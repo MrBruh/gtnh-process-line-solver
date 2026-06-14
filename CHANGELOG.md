@@ -17,5 +17,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that documented export (no vendoring); recipes/throughput/machine-IDs come from its
   dataset, so the hand-authored physical dataset shrinks. Removed the `vendor/`
   placeholder in favor of `examples/` for sample exported plans.
+- Depend on a maintained fork of gtnh-factory-flow (fix only the consumed
+  export/throughput/dataset path) and snapshot a known-good dataset + sample exports
+  as fixtures so the solver is decoupled from the fork's health.
 
 [Unreleased]: https://example.com/gtnh-process-line-solver/commits/main

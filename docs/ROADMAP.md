@@ -8,6 +8,11 @@ bounding-box multiblocks, the previewer and the build guide, the validator + tes
 routing with the realizability invariant; shared-amperage power. Target ~30–50 machines with
 an anytime time budget.
 
+**Upstream note.** We work against a **maintained fork** of gtnh-factory-flow: fix only the
+export/throughput/dataset path we consume, pin a fork commit + dataset version, and **snapshot a
+known-good dataset + sample exports as fixtures** in `examples/`. The solver's progress must
+never depend on the fork's health. Offer fixes upstream as PRs; don't adopt the whole app.
+
 ### Canonical build order
 
 0. **The Assignment (do before solver code):** hand-build a trivial 3-machine line in GT:NH

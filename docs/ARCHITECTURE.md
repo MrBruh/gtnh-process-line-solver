@@ -69,10 +69,12 @@ doc as intent and reconcile.
    a penalty back to perturb placement. The estimate must be ~O(1) per SA move.
 2. **IR — minimal, versioned, up front.** Defined before the integration spike; grows with
    explicit versioning.
-3. **Input — consume gtnh-factory-flow's exported plan JSON** (MIT; Zod-validated, recipes
-   embedded). The adapter validates against a **pinned plan-schema version** and pins a
-   **recipe-dataset version**; no code is vendored. (Supersedes the old fork/patch-gtnh-flow
-   plan, now obsolete since a documented export exists.)
+3. **Input — consume a maintained fork of gtnh-factory-flow's exported plan JSON** (MIT;
+   Zod-validated, recipes embedded). We depend on a **maintained fork** and fix only bugs in the
+   export/throughput/dataset path we consume (fixes offered upstream as PRs). The adapter validates against a **pinned plan-schema version** and a **pinned
+   recipe-dataset version**, and we **snapshot a known-good dataset + sample exports as fixtures**
+   (`examples/`) so the solver is decoupled from the fork's health. No upstream code is vendored.
+   (Supersedes the old fork/patch-gtnh-flow plan.)
 4. **Validator — shared rule data, independent checking logic** so it can catch router bugs.
 5. **Ground truth — golden corpus + property tests now**; harvested corpus via round-trip
    import is v1.1. Plus an in-game spot-check of the starter dataset during the Assignment.
