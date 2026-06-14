@@ -5,8 +5,9 @@ engineering review; this is the canonical, repo-resident copy.)
 
 ## Problem statement
 
-GT:NH has mature tooling for the *logical* side of factory design (`gtnh-flow` and forks
-balance ratios/power into a flow graph) but nothing for the *physical* side. This project
+GT:NH has mature tooling for the *logical* side of factory design (gtnh-factory-flow,
+gtnh-flow, and similar balance ratios/power into a flow graph) but nothing for the *physical*
+side. This project
 takes a balanced process line and decides **where every machine physically goes** and **how
 pipes and wires route between them** in the world, so the line works — optimized for
 compactness under fixed constraints (pinned I/O chest locations, reserved cells, a bounding
@@ -28,10 +29,13 @@ guide**. A paste-ready schematic export is a later, fidelity-gated milestone.
 
 ## Premises (agreed)
 
-1. **Real gap, not a reinvention** — this is the layer past `gtnh-flow`, not a rebuild.
-2. **gtnh-flow gives the logical graph, not physical data** — the solver supplies a separate
-   GT-version-specific dataset of footprints + pipe/wire tiers + placement rules. This data
-   layer is the bulk of the real work.
+1. **Real gap, not a reinvention** — this is the layer past the logical planners
+   (gtnh-factory-flow, gtnh-flow), not a rebuild of them.
+2. **The logical layer gives the graph, not physical data** — gtnh-factory-flow's exported
+   plan (recipes embedded) + its recipe dataset provide the balanced graph, throughput, and
+   machine identity. The solver supplies only the **physical** half (footprints, faces,
+   pipe/wire physical tiers, multiblock structures), keyed to its machine IDs. Real work, but
+   smaller than authoring everything.
 3. **"Works" needs rule-aware routing, not just connectivity** — throughput caps,
    one-fluid-per-pipe, wire limits/loss, accessible I/O faces. "Connected" ≠ "correct."
 4. **The optimizer is assembly of proven techniques, not novel research** — place-then-route;
@@ -43,7 +47,7 @@ guide**. A paste-ready schematic export is a later, fidelity-gated milestone.
 
 **Optimizer core first** (a deliberate, eyes-open choice: the rigorous solver is the point
 and the learning payoff, accepting a slower path to a usable tool). A small integration
-spike de-risks the gtnh-flow boundary before the solver is built.
+spike de-risks the gtnh-factory-flow export boundary before the solver is built.
 
 The full set of engineering decisions (placement↔routing feedback loop, IR contract,
 fork boundary, validator independence, free-form routing + realizability invariant,

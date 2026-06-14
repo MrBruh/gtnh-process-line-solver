@@ -6,17 +6,18 @@ doc as intent and reconcile.
 ## Data flow
 
 ```
-                       ┌──────────────┐
-                       │  gtnh-flow   │  (vendored fork: logical balance graph)
-                       └──────┬───────┘
-                              │ adapter: one serialization point → IR JSON
-                              ▼
-   ┌────────────────────┐  ┌──────────────┐
+                    ┌────────────────────────┐
+                    │    gtnh-factory-flow    │  (MIT web planner; export a plan)
+                    └───────────┬─────────────┘
+                     exported plan JSON (recipes embedded) + recipe dataset
+                                │ adapter: parse + Zod-validate → IR
+                                ▼
+   ┌─────────────────────┐  ┌──────────────┐
    │ physical-rules data │─►│   INPUT IR   │  machines (footprint, faces, orientation
    │ footprints, faces,  │  │  (versioned) │  options), nets (commodity + typed
    │ pipe/wire tiers,    │  └──────┬───────┘  throughput), pinned I/O, bounding region,
    │ ME toggles, cell→blk│         │          ME toggles, cell→block mapping
-   └────────────────────┘         ▼
+   └─────────────────────┘         ▼
             ┌──────────────────────┴───────────────────┐
             ▼          routing-aware cost (cheap)        ▼
      ┌────────────┐  ◄──── feedback (penalty) ───── ┌────────────┐
@@ -45,10 +46,11 @@ doc as intent and reconcile.
 
 - **ir/** — two versioned contracts: the **input IR** (problem) and the **output layout
   schema** (solution, consumed by previewer + build guide + later export). See [`IR.md`](IR.md).
-- **adapter/** — extracts gtnh-flow's computed graph into the IR. One serialization point in
-  the vendored fork; a CI job tracks upstream.
-- **dataset/** — the GT physical-rules data (footprints, faces, pipe/wire tiers, ME) and its
-  loader. The single biggest piece of real work.
+- **adapter/** — parses gtnh-factory-flow's exported plan JSON (Zod-validated, recipes
+  embedded) into the IR, against a pinned plan-schema and recipe-dataset version. No vendoring.
+- **dataset/** — the GT **physical** rules (footprints, faces, pipe/wire physical tiers,
+  multiblocks), keyed to gtnh-factory-flow's machine IDs. Recipes/throughput/identity come from
+  its dataset; you author only the physical half. Still substantial, but smaller than before.
 - **placement/** — SA/LNS over a coarse cell grid; orientation is a placement variable; cost
   = compactness + a *cheap incremental* routing estimate (HPWL + congestion proxy) +
   buildability.
@@ -67,8 +69,10 @@ doc as intent and reconcile.
    a penalty back to perturb placement. The estimate must be ~O(1) per SA move.
 2. **IR — minimal, versioned, up front.** Defined before the integration spike; grows with
    explicit versioning.
-3. **gtnh-flow — patch/fork to emit IR JSON** at one point; CI rebases upstream + runs adapter
-   tests; breaks are patched manually. Upstreaming the exporter is a later option.
+3. **Input — consume gtnh-factory-flow's exported plan JSON** (MIT; Zod-validated, recipes
+   embedded). The adapter validates against a **pinned plan-schema version** and pins a
+   **recipe-dataset version**; no code is vendored. (Supersedes the old fork/patch-gtnh-flow
+   plan, now obsolete since a documented export exists.)
 4. **Validator — shared rule data, independent checking logic** so it can catch router bugs.
 5. **Ground truth — golden corpus + property tests now**; harvested corpus via round-trip
    import is v1.1. Plus an in-game spot-check of the starter dataset during the Assignment.

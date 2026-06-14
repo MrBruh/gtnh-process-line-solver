@@ -16,12 +16,14 @@ an anytime time budget.
    in-game, spot-check the starter dataset's tiers/face-rules/throughputs against reality.
 1. `git init` ✓, package skeleton ✓, lint/test CI ✓.
 2. **IR** (`ir/`) — typed, versioned input IR + output-layout schema. Unblocks everything.
-3. **Integration spike** — real gtnh-flow graph → IR → trivial placement + router → previewer
-   stub. (Recommended but *declined this round*: force one real typed throughput value end to
-   end so gtnh-flow's per-net data is verified now, not at the router milestone.)
-4. **Dataset** (`dataset/`) — starter machine set (footprints/faces/tiers/cell→block). The
-   biggest work item. (Recommended but *declined this round*: pin one concrete demo line first
-   and derive the minimal set from it, to bound this work.)
+3. **Integration spike** — a real gtnh-factory-flow **exported plan JSON** → adapter → IR →
+   trivial placement + router → previewer stub. Typed throughput flows through naturally (it's
+   part of the documented, self-contained export), so the boundary is lower-risk than the old
+   gtnh-flow-internals plan.
+4. **Dataset** (`dataset/`) — the **physical** rules (footprints/faces/physical tiers/
+   cell→block), keyed to gtnh-factory-flow's machine IDs. Recipes/throughput/identity come from
+   its dataset, so this is smaller than before but still the biggest hand-authored piece.
+   (Recommended but *declined this round*: pin one concrete demo line first to bound it.)
 5. **Placement** (`placement/`) — SA/LNS + cheap routing-aware cost; orientation as a variable.
 6. **Router** (`router/`) — free-form per-commodity A* with channels-per-edge cap + cell→block
    realizability + rip-up-and-reroute + ME toggle; then the shared-amperage power primitive.
@@ -33,7 +35,7 @@ an anytime time budget.
 
 | Lane | Tasks | Depends on |
 |------|-------|------------|
-| A | adapter → fork-sync CI | IR |
+| A | adapter (parse gtnh-factory-flow export) → schema/dataset version pinning | IR |
 | B | dataset | IR |
 | C | placement | IR |
 | D | router → power | IR |

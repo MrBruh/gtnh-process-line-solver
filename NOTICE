@@ -6,8 +6,8 @@ licensed under the Apache License, Version 2.0.
 
 Third-party components:
 
-- gtnh-flow (https://github.com/OrderedSet86/gtnh-flow), MIT License.
-  A fork is vendored under vendor/gtnh-flow/ and used to extract balanced
-  process-line graphs. Its MIT license and copyright notice are retained in
-  that directory. gtnh_solver does not rebuild gtnh-flow; it consumes its
-  computed graph across a JSON boundary.
+- gtnh-factory-flow (https://github.com/Samiracle64/gtnh-factory-flow), MIT License.
+  gtnh_solver consumes plan/recipe JSON EXPORTED by gtnh-factory-flow as input. No
+  gtnh-factory-flow source code is included or vendored in this repository; only the
+  user's exported data files are read at runtime. GTNH recipe/texture data carried in
+  those exports remains under its respective owners' licenses.

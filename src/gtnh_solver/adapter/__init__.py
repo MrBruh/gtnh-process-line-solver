@@ -1,9 +1,11 @@
-"""adapter — extract gtnh-flow's balanced graph into the InputIR.
+"""adapter — parse gtnh-factory-flow's exported plan JSON into the InputIR.
 
-gtnh-flow renders graphviz, not a clean API. The decision (docs/ARCHITECTURE.md #3): vendor
-a fork under vendor/gtnh-flow/ and add ONE serialization point that dumps the computed graph
-as IR JSON, which this module loads. A CI job tracks upstream; breaks are patched manually.
+Input is a gtnh-factory-flow exported plan (Zod-validated JSON: graph nodes/edges, fuel
+profiles, targets, and the exact recipes placed) plus its versioned recipe dataset. Decision
+(docs/ARCHITECTURE.md #3): consume this documented export directly; validate against a pinned
+plan-schema version and pin a recipe-dataset version. No code is vendored.
 
-TODO(adapter): load IR JSON from the forked gtnh-flow; map its machines/edges/throughputs to
-InputIR; handle missing/changed fields and version mismatch explicitly (never silently drop).
+TODO(adapter): load + validate the exported plan JSON; derive per-net typed throughput from
+the embedded recipes + balance; map machines/edges to InputIR; fail clearly on schema/dataset
+version mismatch (never silently drop fields).
 """

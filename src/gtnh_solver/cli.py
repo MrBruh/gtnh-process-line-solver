@@ -1,6 +1,6 @@
 """cli — the `gtnh-solve` entry point.
 
-Planned: parse a gtnh-flow project, run the solver, emit the previewer JSON + build guide,
+Planned: parse a gtnh-factory-flow exported plan JSON, run the solver, emit the previewer JSON + build guide,
 honor per-commodity ME flags, and surface infeasibility clearly. Not implemented yet; this
 stub wires the entry point and `--version` so the package is installable and CI is green.
 """
@@ -18,7 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Physical place-and-route solver for GregTech: New Horizons.",
     )
     parser.add_argument("--version", action="version", version=f"gtnh-solve {__version__}")
-    parser.add_argument("project", nargs="?", help="path to a gtnh-flow project (planned)")
+    parser.add_argument("project", nargs="?", help="path to a gtnh-factory-flow exported plan JSON (planned)")
     parser.add_argument("--out", default="out/", help="output directory (planned)")
     return parser
 

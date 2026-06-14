@@ -9,7 +9,10 @@ typed schemas in `src/gtnh_solver/ir/` (Pydantic v2).
 
 ## Input IR — the problem
 
-What the solver consumes (produced by the adapter from gtnh-flow + the dataset).
+What the solver consumes (produced by the adapter from gtnh-factory-flow's exported plan JSON,
+recipes embedded, plus the physical-rules dataset). Source format: gtnh-factory-flow's
+Zod-validated plan JSON (graph nodes/edges, fuel profiles, targets, and the exact recipes
+placed); the adapter maps that → InputIR and pins the plan-schema + recipe-dataset versions.
 
 ```
 InputIR
@@ -28,7 +31,7 @@ Machine
   faces: FaceSpec                   # see DOMAIN.md: front (no I/O) + 5 usable
   voltage_tier: str                 # LV/MV/HV/... — sets cable voltage rating
   orientation_options: [Orientation]  # solver picks one (front-face placement)
-  count: int                        # how many of this machine (from gtnh-flow balance)
+  count: int                        # how many of this machine (from gtnh-factory-flow balance)
 
 Net
   id: str

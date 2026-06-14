@@ -29,8 +29,8 @@ during the Assignment — v1's only contact with actual GT behavior.
 
 ## What to test per module
 
-- **adapter** — correct extraction; missing/changed gtnh-flow fields and version mismatch
-  handled, not silently dropped.
+- **adapter** — correct parsing of gtnh-factory-flow's exported plan JSON; missing/changed
+  fields and plan-schema/dataset version mismatch handled, not silently dropped.
 - **dataset** — entries load + validate; unknown machine / bad footprint raises clearly.
 - **placement** — move operators (translate + orientation), each cost term, per-seed
   determinism, won't-fit infeasibility.

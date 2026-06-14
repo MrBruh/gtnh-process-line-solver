@@ -6,9 +6,9 @@ doc it points to for whatever you're touching.
 ## What this is
 
 A **physical place-and-route solver for GregTech: New Horizons** process lines. It turns a
-balanced logical graph (from `gtnh-flow`) plus a GT physical-rules dataset into a concrete,
+balanced logical graph (from a gtnh-factory-flow exported plan) plus a GT physical-rules dataset into a concrete,
 buildable 3D layout (machine positions + pipe/wire routes), with a previewer and build
-guide. It is NOT a recipe/ratio calculator — that problem is already solved by `gtnh-flow`,
+guide. It is NOT a recipe/ratio calculator — that problem is already solved by gtnh-factory-flow,
 which we consume. See [`docs/DESIGN.md`](docs/DESIGN.md).
 
 **Source of truth for HOW it's built:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
@@ -20,7 +20,7 @@ disagree, the doc is the intent — fix one of them and say which.
 | Module | Responsibility |
 |--------|----------------|
 | `src/gtnh_solver/ir/` | Typed, versioned input IR + output-layout schemas (the contracts) |
-| `src/gtnh_solver/adapter/` | gtnh-flow fork → IR JSON (one serialization point) |
+| `src/gtnh_solver/adapter/` | gtnh-factory-flow exported plan JSON → IR |
 | `src/gtnh_solver/dataset/` | Physical-rules data + loader (footprints, faces, tiers, ME) |
 | `src/gtnh_solver/placement/` | SA/LNS placement with routing-aware cost |
 | `src/gtnh_solver/router/` | Free-form per-commodity A* routing + shared-amperage power |
@@ -29,7 +29,7 @@ disagree, the doc is the intent — fix one of them and say which.
 | `src/gtnh_solver/buildguide/` | Bill of materials, per-layer build instructions |
 | `src/gtnh_solver/previewer/` | three.js previewer + output-layout JSON emit |
 | `src/gtnh_solver/cli.py` | `gtnh-solve` entry point |
-| `vendor/gtnh-flow/` | Pinned fork of gtnh-flow (MIT); patched to emit IR JSON |
+| `examples/` | Sample gtnh-factory-flow exported plans for adapter/solver tests |
 
 ## Conventions
 

@@ -5,28 +5,17 @@
 > **Status: planning / pre-alpha.** The design is complete and reviewed; implementation
 > has not started. This repo is the contributable foundation. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
-## The problem
+Yes, this project is heavily vibe coded. If you see any areas in the code or documentation that can be
+de-slopified, feel free to contribute and make issues or PR's!
 
-GregTech: New Horizons (GT:NH) has mature tooling for the *logical* side of factory
-design — [`gtnh-flow`](https://github.com/OrderedSet86/gtnh-flow) and its forks take a
-target output and balance machine ratios, counts, power, and I/O into a flow graph. They
-stop there. Nothing solves the *physical* side: given that balanced graph, **where does
-every machine go in the world, and how do the pipes and wires route between them so the
-line actually works?**
-
-`gtnh_solver` is that missing layer. It takes a balanced process line, plus a dataset of
-GT physical rules (machine footprints, pipe/wire tiers, face rules), and produces a
-concrete, buildable layout — optimized for compactness under fixed constraints (pinned
-input/output chests, a bounding region) — with an interactive 3D previewer so you can
-inspect and compare candidate layouts.
-
-In CS terms: **place-and-route** (the VLSI/PCB problem family) plus the **facility layout
-problem**, retargeted to GregTech with full physical fidelity.
+**Input comes from [gtnh-factory-flow](https://github.com/Samiracle64/gtnh-factory-flow)** (MIT):
+you design and balance a production line there, export it as plan JSON, and `gtnh_solver` turns
+that into a physical, buildable layout.
 
 ## How it works (data flow)
 
 ```
-   gtnh-flow (logical balance) ──adapter──► IR ◄── physical-rules dataset
+   gtnh-factory-flow (exported plan JSON) ──adapter──► IR ◄── physical-rules dataset
                                              │      (footprints, faces, tiers, ME)
                                              ▼
                         placement (SA/LNS) ◄─routing-aware cost─► router (A*, 2.5D,
@@ -44,7 +33,7 @@ problem**, retargeted to GregTech with full physical fidelity.
 
 ```bash
 pip install -e ".[dev]"
-gtnh-solve path/to/line.yaml --out out/
+gtnh-solve plan.json --out out/   # plan.json exported from gtnh-factory-flow
 # opens the previewer; writes a build guide
 ```
 
@@ -70,5 +59,6 @@ once the IR contract lands.
 
 ## License
 
-Apache-2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). Vendors a fork of the
-MIT-licensed `gtnh-flow`.
+Apache-2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). Consumes plan/recipe JSON
+exported by the MIT-licensed [`gtnh-factory-flow`](https://github.com/Samiracle64/gtnh-factory-flow);
+no third-party code is vendored.

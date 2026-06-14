@@ -9,7 +9,6 @@ are stubs. That makes it a great time to claim a piece and build it.
 ```bash
 git clone <repo>
 cd gtnh-process-line-solver
-git submodule update --init   # pulls the vendored gtnh-flow fork (once it's wired up)
 python -m venv .venv && . .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 pytest          # run tests
@@ -31,7 +30,7 @@ lands. Lanes that can proceed in parallel:
 | Lane | Module(s) | Good first work |
 |------|-----------|-----------------|
 | **IR** (do first — unblocks all) | `ir/` | Typed input IR + output-layout schemas |
-| Adapter | `adapter/`, `vendor/gtnh-flow/` | Fork gtnh-flow; emit IR JSON at one point |
+| Adapter | `adapter/` | Parse gtnh-factory-flow's exported plan JSON into the IR |
 | Dataset | `dataset/` | Author the starter machine set + loader |
 | Placement | `placement/` | SA/LNS + routing-aware cost |
 | Router | `router/` | Per-commodity A*; then the power primitive |
@@ -50,7 +49,8 @@ placement↔router interface before wiring it. Full sequencing and the v1/v1.1 s
 - **Respect the IR contract.** It's versioned; don't break consumers silently.
 - **Explicit over clever, DRY, engineered-enough.** Small, clean diffs.
 - **Keep ASCII diagrams in docstrings current** when you change nearby code.
-- **The vendored `gtnh-flow` is a fork.** Keep its MIT notice; mark any files you change.
+- **Input is gtnh-factory-flow's exported plan JSON** (MIT data, not vendored code). Validate
+  against its schema and pin a recipe-dataset version; see `docs/ARCHITECTURE.md`.
 
 ## Pull requests
 
