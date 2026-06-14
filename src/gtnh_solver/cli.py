@@ -26,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     print(
-        "gtnh-solve is in planning/pre-alpha — the solver is not implemented yet.\n"
+        "gtnh-solve is in planning/pre-alpha - the solver is not implemented yet.\n"
         "See docs/ROADMAP.md for the build order and CONTRIBUTING.md to help.\n"
         f"(requested project={args.project!r}, out={args.out!r})"
     )
