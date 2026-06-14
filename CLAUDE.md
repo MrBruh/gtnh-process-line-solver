@@ -1,6 +1,6 @@
 # CLAUDE.md — agent guide for gtnh_solver
 
-This file orients AI agents (and humans) working in this repo. Read it first, then the
+This file orients AI agents (and people) working in this repo. Read it first, then the
 doc it points to for whatever you're touching.
 
 ## What this is
