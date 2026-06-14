@@ -1,0 +1,73 @@
+# Domain — GT:NH rules the solver encodes
+
+The knowledge a contributor (or the dataset author) needs but won't necessarily know. These
+rules live as *data* in `dataset/` and as *checking logic* in `validator/` (shared data,
+independent logic — see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
+
+> If you play GT:NH and spot an error here, fix it — this doc is the reference both the
+> router and the validator are built against, so a wrong rule here propagates everywhere.
+
+## Platform
+
+- GT:NH is **Minecraft 1.7.10 / Forge**. Block identity is numeric ID + metadata
+  (pre-flattening), which matters for the eventual export.
+- **Litematica does NOT support 1.7.10.** The in-game schematic consumer is
+  **Schematica-Plus**, which can paste tile-entity NBT including GregTech machine
+  configurations. Target classic `.schematic`, not `.litematic`.
+- There is **no headless GT simulator**, so true correctness is only verifiable in-game.
+
+## Machine faces
+
+- A machine has six faces. The **front face** (set by orientation) is the working face and
+  carries **no item/fluid I/O**. The solver chooses orientation so required I/O faces stay
+  routable.
+- The **other five faces** can each be input OR output of items or fluids. Routing a specific
+  commodity onto a face may require a **cover** (conveyor for items, pump/regulator for
+  fluids); a cover occupies that face and is recorded for the build guide/export.
+- A machine **auto-outputs to a single face**, carrying **either items or fluids, not both**.
+  A machine emitting both an item and a fluid output uses auto-output for one and a
+  cover-driven output on another non-front face (or ME) for the other.
+- **Required-I/O-face reachability is a HARD constraint** — a blocked required output face
+  means the line doesn't run. "Convenient access" is a soft preference.
+
+## Fluids and items (pipes)
+
+- A fluid pipe line carries **one fluid type**; a pipe has a per-tick throughput cap by tier
+  (hard constraint). Items routed physically have an analogous per-tick cap by tier.
+- v1 ships **single-channel** GT pipes/cables. Transport is **pluggable per commodity**;
+  planned backends: GT++ quadruple (4-channel) and nonuple (9-channel) fluid pipes (turn
+  per-cell fluid routing into channel-packing), and EnderIO conduits for early/mid-game.
+
+## Power (shared-amperage net)
+
+Power is **not** a disjoint per-pipe flow. Multiple machines pull amperage down a shared
+conductor; the cable burns if total amperage exceeds its rating. Model it as a shared net
+where load **sums** along shared segments (Steiner-tree-like):
+
+- **Voltage tier** of a cable segment follows the **machine voltage tier** it serves (cable
+  rated ≥ that voltage).
+- **Thickness** (1x / 2x / 4x / 8x / 16x, **16x max**) is sized to the **summed amperage**
+  through that segment.
+- A segment needing **> 16x** must split into **parallel runs** or move to a **higher voltage
+  tier** (more power per amp).
+
+## ME networks (AE2)
+
+Each commodity (items, fluids, power) can be **toggled to ME** individually. A toggled
+commodity is removed from physical routing; the solver instead places the appropriate ME
+endpoint (interface / bus / P2P) on a machine face. v1 does not model ME channel limits.
+Default is to route all three physically.
+
+## Multiblocks
+
+Represented as a **bounding box + controller-face and hatch/bus-face metadata** (multiblocks
+do I/O through hatches/buses on casing faces). Full internal StructureLib materialization is
+deferred to the export milestone. Fallback if metadata is too costly to author early:
+single-block-machines-only for the first solver, multiblocks added via round-trip import.
+
+## Cell↔block realizability (don't let the abstraction lie)
+
+Placement/routing run on a coarse cell grid; block-accuracy is materialized only at export. A
+cell boundary has finite physical room, so the router enforces a **margin → max-channels-per-
+edge** cap and a **cell→block realizability** check fed back into search. Without it, the
+solver can certify layouts that don't physically fit.

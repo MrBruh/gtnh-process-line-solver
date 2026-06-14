@@ -1,0 +1,13 @@
+gtnh_solver
+Copyright 2026 The gtnh_solver authors
+
+This product includes software developed as part of the gtnh_solver project,
+licensed under the Apache License, Version 2.0.
+
+Third-party components:
+
+- gtnh-flow (https://github.com/OrderedSet86/gtnh-flow), MIT License.
+  A fork is vendored under vendor/gtnh-flow/ and used to extract balanced
+  process-line graphs. Its MIT license and copyright notice are retained in
+  that directory. gtnh_solver does not rebuild gtnh-flow; it consumes its
+  computed graph across a JSON boundary.

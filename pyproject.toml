@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gtnh_solver"
+version = "0.0.0"
+description = "Physical place-and-route solver for GregTech: New Horizons process lines."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "The gtnh_solver authors" }]
+keywords = ["gregtech", "gtnh", "minecraft", "place-and-route", "optimization"]
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+]
+
+# Core runtime deps for v1 (optimizer core). Kept lean on purpose.
+dependencies = [
+    "networkx>=3.0",   # graph structures for the IR and routing
+    "numpy>=1.24",     # geometry / grid math
+    "pydantic>=2.0",   # typed, versioned IR + output-layout schemas
+]
+
+[project.optional-dependencies]
+# Deferred CP-SAT placement backend (v1 uses SA/LNS; see docs/ARCHITECTURE.md).
+cpsat = ["ortools>=9.8"]
+dev = [
+    "pytest>=8.0",
+    "hypothesis>=6.0",  # property-based tests for the validator safety net
+    "ruff>=0.5",
+    "mypy>=1.8",
+]
+
+[project.scripts]
+gtnh-solve = "gtnh_solver.cli:main"
+
+[project.urls]
+Documentation = "https://example.com/gtnh-process-line-solver/tree/main/docs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gtnh_solver"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.mypy]
+python_version = "3.10"
+packages = ["gtnh_solver"]
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
