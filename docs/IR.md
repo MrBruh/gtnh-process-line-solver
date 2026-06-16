@@ -17,31 +17,46 @@ placed); the adapter maps that → InputIR and pins the plan-schema + recipe-dat
 ```
 InputIR
   version: int                      # contract version
-  bounding_region: Box              # max extent the layout must fit (cells)
+  bounding_region: CellBox          # max extent the layout must fit (cells)
   machines: [Machine]
   nets: [Net]
   pinned: [PinnedIO]                # fixed input/output chest locations
   reserved_cells: [CellCoord]       # off-limits cells
-  me_toggles: { items: bool, fluids: bool, power: bool }   # per-commodity
+  me_toggles: { items: bool, fluids: bool, power: bool }   # per-commodity (default all false)
 
 Machine
   id: str
   type: str                         # GT machine id (keys into dataset)
-  footprint: CellBox                # 1 cell (single-block) or NxMxK (multiblock bbox)
+  footprint: CellBox                # 1 cell (single-block, default) or NxMxK (multiblock bbox)
   faces: FaceSpec                   # see DOMAIN.md: front (no I/O) + 5 usable
   voltage_tier: str                 # LV/MV/HV/... — sets cable voltage rating
-  orientation_options: [Orientation]  # solver picks one (front-face placement)
-  count: int                        # how many of this machine (from gtnh-factory-flow balance)
+  orientation_options: [Facing]     # solver picks one (front-face direction); >= 1
+  count: int                        # how many of this machine (from gtnh-factory-flow balance); >= 1
+
+FaceSpec     { ports: [Port] }      # catalog of required I/O; the physical face is a solver choice
+Port
+  id: str
+  commodity: "item" | "fluid" | "power"
+  direction: "input" | "output"
+  is_auto_output: bool              # the single auto-output face; items XOR fluids, never power
+  cover: str | null                 # conveyor/pump/regulator that drives this port, if any
 
 Net
   id: str
   commodity: "item" | "fluid" | "power"
-  fluid_or_item: str | null         # which fluid/item (null for power)
-  throughput: float                 # TYPED rate: mB/t (fluid), items/t (item), EU/t+A (power)
-  endpoints: [MachineFaceRef]       # which machine faces this net connects
+  fluid_or_item: str | null         # which fluid/item (null for power; required otherwise)
+  throughput: float                 # TYPED rate: mB/t (fluid), items/t (item), EU/t (power); >= 0
+  endpoints: [MachineFaceRef]       # machine ports this net connects; >= 1
 
-PinnedIO     { net_id, cell: CellCoord, kind: "input" | "output" }
+MachineFaceRef { machine_id, port_id }   # resolved to a physical face by the solver
+PinnedIO       { net_id, cell: CellCoord, kind: "input" | "output" }
 ```
+
+`CellBox` is a size `{ sx, sy, sz }` (each >= 1), used for both `footprint` and
+`bounding_region`. The IR enforces structural well-formedness + **referential integrity**
+(unique ids; every endpoint/pinned ref resolves; a net's commodity matches the ports it
+touches). It does **not** check geometry/rule validity (in-bounds, overlaps, tier caps,
+face reachability) — that is the validator's independent job (docs/TESTING.md).
 
 ## Output layout schema — the solution
 
@@ -58,15 +73,20 @@ LayoutResult
   metrics: { footprint, layers, buildability, congestion, ... }
   seed: int                              # for the seed-compare workflow
 
-Placement   { machine_id, cell: CellCoord, orientation: Orientation }
+Placement   { machine_id, cell: CellCoord, orientation: Facing }
 Route
   net_id: str
   commodity: "item" | "fluid" | "power"
   segments: [Segment]                    # cell-path; lowered to blocks only at export
-  # power only:
-  thickness_per_segment: [int]           # 1/2/4/8/16, sized to summed amperage
-Segment     { from: CellCoord, to: CellCoord, channel: int }   # channel < per-edge cap
+  thickness_per_segment: [int] | null    # power only (else null); 1/2/4/8/16, summed amperage
+Segment     { start: CellCoord, end: CellCoord, channel: int }   # channel < per-edge cap; >= 0
+Infeasibility { constraint: str, detail: str, suggested_relaxation: str | null }
 ```
+
+`Facing` is one of `north|south|east|west|up|down` (the front-face direction). `Segment`
+uses `start`/`end` rather than `from`/`to` (`from` is a Python keyword). `status` and
+`infeasibility` are coupled: a `valid` result carries no infeasibility; `infeasible` and
+`partial_invalid` must carry one.
 
 ## Rules the schemas must encode (cross-ref [`DOMAIN.md`](DOMAIN.md))
 

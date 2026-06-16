@@ -10,6 +10,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Project scaffold: docs, package skeleton, CI, license.
 - Design and architecture documentation ported from the office-hours design doc
   and the engineering review (see `docs/`).
+- **IR contracts (`ir/`)** — the two versioned Pydantic v2 schemas everything couples
+  to: `InputIR` (the problem) and `LayoutResult` (the solution), with shared cell-grid
+  geometry and enums. The input IR enforces referential integrity; geometric/rule checks
+  are left to the validator. Full test suite (example + hypothesis). `docs/IR.md` updated
+  to match the implemented shape.
 
 ### Changed
 - Input foundation switched from a forked gtnh-flow (Python) to consuming
