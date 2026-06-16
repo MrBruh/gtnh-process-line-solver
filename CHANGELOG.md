@@ -15,6 +15,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   geometry and enums. The input IR enforces referential integrity; geometric/rule checks
   are left to the validator. Full test suite (example + hypothesis). `docs/IR.md` updated
   to match the implemented shape.
+- **Validator (`validator/`)** — the automated correctness gate: `validate(problem, layout)`
+  independently checks a layout's geometry + structure (machines in-bounds / non-overlapping /
+  off reserved cells / legally oriented / fully placed; nets routed once, contiguous,
+  in-bounds, ME-toggles honored; pinned I/O on-route; power thickness well-formed) and
+  returns a `ValidationReport` of every proven violation — never raises, never passes a
+  silently-invalid layout. Rule-data checks (tier caps, summed amperage, face reachability)
+  are stubbed for the dataset lane. In-code golden corpus (one known-bad case per violation).
 
 ### Changed
 - Input foundation switched from a forked gtnh-flow (Python) to consuming
