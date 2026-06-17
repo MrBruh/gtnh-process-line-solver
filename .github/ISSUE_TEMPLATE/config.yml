@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Design, architecture & domain docs
+    url: https://github.com/MrBruh/gtnh-process-line-solver/tree/main/docs
+    about: Read DESIGN, ARCHITECTURE, IR, DOMAIN, and ROADMAP before filing — many "bugs" are intended contract behavior.

@@ -23,7 +23,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   silently-invalid layout. Rule-data checks (tier caps, summed amperage, face reachability)
   are stubbed for the dataset lane. In-code golden corpus (one known-bad case per violation).
 
+- **Contributor standards & tooling** — documented coding + Conventional-Commits
+  conventions in `CONTRIBUTING.md`; added a `.pre-commit-config.yaml` (ruff lint + format,
+  `mypy --strict`, file hygiene, commit-msg lint), a PR template, and bug/feature issue
+  templates.
+
 ### Changed
+- **CI expanded** to a single static-checks job (via pre-commit), a Python 3.10–3.13 test
+  matrix with a coverage gate (`--cov-fail-under=90`), and a Conventional-Commits check on
+  PRs. Ruff now runs a curated lint rule set plus `ruff format`; the Pydantic mypy plugin
+  is enabled. (`pyproject.toml`, `.github/workflows/ci.yml`.)
 - Input foundation switched from a forked gtnh-flow (Python) to consuming
   gtnh-factory-flow's MIT, Zod-validated exported plan JSON. The adapter now parses
   that documented export (no vendoring); recipes/throughput/machine-IDs come from its
