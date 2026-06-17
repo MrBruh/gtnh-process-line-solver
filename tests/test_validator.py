@@ -50,7 +50,9 @@ def _item_machine(mid: str) -> Machine:
         type="gt.macerator",
         voltage_tier="LV",
         orientation_options=[Facing.NORTH, Facing.SOUTH],
-        faces=FaceSpec(ports=[Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)]),
+        faces=FaceSpec(
+            ports=[Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)]
+        ),
     )
 
 
@@ -194,7 +196,9 @@ BAD_CASES: list[tuple[str, Mutator, ViolationCode]] = [
 ]
 
 
-@pytest.mark.parametrize("mutate,code", [(m, c) for _, m, c in BAD_CASES], ids=[n for n, _, _ in BAD_CASES])
+@pytest.mark.parametrize(
+    ("mutate", "code"), [(m, c) for _, m, c in BAD_CASES], ids=[n for n, _, _ in BAD_CASES]
+)
 def test_known_bad_layout_is_flagged(mutate: Mutator, code: ViolationCode) -> None:
     problem, layout = mutate(*_base())
     report = validate(problem, layout)
@@ -235,7 +239,9 @@ def _power_pair() -> tuple[InputIR, LayoutResult]:
                 type="gt.machine",
                 voltage_tier="LV",
                 orientation_options=[Facing.NORTH],
-                faces=FaceSpec(ports=[Port(id="pwr", commodity=Commodity.POWER, direction=IODirection.INPUT)]),
+                faces=FaceSpec(
+                    ports=[Port(id="pwr", commodity=Commodity.POWER, direction=IODirection.INPUT)]
+                ),
             )
         ],
         nets=[

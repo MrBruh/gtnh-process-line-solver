@@ -124,7 +124,9 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
             continue
         if r.net_id in routed:
             out.append(
-                Violation(ViolationCode.DUPLICATE_ROUTE, f"net {r.net_id!r} is routed more than once")
+                Violation(
+                    ViolationCode.DUPLICATE_ROUTE, f"net {r.net_id!r} is routed more than once"
+                )
             )
         routed.add(r.net_id)
 
@@ -146,7 +148,10 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
             )
 
         for seg in r.segments:
-            for cell in ((seg.start.x, seg.start.y, seg.start.z), (seg.end.x, seg.end.y, seg.end.z)):
+            for cell in (
+                (seg.start.x, seg.start.y, seg.start.z),
+                (seg.end.x, seg.end.y, seg.end.z),
+            ):
                 if not in_region(cell, region):
                     out.append(
                         Violation(
@@ -171,7 +176,11 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
 
         if r.commodity is Commodity.POWER:
             tps = r.thickness_per_segment
-            if tps is None or len(tps) != len(r.segments) or any(t not in (1, 2, 4, 8, 16) for t in tps):
+            if (
+                tps is None
+                or len(tps) != len(r.segments)
+                or any(t not in (1, 2, 4, 8, 16) for t in tps)
+            ):
                 out.append(
                     Violation(
                         ViolationCode.POWER_THICKNESS_INVALID,
@@ -184,9 +193,7 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
         if _is_me_toggled(net.commodity, problem.me_toggles):
             continue
         if net.id not in routed:
-            out.append(
-                Violation(ViolationCode.MISSING_ROUTE, f"net {net.id!r} has no route")
-            )
+            out.append(Violation(ViolationCode.MISSING_ROUTE, f"net {net.id!r} has no route"))
 
 
 def _check_pinned(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:

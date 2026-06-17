@@ -17,4 +17,4 @@ from __future__ import annotations
 from .core import validate
 from .report import ValidationReport, Violation, ViolationCode
 
-__all__ = ["validate", "ValidationReport", "Violation", "ViolationCode"]
+__all__ = ["ValidationReport", "Violation", "ViolationCode", "validate"]

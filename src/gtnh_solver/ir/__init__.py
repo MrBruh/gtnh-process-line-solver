@@ -41,7 +41,7 @@ from .output import (
     Segment,
 )
 
-__all__ = [
+__all__ = [  # noqa: RUF022 — grouped by section (mirrors definition order), not alphabetized
     # versions
     "INPUT_IR_VERSION",
     "LAYOUT_RESULT_VERSION",

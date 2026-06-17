@@ -19,8 +19,7 @@ from __future__ import annotations
 from pydantic import Field, model_validator
 
 from ._base import FrozenModel, StrictModel
-from .enums import Commodity, IODirection
-from .enums import Facing
+from .enums import Commodity, Facing, IODirection
 from .geometry import CellBox, CellCoord
 
 #: Bump on any breaking change to the input contract; record it in ``ir/__init__.py``.
@@ -161,16 +160,12 @@ class InputIR(StrictModel):
             raise ValueError("duplicate net id")
 
         # port_id -> commodity, per machine, for endpoint resolution + commodity match.
-        ports_by_machine = {
-            m.id: {p.id: p.commodity for p in m.faces.ports} for m in self.machines
-        }
+        ports_by_machine = {m.id: {p.id: p.commodity for p in m.faces.ports} for m in self.machines}
         for net in self.nets:
             for ep in net.endpoints:
                 machine_ports = ports_by_machine.get(ep.machine_id)
                 if machine_ports is None:
-                    raise ValueError(
-                        f"net {net.id!r} references unknown machine {ep.machine_id!r}"
-                    )
+                    raise ValueError(f"net {net.id!r} references unknown machine {ep.machine_id!r}")
                 if ep.port_id not in machine_ports:
                     raise ValueError(
                         f"net {net.id!r} references unknown port {ep.port_id!r} "

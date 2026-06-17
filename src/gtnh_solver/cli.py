@@ -18,7 +18,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="Physical place-and-route solver for GregTech: New Horizons.",
     )
     parser.add_argument("--version", action="version", version=f"gtnh-solve {__version__}")
-    parser.add_argument("project", nargs="?", help="path to a gtnh-factory-flow exported plan JSON (planned)")
+    parser.add_argument(
+        "project", nargs="?", help="path to a gtnh-factory-flow exported plan JSON (planned)"
+    )
     parser.add_argument("--out", default="out/", help="output directory (planned)")
     return parser
 

@@ -31,9 +31,11 @@ dependencies = [
 cpsat = ["ortools>=9.8"]
 dev = [
     "pytest>=8.0",
+    "pytest-cov>=5.0",  # coverage measurement + CI gate (see [tool.coverage])
     "hypothesis>=6.0",  # property-based tests for the validator safety net
     "ruff>=0.5",
     "mypy>=1.8",
+    "pre-commit>=3.5",  # local enforcement of ruff/mypy/commit-msg before push
 ]
 
 [project.scripts]
@@ -48,11 +50,52 @@ packages = ["src/gtnh_solver"]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
+target-version = "py310"  # match requires-python; gates pyupgrade (UP) suggestions
+
+[tool.ruff.lint]
+# Explicit, curated rule set (ruff's default is only E + F). Keep this list as the
+# documented contract for "what lint means here"; see CONTRIBUTING.md.
+select = [
+    "E", "W",  # pycodestyle errors + warnings
+    "F",       # pyflakes
+    "I",       # isort (import ordering — autofixable)
+    "N",       # pep8-naming
+    "UP",      # pyupgrade (modernize for the >=3.10 floor)
+    "B",       # flake8-bugbear (likely bugs)
+    "C4",      # flake8-comprehensions
+    "SIM",     # flake8-simplify
+    "PT",      # flake8-pytest-style (tests are first-class here)
+    "RUF",     # ruff-specific rules
+]
+ignore = [
+    # `ruff format` owns line length: it wraps code to <=100 and leaves only
+    # un-splittable tokens (long string literals, docstring prose) over. Enforcing
+    # E501 on top of the formatter just fights it, so we don't. (Astral's own advice.)
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert on private members and re-import fixtures; relax the noisiest rules there.
+"tests/**" = ["N802", "N806"]
+
+[tool.ruff.format]
+docstring-code-format = true  # keep ASCII diagrams / code in docstrings tidy
 
 [tool.mypy]
 python_version = "3.10"
 packages = ["gtnh_solver"]
+plugins = ["pydantic.mypy"]  # the IR is Pydantic v2; the plugin type-checks models
 strict = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--cov=gtnh_solver --cov-report=term-missing"
+
+[tool.coverage.run]
+branch = true
+source = ["gtnh_solver"]
+
+[tool.coverage.report]
+show_missing = true
+# CI enforces the floor explicitly (--cov-fail-under); kept out of config so a
+# contributor running a single test file isn't failed for partial coverage.

@@ -85,12 +85,16 @@ def _valid_input_ir() -> InputIR:
 def _valid_layout() -> LayoutResult:
     return LayoutResult(
         status=LayoutStatus.VALID,
-        placements=[Placement(machine_id="m1", cell=CellCoord(x=1, y=0, z=1), orientation=Facing.NORTH)],
+        placements=[
+            Placement(machine_id="m1", cell=CellCoord(x=1, y=0, z=1), orientation=Facing.NORTH)
+        ],
         routes=[
             Route(
                 net_id="n1",
                 commodity=Commodity.ITEM,
-                segments=[Segment(start=CellCoord(x=1, y=0, z=1), end=CellCoord(x=2, y=0, z=1), channel=0)],
+                segments=[
+                    Segment(start=CellCoord(x=1, y=0, z=1), end=CellCoord(x=2, y=0, z=1), channel=0)
+                ],
             )
         ],
         metrics=LayoutMetrics(footprint=4, layers=1),
@@ -133,24 +137,58 @@ def test_facespec_rejects_duplicate_port_ids() -> None:
 
 
 def test_facespec_allows_one_auto_output() -> None:
-    FaceSpec(ports=[Port(id="o", commodity=Commodity.ITEM, direction=IODirection.OUTPUT, is_auto_output=True)])
+    FaceSpec(
+        ports=[
+            Port(
+                id="o", commodity=Commodity.ITEM, direction=IODirection.OUTPUT, is_auto_output=True
+            )
+        ]
+    )
 
 
 def test_facespec_rejects_two_auto_outputs() -> None:
     with pytest.raises(ValidationError):
         FaceSpec(
             ports=[
-                Port(id="a", commodity=Commodity.ITEM, direction=IODirection.OUTPUT, is_auto_output=True),
-                Port(id="b", commodity=Commodity.FLUID, direction=IODirection.OUTPUT, is_auto_output=True),
+                Port(
+                    id="a",
+                    commodity=Commodity.ITEM,
+                    direction=IODirection.OUTPUT,
+                    is_auto_output=True,
+                ),
+                Port(
+                    id="b",
+                    commodity=Commodity.FLUID,
+                    direction=IODirection.OUTPUT,
+                    is_auto_output=True,
+                ),
             ]
         )
 
 
 def test_auto_output_cannot_be_power_or_input() -> None:
     with pytest.raises(ValidationError):
-        FaceSpec(ports=[Port(id="p", commodity=Commodity.POWER, direction=IODirection.OUTPUT, is_auto_output=True)])
+        FaceSpec(
+            ports=[
+                Port(
+                    id="p",
+                    commodity=Commodity.POWER,
+                    direction=IODirection.OUTPUT,
+                    is_auto_output=True,
+                )
+            ]
+        )
     with pytest.raises(ValidationError):
-        FaceSpec(ports=[Port(id="p", commodity=Commodity.ITEM, direction=IODirection.INPUT, is_auto_output=True)])
+        FaceSpec(
+            ports=[
+                Port(
+                    id="p",
+                    commodity=Commodity.ITEM,
+                    direction=IODirection.INPUT,
+                    is_auto_output=True,
+                )
+            ]
+        )
 
 
 # --------------------------------------------------------------------------- machine
@@ -302,7 +340,9 @@ def test_pinned_io_referencing_unknown_net_rejected() -> None:
         InputIR(
             bounding_region=CellBox(sx=2, sy=2, sz=2),
             machines=[_machine("m1")],
-            pinned=[PinnedIO(net_id="ghost", cell=CellCoord(x=0, y=0, z=0), kind=IODirection.INPUT)],
+            pinned=[
+                PinnedIO(net_id="ghost", cell=CellCoord(x=0, y=0, z=0), kind=IODirection.INPUT)
+            ],
         )
 
 
@@ -334,7 +374,11 @@ def test_segment_channel_non_negative() -> None:
 def test_valid_layout_has_no_infeasibility() -> None:
     assert _valid_layout().version == LAYOUT_RESULT_VERSION
     with pytest.raises(ValidationError):  # valid + infeasibility is contradictory
-        LayoutResult(status=LayoutStatus.VALID, seed=1, infeasibility=Infeasibility(constraint="c", detail="d"))
+        LayoutResult(
+            status=LayoutStatus.VALID,
+            seed=1,
+            infeasibility=Infeasibility(constraint="c", detail="d"),
+        )
 
 
 def test_infeasible_layout_requires_infeasibility() -> None:
@@ -344,7 +388,9 @@ def test_infeasible_layout_requires_infeasibility() -> None:
         status=LayoutStatus.INFEASIBLE,
         seed=1,
         infeasibility=Infeasibility(
-            constraint="bounding_region", detail="machines do not fit", suggested_relaxation="grow region to 10x10"
+            constraint="bounding_region",
+            detail="machines do not fit",
+            suggested_relaxation="grow region to 10x10",
         ),
     )
 
