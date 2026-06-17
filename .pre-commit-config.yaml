@@ -1,0 +1,44 @@
+# Local enforcement of the same static checks CI gates on. Set up once:
+#
+#   pip install -e ".[dev]"   # provides pre-commit, ruff, mypy + the IR's deps
+#   pre-commit install        # wires both the pre-commit and commit-msg stages
+#
+# Thereafter every commit runs ruff (lint + format), mypy, file-hygiene checks, and a
+# Conventional-Commits check on the message. See CONTRIBUTING.md.
+default_install_hook_types: [pre-commit, commit-msg]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.6
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # mypy is configured against the *installed* package (packages = ["gtnh_solver"]),
+  # not a file list, so it must run in the project env — a local/system hook, not an
+  # isolated one. Requires `pip install -e ".[dev]"` first.
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy (strict)
+        entry: mypy
+        language: system
+        pass_filenames: false
+        types: [python]
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.0.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
