@@ -109,8 +109,10 @@ scoped — e.g. `feat/router-astar`, `fix/validator-overlap`, `docs/ir-contract`
 ## Pull requests
 
 - Keep PRs scoped to one lane; fill in the PR template.
-- Green CI is required: the `static` job (ruff lint + format + `mypy`), the `test` matrix
-  (pytest + coverage on Python 3.10–3.13), and the Conventional-Commits check.
+- Green CI is required: the `static` job (ruff lint + format + `mypy`) and the `test` matrix
+  (pytest + coverage on Python 3.10–3.13). The Conventional-Commits check is **advisory** —
+  it flags non-conforming messages in the logs but does not block the merge; the local
+  `commit-msg` hook is the real nudge.
 - Describe what changed and which doc/decision it implements.
 
 ## License

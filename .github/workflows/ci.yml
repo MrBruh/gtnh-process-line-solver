@@ -44,11 +44,14 @@ jobs:
         run: pytest --cov-fail-under=90
 
   commits:
-    name: Commit messages (Conventional Commits)
+    name: Commit messages (Conventional Commits, advisory)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      # Advisory only: non-conforming commit messages are surfaced in the logs but do
+      # not block the merge. The local commit-msg pre-commit hook is the real nudge.
       - uses: webiny/action-conventional-commits@v1.3.0
+        continue-on-error: true
