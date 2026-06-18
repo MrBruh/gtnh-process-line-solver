@@ -30,9 +30,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 - **CI expanded** to a single static-checks job (via pre-commit), a Python 3.10–3.13 test
-  matrix with a coverage gate (`--cov-fail-under=90`), and a Conventional-Commits check on
-  PRs. Ruff now runs a curated lint rule set plus `ruff format`; the Pydantic mypy plugin
-  is enabled. (`pyproject.toml`, `.github/workflows/ci.yml`.)
+  matrix with a coverage gate (`--cov-fail-under=90`), and an advisory (non-blocking)
+  Conventional-Commits check on PRs. Ruff now runs a curated lint rule set plus
+  `ruff format`; the Pydantic mypy plugin is enabled. (`pyproject.toml`,
+  `.github/workflows/ci.yml`.)
 - Input foundation switched from a forked gtnh-flow (Python) to consuming
   gtnh-factory-flow's MIT, Zod-validated exported plan JSON. The adapter now parses
   that documented export (no vendoring); recipes/throughput/machine-IDs come from its
@@ -42,4 +43,4 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   export/throughput/dataset path) and snapshot a known-good dataset + sample exports
   as fixtures so the solver is decoupled from the fork's health.
 
-[Unreleased]: https://example.com/gtnh-process-line-solver/commits/main
+[Unreleased]: https://github.com/MrBruh/gtnh-process-line-solver/commits/main

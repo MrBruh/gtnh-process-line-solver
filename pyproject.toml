@@ -42,7 +42,10 @@ dev = [
 gtnh-solve = "gtnh_solver.cli:main"
 
 [project.urls]
-Documentation = "https://example.com/gtnh-process-line-solver/tree/main/docs"
+Homepage = "https://github.com/MrBruh/gtnh-process-line-solver"
+Repository = "https://github.com/MrBruh/gtnh-process-line-solver"
+Documentation = "https://github.com/MrBruh/gtnh-process-line-solver/tree/main/docs"
+Issues = "https://github.com/MrBruh/gtnh-process-line-solver/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gtnh_solver"]

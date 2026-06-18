@@ -2,8 +2,10 @@
 
 **Physical place-and-route solver for GregTech: New Horizons process lines.**
 
-> **Status: planning / pre-alpha.** The design is complete and reviewed; implementation
-> has not started. This repo is the contributable foundation. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+> **Status: pre-alpha.** The design is complete and reviewed; the IR contracts (`ir/`) and
+> the validator are implemented. The rest of the pipeline — adapter, dataset, placement,
+> router, solver, previewer, build guide — is scaffolded stubs. This repo is the
+> contributable foundation. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 Yes, this project is heavily vibe coded. If you see any areas in the code or documentation that can be
 de-slopified, feel free to contribute and make issues or PR's!
