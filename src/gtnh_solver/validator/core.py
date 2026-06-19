@@ -3,19 +3,19 @@
 This is the only *automated* correctness gate (there is no headless GT simulator). Its
 logic is written independently of the router/placement so it can catch their bugs
 (docs/ARCHITECTURE.md #4). ``validate`` never raises and never short-circuits: it returns
-*every* violation it can prove, computed from geometry/structure alone — independent of the
+*every* violation it can prove, computed from geometry/structure alone - independent of the
 ``status`` the layout claims, so a layout that calls itself ``valid`` while overlapping
 machines is caught (``report.ok is False``).
 
 What is checked now (needs only the IR):
-  completeness/referential — every machine placed the right number of times with a legal
+  completeness/referential - every machine placed the right number of times with a legal
   orientation; every physically-routed net routed exactly once; ME-toggled commodities not
   routed; route commodity matches its net.
-  geometry — machines in-bounds, non-overlapping, off reserved cells; routes in-bounds and
+  geometry - machines in-bounds, non-overlapping, off reserved cells; routes in-bounds and
   contiguous; pinned I/O actually sits on its net's route.
-  power — per-segment cable thickness is present and well-formed (1/2/4/8/16, aligned).
+  power - per-segment cable thickness is present and well-formed (1/2/4/8/16, aligned).
 
-What is deferred to the dataset/router lanes (rule data not available yet) — TODO:
+What is deferred to the dataset/router lanes (rule data not available yet) - TODO:
   throughput/tier caps, one-fluid-per-line, *summed* amperage <= cable rating, and
   required-I/O-face reachability. These need the physical-rules dataset + the router's
   amperage model; the checks above are the geometric/structural floor they build on.

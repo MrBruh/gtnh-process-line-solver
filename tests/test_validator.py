@@ -1,9 +1,9 @@
-"""Tests for the validator — the only automated correctness gate.
+"""Tests for the validator - the only automated correctness gate.
 
 The parametrized accept/reject cases below *are* the in-code golden corpus: one focused
 known-bad layout per violation, plus known-good layouts the validator must accept. The
 headline property is that a layout which *claims* ``status=valid`` but breaks geometry is
-still reported invalid (``report.ok is False``) — the validator's verdict is independent.
+still reported invalid (``report.ok is False``) - the validator's verdict is independent.
 """
 
 from __future__ import annotations
@@ -295,7 +295,7 @@ def test_validate_never_raises_on_a_mismatched_layout() -> None:
     empty = LayoutResult(status=LayoutStatus.VALID, seed=0)
     report = validate(problem, empty)
     assert isinstance(report, ValidationReport)
-    assert not report.ok  # machines unplaced, net unrouted — reported, not raised
+    assert not report.ok  # machines unplaced, net unrouted - reported, not raised
 
 
 @given(

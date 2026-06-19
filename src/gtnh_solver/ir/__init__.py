@@ -1,14 +1,14 @@
-"""ir — the two versioned data contracts everything couples to.
+"""ir - the two versioned data contracts everything couples to.
 
 ``InputIR`` (the problem) and ``LayoutResult`` (the solution, consumed by previewer,
 build guide, and later export). Full spec: docs/IR.md. Implemented as Pydantic v2 models,
 split across submodules and re-exported here as the package's public surface:
 
-- ``enums``      — Commodity, IODirection, Facing, LayoutStatus
-- ``geometry``   — CellCoord, CellBox (integer cell-grid value types)
-- ``input_ir``   — Port, FaceSpec, Machine, MachineFaceRef, Net, METoggles, PinnedIO,
+- ``enums``      - Commodity, IODirection, Facing, LayoutStatus
+- ``geometry``   - CellCoord, CellBox (integer cell-grid value types)
+- ``input_ir``   - Port, FaceSpec, Machine, MachineFaceRef, Net, METoggles, PinnedIO,
                    InputIR  (+ INPUT_IR_VERSION)
-- ``output``     — Placement, Segment, Route, LayoutMetrics, Infeasibility,
+- ``output``     - Placement, Segment, Route, LayoutMetrics, Infeasibility,
                    LayoutResult  (+ LAYOUT_RESULT_VERSION)
 
 Both roots carry an int ``version``. Additive fields can land without a bump; any change
@@ -41,7 +41,7 @@ from .output import (
     Segment,
 )
 
-__all__ = [  # noqa: RUF022 — grouped by section (mirrors definition order), not alphabetized
+__all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not alphabetized
     # versions
     "INPUT_IR_VERSION",
     "LAYOUT_RESULT_VERSION",
@@ -75,7 +75,7 @@ __all__ = [  # noqa: RUF022 — grouped by section (mirrors definition order), n
 # ---------------------------------------------------------------------------
 # Contract changelog (bump the relevant *_VERSION on any breaking change):
 #
-# InputIR v0 / LayoutResult v0 — initial implementation of the docs/IR.md draft.
+# InputIR v0 / LayoutResult v0 - initial implementation of the docs/IR.md draft.
 #   Concretizations made where the doc left shapes open (reconciled into docs/IR.md):
 #   - FaceSpec is a list of `Port` (id/commodity/direction/is_auto_output/cover); the
 #     physical face is a solver decision, so FaceSpec is a port catalog, not a face map.

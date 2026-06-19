@@ -1,4 +1,4 @@
-# CLAUDE.md — agent guide for gtnh_solver
+# CLAUDE.md - agent guide for gtnh_solver
 
 This file orients AI agents (and people) working in this repo. Read it first, then the
 doc it points to for whatever you're touching.
@@ -8,12 +8,12 @@ doc it points to for whatever you're touching.
 A **physical place-and-route solver for GregTech: New Horizons** process lines. It turns a
 balanced logical graph (from a gtnh-factory-flow exported plan) plus a GT physical-rules dataset into a concrete,
 buildable 3D layout (machine positions + pipe/wire routes), with a previewer and build
-guide. It is NOT a recipe/ratio calculator — that problem is already solved by gtnh-factory-flow,
+guide. It is NOT a recipe/ratio calculator - that problem is already solved by gtnh-factory-flow,
 which we consume. See [`docs/DESIGN.md`](docs/DESIGN.md).
 
 **Source of truth for HOW it's built:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 It records the data flow and the engineering-review decisions. If code and that doc
-disagree, the doc is the intent — fix one of them and say which.
+disagree, the doc is the intent - fix one of them and say which.
 
 ## Architecture map (where things live)
 

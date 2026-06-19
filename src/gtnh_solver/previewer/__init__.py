@@ -1,4 +1,4 @@
-"""previewer — interactive 3D preview of candidate layouts.
+"""previewer - interactive 3D preview of candidate layouts.
 
 three.js renders the LayoutResult JSON (boxes for machines, polylines for pipes/cables,
 labels, congestion heatmap) and supports loading multiple runs so seed-dependent results can

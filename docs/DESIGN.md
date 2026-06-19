@@ -9,7 +9,7 @@ GT:NH has mature tooling for the *logical* side of factory design (gtnh-factory-
 gtnh-flow, and similar balance ratios/power into a flow graph) but nothing for the *physical*
 side. This project
 takes a balanced process line and decides **where every machine physically goes** and **how
-pipes and wires route between them** in the world, so the line works — optimized for
+pipes and wires route between them** in the world, so the line works - optimized for
 compactness under fixed constraints (pinned I/O chest locations, reserved cells, a bounding
 region). It is **place-and-route** (VLSI/PCB problem family) + the **facility layout
 problem**, retargeted to GregTech with full physical fidelity.
@@ -19,28 +19,28 @@ guide**. A paste-ready schematic export is a later, fidelity-gated milestone.
 
 ## What makes it worth building
 
-- The logical-balancing space is crowded; the **physical-layout space is empty** — no
+- The logical-balancing space is crowded; the **physical-layout space is empty** - no
   existing tool places machines / routes pipes for GT:NH. This is the wedge.
 - It's a meaty optimization + algorithms project (constraint solving, metaheuristics,
-  capacitated multi-commodity routing) on a domain the author knows — a strong learning
+  capacitated multi-commodity routing) on a domain the author knows - a strong learning
   vehicle that produces a tool people will use.
 - The previewer turns a non-deterministic solver into something you can see, compare, and
   trust.
 
 ## Premises (agreed)
 
-1. **Real gap, not a reinvention** — this is the layer past the logical planners
+1. **Real gap, not a reinvention** - this is the layer past the logical planners
    (gtnh-factory-flow, gtnh-flow), not a rebuild of them.
-2. **The logical layer gives the graph, not physical data** — gtnh-factory-flow's exported
+2. **The logical layer gives the graph, not physical data** - gtnh-factory-flow's exported
    plan (recipes embedded) + its recipe dataset provide the balanced graph, throughput, and
    machine identity. The solver supplies only the **physical** half (footprints, faces,
    pipe/wire physical tiers, multiblock structures), keyed to its machine IDs. Real work, but
    smaller than authoring everything.
-3. **"Works" needs rule-aware routing, not just connectivity** — throughput caps,
+3. **"Works" needs rule-aware routing, not just connectivity** - throughput caps,
    one-fluid-per-pipe, wire limits/loss, accessible I/O faces. "Connected" ≠ "correct."
-4. **The optimizer is assembly of proven techniques, not novel research** — place-then-route;
+4. **The optimizer is assembly of proven techniques, not novel research** - place-then-route;
    SA/LNS placement; A* maze routing with rip-up-and-reroute.
-5. **It needs a distribution path** — a pip-installable CLI/package producing the previewer +
+5. **It needs a distribution path** - a pip-installable CLI/package producing the previewer +
    build guide (and later the export).
 
 ## Chosen approach
@@ -60,7 +60,7 @@ shared-amperage power model, etc.) lives in [`ARCHITECTURE.md`](ARCHITECTURE.md)
   (every routed commodity within throughput/tier limits; ME-toggled commodities excluded and
   endpoint-placed).
 - When no valid layout exists, the solver reports the tightest violated constraint and a
-  suggested relaxation — never a silent failure or a silently-invalid layout.
+  suggested relaxation - never a silent failure or a silently-invalid layout.
 - The previewer renders any candidate in 3D and supports comparing multiple seeds.
 - The build guide is precise enough to reproduce the layout by hand.
 - (Later) An exported schematic pastes into GT:NH via Schematica-Plus and runs.

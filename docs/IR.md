@@ -1,4 +1,4 @@
-# IR — the data contracts
+# IR - the data contracts
 
 `gtnh_solver` has two versioned contracts. Everything couples to them, so they are defined
 up front (minimal, not exhaustive) and grown with explicit version bumps. Implemented as
@@ -7,7 +7,7 @@ typed schemas in `src/gtnh_solver/ir/` (Pydantic v2).
 > Status: **v0 draft.** Fields below are the intended starting shape. Refine during the
 > integration spike; bump `version` on any breaking change.
 
-## Input IR — the problem
+## Input IR - the problem
 
 What the solver consumes (produced by the adapter from gtnh-factory-flow's exported plan JSON,
 recipes embedded, plus the physical-rules dataset). Source format: gtnh-factory-flow's
@@ -29,7 +29,7 @@ Machine
   type: str                         # GT machine id (keys into dataset)
   footprint: CellBox                # 1 cell (single-block, default) or NxMxK (multiblock bbox)
   faces: FaceSpec                   # see DOMAIN.md: front (no I/O) + 5 usable
-  voltage_tier: str                 # LV/MV/HV/... — sets cable voltage rating
+  voltage_tier: str                 # LV/MV/HV/... - sets cable voltage rating
   orientation_options: [Facing]     # solver picks one (front-face direction); >= 1
   count: int                        # how many of this machine (from gtnh-factory-flow balance); >= 1
 
@@ -56,9 +56,9 @@ PinnedIO       { net_id, cell: CellCoord, kind: "input" | "output" }
 `bounding_region`. The IR enforces structural well-formedness + **referential integrity**
 (unique ids; every endpoint/pinned ref resolves; a net's commodity matches the ports it
 touches). It does **not** check geometry/rule validity (in-bounds, overlaps, tier caps,
-face reachability) — that is the validator's independent job (docs/TESTING.md).
+face reachability) - that is the validator's independent job (docs/TESTING.md).
 
-## Output layout schema — the solution
+## Output layout schema - the solution
 
 What the solver produces; consumed by previewer, build guide, and (later) export. A
 first-class versioned contract, not a previewer-internal format.
@@ -90,7 +90,7 @@ uses `start`/`end` rather than `from`/`to` (`from` is a Python keyword). `status
 
 ## Rules the schemas must encode (cross-ref [`DOMAIN.md`](DOMAIN.md))
 
-- A net's `throughput` is **typed** — the router needs the real rate, not just connectivity.
+- A net's `throughput` is **typed** - the router needs the real rate, not just connectivity.
 - `Machine.faces` distinguishes the front face (no I/O) from the five usable faces; required
   output faces are HARD constraints in placement/validation.
 - Power routes carry per-segment `thickness`; the validator checks summed amperage ≤ tier cap.

@@ -3,8 +3,8 @@
 **Physical place-and-route solver for GregTech: New Horizons process lines.**
 
 > **Status: pre-alpha.** The design is complete and reviewed; the IR contracts (`ir/`) and
-> the validator are implemented. The rest of the pipeline — adapter, dataset, placement,
-> router, solver, previewer, build guide — is scaffolded stubs. This repo is the
+> the validator are implemented. The rest of the pipeline - adapter, dataset, placement,
+> router, solver, previewer, build guide - is scaffolded stubs. This repo is the
 > contributable foundation. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 Yes, this project is heavily vibe coded. If you see any areas in the code or documentation that can be
@@ -39,7 +39,7 @@ gtnh-solve plan.json --out out/   # plan.json exported from gtnh-factory-flow
 # opens the previewer; writes a build guide
 ```
 
-(The CLI does not exist yet — this is the target interface. See the roadmap.)
+(The CLI does not exist yet - this is the target interface. See the roadmap.)
 
 ## Documentation
 
@@ -54,7 +54,7 @@ gtnh-solve plan.json --out out/   # plan.json exported from gtnh-factory-flow
 
 ## Contributing
 
-New here? Read [`CONTRIBUTING.md`](CONTRIBUTING.md) — it maps the parallel workstreams
+New here? Read [`CONTRIBUTING.md`](CONTRIBUTING.md) - it maps the parallel workstreams
 ("lanes") so you can pick an independent piece and start. The architecture is designed so
 the adapter, placement, router, validator, dataset, and previewer can be built in parallel
 once the IR contract lands.

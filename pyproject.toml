@@ -61,7 +61,7 @@ target-version = "py310"  # match requires-python; gates pyupgrade (UP) suggesti
 select = [
     "E", "W",  # pycodestyle errors + warnings
     "F",       # pyflakes
-    "I",       # isort (import ordering — autofixable)
+    "I",       # isort (import ordering - autofixable)
     "N",       # pep8-naming
     "UP",      # pyupgrade (modernize for the >=3.10 floor)
     "B",       # flake8-bugbear (likely bugs)

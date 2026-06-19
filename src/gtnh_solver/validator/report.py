@@ -1,6 +1,6 @@
 """The validator's output: a list of violations, never an exception.
 
-A layout that breaks a rule is *reported*, not raised — the solver and CLI decide what to
+A layout that breaks a rule is *reported*, not raised - the solver and CLI decide what to
 do (the worst failure class is a *silently*-invalid layout passed off as valid, so the
 validator's job is to surface every problem it can prove). ``ValidationReport.ok`` is the
 single independent verdict; it is computed from geometry/structure alone, regardless of the

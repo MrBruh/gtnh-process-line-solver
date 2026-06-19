@@ -1,4 +1,4 @@
-"""router.power — the shared-amperage power routing primitive.
+"""router.power - the shared-amperage power routing primitive.
 
 Power is NOT a disjoint per-pipe flow. Amperage SUMS along shared cable segments
 (Steiner-tree-like). Per segment (docs/DOMAIN.md):

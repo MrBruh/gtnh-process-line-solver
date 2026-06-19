@@ -1,6 +1,6 @@
 """Smoke tests so CI is green from the first commit.
 
-Real coverage (property tests, golden corpus, per-module tests) lands with each module —
+Real coverage (property tests, golden corpus, per-module tests) lands with each module -
 see docs/TESTING.md.
 """
 

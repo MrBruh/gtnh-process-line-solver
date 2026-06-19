@@ -1,4 +1,4 @@
-"""adapter — parse gtnh-factory-flow's exported plan JSON into the InputIR.
+"""adapter - parse gtnh-factory-flow's exported plan JSON into the InputIR.
 
 Input is a gtnh-factory-flow exported plan (Zod-validated JSON: graph nodes/edges, fuel
 profiles, targets, and the exact recipes placed) plus its versioned recipe dataset. Decision

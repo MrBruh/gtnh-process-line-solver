@@ -26,7 +26,7 @@ repos:
       - id: ruff-format
 
   # mypy is configured against the *installed* package (packages = ["gtnh_solver"]),
-  # not a file list, so it must run in the project env — a local/system hook, not an
+  # not a file list, so it must run in the project env - a local/system hook, not an
   # isolated one. Requires `pip install -e ".[dev]"` first.
   - repo: local
     hooks:

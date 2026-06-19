@@ -21,7 +21,7 @@ labels: [enhancement]
 
 ## Scope / non-goals
 
-<!-- Recipe/ratio math is out of scope — that's gtnh-factory-flow's job. This solver does
+<!-- Recipe/ratio math is out of scope - that's gtnh-factory-flow's job. This solver does
      physical place-and-route only. -->
 
 ## Alternatives considered

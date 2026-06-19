@@ -1,4 +1,4 @@
-"""Input IR — the *problem* the solver consumes.
+"""Input IR - the *problem* the solver consumes.
 
 Produced by the adapter from a gtnh-factory-flow exported plan JSON (recipes embedded)
 plus the physical-rules dataset. Spec: docs/IR.md. This is one of two versioned
@@ -6,12 +6,12 @@ contracts everything couples to, so it is kept minimal and grown with explicit v
 bumps (see ``INPUT_IR_VERSION`` and the changelog in ``__init__.py``).
 
 What this contract guarantees (checked here) vs. what it does NOT:
-- Guaranteed: structural well-formedness + *referential integrity* — unique ids, every
+- Guaranteed: structural well-formedness + *referential integrity* - unique ids, every
   net/pinned reference resolves to an existing machine+port, a net's commodity matches
   the ports it touches. Downstream code may assume these hold.
 - NOT checked here: geometric/rule validity (cells in-bounds, no machine overlaps,
   throughput within tier caps, required-face reachability). That is the validator's job,
-  on purpose — it has independent logic so it can catch solver bugs (docs/TESTING.md).
+  on purpose - it has independent logic so it can catch solver bugs (docs/TESTING.md).
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ class Machine(StrictModel):
     type: str = Field(min_length=1)  # GT machine id; keys into the physical-rules dataset
     footprint: CellBox = Field(default_factory=CellBox)
     faces: FaceSpec = Field(default_factory=FaceSpec)
-    voltage_tier: str = Field(min_length=1)  # LV/MV/HV/... — sets cable voltage rating
+    voltage_tier: str = Field(min_length=1)  # LV/MV/HV/... - sets cable voltage rating
     orientation_options: list[Facing] = Field(min_length=1)
     count: int = Field(default=1, ge=1)
 
@@ -98,7 +98,7 @@ class MachineFaceRef(FrozenModel):
 class Net(StrictModel):
     """One logical connection to route: a commodity from/to a set of machine ports.
 
-    ``throughput`` is **typed** — the router needs the real rate, not just connectivity:
+    ``throughput`` is **typed** - the router needs the real rate, not just connectivity:
     mB/t (fluid), items/t (item), or EU/t (power). Power is a shared-amperage net, so its
     physical thickness is computed downstream, not stored here.
     """

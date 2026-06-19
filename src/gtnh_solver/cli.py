@@ -1,4 +1,4 @@
-"""cli — the `gtnh-solve` entry point.
+"""cli - the `gtnh-solve` entry point.
 
 Planned: parse a gtnh-factory-flow exported plan JSON, run the solver, emit the previewer JSON + build guide,
 honor per-commodity ME flags, and surface infeasibility clearly. Not implemented yet; this

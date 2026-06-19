@@ -10,26 +10,26 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Project scaffold: docs, package skeleton, CI, license.
 - Design and architecture documentation ported from the office-hours design doc
   and the engineering review (see `docs/`).
-- **IR contracts (`ir/`)** — the two versioned Pydantic v2 schemas everything couples
+- **IR contracts (`ir/`)** - the two versioned Pydantic v2 schemas everything couples
   to: `InputIR` (the problem) and `LayoutResult` (the solution), with shared cell-grid
   geometry and enums. The input IR enforces referential integrity; geometric/rule checks
   are left to the validator. Full test suite (example + hypothesis). `docs/IR.md` updated
   to match the implemented shape.
-- **Validator (`validator/`)** — the automated correctness gate: `validate(problem, layout)`
+- **Validator (`validator/`)** - the automated correctness gate: `validate(problem, layout)`
   independently checks a layout's geometry + structure (machines in-bounds / non-overlapping /
   off reserved cells / legally oriented / fully placed; nets routed once, contiguous,
   in-bounds, ME-toggles honored; pinned I/O on-route; power thickness well-formed) and
-  returns a `ValidationReport` of every proven violation — never raises, never passes a
+  returns a `ValidationReport` of every proven violation - never raises, never passes a
   silently-invalid layout. Rule-data checks (tier caps, summed amperage, face reachability)
   are stubbed for the dataset lane. In-code golden corpus (one known-bad case per violation).
 
-- **Contributor standards & tooling** — documented coding + Conventional-Commits
+- **Contributor standards & tooling** - documented coding + Conventional-Commits
   conventions in `CONTRIBUTING.md`; added a `.pre-commit-config.yaml` (ruff lint + format,
   `mypy --strict`, file hygiene, commit-msg lint), a PR template, and bug/feature issue
   templates.
 
 ### Changed
-- **CI expanded** to a single static-checks job (via pre-commit), a Python 3.10–3.13 test
+- **CI expanded** to a single static-checks job (via pre-commit), a Python 3.10-3.13 test
   matrix with a coverage gate (`--cov-fail-under=90`), and an advisory (non-blocking)
   Conventional-Commits check on PRs. Ruff now runs a curated lint rule set plus
   `ruff format`; the Pydantic mypy plugin is enabled. (`pyproject.toml`,

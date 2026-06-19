@@ -20,7 +20,7 @@ htmlcov/
 # Node (previewer, if a build step is added later)
 node_modules/
 
-# Solver outputs (layouts, previews, schematics) — not source
+# Solver outputs (layouts, previews, schematics) - not source
 out/
 *.litematic
 *.schematic

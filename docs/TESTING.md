@@ -16,31 +16,31 @@ correctness. The strategy works around this with three layers:
 
 2. **Property tests (hypothesis).** The safety net against the worst failure class. For any
    generated input graph, the solver must return **a valid layout OR an explicit
-   infeasibility report — never a silently-invalid layout.** This is the one invariant that
+   infeasibility report - never a silently-invalid layout.** This is the one invariant that
    must always hold.
 
 3. **Golden corpus** (`tests/golden/`). A small set of **known-good** layouts the validator
-   must accept and **known-bad** ones it must reject — the only real-world ground-truth proxy
-   in v1. Start hand-authored (3–5 good + a few bad); the v1.1 round-trip importer grows this
+   must accept and **known-bad** ones it must reject - the only real-world ground-truth proxy
+   in v1. Start hand-authored (3-5 good + a few bad); the v1.1 round-trip importer grows this
    from real community builds.
 
 Plus a **manual in-game spot-check** of the starter dataset (tiers, face rules, throughputs)
-during the Assignment — v1's only contact with actual GT behavior.
+during the Assignment - v1's only contact with actual GT behavior.
 
 ## What to test per module
 
-- **adapter** — correct parsing of gtnh-factory-flow's exported plan JSON; missing/changed
+- **adapter** - correct parsing of gtnh-factory-flow's exported plan JSON; missing/changed
   fields and plan-schema/dataset version mismatch handled, not silently dropped.
-- **dataset** — entries load + validate; unknown machine / bad footprint raises clearly.
-- **placement** — move operators (translate + orientation), each cost term, per-seed
+- **dataset** - entries load + validate; unknown machine / bad footprint raises clearly.
+- **placement** - move operators (translate + orientation), each cost term, per-seed
   determinism, won't-fit infeasibility.
-- **router** — A* per net, throughput/tier caps, one-fluid-per-line, EU-loss cost + amperage
+- **router** - A* per net, throughput/tier caps, one-fluid-per-line, EU-loss cost + amperage
   cap, channels-per-edge invariant, cell→block realizability, rip-up-and-reroute, ME-toggle
   skip + endpoint placement, unroutable → infeasibility.
-- **solver** — the place→route→retry loop converges or gives up with a report; anytime budget
+- **solver** - the place→route→retry loop converges or gives up with a report; anytime budget
   returns best-valid-so-far.
-- **validator** — geometric + rule checks; partial-invalid layouts reported, never passed.
-- **cli** — parse a project, solve, emit previewer JSON + build guide, honor ME flags, surface
+- **validator** - geometric + rule checks; partial-invalid layouts reported, never passed.
+- **cli** - parse a project, solve, emit previewer JSON + build guide, honor ME flags, surface
   infeasibility.
 
 ## Edge cases that must have tests
@@ -53,8 +53,8 @@ during the Assignment — v1's only contact with actual GT behavior.
 
 ## Not auto-testable (manual / in-game)
 
-- Whether a layout actually runs in GT:NH — covered by the in-game Assignment, not CI.
-- Previewer visual correctness — smoke-test the render path; eyeball the rest.
+- Whether a layout actually runs in GT:NH - covered by the in-game Assignment, not CI.
+- Previewer visual correctness - smoke-test the render path; eyeball the rest.
 
 ## Commands
 

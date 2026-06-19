@@ -1,10 +1,10 @@
 """Shared Pydantic base classes for the IR contracts.
 
 Two bases, both reject unknown fields (``extra="forbid"``) so the adapter can never
-*silently* drop or misspell a field — a contract must fail loud (see docs/TESTING.md).
+*silently* drop or misspell a field - a contract must fail loud (see docs/TESTING.md).
 
-- ``StrictModel``  — mutable aggregate models (machines, nets, the IR roots).
-- ``FrozenModel``  — immutable, hashable value types (coordinates, boxes) so they can
+- ``StrictModel``  - mutable aggregate models (machines, nets, the IR roots).
+- ``FrozenModel``  - immutable, hashable value types (coordinates, boxes) so they can
   live in sets / dict keys during the solve.
 """
 

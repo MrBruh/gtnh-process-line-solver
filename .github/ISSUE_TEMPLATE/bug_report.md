@@ -8,7 +8,7 @@ labels: [bug]
 ## What happened
 
 <!-- The wrong behavior. If the validator passed a layout it shouldn't have (or vice
-     versa), say so — that's the correctness gate and a high-priority class of bug. -->
+     versa), say so - that's the correctness gate and a high-priority class of bug. -->
 
 ## What you expected
 

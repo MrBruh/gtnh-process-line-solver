@@ -1,10 +1,10 @@
-# Domain — GT:NH rules the solver encodes
+# Domain - GT:NH rules the solver encodes
 
 The knowledge a contributor (or the dataset author) needs but won't necessarily know. These
 rules live as *data* in `dataset/` and as *checking logic* in `validator/` (shared data,
-independent logic — see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
+independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
 
-> If you play GT:NH and spot an error here, fix it — this doc is the reference both the
+> If you play GT:NH and spot an error here, fix it - this doc is the reference both the
 > router and the validator are built against, so a wrong rule here propagates everywhere.
 
 ## Platform
@@ -27,7 +27,7 @@ independent logic — see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
 - A machine **auto-outputs to a single face**, carrying **either items or fluids, not both**.
   A machine emitting both an item and a fluid output uses auto-output for one and a
   cover-driven output on another non-front face (or ME) for the other.
-- **Required-I/O-face reachability is a HARD constraint** — a blocked required output face
+- **Required-I/O-face reachability is a HARD constraint** - a blocked required output face
   means the line doesn't run. "Convenient access" is a soft preference.
 
 ## Fluids and items (pipes)

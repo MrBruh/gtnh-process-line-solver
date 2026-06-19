@@ -1,4 +1,4 @@
-"""dataset — the GT physical-rules data and its loader.
+"""dataset - the GT physical-rules data and its loader.
 
 Footprints, machine faces (front = no I/O; five usable), pipe/wire tiers + throughputs,
 voltage tiers, ME behavior, and cell->block mappings. This is the single biggest piece of

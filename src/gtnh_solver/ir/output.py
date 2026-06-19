@@ -1,4 +1,4 @@
-"""Output layout schema — the *solution* the solver produces.
+"""Output layout schema - the *solution* the solver produces.
 
 A first-class versioned contract (not a previewer-internal format), consumed by the
 previewer, the build guide, and later the .schematic exporter. Spec: docs/IR.md.
@@ -19,7 +19,7 @@ from .geometry import CellCoord
 #: Bump on any breaking change to the output contract; record it in ``ir/__init__.py``.
 LAYOUT_RESULT_VERSION = 0
 
-#: Allowed GT cable thicknesses (1x/2x/4x/8x/16x, 16x max — docs/DOMAIN.md).
+#: Allowed GT cable thicknesses (1x/2x/4x/8x/16x, 16x max - docs/DOMAIN.md).
 _THICKNESSES = frozenset({1, 2, 4, 8, 16})
 
 
