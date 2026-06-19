@@ -23,7 +23,7 @@ jobs:
       - name: pre-commit
         run: pre-commit run --all-files --show-diff-on-failure
 
-  test:
+  pytest:
     name: Test (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
@@ -42,6 +42,22 @@ jobs:
         run: pip install -e ".[dev]"
       - name: Test
         run: pytest --cov-fail-under=90
+
+  # Single stable required status check for branch protection. The matrix produces
+  # per-version check names that change whenever the version list changes, so instead of
+  # requiring those, require this one `test` gate: it passes only if BOTH the static
+  # checks and every matrix leg passed. `if: always()` so a failed dependency still runs
+  # the gate and fails it (a skipped required check would otherwise be treated as passing).
+  test:
+    name: test
+    needs: [static, pytest]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate on lint/types + the full test matrix
+        run: |
+          echo "static=${{ needs.static.result }} pytest=${{ needs.pytest.result }}"
+          [ "${{ needs.static.result }}" = "success" ] && [ "${{ needs.pytest.result }}" = "success" ]
 
   commits:
     name: Commit messages (Conventional Commits, advisory)
