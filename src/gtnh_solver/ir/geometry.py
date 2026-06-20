@@ -8,6 +8,8 @@ units, not blocks. Axes follow Minecraft: ``x``/``z`` horizontal, ``y`` vertical
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 from pydantic import Field
 
 from ._base import FrozenModel
@@ -37,3 +39,33 @@ class CellBox(FrozenModel):
     def volume(self) -> int:
         """Number of cells the box occupies."""
         return self.sx * self.sy * self.sz
+
+
+# A bare (x, y, z) cell triple - the lightweight form used in hot grid loops, distinct
+# from the validated CellCoord value type above.
+Cell = tuple[int, int, int]
+
+
+def occupied_cells(origin: CellCoord, footprint: CellBox) -> Iterator[Cell]:
+    """Every cell a footprint box covers, given its minimum-corner ``origin``.
+
+    Conventions shared by placement, router, and validator:
+    - ``origin`` is the **minimum corner**; the box occupies
+      ``[x, x+sx) x [y, y+sy) x [z, z+sz)``.
+    - Orientation-driven rotation of non-cubic footprints is a TODO tied to the dataset
+      (1x1x1 machines, the common case, are unaffected).
+    """
+    for dx in range(footprint.sx):
+        for dy in range(footprint.sy):
+            for dz in range(footprint.sz):
+                yield (origin.x + dx, origin.y + dy, origin.z + dz)
+
+
+def in_region(cell: Cell, region: CellBox) -> bool:
+    """Whether a cell lies inside the origin-anchored bounding region.
+
+    Origin-anchored: ``(x, y, z)`` is in-bounds iff ``0 <= x < sx`` and ``0 <= y < sy`` and
+    ``0 <= z < sz``.
+    """
+    x, y, z = cell
+    return 0 <= x < region.sx and 0 <= y < region.sy and 0 <= z < region.sz

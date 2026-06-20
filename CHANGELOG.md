@@ -22,6 +22,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   returns a `ValidationReport` of every proven violation - never raises, never passes a
   silently-invalid layout. Rule-data checks (tier caps, summed amperage, face reachability)
   are stubbed for the dataset lane. In-code golden corpus (one known-bad case per violation).
+- **Placement (`placement/`) - Phase 1 crude placer** - `place(problem)` does deterministic
+  first-fit constructive placement on the cell grid (floor layer first, honoring reserved
+  cells and never overlapping; orientation = first legal option), returning a
+  `PlacementResult` that is either every machine placed or an explicit `Infeasibility` naming
+  what did not fit (never raises). The validator independently certifies the output. Shared
+  cell-grid helpers (`occupied_cells`, `in_region`) lifted into `ir/geometry.py`. Property
+  test proves the core promise: any input yields a valid placement or an explicit
+  infeasibility. SA/LNS placement is Phase 2 (see `docs/ROADMAP.md`).
 
 - **Contributor standards & tooling** - documented coding + Conventional-Commits
   conventions in `CONTRIBUTING.md`; added a `.pre-commit-config.yaml` (ruff lint + format,

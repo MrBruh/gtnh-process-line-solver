@@ -1,34 +1,18 @@
-"""Pure cell-grid geometry helpers for the validator.
+"""Cell-graph connectivity for route validation.
 
-Conventions (must match placement/router when they land):
-- The bounding region is anchored at the origin: a cell ``(x, y, z)`` is in-bounds iff
-  ``0 <= x < sx`` and ``0 <= y < sy`` and ``0 <= z < sz``.
-- A ``Placement.cell`` is the **minimum corner** of the machine's footprint box; the machine
-  occupies ``[x, x+sx) x [y, y+sy) x [z, z+sz)``. Orientation-driven rotation of non-cubic
-  footprints is a TODO tied to the dataset (1x1x1 machines, the common case, are unaffected).
+The cell-grid primitives (``Cell``, ``occupied_cells``, ``in_region``) live in
+``gtnh_solver.ir.geometry`` next to the value types they operate on, and are re-exported here
+so the validator's imports stay in one place. The origin-anchored / minimum-corner conventions
+are documented there. This module adds only ``is_connected`` (route-graph specific).
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable
 
-from gtnh_solver.ir import CellBox, CellCoord
+from gtnh_solver.ir.geometry import Cell, in_region, occupied_cells
 
-Cell = tuple[int, int, int]
-
-
-def occupied_cells(origin: CellCoord, footprint: CellBox) -> Iterator[Cell]:
-    """Every cell a footprint box covers, given its minimum-corner ``origin``."""
-    for dx in range(footprint.sx):
-        for dy in range(footprint.sy):
-            for dz in range(footprint.sz):
-                yield (origin.x + dx, origin.y + dy, origin.z + dz)
-
-
-def in_region(cell: Cell, region: CellBox) -> bool:
-    """Whether a cell lies inside the origin-anchored bounding region."""
-    x, y, z = cell
-    return 0 <= x < region.sx and 0 <= y < region.sy and 0 <= z < region.sz
+__all__ = ["Cell", "in_region", "is_connected", "occupied_cells"]
 
 
 def is_connected(edges: Iterable[tuple[Cell, Cell]]) -> bool:
