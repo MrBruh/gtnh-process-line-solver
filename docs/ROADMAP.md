@@ -1,6 +1,6 @@
 # Roadmap
 
-## v1 - the optimizer core
+## v1 - phased: thin slice first, then the optimizer core
 
 A working solver: one re-runnable annealed solution, 2.5D **buildable-compact** objective,
 all three commodities single-channel + per-commodity ME toggle, single-block **and**
@@ -8,47 +8,82 @@ bounding-box multiblocks, the previewer and the build guide, the validator + tes
 routing with the realizability invariant; shared-amperage power. Target ~30-50 machines with
 an anytime time budget.
 
+**Why phased (cross-model design review, 2026-06).** The biggest failure mode here is a
+polished IR + validator + optimizer that has never turned a real gtnh-factory-flow export into
+a layout a player can build. A mediocre *valid, visible* layout is worth more than an elegant
+optimizer that has consumed zero real input. So v1 proves the whole path on one small line
+first (**Phase 1**), then makes it good (**Phase 2**). The optimizer work is **resequenced,
+not cut** - it is the bulk of v1, queued right after the basics hold.
+
 **Upstream note.** We work against a **maintained fork** of gtnh-factory-flow: fix only the
 export/throughput/dataset path we consume, pin a fork commit + dataset version, and **snapshot a
 known-good dataset + sample exports as fixtures** in `examples/`. The solver's progress must
 never depend on the fork's health. Offer fixes upstream as PRs; don't adopt the whole app.
 
-### Canonical build order
+**Already landed:** package skeleton + lint/type/test CI; the **IR** (`ir/`, T1); the
+**validator** geometric/structural half (`validator/`). These are the contracts + the safety
+gate that Phase 1 builds against.
 
-0. **The Assignment (do before solver code):** hand-build a trivial 3-machine line in GT:NH
-   with real I/O-face config, export with Schematica-Plus, clear, paste back, confirm it
-   rebuilds with config intact AND runs. One evening; retires the export-fidelity risk. While
-   in-game, spot-check the starter dataset's tiers/face-rules/throughputs against reality.
-1. `git init` ✓, package skeleton ✓, lint/test CI ✓.
-2. **IR** (`ir/`) - typed, versioned input IR + output-layout schema. Unblocks everything.
-3. **Integration spike** - a real gtnh-factory-flow **exported plan JSON** → adapter → IR →
-   trivial placement + router → previewer stub. Typed throughput flows through naturally (it's
-   part of the documented, self-contained export), so the boundary is lower-risk than the old
-   gtnh-flow-internals plan.
-4. **Dataset** (`dataset/`) - the **physical** rules (footprints/faces/physical tiers/
-   cell→block), keyed to gtnh-factory-flow's machine IDs. Recipes/throughput/identity come from
-   its dataset, so this is smaller than before but still the biggest hand-authored piece.
-   (Recommended but *declined this round*: pin one concrete demo line first to bound it.)
-5. **Placement** (`placement/`) - SA/LNS + cheap routing-aware cost; orientation as a variable.
-6. **Router** (`router/`) - free-form per-commodity A* with channels-per-edge cap + cell→block
-   realizability + rip-up-and-reroute + ME toggle; then the shared-amperage power primitive.
-7. **Solver** (`solver/`) - place↔route feedback loop + anytime budget.
-8. **Validator** (`validator/`) - independent checks; **build tests alongside every step.**
-9. **Previewer + build guide + CLI.**
+### Phase 1 - thin end-to-end slice (prove the path)
 
-### Parallel lanes (after IR lands)
+Goal: one pinned small demo line goes **real export JSON -> buildable layout** you can see in
+the previewer and verify in-game. Crude is fine - correctness and visibility beat quality. Each
+step stays deliberately dumb; the validator (already built) certifies the output is not
+silently invalid.
 
-| Lane | Tasks | Depends on |
-|------|-------|------------|
-| A | adapter (parse gtnh-factory-flow export) → schema/dataset version pinning | IR |
-| B | dataset | IR |
-| C | placement | IR |
-| D | router → power | IR |
-| E | validator | IR (+ shared rule data) |
-| F | previewer, build guide | output schema |
+1. **Get a real gtnh-factory-flow exported plan JSON** into `examples/` - one small line
+   (~3-5 machines). *(Owner action; everything below depends on it.)*
+2. **Pin that as THE demo line.** Author only the physical-dataset entries it needs - keep it
+   tiny. (This reverses the earlier "don't pin a demo line" call - see Risks.)
+3. **adapter** - that export -> `InputIR`.
+4. **placement (crude)** - deterministic constructive placement: topological / row order, a
+   simple legal-orientation pick, in-bounds, no overlap. No SA/LNS yet.
+5. **router (crude)** - A* per-commodity with obstacle avoidance + single-channel capacity.
+   Power: sum the load on the produced path/tree and size-or-reject; no optimization yet.
+6. **previewer + build guide (minimal)** - emit the `LayoutResult` so it is visible/buildable.
+7. **validator** - certify it (done; it gates Phase 1's output).
+8. **the Assignment (in-game)** - can a human build this line from the output, and does it run?
+   This also spot-checks the starter dataset's tiers/face-rules/throughputs against reality.
 
-Launch A-F in parallel worktrees. **Merge C + D before the solver loop** (both feed it -
-coordinate the placement↔router interface). Then the CLI.
+**Phase 1 success criterion:** the pinned demo line is buildable from the output and runs
+in-game. Do **not** start Phase 2 until this holds.
+
+### Phase 2 - the optimizer core (queued right after Phase 1, NOT cut)
+
+Layer the designed solver onto the working baseline, adding sophistication only where Phase 1
+is demonstrably valid-but-bad (too large, unroutable, ugly). This is the recorded design intent
+- the 9 engineering decisions in [`ARCHITECTURE.md`](ARCHITECTURE.md) still stand:
+
+- **placement** - SA/LNS + cheap routing-aware cost + orientation as a search variable
+  (replaces the crude constructive placer).
+- **router** - rip-up-and-reroute, the **channels-per-edge realizability invariant**,
+  cell->block realizability fed back into search, ME-toggle endpoint placement, pluggable
+  multi-channel backends.
+- **solver** - the **place<->route feedback loop** + anytime wall-clock budget
+  (best-valid-so-far on timeout).
+- **power** - shared-amperage optimization (Steiner-like summing, thickness sizing, the 16x
+  split/upgrade) beyond Phase 1's size-or-reject.
+- **validator (rule half)** - throughput/tier caps, summed amperage <= cable rating,
+  one-fluid-per-line, required-I/O-face reachability, once the physical dataset is real.
+- **tests** - the on-disk golden corpus + broader hypothesis property tests.
+
+#### Parallel lanes (Phase 2 - after the thin slice proves the path)
+
+Once Phase 1 holds, fan the *quality* work out in parallel worktrees. (Phase 1 already built a
+crude end-to-end version of A/C/D/F against the pinned line, so these are upgrades, not
+greenfield.)
+
+| Lane | Phase 2 work | Depends on |
+|------|--------------|------------|
+| A | adapter hardening -> plan-schema/dataset version pinning | Phase 1 adapter |
+| B | full dataset (footprints/faces/tiers/cell->block) beyond the demo line | IR |
+| C | placement -> SA/LNS + routing-aware cost | Phase 1 placement |
+| D | router -> rip-up/reroute + shared-amperage power optimization | Phase 1 router |
+| E | validator rule-half (tier caps, amperage, face reachability) | dataset + router |
+| F | previewer / build guide polish | Phase 1 previewer |
+
+**Merge C + D before the solver loop** (both feed it - coordinate the placement<->router
+interface). Then the CLI ties it together.
 
 ## v1.1 and beyond (deferred)
 
@@ -68,5 +103,7 @@ coordinate the placement↔router interface). Then the CLI.
 
 - **No automated correctness ground truth in v1** beyond self-consistency - mitigated by the
   in-game spot-check + golden corpus, fully addressed by the v1.1 import corpus.
-- **Dataset scope is loosely bounded** until a concrete demo line is pinned (declined this
-  round).
+- **Dataset scope** - bounded now by pinning **one concrete demo line** in Phase 1 (this
+  reverses the earlier decision to leave it loosely bounded). Risk: the pinned line is too
+  unrepresentative to generalize from; mitigated by choosing a line that exercises all three
+  commodities (item + fluid + power) and at least one multiblock if cheap.
