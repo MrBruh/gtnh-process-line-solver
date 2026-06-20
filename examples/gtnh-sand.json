@@ -1,0 +1,1062 @@
+{
+  "schemaVersion": 1,
+  "id": "manual-project",
+  "name": "GTNH Planner",
+  "recipes": [
+    {
+      "id": "oracle:stable-2.8.4:gregtech:gt-recipe-hammer:4e7fc5e58a091fa4",
+      "name": "Forge Hammer: Sand",
+      "machineType": "Forge Hammer",
+      "minimumTier": "LV",
+      "durationTicks": 10,
+      "eut": 16,
+      "inputs": [
+        {
+          "kind": "item",
+          "id": "minecraft:gravel",
+          "amount": 1,
+          "displayName": "Gravel",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/gravel-8075e5ae8c4a.png",
+          "dominantColor": "#585757",
+          "modId": "minecraft"
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "item",
+          "id": "minecraft:sand",
+          "amount": 1,
+          "displayName": "Sand",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/sand-4c6fee7fee56.png",
+          "dominantColor": "#9b9471",
+          "modId": "minecraft"
+        }
+      ],
+      "notes": "Exported by the GTNH calculation oracle from gregtech.api.recipe.RecipeMap.",
+      "machineConfigControls": [
+        {
+          "id": "machineParallel",
+          "label": "Parallel",
+          "minimumKey": "fixed-8",
+          "defaultKey": "fixed-8",
+          "tiers": [
+            {
+              "key": "fixed-8",
+              "label": "8 Parallels",
+              "parallelMultiplier": 8,
+              "resource": {
+                "kind": "item",
+                "id": "factoryflow:machine_config/fixed-8",
+                "amount": 1,
+                "displayName": "8 Parallels",
+                "tooltip": [
+                  "Imported from machine catalyst tooltip",
+                  "Voltage Tier * Anvil Tier * 8 Parallels",
+                  "8 Parallels"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "runtimeCalculation": {
+        "sourceKind": "gregtech-overclock-calculator",
+        "sourceClass": "gregtech.api.util.OverclockCalculator",
+        "recipeMap": "Forge Hammer",
+        "status": "computed",
+        "oracleEligible": true,
+        "strict": true,
+        "generatedAt": "2026-06-03T08:03:05.971Z",
+        "variants": [
+          {
+            "id": "tier-lv",
+            "label": "LV",
+            "overclockTier": "LV",
+            "durationTicks": 10,
+            "eut": 16,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-mv",
+            "label": "MV",
+            "overclockTier": "MV",
+            "durationTicks": 5,
+            "eut": 64,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-hv",
+            "label": "HV",
+            "overclockTier": "HV",
+            "durationTicks": 2,
+            "eut": 256,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-ev",
+            "label": "EV",
+            "overclockTier": "EV",
+            "durationTicks": 1,
+            "eut": 1024,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-iv",
+            "label": "IV",
+            "overclockTier": "IV",
+            "durationTicks": 1,
+            "eut": 4096,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-luv",
+            "label": "LuV",
+            "overclockTier": "LuV",
+            "durationTicks": 1,
+            "eut": 16384,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-zpm",
+            "label": "ZPM",
+            "overclockTier": "ZPM",
+            "durationTicks": 1,
+            "eut": 65536,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uv",
+            "label": "UV",
+            "overclockTier": "UV",
+            "durationTicks": 1,
+            "eut": 262144,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uhv",
+            "label": "UHV",
+            "overclockTier": "UHV",
+            "durationTicks": 1,
+            "eut": 1048576,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uev",
+            "label": "UEV",
+            "overclockTier": "UEV",
+            "durationTicks": 1,
+            "eut": 4194304,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uiv",
+            "label": "UIV",
+            "overclockTier": "UIV",
+            "durationTicks": 1,
+            "eut": 16777216,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uxv",
+            "label": "UXV",
+            "overclockTier": "UXV",
+            "durationTicks": 1,
+            "eut": 67108864,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-opv",
+            "label": "OpV",
+            "overclockTier": "OpV",
+            "durationTicks": 1,
+            "eut": 268435456,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-max",
+            "label": "MAX",
+            "overclockTier": "MAX",
+            "durationTicks": 1,
+            "eut": 1152921504606847000,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          }
+        ]
+      },
+      "source": {
+        "datasetVersionId": "stable-2.8.4",
+        "recipeMap": "Forge Hammer",
+        "exporter": "gtnh-oracle",
+        "rawRecipeId": "gt.recipe.hammer:4e7fc5e58a091fa4"
+      },
+      "nei": {
+        "additionalInfo": [
+          "Special value: 0"
+        ]
+      }
+    },
+    {
+      "id": "oracle:stable-2.8.4:gregtech:gt-recipe-hammer:a3bfd657f15af598",
+      "name": "Forge Hammer: Gravel",
+      "machineType": "Forge Hammer",
+      "minimumTier": "LV",
+      "durationTicks": 10,
+      "eut": 16,
+      "inputs": [
+        {
+          "kind": "item",
+          "id": "minecraft:cobblestone",
+          "amount": 1,
+          "displayName": "Cobblestone",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/cobblestone-1712976ff384.png",
+          "dominantColor": "#525252",
+          "modId": "minecraft"
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "item",
+          "id": "minecraft:gravel",
+          "amount": 1,
+          "displayName": "Gravel",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/gravel-8075e5ae8c4a.png",
+          "dominantColor": "#585757",
+          "modId": "minecraft"
+        }
+      ],
+      "notes": "Exported by the GTNH calculation oracle from gregtech.api.recipe.RecipeMap.",
+      "machineConfigControls": [
+        {
+          "id": "machineParallel",
+          "label": "Parallel",
+          "minimumKey": "fixed-8",
+          "defaultKey": "fixed-8",
+          "tiers": [
+            {
+              "key": "fixed-8",
+              "label": "8 Parallels",
+              "parallelMultiplier": 8,
+              "resource": {
+                "kind": "item",
+                "id": "factoryflow:machine_config/fixed-8",
+                "amount": 1,
+                "displayName": "8 Parallels",
+                "tooltip": [
+                  "Imported from machine catalyst tooltip",
+                  "Voltage Tier * Anvil Tier * 8 Parallels",
+                  "8 Parallels"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "runtimeCalculation": {
+        "sourceKind": "gregtech-overclock-calculator",
+        "sourceClass": "gregtech.api.util.OverclockCalculator",
+        "recipeMap": "Forge Hammer",
+        "status": "computed",
+        "oracleEligible": true,
+        "strict": true,
+        "generatedAt": "2026-06-03T08:03:05.971Z",
+        "variants": [
+          {
+            "id": "tier-lv",
+            "label": "LV",
+            "overclockTier": "LV",
+            "durationTicks": 10,
+            "eut": 16,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-mv",
+            "label": "MV",
+            "overclockTier": "MV",
+            "durationTicks": 5,
+            "eut": 64,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-hv",
+            "label": "HV",
+            "overclockTier": "HV",
+            "durationTicks": 2,
+            "eut": 256,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-ev",
+            "label": "EV",
+            "overclockTier": "EV",
+            "durationTicks": 1,
+            "eut": 1024,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-iv",
+            "label": "IV",
+            "overclockTier": "IV",
+            "durationTicks": 1,
+            "eut": 4096,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-luv",
+            "label": "LuV",
+            "overclockTier": "LuV",
+            "durationTicks": 1,
+            "eut": 16384,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-zpm",
+            "label": "ZPM",
+            "overclockTier": "ZPM",
+            "durationTicks": 1,
+            "eut": 65536,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uv",
+            "label": "UV",
+            "overclockTier": "UV",
+            "durationTicks": 1,
+            "eut": 262144,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uhv",
+            "label": "UHV",
+            "overclockTier": "UHV",
+            "durationTicks": 1,
+            "eut": 1048576,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uev",
+            "label": "UEV",
+            "overclockTier": "UEV",
+            "durationTicks": 1,
+            "eut": 4194304,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uiv",
+            "label": "UIV",
+            "overclockTier": "UIV",
+            "durationTicks": 1,
+            "eut": 16777216,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uxv",
+            "label": "UXV",
+            "overclockTier": "UXV",
+            "durationTicks": 1,
+            "eut": 67108864,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-opv",
+            "label": "OpV",
+            "overclockTier": "OpV",
+            "durationTicks": 1,
+            "eut": 268435456,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-max",
+            "label": "MAX",
+            "overclockTier": "MAX",
+            "durationTicks": 1,
+            "eut": 1152921504606847000,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          }
+        ]
+      },
+      "source": {
+        "datasetVersionId": "stable-2.8.4",
+        "recipeMap": "Forge Hammer",
+        "exporter": "gtnh-oracle",
+        "rawRecipeId": "gt.recipe.hammer:a3bfd657f15af598"
+      },
+      "nei": {
+        "additionalInfo": [
+          "Special value: 0"
+        ]
+      }
+    },
+    {
+      "id": "oracle:stable-2.8.4:gregtech:gt-recipe-hammer:9db1606c47514447",
+      "name": "Forge Hammer: Cobblestone",
+      "machineType": "Forge Hammer",
+      "minimumTier": "LV",
+      "durationTicks": 10,
+      "eut": 16,
+      "inputs": [
+        {
+          "kind": "item",
+          "id": "minecraft:stone",
+          "amount": 1,
+          "displayName": "Stone",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/stone-21345afefcc2.png",
+          "dominantColor": "#545454",
+          "modId": "minecraft"
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "item",
+          "id": "minecraft:cobblestone",
+          "amount": 1,
+          "displayName": "Cobblestone",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/cobblestone-1712976ff384.png",
+          "dominantColor": "#525252",
+          "modId": "minecraft"
+        }
+      ],
+      "notes": "Exported by the GTNH calculation oracle from gregtech.api.recipe.RecipeMap.",
+      "machineConfigControls": [
+        {
+          "id": "machineParallel",
+          "label": "Parallel",
+          "minimumKey": "fixed-8",
+          "defaultKey": "fixed-8",
+          "tiers": [
+            {
+              "key": "fixed-8",
+              "label": "8 Parallels",
+              "parallelMultiplier": 8,
+              "resource": {
+                "kind": "item",
+                "id": "factoryflow:machine_config/fixed-8",
+                "amount": 1,
+                "displayName": "8 Parallels",
+                "tooltip": [
+                  "Imported from machine catalyst tooltip",
+                  "Voltage Tier * Anvil Tier * 8 Parallels",
+                  "8 Parallels"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "runtimeCalculation": {
+        "sourceKind": "gregtech-overclock-calculator",
+        "sourceClass": "gregtech.api.util.OverclockCalculator",
+        "recipeMap": "Forge Hammer",
+        "status": "computed",
+        "oracleEligible": true,
+        "strict": true,
+        "generatedAt": "2026-06-03T08:03:05.969Z",
+        "variants": [
+          {
+            "id": "tier-lv",
+            "label": "LV",
+            "overclockTier": "LV",
+            "durationTicks": 10,
+            "eut": 16,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-mv",
+            "label": "MV",
+            "overclockTier": "MV",
+            "durationTicks": 5,
+            "eut": 64,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-hv",
+            "label": "HV",
+            "overclockTier": "HV",
+            "durationTicks": 2,
+            "eut": 256,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-ev",
+            "label": "EV",
+            "overclockTier": "EV",
+            "durationTicks": 1,
+            "eut": 1024,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-iv",
+            "label": "IV",
+            "overclockTier": "IV",
+            "durationTicks": 1,
+            "eut": 4096,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-luv",
+            "label": "LuV",
+            "overclockTier": "LuV",
+            "durationTicks": 1,
+            "eut": 16384,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-zpm",
+            "label": "ZPM",
+            "overclockTier": "ZPM",
+            "durationTicks": 1,
+            "eut": 65536,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uv",
+            "label": "UV",
+            "overclockTier": "UV",
+            "durationTicks": 1,
+            "eut": 262144,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uhv",
+            "label": "UHV",
+            "overclockTier": "UHV",
+            "durationTicks": 1,
+            "eut": 1048576,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uev",
+            "label": "UEV",
+            "overclockTier": "UEV",
+            "durationTicks": 1,
+            "eut": 4194304,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uiv",
+            "label": "UIV",
+            "overclockTier": "UIV",
+            "durationTicks": 1,
+            "eut": 16777216,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uxv",
+            "label": "UXV",
+            "overclockTier": "UXV",
+            "durationTicks": 1,
+            "eut": 67108864,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-opv",
+            "label": "OpV",
+            "overclockTier": "OpV",
+            "durationTicks": 1,
+            "eut": 268435456,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-max",
+            "label": "MAX",
+            "overclockTier": "MAX",
+            "durationTicks": 1,
+            "eut": 1152921504606847000,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          }
+        ]
+      },
+      "source": {
+        "datasetVersionId": "stable-2.8.4",
+        "recipeMap": "Forge Hammer",
+        "exporter": "gtnh-oracle",
+        "rawRecipeId": "gt.recipe.hammer:9db1606c47514447"
+      },
+      "nei": {
+        "additionalInfo": [
+          "Special value: 0"
+        ]
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "id": "node-f4dbc148-646a-430f-8ec3-4dba5ef4d323",
+      "recipeId": "oracle:stable-2.8.4:gregtech:gt-recipe-hammer:4e7fc5e58a091fa4",
+      "machineCount": 1,
+      "parallel": 1,
+      "overclockTier": "LV",
+      "recipeInputOverrides": {
+        "0": {
+          "kind": "item",
+          "id": "minecraft:gravel",
+          "amount": 1,
+          "displayName": "Gravel",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/gravel-8075e5ae8c4a.png",
+          "dominantColor": "#585757",
+          "modId": "minecraft"
+        }
+      },
+      "enabled": true,
+      "position": {
+        "x": -870.3471688188508,
+        "y": 90.61746085276937
+      }
+    },
+    {
+      "id": "node-9bfdeec1-d48f-4726-b003-c3aa45873460",
+      "recipeId": "oracle:stable-2.8.4:gregtech:gt-recipe-hammer:a3bfd657f15af598",
+      "machineCount": 1,
+      "parallel": 1,
+      "overclockTier": "LV",
+      "recipeInputOverrides": {
+        "0": {
+          "kind": "item",
+          "id": "minecraft:cobblestone",
+          "amount": 1,
+          "displayName": "Cobblestone",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/cobblestone-1712976ff384.png",
+          "dominantColor": "#525252",
+          "modId": "minecraft"
+        }
+      },
+      "enabled": true,
+      "position": {
+        "x": -1378.612441852081,
+        "y": 86.5404666840536
+      }
+    },
+    {
+      "id": "node-f5d03ecc-d4c2-4106-9bc9-fdc168a62b45",
+      "recipeId": "oracle:stable-2.8.4:gregtech:gt-recipe-hammer:9db1606c47514447",
+      "machineCount": 1,
+      "parallel": 1,
+      "overclockTier": "LV",
+      "recipeInputOverrides": {
+        "0": {
+          "kind": "item",
+          "id": "minecraft:stone",
+          "amount": 1,
+          "displayName": "Stone",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/stone-21345afefcc2.png",
+          "dominantColor": "#545454",
+          "modId": "minecraft"
+        }
+      },
+      "enabled": true,
+      "position": {
+        "x": -1890.5809410415654,
+        "y": 93.33545696524654
+      }
+    }
+  ],
+  "storages": [
+    {
+      "id": "storage-ae28da5f-5127-45ed-9967-a2786fcfa436",
+      "kind": "item",
+      "resourceId": "minecraft:stone",
+      "displayName": "Stone",
+      "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/stone-21345afefcc2.png",
+      "dominantColor": "#545454",
+      "position": {
+        "x": -2252.905076164707,
+        "y": 113.87254702298259
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-43bf774e-8a94-454c-b5a0-a5301fa72d8d",
+      "source": "node-9bfdeec1-d48f-4726-b003-c3aa45873460",
+      "target": "node-f4dbc148-646a-430f-8ec3-4dba5ef4d323",
+      "sourceHandle": "output:item:minecraft%3Agravel:0",
+      "targetHandle": "input:item:minecraft%3Agravel:0",
+      "resourceKind": "item",
+      "resourceId": "minecraft:gravel",
+      "label": "Gravel"
+    },
+    {
+      "id": "edge-8edc446f-e8b6-4acd-b42f-4dd7475fea60",
+      "source": "node-f5d03ecc-d4c2-4106-9bc9-fdc168a62b45",
+      "target": "node-9bfdeec1-d48f-4726-b003-c3aa45873460",
+      "sourceHandle": "output:item:minecraft%3Acobblestone:0",
+      "targetHandle": "input:item:minecraft%3Acobblestone:0",
+      "resourceKind": "item",
+      "resourceId": "minecraft:cobblestone",
+      "label": "Cobblestone"
+    },
+    {
+      "id": "edge-d3c27d2f-86b2-425d-b5b6-a1c235941a9e",
+      "source": "storage-ae28da5f-5127-45ed-9967-a2786fcfa436",
+      "target": "node-f5d03ecc-d4c2-4106-9bc9-fdc168a62b45",
+      "sourceHandle": "output:item:minecraft%3Astone",
+      "targetHandle": "input:item:minecraft%3Astone:0",
+      "resourceKind": "item",
+      "resourceId": "minecraft:stone",
+      "label": "Stone"
+    }
+  ],
+  "fuelProfiles": [
+    {
+      "id": "benzene",
+      "name": "Benzene",
+      "fuelFluidId": "benzene",
+      "euPerLiter": 32000,
+      "notes": "GTNH generator fuel value."
+    },
+    {
+      "id": "biodiesel",
+      "name": "Biodiesel",
+      "fuelFluidId": "biodiesel",
+      "euPerLiter": 12800,
+      "notes": "GTNH generator fuel value."
+    },
+    {
+      "id": "steam",
+      "name": "Steam",
+      "fuelFluidId": "steam",
+      "euPerLiter": 16,
+      "notes": "GTNH steam turbine value."
+    }
+  ],
+  "selectedFuelProfileId": "biodiesel",
+  "notes": "Dataset-backed plan. Recipes must come from a normalized GTNH dataset.",
+  "metadata": {
+    "createdAt": "2026-06-27T20:46:28.348Z",
+    "updatedAt": "2026-06-27T21:18:43.353Z"
+  }
+}

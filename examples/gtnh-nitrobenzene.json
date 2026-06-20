@@ -1,0 +1,5851 @@
+{
+  "schemaVersion": 1,
+  "id": "manual-project",
+  "name": "GTNH Planner",
+  "recipes": [
+    {
+      "id": "oracle:stable-2.8.4:gregtech:gtpp-recipe-fluidchemicaleactor:e3e42759b5b6a49c",
+      "name": "Chemical Plant: Nitrobenzene",
+      "machineType": "Chemical Plant",
+      "minimumTier": "HV",
+      "durationTicks": 600,
+      "eut": 480,
+      "inputs": [
+        {
+          "kind": "fluid",
+          "id": "benzene",
+          "amount": 5000,
+          "displayName": "Benzene",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/benzene-b4cb31d3066f.png",
+          "dominantColor": "#151515",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30686",
+              "displayName": "Benzene Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/benzene_cell-bec8f33fea1a.png",
+              "dominantColor": "#6b6b6b",
+              "amount": 0.001
+            }
+          ]
+        },
+        {
+          "kind": "fluid",
+          "id": "sulfuricacid",
+          "amount": 1000,
+          "displayName": "Sulfuric Acid",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/sulfuric_acid-a74b902977a5.png",
+          "dominantColor": "#ff5200",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30720",
+              "displayName": "Sulfuric Acid Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/sulfuric_acid_cell-626f8ed399de.png",
+              "dominantColor": "#7f7f7f",
+              "amount": 0.001
+            }
+          ]
+        },
+        {
+          "kind": "fluid",
+          "id": "nitricacid",
+          "amount": 5000,
+          "displayName": "Nitric Acid",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitric_acid-3e53bbe4a80a.png",
+          "dominantColor": "#f2f221",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30653",
+              "displayName": "Nitric Acid Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitric_acid_cell-8274a302ba81.png",
+              "dominantColor": "#7f7f7f",
+              "amount": 0.001
+            }
+          ]
+        },
+        {
+          "kind": "fluid",
+          "id": "ic2distilledwater",
+          "amount": 10000,
+          "displayName": "Distilled Water",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/distilled_water-193636beb1a2.png",
+          "dominantColor": "#4151f5",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "ic2:itemcellempty@12",
+              "displayName": "Distilled Water Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/distilled_water_cell-b32b563a0f02.png",
+              "dominantColor": "#4775ff",
+              "amount": 0.001
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "fluid",
+          "id": "nitrobenzene",
+          "amount": 5000,
+          "displayName": "Nitrobenzene",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitrobenzene-34ec8c413363.png",
+          "dominantColor": "#392920",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "miscutils:nitrobenzene",
+              "displayName": "Nitrobenzene Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitrobenzene_cell-072a5926f4bf.png",
+              "dominantColor": "#7f7f7f",
+              "amount": 0.001
+            }
+          ]
+        }
+      ],
+      "notes": "Exported by the GTNH calculation oracle from gregtech.api.recipe.RecipeMap.",
+      "machineConfigControls": [
+        {
+          "id": "pipeCasing",
+          "label": "Pipe Casing",
+          "minimumKey": "bronze",
+          "defaultKey": "bronze",
+          "tiers": [
+            {
+              "key": "bronze",
+              "label": "Bronze",
+              "parallelMultiplier": 2,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings2@12",
+                "amount": 1,
+                "displayName": "Bronze Pipe Casing",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/bronze_pipe_casing-93ddbc927ee2.png",
+                "dominantColor": "#78310d",
+                "tooltip": [
+                  "Pipe casing tier",
+                  "2 Parallels per Pipe Casing Tier",
+                  "Parallels: 2x"
+                ]
+              }
+            },
+            {
+              "key": "steel",
+              "label": "Steel",
+              "parallelMultiplier": 4,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings2@13",
+                "amount": 1,
+                "displayName": "Steel Pipe Casing",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/steel_pipe_casing-a4be954d1ec2.png",
+                "dominantColor": "#4c4c4c",
+                "tooltip": [
+                  "Pipe casing tier",
+                  "2 Parallels per Pipe Casing Tier",
+                  "Parallels: 4x"
+                ]
+              }
+            },
+            {
+              "key": "titanium",
+              "label": "Titanium",
+              "parallelMultiplier": 6,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings2@14",
+                "amount": 1,
+                "displayName": "Titanium Pipe Casing",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/titanium_pipe_casing-a8c4d8455f04.png",
+                "dominantColor": "#684261",
+                "tooltip": [
+                  "Pipe casing tier",
+                  "2 Parallels per Pipe Casing Tier",
+                  "Parallels: 6x"
+                ]
+              }
+            },
+            {
+              "key": "tungstensteel",
+              "label": "Tungstensteel",
+              "parallelMultiplier": 8,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings2@15",
+                "amount": 1,
+                "displayName": "Tungstensteel Pipe Casing",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/tungstensteel_pipe_casing-f77d111df95a.png",
+                "dominantColor": "#1b3054",
+                "tooltip": [
+                  "Pipe casing tier",
+                  "2 Parallels per Pipe Casing Tier",
+                  "Parallels: 8x"
+                ]
+              }
+            },
+            {
+              "key": "ptfe",
+              "label": "PTFE",
+              "parallelMultiplier": 10,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings8@1",
+                "amount": 1,
+                "displayName": "PTFE Pipe Casing",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/ptfe_pipe_casing-e6ce1d02b5de.png",
+                "dominantColor": "#323232",
+                "tooltip": [
+                  "Pipe casing tier",
+                  "2 Parallels per Pipe Casing Tier",
+                  "Parallels: 10x"
+                ]
+              }
+            },
+            {
+              "key": "pbi",
+              "label": "PBI",
+              "parallelMultiplier": 12,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings9",
+                "amount": 1,
+                "displayName": "PBI Pipe Casing",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/pbi_pipe_casing-abdb939ca928.png",
+                "dominantColor": "#252525",
+                "tooltip": [
+                  "Pipe casing tier",
+                  "2 Parallels per Pipe Casing Tier",
+                  "Parallels: 12x"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "runtimeCalculation": {
+        "sourceKind": "gregtech-overclock-calculator",
+        "sourceClass": "gregtech.api.util.OverclockCalculator",
+        "recipeMap": "Chemical Plant",
+        "status": "computed",
+        "oracleEligible": true,
+        "strict": true,
+        "generatedAt": "2026-06-03T08:03:07.530Z",
+        "variants": [
+          {
+            "id": "tier-hv",
+            "label": "HV",
+            "overclockTier": "HV",
+            "durationTicks": 600,
+            "eut": 480,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrobenzene",
+                "amount": 5000
+              }
+            ]
+          },
+          {
+            "id": "tier-ev",
+            "label": "EV",
+            "overclockTier": "EV",
+            "durationTicks": 300,
+            "eut": 1920,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrobenzene",
+                "amount": 5000
+              }
+            ]
+          },
+          {
+            "id": "tier-iv",
+            "label": "IV",
+            "overclockTier": "IV",
+            "durationTicks": 150,
+            "eut": 7680,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrobenzene",
+                "amount": 5000
+              }
+            ]
+          },
+          {
+            "id": "tier-luv",
+            "label": "LuV",
+            "overclockTier": "LuV",
+            "durationTicks": 75,
+            "eut": 30720,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrobenzene",
+                "amount": 5000
+              }
+            ]
+          },
+          {
+            "id": "tier-zpm",
+            "label": "ZPM",
+            "overclockTier": "ZPM",
+            "durationTicks": 37,
+            "eut": 122880,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrobenzene",
+                "amount": 5000
+              }
+            ]
+          },
+          {
+            "id": "tier-uv",
+            "label": "UV",
+            "overclockTier": "UV",
+            "durationTicks": 18,
+            "eut": 491520,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrobenzene",
+                "amount": 5000
+              }
+            ]
+          },
+          {
+            "id": "tier-uhv",
+            "label": "UHV",
+            "overclockTier": "UHV",
+            "durationTicks": 9,
+            "eut": 1966080,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrobenzene",
+                "amount": 5000
+              }
+            ]
+          },
+          {
+            "id": "tier-uev",
+            "label": "UEV",
+            "overclockTier": "UEV",
+            "durationTicks": 4,
+            "eut": 7864320,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrobenzene",
+                "amount": 5000
+              }
+            ]
+          },
+          {
+            "id": "tier-uiv",
+            "label": "UIV",
+            "overclockTier": "UIV",
+            "durationTicks": 2,
+            "eut": 31457280,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrobenzene",
+                "amount": 5000
+              }
+            ]
+          },
+          {
+            "id": "tier-uxv",
+            "label": "UXV",
+            "overclockTier": "UXV",
+            "durationTicks": 1,
+            "eut": 125829120,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrobenzene",
+                "amount": 5000
+              }
+            ]
+          },
+          {
+            "id": "tier-opv",
+            "label": "OpV",
+            "overclockTier": "OpV",
+            "durationTicks": 1,
+            "eut": 503316480,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrobenzene",
+                "amount": 5000
+              }
+            ]
+          },
+          {
+            "id": "tier-max",
+            "label": "MAX",
+            "overclockTier": "MAX",
+            "durationTicks": 1,
+            "eut": 8646911284551352000,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrobenzene",
+                "amount": 5000
+              }
+            ]
+          }
+        ]
+      },
+      "source": {
+        "datasetVersionId": "stable-2.8.4",
+        "recipeMap": "Chemical Plant",
+        "exporter": "gtnh-oracle",
+        "rawRecipeId": "gtpp.recipe.fluidchemicaleactor:e3e42759b5b6a49c"
+      },
+      "nei": {
+        "additionalInfo": [
+          "Special value: 4"
+        ]
+      }
+    },
+    {
+      "id": "oracle:stable-2.8.4:gregtech:gt-recipe-distillationtower:a83b248c703c8d2d",
+      "name": "Distillation Tower: Distilled Water",
+      "machineType": "Distillation Tower",
+      "minimumTier": "MV",
+      "durationTicks": 32,
+      "eut": 120,
+      "inputs": [
+        {
+          "kind": "fluid",
+          "id": "water",
+          "amount": 1000,
+          "displayName": "Water",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/water-a9bcacf1db0d.png",
+          "dominantColor": "#2c3ef4",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "ic2:itemcellempty@1",
+              "displayName": "Water Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/water_cell-19cc640bbc15.png",
+              "dominantColor": "#3366ff",
+              "amount": 0.001
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "fluid",
+          "id": "ic2distilledwater",
+          "amount": 1000,
+          "displayName": "Distilled Water",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/distilled_water-193636beb1a2.png",
+          "dominantColor": "#4151f5",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "ic2:itemcellempty@12",
+              "displayName": "Distilled Water Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/distilled_water_cell-b32b563a0f02.png",
+              "dominantColor": "#4775ff",
+              "amount": 0.001
+            }
+          ]
+        }
+      ],
+      "notes": "Exported by the GTNH calculation oracle from gregtech.api.recipe.RecipeMap.",
+      "machineConfigControls": [
+        {
+          "id": "machineParallel",
+          "label": "Parallel",
+          "minimumKey": "fixed-12",
+          "defaultKey": "fixed-12",
+          "tiers": [
+            {
+              "key": "fixed-12",
+              "label": "12 Parallels",
+              "parallelMultiplier": 12,
+              "resource": {
+                "kind": "item",
+                "id": "factoryflow:machine_config/fixed-12",
+                "amount": 1,
+                "displayName": "12 Parallels",
+                "tooltip": [
+                  "Imported from machine catalyst tooltip",
+                  "12 Parallels"
+                ]
+              }
+            },
+            {
+              "key": "fixed-256",
+              "label": "256 Parallels",
+              "parallelMultiplier": 256,
+              "resource": {
+                "kind": "item",
+                "id": "factoryflow:machine_config/fixed-256",
+                "amount": 1,
+                "displayName": "256 Parallels",
+                "tooltip": [
+                  "Imported from machine catalyst tooltip",
+                  "256 Parallels"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "runtimeCalculation": {
+        "sourceKind": "gregtech-overclock-calculator",
+        "sourceClass": "gregtech.api.util.OverclockCalculator",
+        "recipeMap": "Distillation Tower",
+        "status": "computed",
+        "oracleEligible": true,
+        "strict": true,
+        "generatedAt": "2026-06-03T08:03:03.530Z",
+        "variants": [
+          {
+            "id": "tier-mv",
+            "label": "MV",
+            "overclockTier": "MV",
+            "durationTicks": 32,
+            "eut": 120,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ic2distilledwater",
+                "amount": 1000
+              }
+            ]
+          },
+          {
+            "id": "tier-hv",
+            "label": "HV",
+            "overclockTier": "HV",
+            "durationTicks": 16,
+            "eut": 480,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ic2distilledwater",
+                "amount": 1000
+              }
+            ]
+          },
+          {
+            "id": "tier-ev",
+            "label": "EV",
+            "overclockTier": "EV",
+            "durationTicks": 8,
+            "eut": 1920,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ic2distilledwater",
+                "amount": 1000
+              }
+            ]
+          },
+          {
+            "id": "tier-iv",
+            "label": "IV",
+            "overclockTier": "IV",
+            "durationTicks": 4,
+            "eut": 7680,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ic2distilledwater",
+                "amount": 1000
+              }
+            ]
+          },
+          {
+            "id": "tier-luv",
+            "label": "LuV",
+            "overclockTier": "LuV",
+            "durationTicks": 2,
+            "eut": 30720,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ic2distilledwater",
+                "amount": 1000
+              }
+            ]
+          },
+          {
+            "id": "tier-zpm",
+            "label": "ZPM",
+            "overclockTier": "ZPM",
+            "durationTicks": 1,
+            "eut": 122880,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ic2distilledwater",
+                "amount": 1000
+              }
+            ]
+          },
+          {
+            "id": "tier-uv",
+            "label": "UV",
+            "overclockTier": "UV",
+            "durationTicks": 1,
+            "eut": 491520,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ic2distilledwater",
+                "amount": 1000
+              }
+            ]
+          },
+          {
+            "id": "tier-uhv",
+            "label": "UHV",
+            "overclockTier": "UHV",
+            "durationTicks": 1,
+            "eut": 1966080,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ic2distilledwater",
+                "amount": 1000
+              }
+            ]
+          },
+          {
+            "id": "tier-uev",
+            "label": "UEV",
+            "overclockTier": "UEV",
+            "durationTicks": 1,
+            "eut": 7864320,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ic2distilledwater",
+                "amount": 1000
+              }
+            ]
+          },
+          {
+            "id": "tier-uiv",
+            "label": "UIV",
+            "overclockTier": "UIV",
+            "durationTicks": 1,
+            "eut": 31457280,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ic2distilledwater",
+                "amount": 1000
+              }
+            ]
+          },
+          {
+            "id": "tier-uxv",
+            "label": "UXV",
+            "overclockTier": "UXV",
+            "durationTicks": 1,
+            "eut": 125829120,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ic2distilledwater",
+                "amount": 1000
+              }
+            ]
+          },
+          {
+            "id": "tier-opv",
+            "label": "OpV",
+            "overclockTier": "OpV",
+            "durationTicks": 1,
+            "eut": 503316480,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ic2distilledwater",
+                "amount": 1000
+              }
+            ]
+          },
+          {
+            "id": "tier-max",
+            "label": "MAX",
+            "overclockTier": "MAX",
+            "durationTicks": 1,
+            "eut": 8646911284551352000,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ic2distilledwater",
+                "amount": 1000
+              }
+            ]
+          }
+        ]
+      },
+      "source": {
+        "datasetVersionId": "stable-2.8.4",
+        "recipeMap": "Distillation Tower",
+        "exporter": "gtnh-oracle",
+        "rawRecipeId": "gt.recipe.distillationtower:a83b248c703c8d2d"
+      },
+      "nei": {
+        "additionalInfo": [
+          "Special value: 0"
+        ]
+      }
+    },
+    {
+      "id": "oracle:stable-2.8.4:gregtech:gt-recipe-distillationtower:5181597d690be473",
+      "name": "Distillation Tower: Creosote Oil",
+      "machineType": "Distillation Tower",
+      "minimumTier": "HV",
+      "durationTicks": 40,
+      "eut": 256,
+      "inputs": [
+        {
+          "kind": "fluid",
+          "id": "woodtar",
+          "amount": 1000,
+          "displayName": "Wood Tar",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/wood_tar-3b9b64dbe40d.png",
+          "dominantColor": "#201209",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30662",
+              "displayName": "Wood Tar Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/wood_tar_cell-95c3ddd80825.png",
+              "dominantColor": "#7f7f7f",
+              "amount": 0.001
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "fluid",
+          "id": "creosote",
+          "amount": 250,
+          "displayName": "Creosote Oil",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/creosote_oil-b1f855476070.png",
+          "dominantColor": "#6b6400",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30712",
+              "displayName": "Creosote Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/creosote_cell-4d9a8354ac03.png",
+              "dominantColor": "#7f7f7f",
+              "amount": 0.001
+            },
+            {
+              "kind": "item",
+              "id": "railcraft:fluid.creosote.cell",
+              "displayName": "Creosote Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/creosote_cell-0926f7d5dc5b.png",
+              "dominantColor": "#726d00",
+              "amount": 0.001
+            }
+          ]
+        },
+        {
+          "kind": "fluid",
+          "id": "phenol",
+          "amount": 100,
+          "displayName": "Phenol",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/phenol-f76519542441.png",
+          "dominantColor": "#61371b",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30687",
+              "displayName": "Phenol Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/phenol_cell-e18f36fc5bf4.png",
+              "dominantColor": "#7f7f7f",
+              "amount": 0.001
+            }
+          ]
+        },
+        {
+          "kind": "fluid",
+          "id": "benzene",
+          "amount": 400,
+          "displayName": "Benzene",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/benzene-b4cb31d3066f.png",
+          "dominantColor": "#151515",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30686",
+              "displayName": "Benzene Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/benzene_cell-bec8f33fea1a.png",
+              "dominantColor": "#6b6b6b",
+              "amount": 0.001
+            }
+          ]
+        },
+        {
+          "kind": "fluid",
+          "id": "liquid_toluene",
+          "amount": 100,
+          "displayName": "Toluene",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/toluene-58fdb2e06efd.png",
+          "dominantColor": "#702400",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30647",
+              "displayName": "Toluene Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/toluene_cell-80e77bd9b12e.png",
+              "dominantColor": "#371403",
+              "amount": 0.001
+            }
+          ]
+        },
+        {
+          "kind": "fluid",
+          "id": "1,3dimethylbenzene",
+          "amount": 150,
+          "displayName": "1,3-Dimethylbenzene",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/1_3-dimethylbenzene-905441f53ebd.png",
+          "dominantColor": "#5b773c",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30763",
+              "displayName": "1,3-Dimethylbenzene Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/1_3-dimethylbenzene_cell-a57c0bb34d08.png",
+              "dominantColor": "#7f7f7f",
+              "amount": 0.001
+            }
+          ]
+        }
+      ],
+      "notes": "Exported by the GTNH calculation oracle from gregtech.api.recipe.RecipeMap.",
+      "machineConfigControls": [
+        {
+          "id": "machineParallel",
+          "label": "Parallel",
+          "minimumKey": "fixed-12",
+          "defaultKey": "fixed-12",
+          "tiers": [
+            {
+              "key": "fixed-12",
+              "label": "12 Parallels",
+              "parallelMultiplier": 12,
+              "resource": {
+                "kind": "item",
+                "id": "factoryflow:machine_config/fixed-12",
+                "amount": 1,
+                "displayName": "12 Parallels",
+                "tooltip": [
+                  "Imported from machine catalyst tooltip",
+                  "12 Parallels"
+                ]
+              }
+            },
+            {
+              "key": "fixed-256",
+              "label": "256 Parallels",
+              "parallelMultiplier": 256,
+              "resource": {
+                "kind": "item",
+                "id": "factoryflow:machine_config/fixed-256",
+                "amount": 1,
+                "displayName": "256 Parallels",
+                "tooltip": [
+                  "Imported from machine catalyst tooltip",
+                  "256 Parallels"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "runtimeCalculation": {
+        "sourceKind": "gregtech-overclock-calculator",
+        "sourceClass": "gregtech.api.util.OverclockCalculator",
+        "recipeMap": "Distillation Tower",
+        "status": "computed",
+        "oracleEligible": true,
+        "strict": true,
+        "generatedAt": "2026-06-03T08:03:03.527Z",
+        "variants": [
+          {
+            "id": "tier-hv",
+            "label": "HV",
+            "overclockTier": "HV",
+            "durationTicks": 40,
+            "eut": 256,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "creosote",
+                "amount": 250
+              },
+              {
+                "kind": "fluid",
+                "id": "phenol",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "benzene",
+                "amount": 400
+              },
+              {
+                "kind": "fluid",
+                "id": "liquid_toluene",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "1,3dimethylbenzene",
+                "amount": 150
+              }
+            ]
+          },
+          {
+            "id": "tier-ev",
+            "label": "EV",
+            "overclockTier": "EV",
+            "durationTicks": 20,
+            "eut": 1024,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "creosote",
+                "amount": 250
+              },
+              {
+                "kind": "fluid",
+                "id": "phenol",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "benzene",
+                "amount": 400
+              },
+              {
+                "kind": "fluid",
+                "id": "liquid_toluene",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "1,3dimethylbenzene",
+                "amount": 150
+              }
+            ]
+          },
+          {
+            "id": "tier-iv",
+            "label": "IV",
+            "overclockTier": "IV",
+            "durationTicks": 10,
+            "eut": 4096,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "creosote",
+                "amount": 250
+              },
+              {
+                "kind": "fluid",
+                "id": "phenol",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "benzene",
+                "amount": 400
+              },
+              {
+                "kind": "fluid",
+                "id": "liquid_toluene",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "1,3dimethylbenzene",
+                "amount": 150
+              }
+            ]
+          },
+          {
+            "id": "tier-luv",
+            "label": "LuV",
+            "overclockTier": "LuV",
+            "durationTicks": 5,
+            "eut": 16384,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "creosote",
+                "amount": 250
+              },
+              {
+                "kind": "fluid",
+                "id": "phenol",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "benzene",
+                "amount": 400
+              },
+              {
+                "kind": "fluid",
+                "id": "liquid_toluene",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "1,3dimethylbenzene",
+                "amount": 150
+              }
+            ]
+          },
+          {
+            "id": "tier-zpm",
+            "label": "ZPM",
+            "overclockTier": "ZPM",
+            "durationTicks": 2,
+            "eut": 65536,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "creosote",
+                "amount": 250
+              },
+              {
+                "kind": "fluid",
+                "id": "phenol",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "benzene",
+                "amount": 400
+              },
+              {
+                "kind": "fluid",
+                "id": "liquid_toluene",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "1,3dimethylbenzene",
+                "amount": 150
+              }
+            ]
+          },
+          {
+            "id": "tier-uv",
+            "label": "UV",
+            "overclockTier": "UV",
+            "durationTicks": 1,
+            "eut": 262144,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "creosote",
+                "amount": 250
+              },
+              {
+                "kind": "fluid",
+                "id": "phenol",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "benzene",
+                "amount": 400
+              },
+              {
+                "kind": "fluid",
+                "id": "liquid_toluene",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "1,3dimethylbenzene",
+                "amount": 150
+              }
+            ]
+          },
+          {
+            "id": "tier-uhv",
+            "label": "UHV",
+            "overclockTier": "UHV",
+            "durationTicks": 1,
+            "eut": 1048576,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "creosote",
+                "amount": 250
+              },
+              {
+                "kind": "fluid",
+                "id": "phenol",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "benzene",
+                "amount": 400
+              },
+              {
+                "kind": "fluid",
+                "id": "liquid_toluene",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "1,3dimethylbenzene",
+                "amount": 150
+              }
+            ]
+          },
+          {
+            "id": "tier-uev",
+            "label": "UEV",
+            "overclockTier": "UEV",
+            "durationTicks": 1,
+            "eut": 4194304,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "creosote",
+                "amount": 250
+              },
+              {
+                "kind": "fluid",
+                "id": "phenol",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "benzene",
+                "amount": 400
+              },
+              {
+                "kind": "fluid",
+                "id": "liquid_toluene",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "1,3dimethylbenzene",
+                "amount": 150
+              }
+            ]
+          },
+          {
+            "id": "tier-uiv",
+            "label": "UIV",
+            "overclockTier": "UIV",
+            "durationTicks": 1,
+            "eut": 16777216,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "creosote",
+                "amount": 250
+              },
+              {
+                "kind": "fluid",
+                "id": "phenol",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "benzene",
+                "amount": 400
+              },
+              {
+                "kind": "fluid",
+                "id": "liquid_toluene",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "1,3dimethylbenzene",
+                "amount": 150
+              }
+            ]
+          },
+          {
+            "id": "tier-uxv",
+            "label": "UXV",
+            "overclockTier": "UXV",
+            "durationTicks": 1,
+            "eut": 67108864,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "creosote",
+                "amount": 250
+              },
+              {
+                "kind": "fluid",
+                "id": "phenol",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "benzene",
+                "amount": 400
+              },
+              {
+                "kind": "fluid",
+                "id": "liquid_toluene",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "1,3dimethylbenzene",
+                "amount": 150
+              }
+            ]
+          },
+          {
+            "id": "tier-opv",
+            "label": "OpV",
+            "overclockTier": "OpV",
+            "durationTicks": 1,
+            "eut": 268435456,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "creosote",
+                "amount": 250
+              },
+              {
+                "kind": "fluid",
+                "id": "phenol",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "benzene",
+                "amount": 400
+              },
+              {
+                "kind": "fluid",
+                "id": "liquid_toluene",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "1,3dimethylbenzene",
+                "amount": 150
+              }
+            ]
+          },
+          {
+            "id": "tier-max",
+            "label": "MAX",
+            "overclockTier": "MAX",
+            "durationTicks": 1,
+            "eut": 4611686018427388000,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "creosote",
+                "amount": 250
+              },
+              {
+                "kind": "fluid",
+                "id": "phenol",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "benzene",
+                "amount": 400
+              },
+              {
+                "kind": "fluid",
+                "id": "liquid_toluene",
+                "amount": 100
+              },
+              {
+                "kind": "fluid",
+                "id": "1,3dimethylbenzene",
+                "amount": 150
+              }
+            ]
+          }
+        ]
+      },
+      "source": {
+        "datasetVersionId": "stable-2.8.4",
+        "recipeMap": "Distillation Tower",
+        "exporter": "gtnh-oracle",
+        "rawRecipeId": "gt.recipe.distillationtower:5181597d690be473"
+      },
+      "nei": {
+        "additionalInfo": [
+          "Special value: 0"
+        ]
+      }
+    },
+    {
+      "id": "oracle:stable-2.8.4:gregtech:gtpp-recipe-cokeoven:46b503db40885573",
+      "name": "Coke Oven: Charcoal",
+      "machineType": "Coke Oven",
+      "minimumTier": "MV",
+      "durationTicks": 256,
+      "eut": 96,
+      "inputs": [
+        {
+          "kind": "item",
+          "id": "minecraft:log@32767",
+          "amount": 16,
+          "displayName": "Oak Log",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/oak_log-94b92ef5e0d6.png",
+          "dominantColor": "#55442a",
+          "modId": "minecraft"
+        },
+        {
+          "kind": "fluid",
+          "id": "nitrogen",
+          "amount": 1000,
+          "displayName": "Nitrogen",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitrogen-0d1c76596dd7.png",
+          "dominantColor": "#bb0000",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30012",
+              "displayName": "Nitrogen Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitrogen_cell-97fa740469a3.png",
+              "dominantColor": "#00688b",
+              "amount": 0.001
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "item",
+          "id": "minecraft:coal@1",
+          "amount": 20,
+          "displayName": "Charcoal",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/charcoal-7bf013b0a230.png",
+          "dominantColor": "#28241c",
+          "modId": "minecraft"
+        },
+        {
+          "kind": "fluid",
+          "id": "woodtar",
+          "amount": 1500,
+          "displayName": "Wood Tar",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/wood_tar-3b9b64dbe40d.png",
+          "dominantColor": "#201209",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30662",
+              "displayName": "Wood Tar Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/wood_tar_cell-95c3ddd80825.png",
+              "dominantColor": "#7f7f7f",
+              "amount": 0.001
+            }
+          ]
+        }
+      ],
+      "notes": "Exported by the GTNH calculation oracle from gregtech.api.recipe.RecipeMap.",
+      "machineConfigControls": [
+        {
+          "id": "heatingCoil",
+          "label": "Heating Coil",
+          "minimumKey": "cupronickel",
+          "defaultKey": "cupronickel",
+          "tiers": [
+            {
+              "key": "cupronickel",
+              "label": "Cupronickel",
+              "heat": 1801,
+              "eutMultiplier": 0.98,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5",
+                "amount": 1,
+                "displayName": "Cupronickel Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/cupronickel_coil_block-e24ceffe0649.png",
+                "dominantColor": "#5f3623",
+                "tooltip": [
+                  "Heating coil tier",
+                  "EU usage: 98%"
+                ]
+              }
+            },
+            {
+              "key": "kanthal",
+              "label": "Kanthal",
+              "heat": 2701,
+              "eutMultiplier": 0.9603999999999999,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@1",
+                "amount": 1,
+                "displayName": "Kanthal Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/kanthal_coil_block-56a127698599.png",
+                "dominantColor": "#5b6368",
+                "tooltip": [
+                  "Heating coil tier",
+                  "EU usage: 96.04%"
+                ]
+              }
+            },
+            {
+              "key": "nichrome",
+              "label": "Nichrome",
+              "heat": 3601,
+              "eutMultiplier": 0.9411919999999999,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@2",
+                "amount": 1,
+                "displayName": "Nichrome Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nichrome_coil_block-05fecfeb8da8.png",
+                "dominantColor": "#5e5d70",
+                "tooltip": [
+                  "Heating coil tier",
+                  "EU usage: 94.119%"
+                ]
+              }
+            },
+            {
+              "key": "tpv",
+              "label": "TPV-Alloy",
+              "heat": 4501,
+              "eutMultiplier": 0.92236816,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@3",
+                "amount": 1,
+                "displayName": "TPV-Alloy Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/tpv-alloy_coil_block-885a9c5786cc.png",
+                "dominantColor": "#7e006b",
+                "tooltip": [
+                  "Heating coil tier",
+                  "EU usage: 92.237%"
+                ]
+              }
+            },
+            {
+              "key": "hss_g",
+              "label": "HSS-G",
+              "heat": 5401,
+              "eutMultiplier": 0.9039207967999999,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@4",
+                "amount": 1,
+                "displayName": "HSS-G Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hss-g_coil_block-2b83c3bf53f0.png",
+                "dominantColor": "#424201",
+                "tooltip": [
+                  "Heating coil tier",
+                  "EU usage: 90.392%"
+                ]
+              }
+            },
+            {
+              "key": "hss_s",
+              "label": "HSS-S",
+              "heat": 6301,
+              "eutMultiplier": 0.8858423808639999,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@9",
+                "amount": 1,
+                "displayName": "HSS-S Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hss-s_coil_block-674da455f764.png",
+                "dominantColor": "#410303",
+                "tooltip": [
+                  "Heating coil tier",
+                  "EU usage: 88.584%"
+                ]
+              }
+            },
+            {
+              "key": "naquadah",
+              "label": "Naquadah",
+              "heat": 7201,
+              "eutMultiplier": 0.8681255332467199,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@5",
+                "amount": 1,
+                "displayName": "Naquadah Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/naquadah_coil_block-b436a04cce16.png",
+                "dominantColor": "#222222",
+                "tooltip": [
+                  "Heating coil tier",
+                  "EU usage: 86.813%"
+                ]
+              }
+            },
+            {
+              "key": "naquadah_alloy",
+              "label": "Naquadah Alloy",
+              "heat": 8101,
+              "eutMultiplier": 0.8507630225817855,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@6",
+                "amount": 1,
+                "displayName": "Naquadah Alloy Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/naquadah_alloy_coil_block-475d851b6beb.png",
+                "dominantColor": "#262626",
+                "tooltip": [
+                  "Heating coil tier",
+                  "EU usage: 85.076%"
+                ]
+              }
+            },
+            {
+              "key": "trinium",
+              "label": "Trinium",
+              "heat": 9001,
+              "eutMultiplier": 0.8337477621301498,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@10",
+                "amount": 1,
+                "displayName": "Trinium Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/trinium_coil_block-6aeb20fc4638.png",
+                "dominantColor": "#8e8e95",
+                "tooltip": [
+                  "Heating coil tier",
+                  "EU usage: 83.375%"
+                ]
+              }
+            },
+            {
+              "key": "electrum_flux",
+              "label": "Electrum Flux",
+              "heat": 9901,
+              "eutMultiplier": 0.8170728068875468,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@7",
+                "amount": 1,
+                "displayName": "Electrum Flux Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/electrum_flux_coil_block-305e26606f89.png",
+                "dominantColor": "#736f11",
+                "tooltip": [
+                  "Heating coil tier",
+                  "EU usage: 81.707%"
+                ]
+              }
+            },
+            {
+              "key": "awakened_draconium",
+              "label": "Awakened Draconium",
+              "heat": 10801,
+              "eutMultiplier": 0.8007313507497957,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@8",
+                "amount": 1,
+                "displayName": "Awakened Draconium Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/awakened_draconium_coil_block-8be866b0fd15.png",
+                "dominantColor": "#914a24",
+                "tooltip": [
+                  "Heating coil tier",
+                  "EU usage: 80.073%"
+                ]
+              }
+            },
+            {
+              "key": "infinity",
+              "label": "Infinity",
+              "heat": 11701,
+              "eutMultiplier": 0.7847167237347998,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@11",
+                "amount": 1,
+                "displayName": "Infinity Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/infinity_coil_block-9956f783aa9b.png",
+                "dominantColor": "#5d5454",
+                "tooltip": [
+                  "Heating coil tier",
+                  "EU usage: 78.472%"
+                ]
+              }
+            },
+            {
+              "key": "hypogen",
+              "label": "Hypogen",
+              "heat": 12601,
+              "eutMultiplier": 0.7690223892601038,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@12",
+                "amount": 1,
+                "displayName": "Hypogen Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hypogen_coil_block-dd89cb0a22b5.png",
+                "dominantColor": "#934836",
+                "tooltip": [
+                  "Heating coil tier",
+                  "EU usage: 76.902%"
+                ]
+              }
+            },
+            {
+              "key": "eternal",
+              "label": "Eternal",
+              "heat": 13501,
+              "eutMultiplier": 0.7536419414749018,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@13",
+                "amount": 1,
+                "displayName": "Eternal Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/eternal_coil_block-b878fce8ef3b.png",
+                "dominantColor": "#07213e",
+                "tooltip": [
+                  "Heating coil tier",
+                  "EU usage: 75.364%"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "cokeOvenCasing",
+          "label": "Coke Oven Casing",
+          "minimumKey": "heat_resistant",
+          "defaultKey": "heat_resistant",
+          "tiers": [
+            {
+              "key": "heat_resistant",
+              "label": "Heat Resistant",
+              "parallelMultiplier": 16,
+              "resource": {
+                "kind": "item",
+                "id": "factoryflow:machine_config/heat_resistant_coke_oven_casing",
+                "amount": 1,
+                "displayName": "Heat Resistant Coke Oven Casing",
+                "tooltip": [
+                  "Coke Oven casing tier",
+                  "Parallels: 16"
+                ]
+              }
+            },
+            {
+              "key": "heat_proof",
+              "label": "Heat Proof",
+              "parallelMultiplier": 32,
+              "resource": {
+                "kind": "item",
+                "id": "factoryflow:machine_config/heat_proof_coke_oven_casing",
+                "amount": 1,
+                "displayName": "Heat Proof Coke Oven Casing",
+                "tooltip": [
+                  "Coke Oven casing tier",
+                  "Parallels: 32"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "runtimeCalculation": {
+        "sourceKind": "gregtech-overclock-calculator",
+        "sourceClass": "gregtech.api.util.OverclockCalculator",
+        "recipeMap": "Coke Oven",
+        "status": "computed",
+        "oracleEligible": true,
+        "strict": true,
+        "generatedAt": "2026-06-03T08:03:07.495Z",
+        "variants": [
+          {
+            "id": "tier-mv",
+            "label": "MV",
+            "overclockTier": "MV",
+            "durationTicks": 256,
+            "eut": 96,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:coal@1",
+                "amount": 20
+              },
+              {
+                "kind": "fluid",
+                "id": "woodtar",
+                "amount": 1500
+              }
+            ]
+          },
+          {
+            "id": "tier-hv",
+            "label": "HV",
+            "overclockTier": "HV",
+            "durationTicks": 128,
+            "eut": 384,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:coal@1",
+                "amount": 20
+              },
+              {
+                "kind": "fluid",
+                "id": "woodtar",
+                "amount": 1500
+              }
+            ]
+          },
+          {
+            "id": "tier-ev",
+            "label": "EV",
+            "overclockTier": "EV",
+            "durationTicks": 64,
+            "eut": 1536,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:coal@1",
+                "amount": 20
+              },
+              {
+                "kind": "fluid",
+                "id": "woodtar",
+                "amount": 1500
+              }
+            ]
+          },
+          {
+            "id": "tier-iv",
+            "label": "IV",
+            "overclockTier": "IV",
+            "durationTicks": 32,
+            "eut": 6144,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:coal@1",
+                "amount": 20
+              },
+              {
+                "kind": "fluid",
+                "id": "woodtar",
+                "amount": 1500
+              }
+            ]
+          },
+          {
+            "id": "tier-luv",
+            "label": "LuV",
+            "overclockTier": "LuV",
+            "durationTicks": 16,
+            "eut": 24576,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:coal@1",
+                "amount": 20
+              },
+              {
+                "kind": "fluid",
+                "id": "woodtar",
+                "amount": 1500
+              }
+            ]
+          },
+          {
+            "id": "tier-zpm",
+            "label": "ZPM",
+            "overclockTier": "ZPM",
+            "durationTicks": 8,
+            "eut": 98304,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:coal@1",
+                "amount": 20
+              },
+              {
+                "kind": "fluid",
+                "id": "woodtar",
+                "amount": 1500
+              }
+            ]
+          },
+          {
+            "id": "tier-uv",
+            "label": "UV",
+            "overclockTier": "UV",
+            "durationTicks": 4,
+            "eut": 393216,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:coal@1",
+                "amount": 20
+              },
+              {
+                "kind": "fluid",
+                "id": "woodtar",
+                "amount": 1500
+              }
+            ]
+          },
+          {
+            "id": "tier-uhv",
+            "label": "UHV",
+            "overclockTier": "UHV",
+            "durationTicks": 2,
+            "eut": 1572864,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:coal@1",
+                "amount": 20
+              },
+              {
+                "kind": "fluid",
+                "id": "woodtar",
+                "amount": 1500
+              }
+            ]
+          },
+          {
+            "id": "tier-uev",
+            "label": "UEV",
+            "overclockTier": "UEV",
+            "durationTicks": 1,
+            "eut": 6291456,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:coal@1",
+                "amount": 20
+              },
+              {
+                "kind": "fluid",
+                "id": "woodtar",
+                "amount": 1500
+              }
+            ]
+          },
+          {
+            "id": "tier-uiv",
+            "label": "UIV",
+            "overclockTier": "UIV",
+            "durationTicks": 1,
+            "eut": 25165824,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:coal@1",
+                "amount": 20
+              },
+              {
+                "kind": "fluid",
+                "id": "woodtar",
+                "amount": 1500
+              }
+            ]
+          },
+          {
+            "id": "tier-uxv",
+            "label": "UXV",
+            "overclockTier": "UXV",
+            "durationTicks": 1,
+            "eut": 100663296,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:coal@1",
+                "amount": 20
+              },
+              {
+                "kind": "fluid",
+                "id": "woodtar",
+                "amount": 1500
+              }
+            ]
+          },
+          {
+            "id": "tier-opv",
+            "label": "OpV",
+            "overclockTier": "OpV",
+            "durationTicks": 1,
+            "eut": 402653184,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:coal@1",
+                "amount": 20
+              },
+              {
+                "kind": "fluid",
+                "id": "woodtar",
+                "amount": 1500
+              }
+            ]
+          },
+          {
+            "id": "tier-max",
+            "label": "MAX",
+            "overclockTier": "MAX",
+            "durationTicks": 1,
+            "eut": 6917529027641082000,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:coal@1",
+                "amount": 20
+              },
+              {
+                "kind": "fluid",
+                "id": "woodtar",
+                "amount": 1500
+              }
+            ]
+          }
+        ]
+      },
+      "source": {
+        "datasetVersionId": "stable-2.8.4",
+        "recipeMap": "Coke Oven",
+        "exporter": "gtnh-oracle",
+        "rawRecipeId": "gtpp.recipe.cokeoven:46b503db40885573"
+      },
+      "nei": {
+        "additionalInfo": [
+          "Special value: 0"
+        ]
+      }
+    },
+    {
+      "id": "oracle:stable-2.8.4:gregtech:gt-recipe-largechemicalreactor:8c7c915d9f0b1ca5",
+      "name": "Large Chemical Reactor: Nitric Acid",
+      "machineType": "Large Chemical Reactor",
+      "minimumTier": "LV",
+      "durationTicks": 240,
+      "eut": 30,
+      "inputs": [
+        {
+          "kind": "fluid",
+          "id": "nitrogendioxide",
+          "amount": 3000,
+          "displayName": "Nitrogen Dioxide",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitrogen_dioxide-c1c39c008b8b.png",
+          "dominantColor": "#c8feff",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30717",
+              "displayName": "Nitrogen Dioxide Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitrogen_dioxide_cell-4729b49ee128.png",
+              "dominantColor": "#7f7f7f",
+              "amount": 0.001
+            }
+          ]
+        },
+        {
+          "kind": "fluid",
+          "id": "water",
+          "amount": 1000,
+          "displayName": "Water",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/water-a9bcacf1db0d.png",
+          "dominantColor": "#2c3ef4",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "ic2:itemcellempty@1",
+              "displayName": "Water Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/water_cell-19cc640bbc15.png",
+              "dominantColor": "#3366ff",
+              "amount": 0.001
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "fluid",
+          "id": "nitricacid",
+          "amount": 2000,
+          "displayName": "Nitric Acid",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitric_acid-3e53bbe4a80a.png",
+          "dominantColor": "#f2f221",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30653",
+              "displayName": "Nitric Acid Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitric_acid_cell-8274a302ba81.png",
+              "dominantColor": "#7f7f7f",
+              "amount": 0.001
+            }
+          ]
+        },
+        {
+          "kind": "fluid",
+          "id": "nitricoxide",
+          "amount": 1000,
+          "displayName": "Nitric Oxide",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitric_oxide-bef208d53cac.png",
+          "dominantColor": "#65a3c3",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30658",
+              "displayName": "Nitric Oxide Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitric_oxide_cell-bb2cab999a3d.png",
+              "dominantColor": "#7f7f7f",
+              "amount": 0.001
+            }
+          ]
+        }
+      ],
+      "notes": "Exported by the GTNH calculation oracle from gregtech.api.recipe.RecipeMap.",
+      "machineConfigControls": [
+        {
+          "id": "machineParallel",
+          "label": "Parallel",
+          "minimumKey": "fixed-256",
+          "defaultKey": "fixed-256",
+          "tiers": [
+            {
+              "key": "fixed-256",
+              "label": "256 Parallels",
+              "parallelMultiplier": 256,
+              "resource": {
+                "kind": "item",
+                "id": "factoryflow:machine_config/fixed-256",
+                "amount": 1,
+                "displayName": "256 Parallels",
+                "tooltip": [
+                  "Imported from machine catalyst tooltip",
+                  "256 Parallels"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "heatingCoil",
+          "label": "Heating Coil",
+          "minimumKey": "cupronickel",
+          "defaultKey": "cupronickel",
+          "tiers": [
+            {
+              "key": "cupronickel",
+              "label": "Cupronickel",
+              "heat": 1801,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5",
+                "amount": 1,
+                "displayName": "Cupronickel Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/cupronickel_coil_block-e24ceffe0649.png",
+                "dominantColor": "#5f3623",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "kanthal",
+              "label": "Kanthal",
+              "heat": 2701,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@1",
+                "amount": 1,
+                "displayName": "Kanthal Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/kanthal_coil_block-56a127698599.png",
+                "dominantColor": "#5b6368",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "nichrome",
+              "label": "Nichrome",
+              "heat": 3601,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@2",
+                "amount": 1,
+                "displayName": "Nichrome Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nichrome_coil_block-05fecfeb8da8.png",
+                "dominantColor": "#5e5d70",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "tpv",
+              "label": "TPV-Alloy",
+              "heat": 4501,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@3",
+                "amount": 1,
+                "displayName": "TPV-Alloy Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/tpv-alloy_coil_block-885a9c5786cc.png",
+                "dominantColor": "#7e006b",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "hss_g",
+              "label": "HSS-G",
+              "heat": 5401,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@4",
+                "amount": 1,
+                "displayName": "HSS-G Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hss-g_coil_block-2b83c3bf53f0.png",
+                "dominantColor": "#424201",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "hss_s",
+              "label": "HSS-S",
+              "heat": 6301,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@9",
+                "amount": 1,
+                "displayName": "HSS-S Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hss-s_coil_block-674da455f764.png",
+                "dominantColor": "#410303",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "naquadah",
+              "label": "Naquadah",
+              "heat": 7201,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@5",
+                "amount": 1,
+                "displayName": "Naquadah Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/naquadah_coil_block-b436a04cce16.png",
+                "dominantColor": "#222222",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "naquadah_alloy",
+              "label": "Naquadah Alloy",
+              "heat": 8101,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@6",
+                "amount": 1,
+                "displayName": "Naquadah Alloy Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/naquadah_alloy_coil_block-475d851b6beb.png",
+                "dominantColor": "#262626",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "trinium",
+              "label": "Trinium",
+              "heat": 9001,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@10",
+                "amount": 1,
+                "displayName": "Trinium Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/trinium_coil_block-6aeb20fc4638.png",
+                "dominantColor": "#8e8e95",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "electrum_flux",
+              "label": "Electrum Flux",
+              "heat": 9901,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@7",
+                "amount": 1,
+                "displayName": "Electrum Flux Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/electrum_flux_coil_block-305e26606f89.png",
+                "dominantColor": "#736f11",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "awakened_draconium",
+              "label": "Awakened Draconium",
+              "heat": 10801,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@8",
+                "amount": 1,
+                "displayName": "Awakened Draconium Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/awakened_draconium_coil_block-8be866b0fd15.png",
+                "dominantColor": "#914a24",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "infinity",
+              "label": "Infinity",
+              "heat": 11701,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@11",
+                "amount": 1,
+                "displayName": "Infinity Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/infinity_coil_block-9956f783aa9b.png",
+                "dominantColor": "#5d5454",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "hypogen",
+              "label": "Hypogen",
+              "heat": 12601,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@12",
+                "amount": 1,
+                "displayName": "Hypogen Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hypogen_coil_block-dd89cb0a22b5.png",
+                "dominantColor": "#934836",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "eternal",
+              "label": "Eternal",
+              "heat": 13501,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@13",
+                "amount": 1,
+                "displayName": "Eternal Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/eternal_coil_block-b878fce8ef3b.png",
+                "dominantColor": "#07213e",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "runtimeCalculation": {
+        "sourceKind": "gregtech-overclock-calculator",
+        "sourceClass": "gregtech.api.util.OverclockCalculator",
+        "recipeMap": "Large Chemical Reactor",
+        "status": "computed",
+        "oracleEligible": true,
+        "strict": true,
+        "generatedAt": "2026-06-03T08:03:06.084Z",
+        "variants": [
+          {
+            "id": "tier-lv-perfect-oc",
+            "label": "LV Perfect OC",
+            "overclockTier": "LV",
+            "durationTicks": 240,
+            "eut": 30,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 2000
+              },
+              {
+                "kind": "fluid",
+                "id": "nitricoxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-mv-perfect-oc",
+            "label": "MV Perfect OC",
+            "overclockTier": "MV",
+            "durationTicks": 60,
+            "eut": 120,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 2000
+              },
+              {
+                "kind": "fluid",
+                "id": "nitricoxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-hv-perfect-oc",
+            "label": "HV Perfect OC",
+            "overclockTier": "HV",
+            "durationTicks": 15,
+            "eut": 480,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 2000
+              },
+              {
+                "kind": "fluid",
+                "id": "nitricoxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-ev-perfect-oc",
+            "label": "EV Perfect OC",
+            "overclockTier": "EV",
+            "durationTicks": 3,
+            "eut": 1920,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 2000
+              },
+              {
+                "kind": "fluid",
+                "id": "nitricoxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-iv-perfect-oc",
+            "label": "IV Perfect OC",
+            "overclockTier": "IV",
+            "durationTicks": 1,
+            "eut": 7680,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 2000
+              },
+              {
+                "kind": "fluid",
+                "id": "nitricoxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-luv-perfect-oc",
+            "label": "LuV Perfect OC",
+            "overclockTier": "LuV",
+            "durationTicks": 1,
+            "eut": 30720,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 2000
+              },
+              {
+                "kind": "fluid",
+                "id": "nitricoxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-zpm-perfect-oc",
+            "label": "ZPM Perfect OC",
+            "overclockTier": "ZPM",
+            "durationTicks": 1,
+            "eut": 122880,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 2000
+              },
+              {
+                "kind": "fluid",
+                "id": "nitricoxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uv-perfect-oc",
+            "label": "UV Perfect OC",
+            "overclockTier": "UV",
+            "durationTicks": 1,
+            "eut": 491520,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 2000
+              },
+              {
+                "kind": "fluid",
+                "id": "nitricoxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uhv-perfect-oc",
+            "label": "UHV Perfect OC",
+            "overclockTier": "UHV",
+            "durationTicks": 1,
+            "eut": 1966080,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 2000
+              },
+              {
+                "kind": "fluid",
+                "id": "nitricoxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uev-perfect-oc",
+            "label": "UEV Perfect OC",
+            "overclockTier": "UEV",
+            "durationTicks": 1,
+            "eut": 7864320,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 2000
+              },
+              {
+                "kind": "fluid",
+                "id": "nitricoxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uiv-perfect-oc",
+            "label": "UIV Perfect OC",
+            "overclockTier": "UIV",
+            "durationTicks": 1,
+            "eut": 31457280,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 2000
+              },
+              {
+                "kind": "fluid",
+                "id": "nitricoxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uxv-perfect-oc",
+            "label": "UXV Perfect OC",
+            "overclockTier": "UXV",
+            "durationTicks": 1,
+            "eut": 125829120,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 2000
+              },
+              {
+                "kind": "fluid",
+                "id": "nitricoxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-opv-perfect-oc",
+            "label": "OpV Perfect OC",
+            "overclockTier": "OpV",
+            "durationTicks": 1,
+            "eut": 503316480,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 2000
+              },
+              {
+                "kind": "fluid",
+                "id": "nitricoxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-max-perfect-oc",
+            "label": "MAX Perfect OC",
+            "overclockTier": "MAX",
+            "durationTicks": 1,
+            "eut": 2161727821137838000,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 2000
+              },
+              {
+                "kind": "fluid",
+                "id": "nitricoxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          }
+        ]
+      },
+      "source": {
+        "datasetVersionId": "stable-2.8.4",
+        "recipeMap": "Large Chemical Reactor",
+        "exporter": "gtnh-oracle",
+        "rawRecipeId": "gt.recipe.largechemicalreactor:8c7c915d9f0b1ca5"
+      },
+      "nei": {
+        "additionalInfo": [
+          "Special value: 0"
+        ]
+      }
+    },
+    {
+      "id": "oracle:stable-2.8.4:gregtech:gt-recipe-largechemicalreactor:872e550e9e183763",
+      "name": "Large Chemical Reactor: Nitrogen Dioxide",
+      "machineType": "Large Chemical Reactor",
+      "minimumTier": "LV",
+      "durationTicks": 160,
+      "eut": 30,
+      "inputs": [
+        {
+          "kind": "fluid",
+          "id": "oxygen",
+          "amount": 1000,
+          "displayName": "Oxygen",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/oxygen-3e8c0de0c100.png",
+          "dominantColor": "#00799e",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30013",
+              "displayName": "Oxygen Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/oxygen_cell-78b916e2bc48.png",
+              "dominantColor": "#00468c",
+              "amount": 0.001
+            }
+          ]
+        },
+        {
+          "kind": "fluid",
+          "id": "nitricoxide",
+          "amount": 1000,
+          "displayName": "Nitric Oxide",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitric_oxide-bef208d53cac.png",
+          "dominantColor": "#65a3c3",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30658",
+              "displayName": "Nitric Oxide Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitric_oxide_cell-bb2cab999a3d.png",
+              "dominantColor": "#7f7f7f",
+              "amount": 0.001
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "fluid",
+          "id": "nitrogendioxide",
+          "amount": 1000,
+          "displayName": "Nitrogen Dioxide",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitrogen_dioxide-c1c39c008b8b.png",
+          "dominantColor": "#c8feff",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30717",
+              "displayName": "Nitrogen Dioxide Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitrogen_dioxide_cell-4729b49ee128.png",
+              "dominantColor": "#7f7f7f",
+              "amount": 0.001
+            }
+          ]
+        }
+      ],
+      "notes": "Exported by the GTNH calculation oracle from gregtech.api.recipe.RecipeMap.",
+      "machineConfigControls": [
+        {
+          "id": "machineParallel",
+          "label": "Parallel",
+          "minimumKey": "fixed-256",
+          "defaultKey": "fixed-256",
+          "tiers": [
+            {
+              "key": "fixed-256",
+              "label": "256 Parallels",
+              "parallelMultiplier": 256,
+              "resource": {
+                "kind": "item",
+                "id": "factoryflow:machine_config/fixed-256",
+                "amount": 1,
+                "displayName": "256 Parallels",
+                "tooltip": [
+                  "Imported from machine catalyst tooltip",
+                  "256 Parallels"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "heatingCoil",
+          "label": "Heating Coil",
+          "minimumKey": "cupronickel",
+          "defaultKey": "cupronickel",
+          "tiers": [
+            {
+              "key": "cupronickel",
+              "label": "Cupronickel",
+              "heat": 1801,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5",
+                "amount": 1,
+                "displayName": "Cupronickel Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/cupronickel_coil_block-e24ceffe0649.png",
+                "dominantColor": "#5f3623",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "kanthal",
+              "label": "Kanthal",
+              "heat": 2701,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@1",
+                "amount": 1,
+                "displayName": "Kanthal Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/kanthal_coil_block-56a127698599.png",
+                "dominantColor": "#5b6368",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "nichrome",
+              "label": "Nichrome",
+              "heat": 3601,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@2",
+                "amount": 1,
+                "displayName": "Nichrome Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nichrome_coil_block-05fecfeb8da8.png",
+                "dominantColor": "#5e5d70",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "tpv",
+              "label": "TPV-Alloy",
+              "heat": 4501,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@3",
+                "amount": 1,
+                "displayName": "TPV-Alloy Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/tpv-alloy_coil_block-885a9c5786cc.png",
+                "dominantColor": "#7e006b",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "hss_g",
+              "label": "HSS-G",
+              "heat": 5401,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@4",
+                "amount": 1,
+                "displayName": "HSS-G Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hss-g_coil_block-2b83c3bf53f0.png",
+                "dominantColor": "#424201",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "hss_s",
+              "label": "HSS-S",
+              "heat": 6301,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@9",
+                "amount": 1,
+                "displayName": "HSS-S Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hss-s_coil_block-674da455f764.png",
+                "dominantColor": "#410303",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "naquadah",
+              "label": "Naquadah",
+              "heat": 7201,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@5",
+                "amount": 1,
+                "displayName": "Naquadah Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/naquadah_coil_block-b436a04cce16.png",
+                "dominantColor": "#222222",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "naquadah_alloy",
+              "label": "Naquadah Alloy",
+              "heat": 8101,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@6",
+                "amount": 1,
+                "displayName": "Naquadah Alloy Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/naquadah_alloy_coil_block-475d851b6beb.png",
+                "dominantColor": "#262626",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "trinium",
+              "label": "Trinium",
+              "heat": 9001,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@10",
+                "amount": 1,
+                "displayName": "Trinium Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/trinium_coil_block-6aeb20fc4638.png",
+                "dominantColor": "#8e8e95",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "electrum_flux",
+              "label": "Electrum Flux",
+              "heat": 9901,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@7",
+                "amount": 1,
+                "displayName": "Electrum Flux Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/electrum_flux_coil_block-305e26606f89.png",
+                "dominantColor": "#736f11",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "awakened_draconium",
+              "label": "Awakened Draconium",
+              "heat": 10801,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@8",
+                "amount": 1,
+                "displayName": "Awakened Draconium Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/awakened_draconium_coil_block-8be866b0fd15.png",
+                "dominantColor": "#914a24",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "infinity",
+              "label": "Infinity",
+              "heat": 11701,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@11",
+                "amount": 1,
+                "displayName": "Infinity Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/infinity_coil_block-9956f783aa9b.png",
+                "dominantColor": "#5d5454",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "hypogen",
+              "label": "Hypogen",
+              "heat": 12601,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@12",
+                "amount": 1,
+                "displayName": "Hypogen Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hypogen_coil_block-dd89cb0a22b5.png",
+                "dominantColor": "#934836",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "eternal",
+              "label": "Eternal",
+              "heat": 13501,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@13",
+                "amount": 1,
+                "displayName": "Eternal Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/eternal_coil_block-b878fce8ef3b.png",
+                "dominantColor": "#07213e",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "runtimeCalculation": {
+        "sourceKind": "gregtech-overclock-calculator",
+        "sourceClass": "gregtech.api.util.OverclockCalculator",
+        "recipeMap": "Large Chemical Reactor",
+        "status": "computed",
+        "oracleEligible": true,
+        "strict": true,
+        "generatedAt": "2026-06-03T08:03:06.085Z",
+        "variants": [
+          {
+            "id": "tier-lv-perfect-oc",
+            "label": "LV Perfect OC",
+            "overclockTier": "LV",
+            "durationTicks": 160,
+            "eut": 30,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrogendioxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-mv-perfect-oc",
+            "label": "MV Perfect OC",
+            "overclockTier": "MV",
+            "durationTicks": 40,
+            "eut": 120,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrogendioxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-hv-perfect-oc",
+            "label": "HV Perfect OC",
+            "overclockTier": "HV",
+            "durationTicks": 10,
+            "eut": 480,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrogendioxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-ev-perfect-oc",
+            "label": "EV Perfect OC",
+            "overclockTier": "EV",
+            "durationTicks": 2,
+            "eut": 1920,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrogendioxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-iv-perfect-oc",
+            "label": "IV Perfect OC",
+            "overclockTier": "IV",
+            "durationTicks": 1,
+            "eut": 7680,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrogendioxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-luv-perfect-oc",
+            "label": "LuV Perfect OC",
+            "overclockTier": "LuV",
+            "durationTicks": 1,
+            "eut": 30720,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrogendioxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-zpm-perfect-oc",
+            "label": "ZPM Perfect OC",
+            "overclockTier": "ZPM",
+            "durationTicks": 1,
+            "eut": 122880,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrogendioxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uv-perfect-oc",
+            "label": "UV Perfect OC",
+            "overclockTier": "UV",
+            "durationTicks": 1,
+            "eut": 491520,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrogendioxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uhv-perfect-oc",
+            "label": "UHV Perfect OC",
+            "overclockTier": "UHV",
+            "durationTicks": 1,
+            "eut": 1966080,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrogendioxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uev-perfect-oc",
+            "label": "UEV Perfect OC",
+            "overclockTier": "UEV",
+            "durationTicks": 1,
+            "eut": 7864320,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrogendioxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uiv-perfect-oc",
+            "label": "UIV Perfect OC",
+            "overclockTier": "UIV",
+            "durationTicks": 1,
+            "eut": 31457280,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrogendioxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uxv-perfect-oc",
+            "label": "UXV Perfect OC",
+            "overclockTier": "UXV",
+            "durationTicks": 1,
+            "eut": 125829120,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrogendioxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-opv-perfect-oc",
+            "label": "OpV Perfect OC",
+            "overclockTier": "OpV",
+            "durationTicks": 1,
+            "eut": 503316480,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrogendioxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-max-perfect-oc",
+            "label": "MAX Perfect OC",
+            "overclockTier": "MAX",
+            "durationTicks": 1,
+            "eut": 2161727821137838000,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitrogendioxide",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          }
+        ]
+      },
+      "source": {
+        "datasetVersionId": "stable-2.8.4",
+        "recipeMap": "Large Chemical Reactor",
+        "exporter": "gtnh-oracle",
+        "rawRecipeId": "gt.recipe.largechemicalreactor:872e550e9e183763"
+      },
+      "nei": {
+        "additionalInfo": [
+          "Special value: 0"
+        ]
+      }
+    },
+    {
+      "id": "oracle:stable-2.8.4:gregtech:gt-recipe-largechemicalreactor:eb3e5f994a858473",
+      "name": "Large Chemical Reactor: Nitric Acid",
+      "machineType": "Large Chemical Reactor",
+      "minimumTier": "LV",
+      "durationTicks": 320,
+      "eut": 30,
+      "inputs": [
+        {
+          "kind": "fluid",
+          "id": "ammonia",
+          "amount": 1000,
+          "displayName": "Ammonia",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/ammonia-a8358b37d97d.png",
+          "dominantColor": "#afafaf",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30659",
+              "displayName": "Ammonia Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/ammonia_cell-1d0b69a5ac96.png",
+              "dominantColor": "#7f7f7f",
+              "amount": 0.001
+            }
+          ]
+        },
+        {
+          "kind": "fluid",
+          "id": "oxygen",
+          "amount": 4000,
+          "displayName": "Oxygen",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/oxygen-3e8c0de0c100.png",
+          "dominantColor": "#00799e",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30013",
+              "displayName": "Oxygen Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/oxygen_cell-78b916e2bc48.png",
+              "dominantColor": "#00468c",
+              "amount": 0.001
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "fluid",
+          "id": "nitricacid",
+          "amount": 1000,
+          "displayName": "Nitric Acid",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitric_acid-3e53bbe4a80a.png",
+          "dominantColor": "#f2f221",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30653",
+              "displayName": "Nitric Acid Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitric_acid_cell-8274a302ba81.png",
+              "dominantColor": "#7f7f7f",
+              "amount": 0.001
+            }
+          ]
+        },
+        {
+          "kind": "fluid",
+          "id": "water",
+          "amount": 1000,
+          "displayName": "Water",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/water-a9bcacf1db0d.png",
+          "dominantColor": "#2c3ef4",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "ic2:itemcellempty@1",
+              "displayName": "Water Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/water_cell-19cc640bbc15.png",
+              "dominantColor": "#3366ff",
+              "amount": 0.001
+            }
+          ]
+        }
+      ],
+      "notes": "Exported by the GTNH calculation oracle from gregtech.api.recipe.RecipeMap.",
+      "machineConfigControls": [
+        {
+          "id": "machineParallel",
+          "label": "Parallel",
+          "minimumKey": "fixed-256",
+          "defaultKey": "fixed-256",
+          "tiers": [
+            {
+              "key": "fixed-256",
+              "label": "256 Parallels",
+              "parallelMultiplier": 256,
+              "resource": {
+                "kind": "item",
+                "id": "factoryflow:machine_config/fixed-256",
+                "amount": 1,
+                "displayName": "256 Parallels",
+                "tooltip": [
+                  "Imported from machine catalyst tooltip",
+                  "256 Parallels"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "heatingCoil",
+          "label": "Heating Coil",
+          "minimumKey": "cupronickel",
+          "defaultKey": "cupronickel",
+          "tiers": [
+            {
+              "key": "cupronickel",
+              "label": "Cupronickel",
+              "heat": 1801,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5",
+                "amount": 1,
+                "displayName": "Cupronickel Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/cupronickel_coil_block-e24ceffe0649.png",
+                "dominantColor": "#5f3623",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "kanthal",
+              "label": "Kanthal",
+              "heat": 2701,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@1",
+                "amount": 1,
+                "displayName": "Kanthal Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/kanthal_coil_block-56a127698599.png",
+                "dominantColor": "#5b6368",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "nichrome",
+              "label": "Nichrome",
+              "heat": 3601,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@2",
+                "amount": 1,
+                "displayName": "Nichrome Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nichrome_coil_block-05fecfeb8da8.png",
+                "dominantColor": "#5e5d70",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "tpv",
+              "label": "TPV-Alloy",
+              "heat": 4501,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@3",
+                "amount": 1,
+                "displayName": "TPV-Alloy Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/tpv-alloy_coil_block-885a9c5786cc.png",
+                "dominantColor": "#7e006b",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "hss_g",
+              "label": "HSS-G",
+              "heat": 5401,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@4",
+                "amount": 1,
+                "displayName": "HSS-G Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hss-g_coil_block-2b83c3bf53f0.png",
+                "dominantColor": "#424201",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "hss_s",
+              "label": "HSS-S",
+              "heat": 6301,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@9",
+                "amount": 1,
+                "displayName": "HSS-S Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hss-s_coil_block-674da455f764.png",
+                "dominantColor": "#410303",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "naquadah",
+              "label": "Naquadah",
+              "heat": 7201,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@5",
+                "amount": 1,
+                "displayName": "Naquadah Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/naquadah_coil_block-b436a04cce16.png",
+                "dominantColor": "#222222",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "naquadah_alloy",
+              "label": "Naquadah Alloy",
+              "heat": 8101,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@6",
+                "amount": 1,
+                "displayName": "Naquadah Alloy Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/naquadah_alloy_coil_block-475d851b6beb.png",
+                "dominantColor": "#262626",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "trinium",
+              "label": "Trinium",
+              "heat": 9001,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@10",
+                "amount": 1,
+                "displayName": "Trinium Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/trinium_coil_block-6aeb20fc4638.png",
+                "dominantColor": "#8e8e95",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "electrum_flux",
+              "label": "Electrum Flux",
+              "heat": 9901,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@7",
+                "amount": 1,
+                "displayName": "Electrum Flux Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/electrum_flux_coil_block-305e26606f89.png",
+                "dominantColor": "#736f11",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "awakened_draconium",
+              "label": "Awakened Draconium",
+              "heat": 10801,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@8",
+                "amount": 1,
+                "displayName": "Awakened Draconium Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/awakened_draconium_coil_block-8be866b0fd15.png",
+                "dominantColor": "#914a24",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "infinity",
+              "label": "Infinity",
+              "heat": 11701,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@11",
+                "amount": 1,
+                "displayName": "Infinity Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/infinity_coil_block-9956f783aa9b.png",
+                "dominantColor": "#5d5454",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "hypogen",
+              "label": "Hypogen",
+              "heat": 12601,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@12",
+                "amount": 1,
+                "displayName": "Hypogen Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hypogen_coil_block-dd89cb0a22b5.png",
+                "dominantColor": "#934836",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "eternal",
+              "label": "Eternal",
+              "heat": 13501,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@13",
+                "amount": 1,
+                "displayName": "Eternal Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/eternal_coil_block-b878fce8ef3b.png",
+                "dominantColor": "#07213e",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "runtimeCalculation": {
+        "sourceKind": "gregtech-overclock-calculator",
+        "sourceClass": "gregtech.api.util.OverclockCalculator",
+        "recipeMap": "Large Chemical Reactor",
+        "status": "computed",
+        "oracleEligible": true,
+        "strict": true,
+        "generatedAt": "2026-06-03T08:03:06.084Z",
+        "variants": [
+          {
+            "id": "tier-lv-perfect-oc",
+            "label": "LV Perfect OC",
+            "overclockTier": "LV",
+            "durationTicks": 320,
+            "eut": 30,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 1000
+              },
+              {
+                "kind": "fluid",
+                "id": "water",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-mv-perfect-oc",
+            "label": "MV Perfect OC",
+            "overclockTier": "MV",
+            "durationTicks": 80,
+            "eut": 120,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 1000
+              },
+              {
+                "kind": "fluid",
+                "id": "water",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-hv-perfect-oc",
+            "label": "HV Perfect OC",
+            "overclockTier": "HV",
+            "durationTicks": 20,
+            "eut": 480,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 1000
+              },
+              {
+                "kind": "fluid",
+                "id": "water",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-ev-perfect-oc",
+            "label": "EV Perfect OC",
+            "overclockTier": "EV",
+            "durationTicks": 5,
+            "eut": 1920,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 1000
+              },
+              {
+                "kind": "fluid",
+                "id": "water",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-iv-perfect-oc",
+            "label": "IV Perfect OC",
+            "overclockTier": "IV",
+            "durationTicks": 1,
+            "eut": 7680,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 1000
+              },
+              {
+                "kind": "fluid",
+                "id": "water",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-luv-perfect-oc",
+            "label": "LuV Perfect OC",
+            "overclockTier": "LuV",
+            "durationTicks": 1,
+            "eut": 30720,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 1000
+              },
+              {
+                "kind": "fluid",
+                "id": "water",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-zpm-perfect-oc",
+            "label": "ZPM Perfect OC",
+            "overclockTier": "ZPM",
+            "durationTicks": 1,
+            "eut": 122880,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 1000
+              },
+              {
+                "kind": "fluid",
+                "id": "water",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uv-perfect-oc",
+            "label": "UV Perfect OC",
+            "overclockTier": "UV",
+            "durationTicks": 1,
+            "eut": 491520,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 1000
+              },
+              {
+                "kind": "fluid",
+                "id": "water",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uhv-perfect-oc",
+            "label": "UHV Perfect OC",
+            "overclockTier": "UHV",
+            "durationTicks": 1,
+            "eut": 1966080,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 1000
+              },
+              {
+                "kind": "fluid",
+                "id": "water",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uev-perfect-oc",
+            "label": "UEV Perfect OC",
+            "overclockTier": "UEV",
+            "durationTicks": 1,
+            "eut": 7864320,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 1000
+              },
+              {
+                "kind": "fluid",
+                "id": "water",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uiv-perfect-oc",
+            "label": "UIV Perfect OC",
+            "overclockTier": "UIV",
+            "durationTicks": 1,
+            "eut": 31457280,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 1000
+              },
+              {
+                "kind": "fluid",
+                "id": "water",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uxv-perfect-oc",
+            "label": "UXV Perfect OC",
+            "overclockTier": "UXV",
+            "durationTicks": 1,
+            "eut": 125829120,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 1000
+              },
+              {
+                "kind": "fluid",
+                "id": "water",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-opv-perfect-oc",
+            "label": "OpV Perfect OC",
+            "overclockTier": "OpV",
+            "durationTicks": 1,
+            "eut": 503316480,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 1000
+              },
+              {
+                "kind": "fluid",
+                "id": "water",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-max-perfect-oc",
+            "label": "MAX Perfect OC",
+            "overclockTier": "MAX",
+            "durationTicks": 1,
+            "eut": 2161727821137838000,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "nitricacid",
+                "amount": 1000
+              },
+              {
+                "kind": "fluid",
+                "id": "water",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          }
+        ]
+      },
+      "source": {
+        "datasetVersionId": "stable-2.8.4",
+        "recipeMap": "Large Chemical Reactor",
+        "exporter": "gtnh-oracle",
+        "rawRecipeId": "gt.recipe.largechemicalreactor:eb3e5f994a858473"
+      },
+      "nei": {
+        "additionalInfo": [
+          "Special value: 0"
+        ]
+      }
+    },
+    {
+      "id": "oracle:stable-2.8.4:gregtech:gt-recipe-largechemicalreactor:eb6e9711372274ab",
+      "name": "Large Chemical Reactor: Ammonia",
+      "machineType": "Large Chemical Reactor",
+      "minimumTier": "HV",
+      "durationTicks": 320,
+      "eut": 384,
+      "inputs": [
+        {
+          "kind": "fluid",
+          "id": "nitrogen",
+          "amount": 1000,
+          "displayName": "Nitrogen",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitrogen-0d1c76596dd7.png",
+          "dominantColor": "#bb0000",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30012",
+              "displayName": "Nitrogen Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitrogen_cell-97fa740469a3.png",
+              "dominantColor": "#00688b",
+              "amount": 0.001
+            }
+          ]
+        },
+        {
+          "kind": "fluid",
+          "id": "hydrogen",
+          "amount": 3000,
+          "displayName": "Hydrogen",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hydrogen-ca2d2a4b02d7.png",
+          "dominantColor": "#ff6565",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30001",
+              "displayName": "Hydrogen Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hydrogen_cell-4f848ba8c21b.png",
+              "dominantColor": "#0000b2",
+              "amount": 0.001
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "fluid",
+          "id": "ammonia",
+          "amount": 1000,
+          "displayName": "Ammonia",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/ammonia-a8358b37d97d.png",
+          "dominantColor": "#afafaf",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30659",
+              "displayName": "Ammonia Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/ammonia_cell-1d0b69a5ac96.png",
+              "dominantColor": "#7f7f7f",
+              "amount": 0.001
+            }
+          ]
+        }
+      ],
+      "notes": "Exported by the GTNH calculation oracle from gregtech.api.recipe.RecipeMap.",
+      "machineConfigControls": [
+        {
+          "id": "machineParallel",
+          "label": "Parallel",
+          "minimumKey": "fixed-256",
+          "defaultKey": "fixed-256",
+          "tiers": [
+            {
+              "key": "fixed-256",
+              "label": "256 Parallels",
+              "parallelMultiplier": 256,
+              "resource": {
+                "kind": "item",
+                "id": "factoryflow:machine_config/fixed-256",
+                "amount": 1,
+                "displayName": "256 Parallels",
+                "tooltip": [
+                  "Imported from machine catalyst tooltip",
+                  "256 Parallels"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "heatingCoil",
+          "label": "Heating Coil",
+          "minimumKey": "cupronickel",
+          "defaultKey": "cupronickel",
+          "tiers": [
+            {
+              "key": "cupronickel",
+              "label": "Cupronickel",
+              "heat": 1801,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5",
+                "amount": 1,
+                "displayName": "Cupronickel Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/cupronickel_coil_block-e24ceffe0649.png",
+                "dominantColor": "#5f3623",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "kanthal",
+              "label": "Kanthal",
+              "heat": 2701,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@1",
+                "amount": 1,
+                "displayName": "Kanthal Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/kanthal_coil_block-56a127698599.png",
+                "dominantColor": "#5b6368",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "nichrome",
+              "label": "Nichrome",
+              "heat": 3601,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@2",
+                "amount": 1,
+                "displayName": "Nichrome Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nichrome_coil_block-05fecfeb8da8.png",
+                "dominantColor": "#5e5d70",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "tpv",
+              "label": "TPV-Alloy",
+              "heat": 4501,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@3",
+                "amount": 1,
+                "displayName": "TPV-Alloy Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/tpv-alloy_coil_block-885a9c5786cc.png",
+                "dominantColor": "#7e006b",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "hss_g",
+              "label": "HSS-G",
+              "heat": 5401,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@4",
+                "amount": 1,
+                "displayName": "HSS-G Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hss-g_coil_block-2b83c3bf53f0.png",
+                "dominantColor": "#424201",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "hss_s",
+              "label": "HSS-S",
+              "heat": 6301,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@9",
+                "amount": 1,
+                "displayName": "HSS-S Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hss-s_coil_block-674da455f764.png",
+                "dominantColor": "#410303",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "naquadah",
+              "label": "Naquadah",
+              "heat": 7201,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@5",
+                "amount": 1,
+                "displayName": "Naquadah Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/naquadah_coil_block-b436a04cce16.png",
+                "dominantColor": "#222222",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "naquadah_alloy",
+              "label": "Naquadah Alloy",
+              "heat": 8101,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@6",
+                "amount": 1,
+                "displayName": "Naquadah Alloy Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/naquadah_alloy_coil_block-475d851b6beb.png",
+                "dominantColor": "#262626",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "trinium",
+              "label": "Trinium",
+              "heat": 9001,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@10",
+                "amount": 1,
+                "displayName": "Trinium Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/trinium_coil_block-6aeb20fc4638.png",
+                "dominantColor": "#8e8e95",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "electrum_flux",
+              "label": "Electrum Flux",
+              "heat": 9901,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@7",
+                "amount": 1,
+                "displayName": "Electrum Flux Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/electrum_flux_coil_block-305e26606f89.png",
+                "dominantColor": "#736f11",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "awakened_draconium",
+              "label": "Awakened Draconium",
+              "heat": 10801,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@8",
+                "amount": 1,
+                "displayName": "Awakened Draconium Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/awakened_draconium_coil_block-8be866b0fd15.png",
+                "dominantColor": "#914a24",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "infinity",
+              "label": "Infinity",
+              "heat": 11701,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@11",
+                "amount": 1,
+                "displayName": "Infinity Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/infinity_coil_block-9956f783aa9b.png",
+                "dominantColor": "#5d5454",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "hypogen",
+              "label": "Hypogen",
+              "heat": 12601,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@12",
+                "amount": 1,
+                "displayName": "Hypogen Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hypogen_coil_block-dd89cb0a22b5.png",
+                "dominantColor": "#934836",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "eternal",
+              "label": "Eternal",
+              "heat": 13501,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@13",
+                "amount": 1,
+                "displayName": "Eternal Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/eternal_coil_block-b878fce8ef3b.png",
+                "dominantColor": "#07213e",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "runtimeCalculation": {
+        "sourceKind": "gregtech-overclock-calculator",
+        "sourceClass": "gregtech.api.util.OverclockCalculator",
+        "recipeMap": "Large Chemical Reactor",
+        "status": "computed",
+        "oracleEligible": true,
+        "strict": true,
+        "generatedAt": "2026-06-03T08:03:06.024Z",
+        "variants": [
+          {
+            "id": "tier-hv-perfect-oc",
+            "label": "HV Perfect OC",
+            "overclockTier": "HV",
+            "durationTicks": 320,
+            "eut": 384,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ammonia",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-ev-perfect-oc",
+            "label": "EV Perfect OC",
+            "overclockTier": "EV",
+            "durationTicks": 80,
+            "eut": 1536,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ammonia",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-iv-perfect-oc",
+            "label": "IV Perfect OC",
+            "overclockTier": "IV",
+            "durationTicks": 20,
+            "eut": 6144,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ammonia",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-luv-perfect-oc",
+            "label": "LuV Perfect OC",
+            "overclockTier": "LuV",
+            "durationTicks": 5,
+            "eut": 24576,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ammonia",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-zpm-perfect-oc",
+            "label": "ZPM Perfect OC",
+            "overclockTier": "ZPM",
+            "durationTicks": 1,
+            "eut": 98304,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ammonia",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uv-perfect-oc",
+            "label": "UV Perfect OC",
+            "overclockTier": "UV",
+            "durationTicks": 1,
+            "eut": 393216,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ammonia",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uhv-perfect-oc",
+            "label": "UHV Perfect OC",
+            "overclockTier": "UHV",
+            "durationTicks": 1,
+            "eut": 1572864,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ammonia",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uev-perfect-oc",
+            "label": "UEV Perfect OC",
+            "overclockTier": "UEV",
+            "durationTicks": 1,
+            "eut": 6291456,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ammonia",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uiv-perfect-oc",
+            "label": "UIV Perfect OC",
+            "overclockTier": "UIV",
+            "durationTicks": 1,
+            "eut": 25165824,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ammonia",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uxv-perfect-oc",
+            "label": "UXV Perfect OC",
+            "overclockTier": "UXV",
+            "durationTicks": 1,
+            "eut": 100663296,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ammonia",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-opv-perfect-oc",
+            "label": "OpV Perfect OC",
+            "overclockTier": "OpV",
+            "durationTicks": 1,
+            "eut": 402653184,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ammonia",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-max-perfect-oc",
+            "label": "MAX Perfect OC",
+            "overclockTier": "MAX",
+            "durationTicks": 1,
+            "eut": 6917529027641082000,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "ammonia",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          }
+        ]
+      },
+      "source": {
+        "datasetVersionId": "stable-2.8.4",
+        "recipeMap": "Large Chemical Reactor",
+        "exporter": "gtnh-oracle",
+        "rawRecipeId": "gt.recipe.largechemicalreactor:eb6e9711372274ab"
+      },
+      "nei": {
+        "additionalInfo": [
+          "Special value: 0"
+        ]
+      }
+    },
+    {
+      "id": "oracle:stable-2.8.4:gregtech:gt-recipe-largechemicalreactor:3d33903a32e11775",
+      "name": "Large Chemical Reactor: Sulfuric Acid",
+      "machineType": "Large Chemical Reactor",
+      "minimumTier": "LV",
+      "durationTicks": 480,
+      "eut": 30,
+      "inputs": [
+        {
+          "kind": "item",
+          "id": "gregtech:gt.metaitem.01@2022",
+          "amount": 1,
+          "displayName": "Sulfur Dust",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/sulfur_dust-e2599a7ff98a.png",
+          "dominantColor": "#6b6b00",
+          "modId": "gregtech"
+        },
+        {
+          "kind": "fluid",
+          "id": "oxygen",
+          "amount": 3000,
+          "displayName": "Oxygen",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/oxygen-3e8c0de0c100.png",
+          "dominantColor": "#00799e",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30013",
+              "displayName": "Oxygen Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/oxygen_cell-78b916e2bc48.png",
+              "dominantColor": "#00468c",
+              "amount": 0.001
+            }
+          ]
+        },
+        {
+          "kind": "fluid",
+          "id": "water",
+          "amount": 1000,
+          "displayName": "Water",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/water-a9bcacf1db0d.png",
+          "dominantColor": "#2c3ef4",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "ic2:itemcellempty@1",
+              "displayName": "Water Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/water_cell-19cc640bbc15.png",
+              "dominantColor": "#3366ff",
+              "amount": 0.001
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "fluid",
+          "id": "sulfuricacid",
+          "amount": 1000,
+          "displayName": "Sulfuric Acid",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/sulfuric_acid-a74b902977a5.png",
+          "dominantColor": "#ff5200",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "gregtech:gt.metaitem.01@30720",
+              "displayName": "Sulfuric Acid Cell",
+              "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/sulfuric_acid_cell-626f8ed399de.png",
+              "dominantColor": "#7f7f7f",
+              "amount": 0.001
+            }
+          ]
+        }
+      ],
+      "notes": "Exported by the GTNH calculation oracle from gregtech.api.recipe.RecipeMap.",
+      "machineConfigControls": [
+        {
+          "id": "machineParallel",
+          "label": "Parallel",
+          "minimumKey": "fixed-256",
+          "defaultKey": "fixed-256",
+          "tiers": [
+            {
+              "key": "fixed-256",
+              "label": "256 Parallels",
+              "parallelMultiplier": 256,
+              "resource": {
+                "kind": "item",
+                "id": "factoryflow:machine_config/fixed-256",
+                "amount": 1,
+                "displayName": "256 Parallels",
+                "tooltip": [
+                  "Imported from machine catalyst tooltip",
+                  "256 Parallels"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "heatingCoil",
+          "label": "Heating Coil",
+          "minimumKey": "cupronickel",
+          "defaultKey": "cupronickel",
+          "tiers": [
+            {
+              "key": "cupronickel",
+              "label": "Cupronickel",
+              "heat": 1801,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5",
+                "amount": 1,
+                "displayName": "Cupronickel Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/cupronickel_coil_block-e24ceffe0649.png",
+                "dominantColor": "#5f3623",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "kanthal",
+              "label": "Kanthal",
+              "heat": 2701,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@1",
+                "amount": 1,
+                "displayName": "Kanthal Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/kanthal_coil_block-56a127698599.png",
+                "dominantColor": "#5b6368",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "nichrome",
+              "label": "Nichrome",
+              "heat": 3601,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@2",
+                "amount": 1,
+                "displayName": "Nichrome Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nichrome_coil_block-05fecfeb8da8.png",
+                "dominantColor": "#5e5d70",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "tpv",
+              "label": "TPV-Alloy",
+              "heat": 4501,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@3",
+                "amount": 1,
+                "displayName": "TPV-Alloy Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/tpv-alloy_coil_block-885a9c5786cc.png",
+                "dominantColor": "#7e006b",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "hss_g",
+              "label": "HSS-G",
+              "heat": 5401,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@4",
+                "amount": 1,
+                "displayName": "HSS-G Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hss-g_coil_block-2b83c3bf53f0.png",
+                "dominantColor": "#424201",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "hss_s",
+              "label": "HSS-S",
+              "heat": 6301,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@9",
+                "amount": 1,
+                "displayName": "HSS-S Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hss-s_coil_block-674da455f764.png",
+                "dominantColor": "#410303",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "naquadah",
+              "label": "Naquadah",
+              "heat": 7201,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@5",
+                "amount": 1,
+                "displayName": "Naquadah Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/naquadah_coil_block-b436a04cce16.png",
+                "dominantColor": "#222222",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "naquadah_alloy",
+              "label": "Naquadah Alloy",
+              "heat": 8101,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@6",
+                "amount": 1,
+                "displayName": "Naquadah Alloy Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/naquadah_alloy_coil_block-475d851b6beb.png",
+                "dominantColor": "#262626",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "trinium",
+              "label": "Trinium",
+              "heat": 9001,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@10",
+                "amount": 1,
+                "displayName": "Trinium Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/trinium_coil_block-6aeb20fc4638.png",
+                "dominantColor": "#8e8e95",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "electrum_flux",
+              "label": "Electrum Flux",
+              "heat": 9901,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@7",
+                "amount": 1,
+                "displayName": "Electrum Flux Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/electrum_flux_coil_block-305e26606f89.png",
+                "dominantColor": "#736f11",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "awakened_draconium",
+              "label": "Awakened Draconium",
+              "heat": 10801,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@8",
+                "amount": 1,
+                "displayName": "Awakened Draconium Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/awakened_draconium_coil_block-8be866b0fd15.png",
+                "dominantColor": "#914a24",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "infinity",
+              "label": "Infinity",
+              "heat": 11701,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@11",
+                "amount": 1,
+                "displayName": "Infinity Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/infinity_coil_block-9956f783aa9b.png",
+                "dominantColor": "#5d5454",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "hypogen",
+              "label": "Hypogen",
+              "heat": 12601,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@12",
+                "amount": 1,
+                "displayName": "Hypogen Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hypogen_coil_block-dd89cb0a22b5.png",
+                "dominantColor": "#934836",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            },
+            {
+              "key": "eternal",
+              "label": "Eternal",
+              "heat": 13501,
+              "resource": {
+                "kind": "item",
+                "id": "gregtech:gt.blockcasings5@13",
+                "amount": 1,
+                "displayName": "Eternal Coil Block",
+                "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/eternal_coil_block-b878fce8ef3b.png",
+                "dominantColor": "#07213e",
+                "tooltip": [
+                  "Heating coil tier",
+                  "Required structure coil",
+                  "No runtime speed or EU/t effect"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "runtimeCalculation": {
+        "sourceKind": "gregtech-overclock-calculator",
+        "sourceClass": "gregtech.api.util.OverclockCalculator",
+        "recipeMap": "Large Chemical Reactor",
+        "status": "computed",
+        "oracleEligible": true,
+        "strict": true,
+        "generatedAt": "2026-06-03T08:03:06.089Z",
+        "variants": [
+          {
+            "id": "tier-lv-perfect-oc",
+            "label": "LV Perfect OC",
+            "overclockTier": "LV",
+            "durationTicks": 480,
+            "eut": 30,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "sulfuricacid",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-mv-perfect-oc",
+            "label": "MV Perfect OC",
+            "overclockTier": "MV",
+            "durationTicks": 120,
+            "eut": 120,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "sulfuricacid",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-hv-perfect-oc",
+            "label": "HV Perfect OC",
+            "overclockTier": "HV",
+            "durationTicks": 30,
+            "eut": 480,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "sulfuricacid",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-ev-perfect-oc",
+            "label": "EV Perfect OC",
+            "overclockTier": "EV",
+            "durationTicks": 7,
+            "eut": 1920,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "sulfuricacid",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-iv-perfect-oc",
+            "label": "IV Perfect OC",
+            "overclockTier": "IV",
+            "durationTicks": 1,
+            "eut": 7680,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "sulfuricacid",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-luv-perfect-oc",
+            "label": "LuV Perfect OC",
+            "overclockTier": "LuV",
+            "durationTicks": 1,
+            "eut": 30720,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "sulfuricacid",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-zpm-perfect-oc",
+            "label": "ZPM Perfect OC",
+            "overclockTier": "ZPM",
+            "durationTicks": 1,
+            "eut": 122880,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "sulfuricacid",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uv-perfect-oc",
+            "label": "UV Perfect OC",
+            "overclockTier": "UV",
+            "durationTicks": 1,
+            "eut": 491520,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "sulfuricacid",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uhv-perfect-oc",
+            "label": "UHV Perfect OC",
+            "overclockTier": "UHV",
+            "durationTicks": 1,
+            "eut": 1966080,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "sulfuricacid",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uev-perfect-oc",
+            "label": "UEV Perfect OC",
+            "overclockTier": "UEV",
+            "durationTicks": 1,
+            "eut": 7864320,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "sulfuricacid",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uiv-perfect-oc",
+            "label": "UIV Perfect OC",
+            "overclockTier": "UIV",
+            "durationTicks": 1,
+            "eut": 31457280,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "sulfuricacid",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-uxv-perfect-oc",
+            "label": "UXV Perfect OC",
+            "overclockTier": "UXV",
+            "durationTicks": 1,
+            "eut": 125829120,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "sulfuricacid",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-opv-perfect-oc",
+            "label": "OpV Perfect OC",
+            "overclockTier": "OpV",
+            "durationTicks": 1,
+            "eut": 503316480,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "sulfuricacid",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          },
+          {
+            "id": "tier-max-perfect-oc",
+            "label": "MAX Perfect OC",
+            "overclockTier": "MAX",
+            "durationTicks": 1,
+            "eut": 2161727821137838000,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "fluid",
+                "id": "sulfuricacid",
+                "amount": 1000
+              }
+            ],
+            "notes": "GTNH perfect overclock profile."
+          }
+        ]
+      },
+      "source": {
+        "datasetVersionId": "stable-2.8.4",
+        "recipeMap": "Large Chemical Reactor",
+        "exporter": "gtnh-oracle",
+        "rawRecipeId": "gt.recipe.largechemicalreactor:3d33903a32e11775"
+      },
+      "nei": {
+        "additionalInfo": [
+          "Special value: 0"
+        ]
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "id": "node-0738cf81-94b5-410e-939d-80672ac4ea45",
+      "recipeId": "oracle:stable-2.8.4:gregtech:gtpp-recipe-fluidchemicaleactor:e3e42759b5b6a49c",
+      "machineCount": 1,
+      "parallel": 1,
+      "overclockTier": "HV",
+      "machineConfigTiers": {
+        "pipeCasing": "titanium"
+      },
+      "recipeInputOverrides": {
+        "0": {
+          "kind": "fluid",
+          "id": "benzene",
+          "amount": 5000,
+          "displayName": "Benzene",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/benzene-b4cb31d3066f.png",
+          "dominantColor": "#151515"
+        },
+        "1": {
+          "kind": "fluid",
+          "id": "sulfuricacid",
+          "amount": 1000,
+          "displayName": "Sulfuric Acid",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/sulfuric_acid-a74b902977a5.png",
+          "dominantColor": "#ff5200"
+        },
+        "2": {
+          "kind": "fluid",
+          "id": "nitricacid",
+          "amount": 5000,
+          "displayName": "Nitric Acid",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitric_acid-3e53bbe4a80a.png",
+          "dominantColor": "#f2f221"
+        },
+        "3": {
+          "kind": "fluid",
+          "id": "ic2distilledwater",
+          "amount": 10000,
+          "displayName": "Distilled Water",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/distilled_water-193636beb1a2.png",
+          "dominantColor": "#4151f5"
+        }
+      },
+      "enabled": true,
+      "position": {
+        "x": 512.8174194676691,
+        "y": -48.9365742473685
+      }
+    },
+    {
+      "id": "node-732a2bf7-32ac-43b8-a9a4-07e0307a9f2e",
+      "recipeId": "oracle:stable-2.8.4:gregtech:gt-recipe-distillationtower:a83b248c703c8d2d",
+      "machineCount": 1,
+      "parallel": 1,
+      "overclockTier": "MV",
+      "recipeInputOverrides": {
+        "0": {
+          "kind": "fluid",
+          "id": "water",
+          "amount": 1000,
+          "displayName": "Water",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/water-a9bcacf1db0d.png",
+          "dominantColor": "#2c3ef4"
+        }
+      },
+      "enabled": true,
+      "position": {
+        "x": 450.12585603098483,
+        "y": 476.8636352215954
+      }
+    },
+    {
+      "id": "node-894f0da7-a618-44c6-aa1e-9b6084134999",
+      "recipeId": "oracle:stable-2.8.4:gregtech:gt-recipe-distillationtower:5181597d690be473",
+      "machineCount": 1,
+      "parallel": 1,
+      "overclockTier": "HV",
+      "recipeInputOverrides": {
+        "0": {
+          "kind": "fluid",
+          "id": "woodtar",
+          "amount": 1000,
+          "displayName": "Wood Tar",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/wood_tar-3b9b64dbe40d.png",
+          "dominantColor": "#201209"
+        }
+      },
+      "enabled": true,
+      "position": {
+        "x": -379.02062813161217,
+        "y": -445.51127532554165
+      }
+    },
+    {
+      "id": "node-c85c58bc-fa83-4b87-b669-efd15043ea4e",
+      "recipeId": "oracle:stable-2.8.4:gregtech:gtpp-recipe-cokeoven:46b503db40885573",
+      "machineCount": 1,
+      "parallel": 1,
+      "overclockTier": "MV",
+      "coilTier": "nichrome",
+      "machineConfigTiers": {
+        "cokeOvenCasing": "heat_proof"
+      },
+      "recipeInputOverrides": {
+        "0": {
+          "kind": "item",
+          "id": "minecraft:log@32767",
+          "amount": 16,
+          "displayName": "Oak Log",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/oak_log-94b92ef5e0d6.png",
+          "dominantColor": "#55442a",
+          "modId": "minecraft"
+        },
+        "1": {
+          "kind": "fluid",
+          "id": "nitrogen",
+          "amount": 1000,
+          "displayName": "Nitrogen",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitrogen-0d1c76596dd7.png",
+          "dominantColor": "#bb0000"
+        }
+      },
+      "enabled": true,
+      "position": {
+        "x": -949.3116245556424,
+        "y": -460.6785890602233
+      }
+    },
+    {
+      "id": "node-375e3f00-6fc2-4ea6-8b02-ec4cf8a0f879",
+      "recipeId": "oracle:stable-2.8.4:gregtech:gt-recipe-largechemicalreactor:eb3e5f994a858473",
+      "machineCount": 1,
+      "parallel": 1,
+      "overclockTier": "LV",
+      "recipeInputOverrides": {
+        "0": {
+          "kind": "fluid",
+          "id": "ammonia",
+          "amount": 1000,
+          "displayName": "Ammonia",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/ammonia-a8358b37d97d.png",
+          "dominantColor": "#afafaf"
+        },
+        "1": {
+          "kind": "fluid",
+          "id": "oxygen",
+          "amount": 4000,
+          "displayName": "Oxygen",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/oxygen-3e8c0de0c100.png",
+          "dominantColor": "#00799e"
+        }
+      },
+      "enabled": true,
+      "position": {
+        "x": -328.36174008471676,
+        "y": 100.51201912299793
+      }
+    },
+    {
+      "id": "node-d7b48bd3-dd0d-45a2-8b56-7e2e680b9723",
+      "recipeId": "oracle:stable-2.8.4:gregtech:gt-recipe-largechemicalreactor:eb6e9711372274ab",
+      "machineCount": 1,
+      "parallel": 1,
+      "overclockTier": "HV",
+      "recipeInputOverrides": {
+        "0": {
+          "kind": "fluid",
+          "id": "nitrogen",
+          "amount": 1000,
+          "displayName": "Nitrogen",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitrogen-0d1c76596dd7.png",
+          "dominantColor": "#bb0000"
+        },
+        "1": {
+          "kind": "fluid",
+          "id": "hydrogen",
+          "amount": 3000,
+          "displayName": "Hydrogen",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hydrogen-ca2d2a4b02d7.png",
+          "dominantColor": "#ff6565"
+        }
+      },
+      "enabled": true,
+      "position": {
+        "x": -909.7754332475134,
+        "y": 74.22200864954972
+      }
+    },
+    {
+      "id": "node-704f1f0c-68e2-4c43-9cbb-36fa94d85136",
+      "recipeId": "oracle:stable-2.8.4:gregtech:gt-recipe-largechemicalreactor:3d33903a32e11775",
+      "machineCount": 1,
+      "parallel": 1,
+      "overclockTier": "LV",
+      "recipeInputOverrides": {
+        "0": {
+          "kind": "item",
+          "id": "gregtech:gt.metaitem.01@2022",
+          "amount": 1,
+          "displayName": "Sulfur Dust",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/sulfur_dust-e2599a7ff98a.png",
+          "dominantColor": "#6b6b00",
+          "modId": "gregtech"
+        },
+        "1": {
+          "kind": "fluid",
+          "id": "oxygen",
+          "amount": 3000,
+          "displayName": "Oxygen",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/oxygen-3e8c0de0c100.png",
+          "dominantColor": "#00799e"
+        },
+        "2": {
+          "kind": "fluid",
+          "id": "water",
+          "amount": 1000,
+          "displayName": "Water",
+          "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/water-a9bcacf1db0d.png",
+          "dominantColor": "#2c3ef4"
+        }
+      },
+      "enabled": true,
+      "position": {
+        "x": -736.0950111418801,
+        "y": 531.400896482331
+      }
+    }
+  ],
+  "storages": [
+    {
+      "id": "storage-7b29b086-ae7b-4844-9fc3-be0f929433df",
+      "kind": "fluid",
+      "resourceId": "liquid_toluene",
+      "displayName": "Toluene",
+      "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/toluene-58fdb2e06efd.png",
+      "dominantColor": "#702400",
+      "position": {
+        "x": -339.14720727846867,
+        "y": -674.1141131746759
+      }
+    },
+    {
+      "id": "storage-e280e68a-0634-4701-a904-977852b377a7",
+      "kind": "fluid",
+      "resourceId": "1,3dimethylbenzene",
+      "displayName": "1,3-Dimethylbenzene",
+      "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/1_3-dimethylbenzene-905441f53ebd.png",
+      "dominantColor": "#5b773c",
+      "position": {
+        "x": -34.7897783358568,
+        "y": -671.0806504277397
+      }
+    },
+    {
+      "id": "storage-2c5592f2-0304-44e3-98b7-18983e198dd1",
+      "kind": "fluid",
+      "resourceId": "phenol",
+      "displayName": "Phenol",
+      "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/phenol-f76519542441.png",
+      "dominantColor": "#61371b",
+      "position": {
+        "x": 255.41149112105217,
+        "y": -625.5787092236947
+      }
+    },
+    {
+      "id": "storage-ff407048-f1c9-46c0-ac5d-a48766d6d586",
+      "kind": "fluid",
+      "resourceId": "creosote",
+      "displayName": "Creosote Oil",
+      "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/creosote_oil-b1f855476070.png",
+      "dominantColor": "#6b6400",
+      "position": {
+        "x": 489.99927688412845,
+        "y": -605.3556242441191
+      }
+    },
+    {
+      "id": "storage-3a33b71a-4efb-408e-b349-0cfb614b8f92",
+      "kind": "item",
+      "resourceId": "minecraft:log@32767",
+      "displayName": "Oak Log",
+      "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/oak_log-94b92ef5e0d6.png",
+      "dominantColor": "#55442a",
+      "position": {
+        "x": -1341.2010680164365,
+        "y": -457.7271038932177
+      }
+    },
+    {
+      "id": "storage-04d7af42-f5da-4956-a23b-631b9f777db2",
+      "kind": "fluid",
+      "resourceId": "nitrogen",
+      "displayName": "Nitrogen",
+      "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/nitrogen-0d1c76596dd7.png",
+      "dominantColor": "#bb0000",
+      "position": {
+        "x": -1418.8961676170513,
+        "y": -173.54492464637957
+      }
+    },
+    {
+      "id": "storage-97a952a3-a5d9-4373-af0d-e3d2507dab40",
+      "kind": "item",
+      "resourceId": "minecraft:coal@1",
+      "displayName": "Charcoal",
+      "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/charcoal-7bf013b0a230.png",
+      "dominantColor": "#28241c",
+      "position": {
+        "x": -729.1999125350636,
+        "y": -697.3706609011879
+      }
+    },
+    {
+      "id": "storage-9370a277-1d8c-4b6e-b326-20032dc5ff55",
+      "kind": "fluid",
+      "resourceId": "water",
+      "displayName": "Water",
+      "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/water-a9bcacf1db0d.png",
+      "dominantColor": "#2c3ef4",
+      "position": {
+        "x": -53.69223799887546,
+        "y": 655.5155852149843
+      }
+    },
+    {
+      "id": "storage-2b804d6a-0952-400b-b185-9d0a402dace4",
+      "kind": "fluid",
+      "resourceId": "oxygen",
+      "displayName": "Oxygen",
+      "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/oxygen-3e8c0de0c100.png",
+      "dominantColor": "#00799e",
+      "position": {
+        "x": -1416.637765070603,
+        "y": 567.4827110576277
+      }
+    },
+    {
+      "id": "storage-32c331ae-b69c-41b7-943b-cca66dd781d7",
+      "kind": "fluid",
+      "resourceId": "hydrogen",
+      "displayName": "Hydrogen",
+      "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/hydrogen-ca2d2a4b02d7.png",
+      "dominantColor": "#ff6565",
+      "position": {
+        "x": -1416.4282744110815,
+        "y": 313.10559664222626
+      }
+    },
+    {
+      "id": "storage-ec9b891b-f6a0-4ab6-86e7-a7f11cced8fa",
+      "kind": "item",
+      "resourceId": "gregtech:gt.metaitem.01@2022",
+      "displayName": "Sulfur Dust",
+      "iconPath": "/datasets/gtnh/stable-2.8.4/textures/rendered/sulfur_dust-e2599a7ff98a.png",
+      "dominantColor": "#6b6b00",
+      "position": {
+        "x": -1424.44140522732,
+        "y": 806.7450164778346
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-8b6a418b-6fe1-4ec8-a86e-43cc4c0706ee",
+      "source": "node-732a2bf7-32ac-43b8-a9a4-07e0307a9f2e",
+      "target": "node-0738cf81-94b5-410e-939d-80672ac4ea45",
+      "sourceHandle": "output:fluid:ic2distilledwater:0",
+      "targetHandle": "input:fluid:ic2distilledwater:3",
+      "resourceKind": "fluid",
+      "resourceId": "ic2distilledwater",
+      "label": "Distilled Water"
+    },
+    {
+      "id": "edge-e10b4fdc-d9fa-48de-957e-66cfda312d55",
+      "source": "node-894f0da7-a618-44c6-aa1e-9b6084134999",
+      "target": "node-0738cf81-94b5-410e-939d-80672ac4ea45",
+      "sourceHandle": "output:fluid:benzene:2",
+      "targetHandle": "input:fluid:benzene:0",
+      "resourceKind": "fluid",
+      "resourceId": "benzene",
+      "label": "Benzene"
+    },
+    {
+      "id": "edge-1a2ef346-0af2-40ba-894e-cee300bda288",
+      "source": "node-894f0da7-a618-44c6-aa1e-9b6084134999",
+      "target": "storage-7b29b086-ae7b-4844-9fc3-be0f929433df",
+      "sourceHandle": "output:fluid:liquid_toluene:3",
+      "targetHandle": "input:fluid:liquid_toluene",
+      "resourceKind": "fluid",
+      "resourceId": "liquid_toluene",
+      "label": "Toluene"
+    },
+    {
+      "id": "edge-23656bb2-3ab9-4aac-a838-25785928ae2f",
+      "source": "node-894f0da7-a618-44c6-aa1e-9b6084134999",
+      "target": "storage-e280e68a-0634-4701-a904-977852b377a7",
+      "sourceHandle": "output:fluid:1%2C3dimethylbenzene:4",
+      "targetHandle": "input:fluid:1%2C3dimethylbenzene",
+      "resourceKind": "fluid",
+      "resourceId": "1,3dimethylbenzene",
+      "label": "1,3-Dimethylbenzene"
+    },
+    {
+      "id": "edge-c1068aa9-a987-491a-a71b-3876cb2b6b05",
+      "source": "node-894f0da7-a618-44c6-aa1e-9b6084134999",
+      "target": "storage-2c5592f2-0304-44e3-98b7-18983e198dd1",
+      "sourceHandle": "output:fluid:phenol:1",
+      "targetHandle": "input:fluid:phenol",
+      "resourceKind": "fluid",
+      "resourceId": "phenol",
+      "label": "Phenol"
+    },
+    {
+      "id": "edge-85159b2b-2482-4693-af42-d410781b6181",
+      "source": "node-894f0da7-a618-44c6-aa1e-9b6084134999",
+      "target": "storage-ff407048-f1c9-46c0-ac5d-a48766d6d586",
+      "sourceHandle": "output:fluid:creosote:0",
+      "targetHandle": "input:fluid:creosote",
+      "resourceKind": "fluid",
+      "resourceId": "creosote",
+      "label": "Creosote Oil"
+    },
+    {
+      "id": "edge-4d0fd64f-d793-4674-b791-271bc669c419",
+      "source": "node-c85c58bc-fa83-4b87-b669-efd15043ea4e",
+      "target": "node-894f0da7-a618-44c6-aa1e-9b6084134999",
+      "sourceHandle": "output:fluid:woodtar:1",
+      "targetHandle": "input:fluid:woodtar:0",
+      "resourceKind": "fluid",
+      "resourceId": "woodtar",
+      "label": "Wood Tar"
+    },
+    {
+      "id": "edge-f394785c-a648-46cd-abc2-33afa47b1c12",
+      "source": "storage-3a33b71a-4efb-408e-b349-0cfb614b8f92",
+      "target": "node-c85c58bc-fa83-4b87-b669-efd15043ea4e",
+      "sourceHandle": "output:item:minecraft%3Alog%4032767",
+      "targetHandle": "input:item:minecraft%3Alog%4032767:0",
+      "resourceKind": "item",
+      "resourceId": "minecraft:log@32767",
+      "label": "Oak Log"
+    },
+    {
+      "id": "edge-b7bf8f99-fb12-4f95-8d70-04ccacce2150",
+      "source": "storage-04d7af42-f5da-4956-a23b-631b9f777db2",
+      "target": "node-c85c58bc-fa83-4b87-b669-efd15043ea4e",
+      "sourceHandle": "output:fluid:nitrogen",
+      "targetHandle": "input:fluid:nitrogen:1",
+      "resourceKind": "fluid",
+      "resourceId": "nitrogen",
+      "label": "Nitrogen"
+    },
+    {
+      "id": "edge-4f28b732-526f-4df2-9408-8633c0d91ce3",
+      "source": "node-c85c58bc-fa83-4b87-b669-efd15043ea4e",
+      "target": "storage-97a952a3-a5d9-4373-af0d-e3d2507dab40",
+      "sourceHandle": "output:item:minecraft%3Acoal%401:0",
+      "targetHandle": "input:item:minecraft%3Acoal%401",
+      "resourceKind": "item",
+      "resourceId": "minecraft:coal@1",
+      "label": "Charcoal"
+    },
+    {
+      "id": "edge-4c72b531-ec6b-4838-bd1d-0357721a7a89",
+      "source": "storage-9370a277-1d8c-4b6e-b326-20032dc5ff55",
+      "target": "node-732a2bf7-32ac-43b8-a9a4-07e0307a9f2e",
+      "sourceHandle": "output:fluid:water",
+      "targetHandle": "input:fluid:water:0",
+      "resourceKind": "fluid",
+      "resourceId": "water",
+      "label": "Water"
+    },
+    {
+      "id": "edge-62efee8f-edc6-4bfa-9cb7-96ce012cc838",
+      "source": "storage-2b804d6a-0952-400b-b185-9d0a402dace4",
+      "target": "node-375e3f00-6fc2-4ea6-8b02-ec4cf8a0f879",
+      "sourceHandle": "output:fluid:oxygen",
+      "targetHandle": "input:fluid:oxygen:1",
+      "resourceKind": "fluid",
+      "resourceId": "oxygen",
+      "label": "Oxygen"
+    },
+    {
+      "id": "edge-8ca97c4c-fe55-43d3-ae53-d9bebe83eede",
+      "source": "node-d7b48bd3-dd0d-45a2-8b56-7e2e680b9723",
+      "target": "node-375e3f00-6fc2-4ea6-8b02-ec4cf8a0f879",
+      "sourceHandle": "output:fluid:ammonia:0",
+      "targetHandle": "input:fluid:ammonia:0",
+      "resourceKind": "fluid",
+      "resourceId": "ammonia",
+      "label": "Ammonia"
+    },
+    {
+      "id": "edge-d1d745b2-6bc9-4992-8e77-1df3c05b8d38",
+      "source": "storage-04d7af42-f5da-4956-a23b-631b9f777db2",
+      "target": "node-d7b48bd3-dd0d-45a2-8b56-7e2e680b9723",
+      "sourceHandle": "output:fluid:nitrogen",
+      "targetHandle": "input:fluid:nitrogen:0",
+      "resourceKind": "fluid",
+      "resourceId": "nitrogen",
+      "label": "Nitrogen"
+    },
+    {
+      "id": "edge-8948bae6-42b2-455d-8d39-a76aec7663a4",
+      "source": "storage-32c331ae-b69c-41b7-943b-cca66dd781d7",
+      "target": "node-d7b48bd3-dd0d-45a2-8b56-7e2e680b9723",
+      "sourceHandle": "output:fluid:hydrogen",
+      "targetHandle": "input:fluid:hydrogen:1",
+      "resourceKind": "fluid",
+      "resourceId": "hydrogen",
+      "label": "Hydrogen"
+    },
+    {
+      "id": "edge-c44fa4d0-340e-4e51-95f7-0709d69c2fc5",
+      "source": "node-375e3f00-6fc2-4ea6-8b02-ec4cf8a0f879",
+      "target": "node-0738cf81-94b5-410e-939d-80672ac4ea45",
+      "sourceHandle": "output:fluid:nitricacid:0",
+      "targetHandle": "input:fluid:nitricacid:2",
+      "resourceKind": "fluid",
+      "resourceId": "nitricacid",
+      "label": "Nitric Acid"
+    },
+    {
+      "id": "edge-5aaadeb9-5fa6-4446-8318-b33be2d4d997",
+      "source": "storage-9370a277-1d8c-4b6e-b326-20032dc5ff55",
+      "target": "node-704f1f0c-68e2-4c43-9cbb-36fa94d85136",
+      "sourceHandle": "output:fluid:water",
+      "targetHandle": "input:fluid:water:2",
+      "resourceKind": "fluid",
+      "resourceId": "water",
+      "label": "Water"
+    },
+    {
+      "id": "edge-65d9f3c2-cc5b-460e-a73d-19aa7f08f85f",
+      "source": "storage-2b804d6a-0952-400b-b185-9d0a402dace4",
+      "target": "node-704f1f0c-68e2-4c43-9cbb-36fa94d85136",
+      "sourceHandle": "output:fluid:oxygen",
+      "targetHandle": "input:fluid:oxygen:1",
+      "resourceKind": "fluid",
+      "resourceId": "oxygen",
+      "label": "Oxygen"
+    },
+    {
+      "id": "edge-458ec88e-49a6-4060-9090-a9024a2ebd85",
+      "source": "storage-ec9b891b-f6a0-4ab6-86e7-a7f11cced8fa",
+      "target": "node-704f1f0c-68e2-4c43-9cbb-36fa94d85136",
+      "sourceHandle": "output:item:gregtech%3Agt.metaitem.01%402022",
+      "targetHandle": "input:item:gregtech%3Agt.metaitem.01%402022:0",
+      "resourceKind": "item",
+      "resourceId": "gregtech:gt.metaitem.01@2022",
+      "label": "Sulfur Dust"
+    },
+    {
+      "id": "edge-99464fe6-3fd0-406f-b0e5-5582536ad92d",
+      "source": "node-704f1f0c-68e2-4c43-9cbb-36fa94d85136",
+      "target": "node-0738cf81-94b5-410e-939d-80672ac4ea45",
+      "sourceHandle": "output:fluid:sulfuricacid:0",
+      "targetHandle": "input:fluid:sulfuricacid:1",
+      "resourceKind": "fluid",
+      "resourceId": "sulfuricacid",
+      "label": "Sulfuric Acid"
+    }
+  ],
+  "fuelProfiles": [
+    {
+      "id": "benzene",
+      "name": "Benzene",
+      "fuelFluidId": "benzene",
+      "euPerLiter": 32000,
+      "notes": "GTNH generator fuel value."
+    },
+    {
+      "id": "biodiesel",
+      "name": "Biodiesel",
+      "fuelFluidId": "biodiesel",
+      "euPerLiter": 12800,
+      "notes": "GTNH generator fuel value."
+    },
+    {
+      "id": "steam",
+      "name": "Steam",
+      "fuelFluidId": "steam",
+      "euPerLiter": 16,
+      "notes": "GTNH steam turbine value."
+    }
+  ],
+  "selectedFuelProfileId": "biodiesel",
+  "notes": "Dataset-backed plan. Recipes must come from a normalized GTNH dataset.",
+  "metadata": {
+    "createdAt": "2026-06-27T20:46:28.348Z",
+    "updatedAt": "2026-06-27T21:11:58.322Z"
+  }
+}
