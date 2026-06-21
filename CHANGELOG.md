@@ -30,6 +30,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cell-grid helpers (`occupied_cells`, `in_region`) lifted into `ir/geometry.py`. Property
   test proves the core promise: any input yields a valid placement or an explicit
   infeasibility. SA/LNS placement is Phase 2 (see `docs/ROADMAP.md`).
+- **Adapter (`adapter/`)** - `adapt_file(path)` / `to_input_ir(plan)` map a gtnh-factory-flow
+  exported plan JSON to `InputIR`: nodes -> machines (recipe I/O -> item/fluid ports, computed
+  typed throughput), storages -> boundary "chest" machines, edges -> nets. Typed view of the
+  consumed export shape (`plan.py`, tolerant of extra fields). Two real exports committed as
+  fixtures in `examples/` (sand, nitrobenzene); both adapt -> place -> validate cleanly. Crude
+  for Phase 1: single-block footprints, default orientations, power nets not synthesized yet.
 
 - **Contributor standards & tooling** - documented coding + Conventional-Commits
   conventions in `CONTRIBUTING.md`; added a `.pre-commit-config.yaml` (ruff lint + format,
