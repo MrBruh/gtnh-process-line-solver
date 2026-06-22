@@ -1,8 +1,12 @@
-"""buildguide - render a LayoutResult into a player-buildable guide.
+"""buildguide - render a LayoutResult into a player-buildable text guide.
 
-Contents (docs/TESTING.md / review): bill of materials (machine counts, pipe/cable lengths
-by tier), per-layer block-coordinate placement maps, a placement order, and explicit
-I/O-face / cover configuration callouts per machine.
-
-TODO(buildguide): consume the output-layout schema and emit the guide (markdown/HTML).
+Phase 1 ships a text guide (:func:`build_guide`, in ``core``): header, bill of materials,
+per-net connections, and a per-layer ASCII map with a key. The richer HTML/markdown guide
+(placement order, per-cover callouts) and the three.js previewer come later (docs/ROADMAP.md).
 """
+
+from __future__ import annotations
+
+from .core import build_guide
+
+__all__ = ["build_guide"]

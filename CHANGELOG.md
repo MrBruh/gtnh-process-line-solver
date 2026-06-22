@@ -45,6 +45,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the output schema (additive); the validator gained the route<->endpoint **reachability check**
   (terminal on a non-front face adjacent to its machine and on the route). Machine `orientation`
   is now constrained to horizontal facings (GT machines never face up/down).
+- **Build guide (`buildguide/`)** - `build_guide(problem, layout)` renders a `LayoutResult` as
+  a human-readable text guide: header, bill of materials (machines by type, pipe/cable cells
+  per commodity, I/O cover count), per-net connections (resource + machine faces), and a
+  per-layer ASCII map with a key. The cheap, visible Phase 1 payoff - a player can read and
+  build the sand line from it - ahead of the three.js previewer.
 
 - **Contributor standards & tooling** - documented coding + Conventional-Commits
   conventions in `CONTRIBUTING.md`; added a `.pre-commit-config.yaml` (ruff lint + format,
