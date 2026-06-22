@@ -13,6 +13,7 @@ from collections.abc import Iterator
 from pydantic import Field
 
 from ._base import FrozenModel
+from .enums import Facing
 
 
 class CellCoord(FrozenModel):
@@ -69,3 +70,15 @@ def in_region(cell: Cell, region: CellBox) -> bool:
     """
     x, y, z = cell
     return 0 <= x < region.sx and 0 <= y < region.sy and 0 <= z < region.sz
+
+
+# Unit step out of each block face. Minecraft axes: north -z, south +z, east +x, west -x,
+# up +y, down -y. Shared by the router (where a port docks) and the validator (face checks).
+FACE_DELTAS: dict[Facing, Cell] = {
+    Facing.NORTH: (0, 0, -1),
+    Facing.SOUTH: (0, 0, 1),
+    Facing.EAST: (1, 0, 0),
+    Facing.WEST: (-1, 0, 0),
+    Facing.UP: (0, 1, 0),
+    Facing.DOWN: (0, -1, 0),
+}

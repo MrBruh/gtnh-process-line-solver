@@ -73,18 +73,23 @@ LayoutResult
   metrics: { footprint, layers, buildability, congestion, ... }
   seed: int                              # for the seed-compare workflow
 
-Placement   { machine_id, cell: CellCoord, orientation: Facing }
+Placement   { machine_id, cell: CellCoord, orientation: Facing }   # orientation horizontal only
 Route
   net_id: str
   commodity: "item" | "fluid" | "power"
+  terminals: [Terminal]                  # where the route meets each machine endpoint (covers ride here)
   segments: [Segment]                    # cell-path; lowered to blocks only at export
   thickness_per_segment: [int] | null    # power only (else null); 1/2/4/8/16, summed amperage
+Terminal    { machine_id, port_id, face: Facing, cell: CellCoord }  # non-front face; cell just outside
 Segment     { start: CellCoord, end: CellCoord, channel: int }   # channel < per-edge cap; >= 0
 Infeasibility { constraint: str, detail: str, suggested_relaxation: str | null }
 ```
 
-`Facing` is one of `north|south|east|west|up|down` (the front-face direction). `Segment`
-uses `start`/`end` rather than `from`/`to` (`from` is a Python keyword). `status` and
+`Facing` is one of `north|south|east|west|up|down`. A machine's `orientation` (front face) is
+**horizontal only** (`north|south|east|west`) - GT machines never face up/down, though those
+faces can still carry I/O. A `Terminal` records where a net docks on a machine endpoint: the
+resolved non-front `face` (covers ride on the machine/storage face, never on the pipe) and the
+adjacent `cell`. `Segment` uses `start`/`end` (`from` is a Python keyword). `status` and
 `infeasibility` are coupled: a `valid` result carries no infeasibility; `infeasible` and
 `partial_invalid` must carry one.
 

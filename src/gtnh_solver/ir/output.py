@@ -41,12 +41,25 @@ class Segment(StrictModel):
     channel: int = Field(ge=0)
 
 
+class Terminal(StrictModel):
+    """Where a net physically attaches to one of its machine endpoints: the resolved face
+    (covers ride here, never on the pipe) and the adjacent ``cell`` the route docks at. The
+    ``face`` must be a usable (non-front) face; the ``cell`` is just outside the footprint."""
+
+    machine_id: str = Field(min_length=1)
+    port_id: str = Field(min_length=1)
+    face: Facing
+    cell: CellCoord
+
+
 class Route(StrictModel):
-    """The path taken by one net. For power, ``thickness_per_segment`` is required and
-    aligns 1:1 with ``segments``; for items/fluids it must be omitted."""
+    """The path taken by one net. ``terminals`` pin where it meets its machines (one per net
+    endpoint). For power, ``thickness_per_segment`` is required and aligns 1:1 with
+    ``segments``; for items/fluids it must be omitted."""
 
     net_id: str = Field(min_length=1)
     commodity: Commodity
+    terminals: list[Terminal] = Field(default_factory=list)
     segments: list[Segment] = Field(default_factory=list)
     thickness_per_segment: list[int] | None = None  # power only; 1/2/4/8/16 per segment
 

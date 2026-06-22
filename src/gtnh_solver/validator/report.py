@@ -32,6 +32,11 @@ class ViolationCode(str, Enum):
     ROUTE_OUT_OF_BOUNDS = "route_out_of_bounds"
     ROUTE_DISCONTINUOUS = "route_discontinuous"
     PINNED_IO_NOT_ON_ROUTE = "pinned_io_not_on_route"
+    # terminals / required-I/O-face reachability
+    MISSING_TERMINAL = "missing_terminal"
+    TERMINAL_ON_FRONT_FACE = "terminal_on_front_face"
+    TERMINAL_NOT_ADJACENT = "terminal_not_adjacent"
+    TERMINAL_NOT_ON_ROUTE = "terminal_not_on_route"
     # power (independent re-check of the shared-amperage primitive's output shape)
     POWER_THICKNESS_INVALID = "power_thickness_invalid"
 

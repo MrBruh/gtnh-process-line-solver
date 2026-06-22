@@ -3,9 +3,12 @@
 Mapping (see docs/ARCHITECTURE.md, docs/IR.md):
 - ``node``    -> ``Machine`` (recipe.machineType -> type, overclockTier -> voltage_tier,
                 machineCount -> count); recipe inputs/outputs -> item/fluid ``Port``s.
-- ``storage`` -> a 1x1x1 "chest" ``Machine`` whose ports come from the edges touching it
-                (source edge -> output port, target edge -> input port). This keeps a boundary
-                feed/drain as just another placeable node, so the IR needs no separate concept.
+- ``storage`` -> a boundary ``Machine`` typed **Super Chest** (items) or **Super Tank**
+                (fluids) - blocks that take I/O covers on their faces, so every cover rides a
+                machine/storage face and never a pipe (a deliberate Phase 1 simplification).
+                Its ports come from the edges touching it (source edge -> output, target ->
+                input), so a feed/drain is just another placeable node; the IR needs no
+                separate boundary concept.
 - ``edge``    -> ``Net`` (resourceKind -> commodity, resourceId -> fluid_or_item); endpoints
                 reference the matching out/in ports; typed throughput is computed from the
                 recipe rate.
@@ -43,6 +46,8 @@ _DEFAULT_ORIENTATIONS = [Facing.NORTH, Facing.SOUTH, Facing.EAST, Facing.WEST]
 _STORAGE_TIER = "LV"  # storages are unpowered; placeholder tier to satisfy the contract
 
 _COMMODITY = {"item": Commodity.ITEM, "fluid": Commodity.FLUID}
+# Boundary I/O blocks that accept I/O covers on their faces (keeps covers off pipes).
+_STORAGE_TYPE = {"item": "Super Chest", "fluid": "Super Tank"}
 
 
 class AdapterError(ValueError):
@@ -88,7 +93,7 @@ def to_input_ir(plan: Plan) -> InputIR:
         machines.append(
             Machine(
                 id=storage.id,
-                type="storage",
+                type=_storage_type(storage.kind),
                 footprint=_DEFAULT_FOOTPRINT,
                 faces=FaceSpec(ports=storage_ports.get(storage.id, [])),
                 voltage_tier=_STORAGE_TIER,
@@ -106,6 +111,13 @@ def _commodity(kind: str) -> Commodity:
         return _COMMODITY[kind]
     except KeyError:
         raise AdapterError(f"unsupported resource kind {kind!r} (expected item or fluid)") from None
+
+
+def _storage_type(kind: str) -> str:
+    try:
+        return _STORAGE_TYPE[kind]
+    except KeyError:
+        raise AdapterError(f"unsupported storage kind {kind!r} (expected item or fluid)") from None
 
 
 def _port_id(direction: IODirection, resource_id: str) -> str:

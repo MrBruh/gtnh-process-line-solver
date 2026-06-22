@@ -42,3 +42,8 @@ class LayoutStatus(str, Enum):
     VALID = "valid"
     INFEASIBLE = "infeasible"
     PARTIAL_INVALID = "partial_invalid"
+
+
+#: The facings a machine front can take. GT machines are placed facing a horizontal direction;
+#: they never face up/down (top/bottom faces can still carry I/O - see docs/DOMAIN.md).
+HORIZONTAL_FACINGS = frozenset({Facing.NORTH, Facing.SOUTH, Facing.EAST, Facing.WEST})

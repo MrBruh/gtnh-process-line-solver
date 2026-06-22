@@ -204,6 +204,14 @@ def test_machine_rejects_duplicate_orientations() -> None:
         _machine(orientations=[Facing.NORTH, Facing.NORTH])
 
 
+def test_machine_orientation_must_be_horizontal() -> None:
+    # GT machines never face up/down; the front is always a horizontal direction.
+    with pytest.raises(ValidationError):
+        _machine(orientations=[Facing.UP])
+    with pytest.raises(ValidationError):
+        _machine(orientations=[Facing.NORTH, Facing.DOWN])
+
+
 def test_machine_count_must_be_at_least_one() -> None:
     with pytest.raises(ValidationError):
         Machine(

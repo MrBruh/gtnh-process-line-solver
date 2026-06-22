@@ -33,6 +33,7 @@ from gtnh_solver.ir import (
     Port,
     Route,
     Segment,
+    Terminal,
 )
 from gtnh_solver.validator import ValidationReport, validate
 from gtnh_solver.validator.report import ViolationCode
@@ -73,7 +74,7 @@ def _base() -> tuple[InputIR, LayoutResult]:
                 ],
             )
         ],
-        pinned=[PinnedIO(net_id="n1", cell=_coord(1, 0, 1), kind=IODirection.OUTPUT)],
+        pinned=[PinnedIO(net_id="n1", cell=_coord(1, 0, 2), kind=IODirection.OUTPUT)],
     )
     layout = LayoutResult(
         status=LayoutStatus.VALID,
@@ -86,9 +87,18 @@ def _base() -> tuple[InputIR, LayoutResult]:
             Route(
                 net_id="n1",
                 commodity=Commodity.ITEM,
+                terminals=[
+                    # both machines dock on their south face (front is north) into the z=2 row
+                    Terminal(
+                        machine_id="m1", port_id="out", face=Facing.SOUTH, cell=_coord(1, 0, 2)
+                    ),
+                    Terminal(
+                        machine_id="m2", port_id="out", face=Facing.SOUTH, cell=_coord(3, 0, 2)
+                    ),
+                ],
                 segments=[
-                    Segment(start=_coord(1, 0, 1), end=_coord(2, 0, 1), channel=0),
-                    Segment(start=_coord(2, 0, 1), end=_coord(3, 0, 1), channel=0),
+                    Segment(start=_coord(1, 0, 2), end=_coord(2, 0, 2), channel=0),
+                    Segment(start=_coord(2, 0, 2), end=_coord(3, 0, 2), channel=0),
                 ],
             )
         ],
@@ -179,6 +189,32 @@ def _pinned_off_route(p: InputIR, layout: LayoutResult) -> tuple[InputIR, Layout
     return p.model_copy(update={"pinned": [pin]}), layout
 
 
+def _replace_first_terminal(layout: LayoutResult, **update: object) -> LayoutResult:
+    r = layout.routes[0]
+    bad = r.terminals[0].model_copy(update=update)
+    return layout.model_copy(
+        update={"routes": [r.model_copy(update={"terminals": [bad, r.terminals[1]]})]}
+    )
+
+
+def _missing_terminal(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    r = layout.routes[0].model_copy(update={"terminals": []})
+    return p, layout.model_copy(update={"routes": [r]})
+
+
+def _terminal_on_front(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    return p, _replace_first_terminal(layout, face=Facing.NORTH)  # north is the front face
+
+
+def _terminal_not_adjacent(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    return p, _replace_first_terminal(layout, cell=_coord(5, 0, 5))
+
+
+def _terminal_off_route(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    # adjacent to m1 on its (non-front) east face, but not on the route running along z=2
+    return p, _replace_first_terminal(layout, face=Facing.EAST, cell=_coord(2, 0, 1))
+
+
 BAD_CASES: list[tuple[str, Mutator, ViolationCode]] = [
     ("overlap", _overlap, ViolationCode.MACHINE_OVERLAP),
     ("machine_oob", _machine_oob, ViolationCode.MACHINE_OUT_OF_BOUNDS),
@@ -193,6 +229,10 @@ BAD_CASES: list[tuple[str, Mutator, ViolationCode]] = [
     ("route_oob", _route_oob, ViolationCode.ROUTE_OUT_OF_BOUNDS),
     ("discontinuous", _discontinuous, ViolationCode.ROUTE_DISCONTINUOUS),
     ("pinned_off_route", _pinned_off_route, ViolationCode.PINNED_IO_NOT_ON_ROUTE),
+    ("missing_terminal", _missing_terminal, ViolationCode.MISSING_TERMINAL),
+    ("terminal_on_front", _terminal_on_front, ViolationCode.TERMINAL_ON_FRONT_FACE),
+    ("terminal_not_adjacent", _terminal_not_adjacent, ViolationCode.TERMINAL_NOT_ADJACENT),
+    ("terminal_off_route", _terminal_off_route, ViolationCode.TERMINAL_NOT_ON_ROUTE),
 ]
 
 
@@ -261,7 +301,12 @@ def _power_pair() -> tuple[InputIR, LayoutResult]:
             Route(
                 net_id="np",
                 commodity=Commodity.POWER,
-                segments=[Segment(start=_coord(0, 0, 0), end=_coord(1, 0, 0), channel=0)],
+                terminals=[
+                    Terminal(
+                        machine_id="mp", port_id="pwr", face=Facing.SOUTH, cell=_coord(0, 0, 1)
+                    )
+                ],
+                segments=[Segment(start=_coord(0, 0, 1), end=_coord(0, 0, 2), channel=0)],
                 thickness_per_segment=[8],
             )
         ],

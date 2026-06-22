@@ -13,30 +13,25 @@ What is checked now (needs only the IR):
   routed; route commodity matches its net.
   geometry - machines in-bounds, non-overlapping, off reserved cells; routes in-bounds and
   contiguous; pinned I/O actually sits on its net's route.
+  terminals - every net endpoint has a terminal on a usable (non-front) face adjacent to its
+  machine, and that terminal cell lies on the route (the geometric half of required-I/O-face
+  reachability).
   power - per-segment cable thickness is present and well-formed (1/2/4/8/16, aligned).
 
-What is deferred to the dataset/router lanes (rule data not available yet) - TODO:
-  throughput/tier caps, one-fluid-per-line, *summed* amperage <= cable rating, and
-  required-I/O-face reachability. These need the physical-rules dataset + the router's
-  amperage model; the checks above are the geometric/structural floor they build on.
+What is deferred to the dataset lane (rule data not available yet) - TODO:
+  throughput/tier caps, one-fluid-per-line, *summed* amperage <= cable rating, and the
+  dataset-specific half of face rules (which faces a given machine type may use, covers).
+  These need the physical-rules dataset; the checks above are the floor they build on.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
 
-from gtnh_solver.ir import Commodity, InputIR, LayoutResult, METoggles
+from gtnh_solver.ir import Commodity, InputIR, LayoutResult, Placement
 
-from ._geometry import Cell, in_region, is_connected, occupied_cells
+from ._geometry import FACE_DELTAS, Cell, in_region, is_connected, occupied_cells
 from .report import ValidationReport, Violation, ViolationCode
-
-
-def _is_me_toggled(commodity: Commodity, toggles: METoggles) -> bool:
-    return {
-        Commodity.ITEM: toggles.items,
-        Commodity.FLUID: toggles.fluids,
-        Commodity.POWER: toggles.power,
-    }[commodity]
 
 
 def validate(problem: InputIR, layout: LayoutResult) -> ValidationReport:
@@ -44,6 +39,7 @@ def validate(problem: InputIR, layout: LayoutResult) -> ValidationReport:
     out: list[Violation] = []
     _check_placements(problem, layout, out)
     _check_routes(problem, layout, out)
+    _check_terminals(problem, layout, out)
     _check_pinned(problem, layout, out)
     return ValidationReport(tuple(out))
 
@@ -138,7 +134,7 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
                     f"but the net is {net.commodity.value}",
                 )
             )
-        if _is_me_toggled(net.commodity, problem.me_toggles):
+        if problem.me_toggles.toggled(net.commodity):
             out.append(
                 Violation(
                     ViolationCode.UNEXPECTED_ME_ROUTE,
@@ -190,10 +186,72 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
                 )
 
     for net in problem.nets:
-        if _is_me_toggled(net.commodity, problem.me_toggles):
+        if problem.me_toggles.toggled(net.commodity):
             continue
         if net.id not in routed:
             out.append(Violation(ViolationCode.MISSING_ROUTE, f"net {net.id!r} has no route"))
+
+
+def _check_terminals(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
+    machines = {m.id: m for m in problem.machines}
+    placement_by_machine: dict[str, Placement] = {}
+    for pl in layout.placements:
+        placement_by_machine.setdefault(pl.machine_id, pl)
+    nets = {n.id: n for n in problem.nets}
+
+    for r in layout.routes:
+        net = nets.get(r.net_id)
+        if net is None:
+            continue  # UNKNOWN_NET already reported by _check_routes
+        route_cells = {
+            cell
+            for seg in r.segments
+            for cell in (
+                (seg.start.x, seg.start.y, seg.start.z),
+                (seg.end.x, seg.end.y, seg.end.z),
+            )
+        }
+        have = {(t.machine_id, t.port_id) for t in r.terminals}
+        for ep in net.endpoints:
+            if (ep.machine_id, ep.port_id) not in have:
+                out.append(
+                    Violation(
+                        ViolationCode.MISSING_TERMINAL,
+                        f"net {r.net_id!r} endpoint {ep.port_id!r} on {ep.machine_id!r} "
+                        f"has no terminal",
+                    )
+                )
+        for t in r.terminals:
+            placement = placement_by_machine.get(t.machine_id)
+            machine = machines.get(t.machine_id)
+            if placement is None or machine is None:
+                continue  # placement/machine problems reported elsewhere
+            cell = (t.cell.x, t.cell.y, t.cell.z)
+            if t.face is placement.orientation:
+                out.append(
+                    Violation(
+                        ViolationCode.TERMINAL_ON_FRONT_FACE,
+                        f"terminal for net {r.net_id!r} on {t.machine_id!r} uses the front "
+                        f"face {t.face.value}",
+                    )
+                )
+            dx, dy, dz = FACE_DELTAS[t.face]
+            body = set(occupied_cells(placement.cell, machine.footprint))
+            if (cell[0] - dx, cell[1] - dy, cell[2] - dz) not in body or cell in body:
+                out.append(
+                    Violation(
+                        ViolationCode.TERMINAL_NOT_ADJACENT,
+                        f"terminal {cell} for net {r.net_id!r} is not just outside "
+                        f"{t.machine_id!r} on face {t.face.value}",
+                    )
+                )
+            if cell not in route_cells:
+                out.append(
+                    Violation(
+                        ViolationCode.TERMINAL_NOT_ON_ROUTE,
+                        f"terminal {cell} for net {r.net_id!r} is not on the route",
+                    )
+                )
 
 
 def _check_pinned(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:

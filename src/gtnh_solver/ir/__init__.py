@@ -8,7 +8,7 @@ split across submodules and re-exported here as the package's public surface:
 - ``geometry``   - CellCoord, CellBox (integer cell-grid value types)
 - ``input_ir``   - Port, FaceSpec, Machine, MachineFaceRef, Net, METoggles, PinnedIO,
                    InputIR  (+ INPUT_IR_VERSION)
-- ``output``     - Placement, Segment, Route, LayoutMetrics, Infeasibility,
+- ``output``     - Placement, Segment, Terminal, Route, LayoutMetrics, Infeasibility,
                    LayoutResult  (+ LAYOUT_RESULT_VERSION)
 
 Both roots carry an int ``version``. Additive fields can land without a bump; any change
@@ -39,6 +39,7 @@ from .output import (
     Placement,
     Route,
     Segment,
+    Terminal,
 )
 
 __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not alphabetized
@@ -65,6 +66,7 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
     # output schema
     "Placement",
     "Segment",
+    "Terminal",
     "Route",
     "LayoutMetrics",
     "Infeasibility",
@@ -82,4 +84,9 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   - MachineFaceRef references a machine + port_id (resolved to a face by the solver).
 #   - Geometry `Box`/`CellBox` unified into one `CellBox` (a size, each dim >= 1).
 #   - Segment fields named `start`/`end` (doc's `from` is a Python keyword).
+#
+# LayoutResult v0 (additive, no version bump) - added `Route.terminals: list[Terminal]`
+#   (machine_id/port_id/face/cell) so a route records where it docks on each machine
+#   endpoint. Existing consumers default to an empty list; the router fills it and the
+#   validator checks face/adjacency/on-route reachability.
 # ---------------------------------------------------------------------------

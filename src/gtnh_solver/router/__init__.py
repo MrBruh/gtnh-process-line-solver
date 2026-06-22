@@ -1,12 +1,16 @@
-"""router - free-form per-commodity routing on the cell grid.
+"""router - per-commodity routing on the cell grid.
 
-A* (not Lee BFS) with a Manhattan heuristic on the region-bounded grid; rip-up-and-reroute
-under congestion. Enforces throughput/tier caps, one-fluid-per-line, ME-toggle skip +
-endpoint placement, and the channels-per-edge cap + cell->block realizability that keep the
-coarse-cell abstraction from certifying unbuildable layouts (docs/ARCHITECTURE.md #6, #7).
+Phase 1 ships a crude A* router (:func:`route`, in ``core``): resolve a Terminal per net
+endpoint on a usable (non-front) machine face, then A* between terminals avoiding machine and
+reserved cells. Crude - one channel, no capacity, item/fluid only (docs/ROADMAP.md).
 
-Power has its own primitive - see router/power.py.
-
-TODO(router): implement A* per net, capacity/rule constraints, rip-up-and-reroute, the
-channels-per-edge invariant, realizability feedback, and ME handling.
+Phase 2 adds the channels-per-edge cap + cell->block realizability, rip-up-and-reroute, ME
+endpoint placement, and the shared-amperage power primitive (see ``router/power.py``,
+docs/ARCHITECTURE.md #6/#7/#8). The validator independently certifies routes either way.
 """
+
+from __future__ import annotations
+
+from .core import RouteResult, route
+
+__all__ = ["RouteResult", "route"]

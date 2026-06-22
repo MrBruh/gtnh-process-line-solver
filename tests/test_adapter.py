@@ -64,7 +64,7 @@ def test_adapt_sand_to_input_ir() -> None:
     assert all(n.commodity is Commodity.ITEM for n in ir.nets)
     types = {m.type for m in ir.machines}
     assert "Forge Hammer" in types
-    assert "storage" in types
+    assert "Super Chest" in types  # the item storage source (covers ride on it, not the pipe)
 
 
 def test_adapt_sand_end_to_end_places_and_validates() -> None:
@@ -86,6 +86,7 @@ def test_adapt_nitrobenzene_has_fluids_and_places() -> None:
     assert len(ir.machines) == 18  # 7 nodes + 11 storages
     assert any(n.commodity is Commodity.FLUID for n in ir.nets)
     assert any(n.commodity is Commodity.ITEM for n in ir.nets)
+    assert "Super Tank" in {m.type for m in ir.machines}  # fluid storages
     assert place(ir).ok
 
 

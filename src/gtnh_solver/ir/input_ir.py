@@ -19,7 +19,7 @@ from __future__ import annotations
 from pydantic import Field, model_validator
 
 from ._base import FrozenModel, StrictModel
-from .enums import Commodity, Facing, IODirection
+from .enums import HORIZONTAL_FACINGS, Commodity, Facing, IODirection
 from .geometry import CellBox, CellCoord
 
 #: Bump on any breaking change to the input contract; record it in ``ir/__init__.py``.
@@ -84,6 +84,12 @@ class Machine(StrictModel):
     def _check(self) -> Machine:
         if len(self.orientation_options) != len(set(self.orientation_options)):
             raise ValueError("duplicate orientation in orientation_options")
+        non_horizontal = [f for f in self.orientation_options if f not in HORIZONTAL_FACINGS]
+        if non_horizontal:
+            raise ValueError(
+                "machine front must face a horizontal direction (N/S/E/W); "
+                f"got {[f.value for f in non_horizontal]}"
+            )
         return self
 
 
@@ -127,6 +133,14 @@ class METoggles(StrictModel):
     items: bool = False
     fluids: bool = False
     power: bool = False
+
+    def toggled(self, commodity: Commodity) -> bool:
+        """Whether ``commodity`` is routed via ME (and so removed from physical routing)."""
+        return {
+            Commodity.ITEM: self.items,
+            Commodity.FLUID: self.fluids,
+            Commodity.POWER: self.power,
+        }[commodity]
 
 
 class PinnedIO(StrictModel):

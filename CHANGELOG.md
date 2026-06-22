@@ -32,10 +32,19 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   infeasibility. SA/LNS placement is Phase 2 (see `docs/ROADMAP.md`).
 - **Adapter (`adapter/`)** - `adapt_file(path)` / `to_input_ir(plan)` map a gtnh-factory-flow
   exported plan JSON to `InputIR`: nodes -> machines (recipe I/O -> item/fluid ports, computed
-  typed throughput), storages -> boundary "chest" machines, edges -> nets. Typed view of the
-  consumed export shape (`plan.py`, tolerant of extra fields). Two real exports committed as
-  fixtures in `examples/` (sand, nitrobenzene); both adapt -> place -> validate cleanly. Crude
-  for Phase 1: single-block footprints, default orientations, power nets not synthesized yet.
+  typed throughput), storages -> boundary **Super Chest** (items) / **Super Tank** (fluids)
+  machines (blocks that take I/O covers, so covers ride machine/storage faces, never pipes),
+  edges -> nets. Typed view of the consumed export shape (`plan.py`, tolerant of extra fields).
+  Two real exports committed as fixtures in `examples/` (sand, nitrobenzene). Crude for Phase 1:
+  single-block footprints, default orientations, power nets not synthesized yet.
+- **Router (`router/`) - Phase 1 crude router** - `route(problem, placements)` resolves a
+  `Terminal` per net endpoint on a usable (non-front) machine face, then A* between terminals
+  over the free cell grid, returning routes or an explicit `Infeasibility`. The sand demo line
+  now goes **export -> place -> route -> validator.ok**, the whole Phase 1 slice end to end.
+  Crude: one channel, no capacity, item/fluid only. Added `Route.terminals: list[Terminal]` to
+  the output schema (additive); the validator gained the route<->endpoint **reachability check**
+  (terminal on a non-front face adjacent to its machine and on the route). Machine `orientation`
+  is now constrained to horizontal facings (GT machines never face up/down).
 
 - **Contributor standards & tooling** - documented coding + Conventional-Commits
   conventions in `CONTRIBUTING.md`; added a `.pre-commit-config.yaml` (ruff lint + format,
