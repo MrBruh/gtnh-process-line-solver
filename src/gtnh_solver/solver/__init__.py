@@ -1,10 +1,14 @@
-"""solver - orchestrates placement and routing.
+"""solver - composes placement + auto-output + routing into a LayoutResult.
 
-The place->route->retry feedback loop (docs/ARCHITECTURE.md #1): place, route, and if a net
-is unroutable/over-capacity feed a penalty back to perturb placement. Anytime behavior
-(#6): on the wall-clock budget, return the best VALID layout found so far, or an explicit
-"no valid layout yet" report - never hang, never return a silently-invalid layout.
-
-TODO(solver): implement the feedback loop, convergence/give-up logic, and the anytime budget
-tracking best-valid-so-far. Merge placement + router behind a stable interface.
+Phase 1 ships a single-pass :func:`solve` (in ``core``): place (flow order) -> assign
+auto-output connections for adjacent machines -> route pipes for the rest -> assemble. No
+feedback loop yet. Phase 2 adds the place<->route<->retry loop and the anytime budget
+(docs/ARCHITECTURE.md #1/#6): perturb placement when a net is unroutable, return the best
+valid layout on timeout, never hang, never return a silently-invalid layout.
 """
+
+from __future__ import annotations
+
+from .core import solve
+
+__all__ = ["solve"]

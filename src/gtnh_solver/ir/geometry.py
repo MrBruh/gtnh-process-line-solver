@@ -82,3 +82,14 @@ FACE_DELTAS: dict[Facing, Cell] = {
     Facing.UP: (0, 1, 0),
     Facing.DOWN: (0, -1, 0),
 }
+
+#: The face on the far side of a block from a given face (shared by solver + validator for
+#: auto-output adjacency: a source's auto-output face meets the target's opposite input face).
+OPPOSITE_FACE: dict[Facing, Facing] = {
+    Facing.NORTH: Facing.SOUTH,
+    Facing.SOUTH: Facing.NORTH,
+    Facing.EAST: Facing.WEST,
+    Facing.WEST: Facing.EAST,
+    Facing.UP: Facing.DOWN,
+    Facing.DOWN: Facing.UP,
+}

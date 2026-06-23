@@ -78,6 +78,19 @@ class Route(StrictModel):
         return self
 
 
+class AutoConnection(StrictModel):
+    """A net satisfied with NO pipe: the source machine auto-outputs straight into the
+    adjacent target's input face (GT machines + Super Chests/Tanks auto-eject to one face).
+    Just the two touching faces - no segments, no covers. ``source_face`` points from source
+    to target; ``target_face`` is the opposite. Both must be usable (non-front) faces."""
+
+    net_id: str = Field(min_length=1)
+    source_machine_id: str = Field(min_length=1)
+    source_face: Facing
+    target_machine_id: str = Field(min_length=1)
+    target_face: Facing
+
+
 class LayoutMetrics(StrictModel):
     """Advisory metrics about a layout (footprint, layer count, buildability/congestion
     scores, ...). ``extra="allow"`` on purpose: metrics are informational and additive,
@@ -109,6 +122,7 @@ class LayoutResult(StrictModel):
     infeasibility: Infeasibility | None = None
     placements: list[Placement] = Field(default_factory=list)
     routes: list[Route] = Field(default_factory=list)
+    auto_connections: list[AutoConnection] = Field(default_factory=list)
     metrics: LayoutMetrics = Field(default_factory=LayoutMetrics)
     seed: int  # the RNG seed that produced this layout (for the seed-compare workflow)
 

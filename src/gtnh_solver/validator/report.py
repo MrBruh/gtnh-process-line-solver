@@ -23,7 +23,8 @@ class ViolationCode(str, Enum):
     UNKNOWN_NET = "unknown_net"
     DUPLICATE_ROUTE = "duplicate_route"
     ROUTE_COMMODITY_MISMATCH = "route_commodity_mismatch"
-    MISSING_ROUTE = "missing_route"
+    MISSING_CONNECTION = "missing_connection"  # net has neither a route nor an auto-connection
+    NET_DOUBLE_CONNECTED = "net_double_connected"  # both a route and an auto-connection
     UNEXPECTED_ME_ROUTE = "unexpected_me_route"
     # geometry
     MACHINE_OUT_OF_BOUNDS = "machine_out_of_bounds"
@@ -37,6 +38,10 @@ class ViolationCode(str, Enum):
     TERMINAL_ON_FRONT_FACE = "terminal_on_front_face"
     TERMINAL_NOT_ADJACENT = "terminal_not_adjacent"
     TERMINAL_NOT_ON_ROUTE = "terminal_not_on_route"
+    # auto-output connections (adjacent machines feeding each other, no pipe)
+    AUTO_OUTPUT_ON_FRONT_FACE = "auto_output_on_front_face"
+    AUTO_OUTPUT_NOT_ADJACENT = "auto_output_not_adjacent"
+    DUPLICATE_AUTO_OUTPUT = "duplicate_auto_output"
     # power (independent re-check of the shared-amperage primitive's output shape)
     POWER_THICKNESS_INVALID = "power_thickness_invalid"
 

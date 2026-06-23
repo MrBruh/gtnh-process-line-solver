@@ -33,6 +33,7 @@ from .input_ir import (
 )
 from .output import (
     LAYOUT_RESULT_VERSION,
+    AutoConnection,
     Infeasibility,
     LayoutMetrics,
     LayoutResult,
@@ -68,6 +69,7 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
     "Segment",
     "Terminal",
     "Route",
+    "AutoConnection",
     "LayoutMetrics",
     "Infeasibility",
     "LayoutResult",
@@ -89,4 +91,9 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   (machine_id/port_id/face/cell) so a route records where it docks on each machine
 #   endpoint. Existing consumers default to an empty list; the router fills it and the
 #   validator checks face/adjacency/on-route reachability.
+#
+# LayoutResult v0 (additive, no version bump) - added `LayoutResult.auto_connections:
+#   list[AutoConnection]`. A net is satisfied by EITHER a pipe `Route` OR an
+#   `AutoConnection` (adjacent machines auto-feeding, no pipe). Machine `orientation` is
+#   horizontal-only (GT machines never face up/down).
 # ---------------------------------------------------------------------------

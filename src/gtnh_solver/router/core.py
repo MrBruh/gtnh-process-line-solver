@@ -15,7 +15,7 @@ lies on the route.
 from __future__ import annotations
 
 import heapq
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 
@@ -54,8 +54,10 @@ class RouteResult:
         return self.infeasibility is None
 
 
-def route(problem: InputIR, placements: Sequence[Placement]) -> RouteResult:
-    """Route every non-ME net of ``problem`` over the given ``placements``."""
+def route(
+    problem: InputIR, placements: Sequence[Placement], *, skip_nets: Collection[str] = ()
+) -> RouteResult:
+    """Route each non-ME net of ``problem`` (except ``skip_nets``) over the given placements."""
     machines = {m.id: m for m in problem.machines}
     placement_by_machine: dict[str, Placement] = {}
     for placement in placements:
@@ -71,7 +73,7 @@ def route(problem: InputIR, placements: Sequence[Placement]) -> RouteResult:
     docked: set[Cell] = set()
     routes: list[Route] = []
     for net in problem.nets:
-        if problem.me_toggles.toggled(net.commodity):
+        if net.id in skip_nets or problem.me_toggles.toggled(net.commodity):
             continue
 
         terminals: list[Terminal] = []

@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from gtnh_solver.ir.geometry import FACE_DELTAS, Cell, in_region, occupied_cells
+from gtnh_solver.ir.geometry import FACE_DELTAS, OPPOSITE_FACE, Cell, in_region, occupied_cells
 
-__all__ = ["FACE_DELTAS", "Cell", "in_region", "is_connected", "occupied_cells"]
+__all__ = ["FACE_DELTAS", "OPPOSITE_FACE", "Cell", "in_region", "is_connected", "occupied_cells"]
 
 
 def is_connected(edges: Iterable[tuple[Cell, Cell]]) -> bool:

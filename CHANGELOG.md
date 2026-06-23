@@ -50,6 +50,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   per commodity, I/O cover count), per-net connections (resource + machine faces), and a
   per-layer ASCII map with a key. The cheap, visible Phase 1 payoff - a player can read and
   build the sand line from it - ahead of the three.js previewer.
+- **Solver (`solver/`) + auto-output** - `solve(problem)` composes the pipeline: place (now in
+  **flow order** - a topological sort so producers land next to consumers) -> assign
+  **auto-output connections** (a source machine ejecting straight into an adjacent target's
+  input face: no pipe, no cover, GT's free connection - one auto-output per machine) -> route
+  pipes only for what auto-output can't cover -> assemble. The sand line now solves to a flat
+  row of 4 machines auto-feeding each other: **zero pipes, zero covers**. Added
+  `LayoutResult.auto_connections: list[AutoConnection]` (additive); a net is satisfied by a
+  `Route` XOR an `AutoConnection`, and the validator checks auto-connection adjacency / faces /
+  single-auto-output-per-machine. Power nets are still not synthesized (the export has no power
+  source) - a shared-amperage power model with optimized source count/placement is next.
 
 - **Contributor standards & tooling** - documented coding + Conventional-Commits
   conventions in `CONTRIBUTING.md`; added a `.pre-commit-config.yaml` (ruff lint + format,

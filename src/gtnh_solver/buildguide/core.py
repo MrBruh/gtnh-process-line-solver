@@ -66,26 +66,38 @@ def _bom(layout: LayoutResult, machines: dict[str, Machine]) -> list[str]:
     if pipe_cells:
         lines += [f"  {len(c):>3}  x  {_PIPE_LABEL[k]}" for k, c in sorted(pipe_cells.items())]
     else:
-        lines.append("  (none)")
-    lines += [f"  {covers:>3}  x  I/O cover (one per terminal)", ""]
+        lines.append("  (no pipes)")
+    lines.append(f"  {covers:>3}  x  I/O cover (one per pipe terminal)")
+    lines.append(
+        f"  {len(layout.auto_connections):>3}  x  auto-output connection (adjacent, no pipe)"
+    )
+    lines.append("")
     return lines
+
+
+def _machine_label(machine_id: str, machines: dict[str, Machine]) -> str:
+    return machines[machine_id].type if machine_id in machines else machine_id
 
 
 def _connections(
     layout: LayoutResult, machines: dict[str, Machine], nets: dict[str, Net]
 ) -> list[str]:
-    if not layout.routes:
+    if not layout.routes and not layout.auto_connections:
         return []
     lines = ["## Connections", ""]
+    for ac in layout.auto_connections:
+        net = nets.get(ac.net_id)
+        resource = net.fluid_or_item if net and net.fluid_or_item else ac.net_id
+        src = _machine_label(ac.source_machine_id, machines)
+        tgt = _machine_label(ac.target_machine_id, machines)
+        lines.append(
+            f"  {resource:<22} {src} [{ac.source_face.value}] => {tgt} [{ac.target_face.value}]   (auto-output)"
+        )
     for r in layout.routes:
         net = nets.get(r.net_id)
         resource = net.fluid_or_item if net and net.fluid_or_item else r.commodity.value
-        ends = [
-            f"{machines[t.machine_id].type if t.machine_id in machines else t.machine_id}"
-            f" [{t.face.value}]"
-            for t in r.terminals
-        ]
-        lines.append(f"  {resource:<22} {' -> '.join(ends)}")
+        ends = [f"{_machine_label(t.machine_id, machines)} [{t.face.value}]" for t in r.terminals]
+        lines.append(f"  {resource:<22} {' -> '.join(ends)}   (pipe)")
     lines.append("")
     return lines
 

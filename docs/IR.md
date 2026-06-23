@@ -69,7 +69,8 @@ LayoutResult
   status: "valid" | "infeasible" | "partial_invalid"
   infeasibility: Infeasibility | null   # tightest violated constraint + suggested relaxation
   placements: [Placement]
-  routes: [Route]
+  routes: [Route]                        # nets connected by a pipe
+  auto_connections: [AutoConnection]     # nets connected by adjacency (no pipe)
   metrics: { footprint, layers, buildability, congestion, ... }
   seed: int                              # for the seed-compare workflow
 
@@ -82,16 +83,19 @@ Route
   thickness_per_segment: [int] | null    # power only (else null); 1/2/4/8/16, summed amperage
 Terminal    { machine_id, port_id, face: Facing, cell: CellCoord }  # non-front face; cell just outside
 Segment     { start: CellCoord, end: CellCoord, channel: int }   # channel < per-edge cap; >= 0
+AutoConnection { net_id, source_machine_id, source_face: Facing, target_machine_id, target_face: Facing }
 Infeasibility { constraint: str, detail: str, suggested_relaxation: str | null }
 ```
 
 `Facing` is one of `north|south|east|west|up|down`. A machine's `orientation` (front face) is
 **horizontal only** (`north|south|east|west`) - GT machines never face up/down, though those
-faces can still carry I/O. A `Terminal` records where a net docks on a machine endpoint: the
-resolved non-front `face` (covers ride on the machine/storage face, never on the pipe) and the
-adjacent `cell`. `Segment` uses `start`/`end` (`from` is a Python keyword). `status` and
-`infeasibility` are coupled: a `valid` result carries no infeasibility; `infeasible` and
-`partial_invalid` must carry one.
+faces can still carry I/O. Each non-ME net is satisfied by **exactly one** of: a pipe `Route`,
+or an `AutoConnection` (the source machine auto-ejecting straight into an adjacent target's
+input face - no pipe, no cover; `source_face` points source->target, `target_face` is the
+opposite, both non-front). A `Terminal` records where a *pipe* docks: the non-front `face`
+(covers ride on the machine face, never the pipe) and the adjacent `cell`. `Segment` uses
+`start`/`end` (`from` is a Python keyword). `status`/`infeasibility` are coupled: a `valid`
+result carries no infeasibility; `infeasible`/`partial_invalid` must carry one.
 
 ## Rules the schemas must encode (cross-ref [`DOMAIN.md`](DOMAIN.md))
 

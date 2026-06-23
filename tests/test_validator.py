@@ -15,6 +15,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from gtnh_solver.ir import (
+    AutoConnection,
     CellBox,
     CellCoord,
     Commodity,
@@ -225,7 +226,7 @@ BAD_CASES: list[tuple[str, Mutator, ViolationCode]] = [
     ("unknown_net", _unknown_net, ViolationCode.UNKNOWN_NET),
     ("duplicate_route", _duplicate_route, ViolationCode.DUPLICATE_ROUTE),
     ("commodity_mismatch", _commodity_mismatch, ViolationCode.ROUTE_COMMODITY_MISMATCH),
-    ("missing_route", _missing_route, ViolationCode.MISSING_ROUTE),
+    ("missing_connection", _missing_route, ViolationCode.MISSING_CONNECTION),
     ("route_oob", _route_oob, ViolationCode.ROUTE_OUT_OF_BOUNDS),
     ("discontinuous", _discontinuous, ViolationCode.ROUTE_DISCONTINUOUS),
     ("pinned_off_route", _pinned_off_route, ViolationCode.PINNED_IO_NOT_ON_ROUTE),
@@ -330,6 +331,115 @@ def test_power_thickness_defect_caught_even_when_model_validation_bypassed() -> 
     )
     broken = layout.model_copy(update={"routes": [bad_route]})
     assert ViolationCode.POWER_THICKNESS_INVALID in validate(problem, broken).codes()
+
+
+# --------------------------------------------------------------- auto-output connections
+
+
+def _auto_machine(mid: str, port: str, direction: IODirection) -> Machine:
+    return Machine(
+        id=mid,
+        type="t",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(ports=[Port(id=port, commodity=Commodity.ITEM, direction=direction)]),
+    )
+
+
+def _auto_base() -> tuple[InputIR, LayoutResult]:
+    """m1 (out) auto-feeds adjacent m2 (in) on east/west - a fully valid auto-connection."""
+    problem = InputIR(
+        bounding_region=CellBox(sx=4, sy=4, sz=4),
+        machines=[
+            _auto_machine("m1", "out", IODirection.OUTPUT),
+            _auto_machine("m2", "in", IODirection.INPUT),
+        ],
+        nets=[
+            Net(
+                id="n",
+                commodity=Commodity.ITEM,
+                fluid_or_item="x",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="m1", port_id="out"),
+                    MachineFaceRef(machine_id="m2", port_id="in"),
+                ],
+            )
+        ],
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id="m1", cell=_coord(0, 0, 0), orientation=Facing.NORTH),
+            Placement(machine_id="m2", cell=_coord(1, 0, 0), orientation=Facing.NORTH),
+        ],
+        auto_connections=[
+            AutoConnection(
+                net_id="n",
+                source_machine_id="m1",
+                source_face=Facing.EAST,
+                target_machine_id="m2",
+                target_face=Facing.WEST,
+            )
+        ],
+    )
+    return problem, layout
+
+
+def test_auto_connection_valid_passes() -> None:
+    assert validate(*_auto_base()).ok
+
+
+def _auto_front(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    ac = layout.auto_connections[0].model_copy(update={"source_face": Facing.NORTH})  # front
+    return p, layout.model_copy(update={"auto_connections": [ac]})
+
+
+def _auto_not_adjacent(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    ac = layout.auto_connections[0].model_copy(
+        update={"source_face": Facing.SOUTH}
+    )  # not toward m2
+    return p, layout.model_copy(update={"auto_connections": [ac]})
+
+
+def _auto_duplicate(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    ac = layout.auto_connections[0]
+    return p, layout.model_copy(update={"auto_connections": [ac, ac]})  # m1 auto-outputs twice
+
+
+AUTO_BAD_CASES: list[tuple[str, Mutator, ViolationCode]] = [
+    ("auto_front", _auto_front, ViolationCode.AUTO_OUTPUT_ON_FRONT_FACE),
+    ("auto_not_adjacent", _auto_not_adjacent, ViolationCode.AUTO_OUTPUT_NOT_ADJACENT),
+    ("auto_duplicate", _auto_duplicate, ViolationCode.DUPLICATE_AUTO_OUTPUT),
+]
+
+
+@pytest.mark.parametrize(
+    ("mutate", "code"),
+    [(m, c) for _, m, c in AUTO_BAD_CASES],
+    ids=[n for n, _, _ in AUTO_BAD_CASES],
+)
+def test_known_bad_auto_connection_is_flagged(mutate: Mutator, code: ViolationCode) -> None:
+    problem, layout = mutate(*_auto_base())
+    report = validate(problem, layout)
+    assert not report.ok
+    assert code in report.codes(), f"expected {code} in {report.codes()}"
+
+
+def test_net_with_both_route_and_auto_connection_is_flagged() -> None:
+    problem, layout = _auto_base()
+    route = Route(
+        net_id="n",
+        commodity=Commodity.ITEM,
+        terminals=[
+            Terminal(machine_id="m1", port_id="out", face=Facing.SOUTH, cell=_coord(0, 0, 1)),
+            Terminal(machine_id="m2", port_id="in", face=Facing.SOUTH, cell=_coord(1, 0, 1)),
+        ],
+        segments=[Segment(start=_coord(0, 0, 1), end=_coord(1, 0, 1), channel=0)],
+    )
+    layout = layout.model_copy(update={"routes": [route]})
+    assert ViolationCode.NET_DOUBLE_CONNECTED in validate(problem, layout).codes()
 
 
 # --------------------------------------------------------------- robustness / property

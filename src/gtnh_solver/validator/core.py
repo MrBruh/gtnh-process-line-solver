@@ -30,7 +30,7 @@ from collections import defaultdict
 
 from gtnh_solver.ir import Commodity, InputIR, LayoutResult, Placement
 
-from ._geometry import FACE_DELTAS, Cell, in_region, is_connected, occupied_cells
+from ._geometry import FACE_DELTAS, OPPOSITE_FACE, Cell, in_region, is_connected, occupied_cells
 from .report import ValidationReport, Violation, ViolationCode
 
 
@@ -40,6 +40,7 @@ def validate(problem: InputIR, layout: LayoutResult) -> ValidationReport:
     _check_placements(problem, layout, out)
     _check_routes(problem, layout, out)
     _check_terminals(problem, layout, out)
+    _check_auto_connections(problem, layout, out)
     _check_pinned(problem, layout, out)
     return ValidationReport(tuple(out))
 
@@ -185,11 +186,25 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
                     )
                 )
 
+    auto_ids = {ac.net_id for ac in layout.auto_connections}
     for net in problem.nets:
         if problem.me_toggles.toggled(net.commodity):
             continue
-        if net.id not in routed:
-            out.append(Violation(ViolationCode.MISSING_ROUTE, f"net {net.id!r} has no route"))
+        routed_here, auto_here = net.id in routed, net.id in auto_ids
+        if routed_here and auto_here:
+            out.append(
+                Violation(
+                    ViolationCode.NET_DOUBLE_CONNECTED,
+                    f"net {net.id!r} is both routed and auto-connected",
+                )
+            )
+        elif not routed_here and not auto_here:
+            out.append(
+                Violation(
+                    ViolationCode.MISSING_CONNECTION,
+                    f"net {net.id!r} is neither routed nor auto-connected",
+                )
+            )
 
 
 def _check_terminals(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
@@ -252,6 +267,51 @@ def _check_terminals(problem: InputIR, layout: LayoutResult, out: list[Violation
                         f"terminal {cell} for net {r.net_id!r} is not on the route",
                     )
                 )
+
+
+def _check_auto_connections(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
+    machines = {m.id: m for m in problem.machines}
+    placement_of: dict[str, Placement] = {}
+    for pl in layout.placements:
+        placement_of.setdefault(pl.machine_id, pl)
+    source_uses: dict[str, int] = defaultdict(int)
+
+    for ac in layout.auto_connections:
+        source_uses[ac.source_machine_id] += 1
+        sp = placement_of.get(ac.source_machine_id)
+        sm = machines.get(ac.source_machine_id)
+        tp = placement_of.get(ac.target_machine_id)
+        tm = machines.get(ac.target_machine_id)
+        if sp is None or sm is None or tp is None or tm is None:
+            continue  # unknown / unplaced machine reported by _check_placements
+        if ac.source_face is sp.orientation or ac.target_face is tp.orientation:
+            out.append(
+                Violation(
+                    ViolationCode.AUTO_OUTPUT_ON_FRONT_FACE,
+                    f"auto-output for net {ac.net_id!r} uses a front face",
+                )
+            )
+        dx, dy, dz = FACE_DELTAS[ac.source_face]
+        source_cells = set(occupied_cells(sp.cell, sm.footprint))
+        target_cells = set(occupied_cells(tp.cell, tm.footprint))
+        adjacent = any((x + dx, y + dy, z + dz) in target_cells for x, y, z in source_cells)
+        if not adjacent or ac.target_face is not OPPOSITE_FACE[ac.source_face]:
+            out.append(
+                Violation(
+                    ViolationCode.AUTO_OUTPUT_NOT_ADJACENT,
+                    f"auto-output for net {ac.net_id!r}: {ac.source_machine_id!r} does not meet "
+                    f"{ac.target_machine_id!r} on {ac.source_face.value}/{ac.target_face.value}",
+                )
+            )
+
+    for machine_id, uses in source_uses.items():
+        if uses > 1:
+            out.append(
+                Violation(
+                    ViolationCode.DUPLICATE_AUTO_OUTPUT,
+                    f"machine {machine_id!r} auto-outputs to {uses} nets (only one auto-output face)",
+                )
+            )
 
 
 def _check_pinned(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:

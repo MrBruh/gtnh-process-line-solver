@@ -26,20 +26,15 @@ from gtnh_solver.ir import (
     Placement,
     Port,
 )
-from gtnh_solver.placement import place
 from gtnh_solver.router import route
+from gtnh_solver.solver import solve
 
 _SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
 
 
 def _sand_guide() -> str:
     ir = adapt_file(_SAND)
-    pr = place(ir)
-    rr = route(ir, pr.placements)
-    layout = LayoutResult(
-        status=LayoutStatus.VALID, seed=0, placements=list(pr.placements), routes=list(rr.routes)
-    )
-    return build_guide(ir, layout)
+    return build_guide(ir, solve(ir))
 
 
 def test_build_guide_sand_has_all_sections() -> None:
@@ -50,7 +45,6 @@ def test_build_guide_sand_has_all_sections() -> None:
         "## Connections",
         "## Layout",
         "### Layer y = 0",
-        "### Layer y = 1",  # routing steps up to the y=1 layer
         "## Key",
     ):
         assert marker in guide, f"missing section: {marker}"
@@ -62,10 +56,11 @@ def test_build_guide_bom_counts_machines_by_type() -> None:
     assert "1  x  Super Chest" in guide
 
 
-def test_build_guide_connections_name_the_resources() -> None:
+def test_build_guide_sand_uses_auto_output_not_pipes() -> None:
     guide = _sand_guide()
     assert "minecraft:gravel" in guide
-    assert "[south]" in guide  # a resolved terminal face
+    assert "(auto-output)" in guide  # the chain auto-feeds...
+    assert "(no pipes)" in guide  # ...so the BoM lists no pipes
 
 
 def test_build_guide_is_deterministic() -> None:
@@ -76,7 +71,7 @@ def test_build_guide_handles_empty_layout() -> None:
     ir = adapt_file(_SAND)
     guide = build_guide(ir, LayoutResult(status=LayoutStatus.VALID, seed=0))
     assert "(empty)" in guide  # no placements/routes
-    assert "(none)" in guide  # no routing in the BoM
+    assert "(no pipes)" in guide  # no routing in the BoM
 
 
 def test_build_guide_renders_power_route_with_fallback_label() -> None:
