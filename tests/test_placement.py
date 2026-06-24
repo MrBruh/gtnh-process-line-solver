@@ -43,7 +43,6 @@ def _machine(
     mid: str,
     *,
     footprint: CellBox | None = None,
-    count: int = 1,
     orientations: list[Facing] | None = None,
 ) -> Machine:
     return Machine(
@@ -52,7 +51,6 @@ def _machine(
         footprint=footprint if footprint is not None else CellBox(),
         voltage_tier="LV",
         orientation_options=orientations if orientations is not None else [Facing.NORTH],
-        count=count,
     )
 
 
@@ -99,14 +97,6 @@ def test_respects_reserved_cells() -> None:
     assert result.placements[0].cell == CellCoord(x=1, y=0, z=0)  # avoided the reserved cell
 
 
-def test_count_expands_to_distinct_placements() -> None:
-    result = place(_problem([_machine("a", count=3)]))
-    assert result.ok
-    assert len(result.placements) == 3
-    assert all(p.machine_id == "a" for p in result.placements)
-    assert len({(p.cell.x, p.cell.y, p.cell.z) for p in result.placements}) == 3
-
-
 def test_multiblock_footprint_does_not_overlap() -> None:
     problem = _problem(
         [_machine("big", footprint=CellBox(sx=2, sy=1, sz=2)), _machine("small")],
@@ -118,7 +108,7 @@ def test_multiblock_footprint_does_not_overlap() -> None:
 
 
 def test_placement_is_deterministic() -> None:
-    problem = _problem([_machine("a"), _machine("b", count=2)])
+    problem = _problem([_machine("a"), _machine("b"), _machine("c")])
     assert place(problem).placements == place(problem).placements
 
 

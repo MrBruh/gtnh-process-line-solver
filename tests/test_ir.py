@@ -212,14 +212,16 @@ def test_machine_orientation_must_be_horizontal() -> None:
         _machine(orientations=[Facing.NORTH, Facing.DOWN])
 
 
-def test_machine_count_must_be_at_least_one() -> None:
+def test_machine_no_longer_accepts_count() -> None:
+    # `count` was dropped in InputIR v1 (multi-instance machines are Phase 2); StrictModel
+    # forbids unknown fields, so a stray `count=` is now a loud error, not silently ignored.
     with pytest.raises(ValidationError):
         Machine(
             id="m",
             type="t",
             voltage_tier="LV",
             orientation_options=[Facing.NORTH],
-            count=0,
+            count=1,
         )
 
 

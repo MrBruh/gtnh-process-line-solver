@@ -2,10 +2,11 @@
 
 First-fit constructive placement on the coarse cell grid: walk machines in **flow order**
 (a topological sort by net source->sink, so a producer lands next to its consumer - which lets
-the solver auto-feed them without a pipe), expanding ``count`` into that many instances, and
-drop each into the first free, in-bounds slot - scanning the floor layer first, then row by
-row, then upward - honoring reserved cells and never overlapping. Orientation is the machine's
-first listed legal option. No search, no compaction; that is Phase 2 (SA/LNS), docs/ROADMAP.md.
+the solver auto-feed them without a pipe) and drop each into the first free, in-bounds slot -
+scanning the floor layer first, then row by row, then upward - honoring reserved cells and
+never overlapping. Orientation is the machine's first listed legal option. One placement per
+machine (multi-instance groups are Phase 2 - see ``Machine`` / docs/ROADMAP.md). No search, no
+compaction; that is Phase 2 (SA/LNS) too, docs/ROADMAP.md.
 
 It returns a :class:`PlacementResult`: either every instance placed, or a partial set plus an
 explicit :class:`~gtnh_solver.ir.Infeasibility` naming the machine that did not fit. It never
@@ -44,34 +45,31 @@ class PlacementResult:
 
 
 def place(problem: InputIR) -> PlacementResult:
-    """Deterministically place every machine (expanded by ``count``) into the region."""
+    """Deterministically place every machine (one each) into the region."""
     region = problem.bounding_region
     occupied: set[Cell] = {(c.x, c.y, c.z) for c in problem.reserved_cells}
     placements: list[Placement] = []
 
     for machine in _flow_order(problem):
         orientation = machine.orientation_options[0]
-        for instance in range(machine.count):
-            origin = _first_fit(machine, region, occupied)
-            if origin is None:
-                detail = (
-                    f"machine {machine.id!r} (instance {instance + 1} of {machine.count}) does "
-                    f"not fit in the free space of the {region.sx}x{region.sy}x{region.sz} region"
-                )
-                return PlacementResult(
-                    placements=tuple(placements),
-                    infeasibility=Infeasibility(
-                        constraint="bounding_region",
-                        detail=detail,
-                        suggested_relaxation=(
-                            "enlarge bounding_region, or remove machines / reserved cells"
-                        ),
-                    ),
-                )
-            occupied.update(occupied_cells(origin, machine.footprint))
-            placements.append(
-                Placement(machine_id=machine.id, cell=origin, orientation=orientation)
+        origin = _first_fit(machine, region, occupied)
+        if origin is None:
+            detail = (
+                f"machine {machine.id!r} does not fit in the free space of the "
+                f"{region.sx}x{region.sy}x{region.sz} region"
             )
+            return PlacementResult(
+                placements=tuple(placements),
+                infeasibility=Infeasibility(
+                    constraint="bounding_region",
+                    detail=detail,
+                    suggested_relaxation=(
+                        "enlarge bounding_region, or remove machines / reserved cells"
+                    ),
+                ),
+            )
+        occupied.update(occupied_cells(origin, machine.footprint))
+        placements.append(Placement(machine_id=machine.id, cell=origin, orientation=orientation))
 
     return PlacementResult(placements=tuple(placements))
 

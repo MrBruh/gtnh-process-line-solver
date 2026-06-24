@@ -99,6 +99,18 @@ def test_unknown_recipe_raises() -> None:
         to_input_ir(plan)
 
 
+def test_multi_instance_node_is_rejected() -> None:
+    # machineCount > 1 cannot be mapped yet: a net endpoint can't address one instance of a
+    # group, so the adapter fails loud rather than emit a placed-but-unwired layout.
+    plan = Plan(
+        schema_version=1,
+        recipes=[Recipe(id="r", machine_type="M", outputs=[_resource("item", "x")])],
+        nodes=[Node(id="n", recipe_id="r", overclock_tier="LV", machine_count=2)],
+    )
+    with pytest.raises(AdapterError):
+        to_input_ir(plan)
+
+
 def test_unsupported_resource_kind_raises() -> None:
     plan = Plan(
         schema_version=1,

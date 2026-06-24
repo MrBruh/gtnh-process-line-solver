@@ -118,11 +118,11 @@ def _check_placements(problem: InputIR, layout: LayoutResult, out: list[Violatio
                 owner[cell] = pl.machine_id
 
     for m in problem.machines:
-        if counts[m.id] != m.count:
+        if counts[m.id] != 1:
             out.append(
                 Violation(
                     ViolationCode.PLACEMENT_COUNT_MISMATCH,
-                    f"machine {m.id!r} expects {m.count} placement(s), found {counts[m.id]}",
+                    f"machine {m.id!r} expects exactly one placement, found {counts[m.id]}",
                 )
             )
 

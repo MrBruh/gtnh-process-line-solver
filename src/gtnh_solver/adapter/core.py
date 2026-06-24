@@ -1,8 +1,9 @@
 """Map a gtnh-factory-flow exported plan to the solver's ``InputIR``.
 
 Mapping (see docs/ARCHITECTURE.md, docs/IR.md):
-- ``node``    -> ``Machine`` (recipe.machineType -> type, overclockTier -> voltage_tier,
-                machineCount -> count); recipe inputs/outputs -> item/fluid ``Port``s.
+- ``node``    -> ``Machine`` (recipe.machineType -> type, overclockTier -> voltage_tier);
+                recipe inputs/outputs -> item/fluid ``Port``s. ``machineCount`` must be 1 -
+                multi-instance nodes are rejected (see the Phase 1 note below).
 - ``storage`` -> a boundary ``Machine`` typed **Super Chest** (items) or **Super Tank**
                 (fluids) - blocks that take I/O covers on their faces, so every cover rides a
                 machine/storage face and never a pipe (a deliberate Phase 1 simplification).
@@ -14,10 +15,13 @@ Mapping (see docs/ARCHITECTURE.md, docs/IR.md):
                 recipe rate.
 
 Crude-on-purpose for Phase 1 (docs/ROADMAP.md): single-block 1x1x1 footprints and default
-orientations for every machine (real footprints/faces come from the dataset lane), and **power
-is not synthesized yet** (the export carries ``eut`` but no power source; power nets are a
-follow-up). The InputIR's own referential-integrity check is the validation gate: a dangling
-edge or commodity mismatch fails loud here, which is the adapter contract (docs/TESTING.md).
+orientations for every machine (real footprints/faces come from the dataset lane), **power is
+not synthesized yet** (the export carries ``eut`` but no power source; power nets are a
+follow-up), and **multi-instance nodes (``machineCount > 1``) are rejected** rather than
+mapped - a net endpoint cannot address one instance of a group until routing is instance-aware
+(InputIR v1 dropped ``Machine.count``; see ``ir/__init__.py``, docs/ROADMAP.md). The InputIR's
+own referential-integrity check is the validation gate: a dangling edge or commodity mismatch
+fails loud here, which is the adapter contract (docs/TESTING.md).
 """
 
 from __future__ import annotations
@@ -76,6 +80,12 @@ def to_input_ir(plan: Plan) -> InputIR:
         recipe = recipes.get(node.recipe_id)
         if recipe is None:
             raise AdapterError(f"node {node.id!r} references unknown recipe {node.recipe_id!r}")
+        if node.machine_count != 1:
+            raise AdapterError(
+                f"node {node.id!r} has machineCount={node.machine_count}; multi-instance nodes "
+                f"are not supported yet (instance-aware routing is Phase 2 - see docs/ROADMAP.md). "
+                f"Split it into single-machine nodes in the export."
+            )
         machines.append(
             Machine(
                 id=node.id,
@@ -84,7 +94,6 @@ def to_input_ir(plan: Plan) -> InputIR:
                 faces=FaceSpec(ports=_recipe_ports(recipe)),
                 voltage_tier=node.overclock_tier,
                 orientation_options=_DEFAULT_ORIENTATIONS,
-                count=node.machine_count,
             )
         )
 
@@ -98,7 +107,6 @@ def to_input_ir(plan: Plan) -> InputIR:
                 faces=FaceSpec(ports=storage_ports.get(storage.id, [])),
                 voltage_tier=_STORAGE_TIER,
                 orientation_options=_DEFAULT_ORIENTATIONS,
-                count=1,
             )
         )
 

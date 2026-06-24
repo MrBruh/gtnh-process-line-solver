@@ -23,7 +23,7 @@ from .enums import HORIZONTAL_FACINGS, Commodity, Facing, IODirection
 from .geometry import CellBox, CellCoord
 
 #: Bump on any breaking change to the input contract; record it in ``ir/__init__.py``.
-INPUT_IR_VERSION = 0
+INPUT_IR_VERSION = 1
 
 
 class Port(StrictModel):
@@ -69,8 +69,16 @@ class FaceSpec(StrictModel):
 
 
 class Machine(StrictModel):
-    """A machine instance group to place. ``count`` identical copies (from the
-    gtnh-factory-flow balance) share this spec; placement expands them."""
+    """A single machine to place at one position.
+
+    Multi-instance machine groups (the gtnh-factory-flow balance can call for N identical
+    copies of a recipe) are **not modelled yet**: a net endpoint (``MachineFaceRef``) cannot
+    address one instance of a group, so the placer/router/validator could only drop the copies
+    and leave the extras silently unwired. Until instance-aware routing exists (Phase 2,
+    docs/ROADMAP.md) each ``Machine`` is exactly one instance, and the adapter rejects an export
+    ``machineCount > 1`` rather than emit an under-wired layout. (``count`` was dropped in
+    InputIR v1; see ``ir/__init__.py``.)
+    """
 
     id: str = Field(min_length=1)
     type: str = Field(min_length=1)  # GT machine id; keys into the physical-rules dataset
@@ -78,7 +86,6 @@ class Machine(StrictModel):
     faces: FaceSpec = Field(default_factory=FaceSpec)
     voltage_tier: str = Field(min_length=1)  # LV/MV/HV/... - sets cable voltage rating
     orientation_options: list[Facing] = Field(min_length=1)
-    count: int = Field(default=1, ge=1)
 
     @model_validator(mode="after")
     def _check(self) -> Machine:

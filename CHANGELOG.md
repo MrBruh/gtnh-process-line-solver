@@ -67,6 +67,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   templates.
 
 ### Changed
+- **InputIR bumped to v1 (breaking): dropped `Machine.count`.** Multi-instance machine groups
+  are not modelled until routing is instance-aware (Phase 2): the placer expanded `count` into
+  N placements sharing one machine id, but a `MachineFaceRef` cannot address a specific
+  instance, so the router/solver/validator collapsed the copies via `setdefault` and left the
+  extras silently unwired. Each `Machine` is now exactly one instance; the adapter rejects an
+  export `machineCount > 1` with an explicit `AdapterError` instead of emitting an under-wired
+  layout. (`ir/`, `adapter/`, `placement/`, `validator/`.)
 - **CI expanded** to a single static-checks job (via pre-commit), a Python 3.10-3.13 test
   matrix with a coverage gate (`--cov-fail-under=90`), and an advisory (non-blocking)
   Conventional-Commits check on PRs. Ruff now runs a curated lint rule set plus

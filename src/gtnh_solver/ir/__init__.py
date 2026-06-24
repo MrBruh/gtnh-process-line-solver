@@ -96,4 +96,12 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   list[AutoConnection]`. A net is satisfied by EITHER a pipe `Route` OR an
 #   `AutoConnection` (adjacent machines auto-feeding, no pipe). Machine `orientation` is
 #   horizontal-only (GT machines never face up/down).
+#
+# InputIR v1 (BREAKING) - dropped `Machine.count`. Multi-instance machine groups are not
+#   supported until instance-aware routing exists (Phase 2): the placer expanded `count` into
+#   N placements sharing one machine id, but the router/solver/validator collapsed them via
+#   `setdefault` and a `MachineFaceRef` cannot address a specific instance - counted machines
+#   were placed yet silently left unwired. Each `Machine` is now exactly one instance; the
+#   adapter rejects an export `machineCount > 1` with an explicit `AdapterError`. `count`
+#   returns once routing is instance-aware.
 # ---------------------------------------------------------------------------

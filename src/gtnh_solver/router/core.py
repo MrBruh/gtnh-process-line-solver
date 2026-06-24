@@ -61,7 +61,7 @@ def route(
     machines = {m.id: m for m in problem.machines}
     placement_by_machine: dict[str, Placement] = {}
     for placement in placements:
-        placement_by_machine.setdefault(placement.machine_id, placement)  # count==1 in Phase 1
+        placement_by_machine.setdefault(placement.machine_id, placement)  # one placement/machine
     region = problem.bounding_region
 
     obstacles: set[Cell] = {(c.x, c.y, c.z) for c in problem.reserved_cells}

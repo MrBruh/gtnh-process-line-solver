@@ -31,7 +31,8 @@ Machine
   faces: FaceSpec                   # see DOMAIN.md: front (no I/O) + 5 usable
   voltage_tier: str                 # LV/MV/HV/... - sets cable voltage rating
   orientation_options: [Facing]     # solver picks one (front-face direction); >= 1
-  count: int                        # how many of this machine (from gtnh-factory-flow balance); >= 1
+                                    # one instance per Machine; `count` was dropped in v1 -
+                                    # multi-instance groups need instance-aware routing (Phase 2)
 
 FaceSpec     { ports: [Port] }      # catalog of required I/O; the physical face is a solver choice
 Port
