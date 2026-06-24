@@ -9,9 +9,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.ir import (
     CellBox,
+    CellCoord,
     Commodity,
     FaceSpec,
     Facing,
@@ -22,7 +25,11 @@ from gtnh_solver.ir import (
     MachineFaceRef,
     Net,
     Port,
+    Route,
+    Segment,
 )
+from gtnh_solver.router import RouteResult
+from gtnh_solver.solver import core as solver_core
 from gtnh_solver.solver import solve
 from gtnh_solver.validator import validate
 
@@ -112,3 +119,46 @@ def test_solve_fork_auto_outputs_one_and_pipes_the_other() -> None:
     assert validate(problem, layout).ok
     assert len(layout.auto_connections) == 1  # one auto-output...
     assert len(layout.routes) == 1  # ...and the rest piped
+
+
+def test_solve_downgrades_when_assembled_layout_fails_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # place.ok && route.ok alone never proved the layout sound. With a buggy router that emits
+    # a geometrically invalid route, solve() must run its own output through the independent
+    # validator and downgrade VALID -> partial_invalid instead of passing it off as valid.
+    problem = InputIR(
+        bounding_region=CellBox(sx=4, sy=4, sz=4),
+        machines=[
+            Machine(
+                id="mp",
+                type="t",
+                voltage_tier="LV",
+                orientation_options=[Facing.NORTH],
+                faces=FaceSpec(
+                    ports=[Port(id="pwr", commodity=Commodity.POWER, direction=IODirection.INPUT)]
+                ),
+            )
+        ],
+        nets=[
+            Net(
+                id="np",
+                commodity=Commodity.POWER,
+                throughput=32.0,
+                endpoints=[MachineFaceRef(machine_id="mp", port_id="pwr")],
+            )
+        ],
+    )
+    teleport = Route(  # a single segment that jumps two cells - the validator must reject it
+        net_id="np",
+        commodity=Commodity.POWER,
+        segments=[Segment(start=CellCoord(x=0, y=0, z=1), end=CellCoord(x=0, y=0, z=3), channel=0)],
+        thickness_per_segment=[8],
+    )
+    monkeypatch.setattr(solver_core, "route", lambda *a, **k: RouteResult(routes=(teleport,)))
+
+    layout = solve(problem)
+    assert layout.status is LayoutStatus.PARTIAL_INVALID
+    assert layout.infeasibility is not None
+    assert layout.infeasibility.constraint == "validation"
+    assert validate(problem, layout).ok is False  # the bad route is preserved, not silently dropped

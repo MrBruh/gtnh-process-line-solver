@@ -96,5 +96,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   must resolve, and power/ME-routed commodities cannot be auto-output. New violation codes
   (`route_segment_not_unit`, `route_through_machine`, `route_on_reserved`,
   `auto_output_wrong_endpoints`, `auto_output_illegal_commodity`) with one negative test each.
+- **`solve()` now validates its own output.** It previously returned `valid` whenever
+  placement and routing each reported success, without ever running the independent validator -
+  so the "never returns a silently-invalid layout" promise was not enforced end to end. `solve`
+  now runs `validate()` on the assembled layout and downgrades a `valid` result to
+  `partial_invalid` (carrying the violation) if anything is proven wrong.
 
 [Unreleased]: https://github.com/MrBruh/gtnh-process-line-solver/commits/main

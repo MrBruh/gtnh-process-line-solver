@@ -6,7 +6,12 @@ The Phase 1 orchestration (docs/ROADMAP.md):
      target's input face, no pipe and no cover (GT's free connection; one auto-output per
      machine, items XOR fluids - docs/DOMAIN.md);
   3. route pipes for the nets auto-output could NOT cover;
-  4. assemble the LayoutResult (or surface the placement/routing infeasibility).
+  4. assemble the LayoutResult (or surface the placement/routing infeasibility);
+  5. **validate the assembled layout against the independent validator** and downgrade a
+     VALID result to ``partial_invalid`` if it proves any violation. The validator's logic is
+     written independently of the placer/router precisely to catch their bugs, so running it on
+     our own output is what makes the "never returns a silently-invalid layout" promise true
+     end to end (docs/ARCHITECTURE.md #4) - not just an internal `place.ok && route.ok`.
 
 Auto-output is preferred because it is what a player actually builds for a simple chain: a row
 of adjacent machines feeding each other needs zero pipes. Pipes are only for what is left -
@@ -19,6 +24,7 @@ from gtnh_solver.ir import (
     AutoConnection,
     Commodity,
     Facing,
+    Infeasibility,
     InputIR,
     IODirection,
     LayoutResult,
@@ -29,6 +35,7 @@ from gtnh_solver.ir import (
 from gtnh_solver.ir.geometry import FACE_DELTAS, OPPOSITE_FACE, occupied_cells
 from gtnh_solver.placement import place
 from gtnh_solver.router import route
+from gtnh_solver.validator import ValidationReport, validate
 
 
 def solve(problem: InputIR, *, seed: int = 0) -> LayoutResult:
@@ -51,12 +58,43 @@ def solve(problem: InputIR, *, seed: int = 0) -> LayoutResult:
             auto_connections=autos,
         )
 
-    return LayoutResult(
+    layout = LayoutResult(
         status=LayoutStatus.VALID,
         seed=seed,
         placements=list(placement.placements),
         routes=list(routing.routes),
         auto_connections=autos,
+    )
+    # The placer and router each report success on their own terms; the validator is the only
+    # gate written independently of them, so run it on the assembled layout before claiming
+    # VALID. If it proves a violation, that is a bug in our own output - surface it as
+    # partial_invalid rather than handing back a silently-invalid layout.
+    report = validate(problem, layout)
+    if not report.ok:
+        return LayoutResult(
+            status=LayoutStatus.PARTIAL_INVALID,
+            seed=seed,
+            infeasibility=_validation_infeasibility(report),
+            placements=list(placement.placements),
+            routes=list(routing.routes),
+            auto_connections=autos,
+        )
+    return layout
+
+
+def _validation_infeasibility(report: ValidationReport) -> Infeasibility:
+    """An Infeasibility describing why our own assembled layout failed independent validation."""
+    codes = ", ".join(v.code.value for v in report.violations)
+    return Infeasibility(
+        constraint="validation",
+        detail=(
+            f"the assembled layout failed independent validation "
+            f"({len(report.violations)} violation(s): {codes})"
+        ),
+        suggested_relaxation=(
+            "this indicates a solver/router bug - the placement or routes are geometrically "
+            "invalid; report it with the failing input"
+        ),
     )
 
 
