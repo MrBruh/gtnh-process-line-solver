@@ -81,4 +81,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   export/throughput/dataset path) and snapshot a known-good dataset + sample exports
   as fixtures so the solver is decoupled from the fork's health.
 
+### Removed
+- Dropped the unused `networkx` and `numpy` core runtime dependencies - neither was
+  imported anywhere in the implementation. They will be re-added if and when the Phase 2
+  optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
+
 [Unreleased]: https://github.com/MrBruh/gtnh-process-line-solver/commits/main
