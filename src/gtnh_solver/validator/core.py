@@ -11,11 +11,15 @@ What is checked now (needs only the IR):
   completeness/referential - every machine placed the right number of times with a legal
   orientation; every physically-routed net routed exactly once; ME-toggled commodities not
   routed; route commodity matches its net.
-  geometry - machines in-bounds, non-overlapping, off reserved cells; routes in-bounds and
-  contiguous; pinned I/O actually sits on its net's route.
+  geometry - machines in-bounds, non-overlapping, off reserved cells; routes in-bounds,
+  contiguous, every segment a unit (+/-1) hop, and never running through a machine body or a
+  reserved cell; pinned I/O actually sits on its net's route.
   terminals - every net endpoint has a terminal on a usable (non-front) face adjacent to its
   machine, and that terminal cell lies on the route (the geometric half of required-I/O-face
   reachability).
+  auto-output - every auto-connection joins its net's real OUTPUT->INPUT endpoint machines
+  (resolved by port direction) on adjacent usable faces; power/ME commodities cannot
+  auto-output, and a machine has at most one auto-output face.
   power - per-segment cable thickness is present and well-formed (1/2/4/8/16, aligned).
 
 What is deferred to the dataset lane (rule data not available yet) - TODO:
@@ -28,9 +32,25 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from gtnh_solver.ir import Commodity, InputIR, LayoutResult, Placement
+from gtnh_solver.ir import (
+    AutoConnection,
+    Commodity,
+    InputIR,
+    IODirection,
+    LayoutResult,
+    Net,
+    Placement,
+)
 
-from ._geometry import FACE_DELTAS, OPPOSITE_FACE, Cell, in_region, is_connected, occupied_cells
+from ._geometry import (
+    FACE_DELTAS,
+    OPPOSITE_FACE,
+    Cell,
+    in_region,
+    is_connected,
+    is_unit_step,
+    occupied_cells,
+)
 from .report import ValidationReport, Violation, ViolationCode
 
 
@@ -110,6 +130,13 @@ def _check_placements(problem: InputIR, layout: LayoutResult, out: list[Violatio
 def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
     nets = {n.id: n for n in problem.nets}
     region = problem.bounding_region
+    reserved = {(c.x, c.y, c.z) for c in problem.reserved_cells}
+    machines = {m.id: m for m in problem.machines}
+    body_cells: set[Cell] = set()
+    for pl in layout.placements:
+        m = machines.get(pl.machine_id)
+        if m is not None:
+            body_cells.update(occupied_cells(pl.cell, m.footprint))
     routed: set[str] = set()
 
     for r in layout.routes:
@@ -144,11 +171,14 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
                 )
             )
 
+        edges: list[tuple[Cell, Cell]] = []
+        route_cells: set[Cell] = set()
         for seg in r.segments:
-            for cell in (
-                (seg.start.x, seg.start.y, seg.start.z),
-                (seg.end.x, seg.end.y, seg.end.z),
-            ):
+            start = (seg.start.x, seg.start.y, seg.start.z)
+            end = (seg.end.x, seg.end.y, seg.end.z)
+            edges.append((start, end))
+            route_cells.update((start, end))
+            for cell in (start, end):
                 if not in_region(cell, region):
                     out.append(
                         Violation(
@@ -156,13 +186,14 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
                             f"route for net {r.net_id!r} passes through {cell}, out of bounds",
                         )
                     )
-        edges = [
-            (
-                (seg.start.x, seg.start.y, seg.start.z),
-                (seg.end.x, seg.end.y, seg.end.z),
-            )
-            for seg in r.segments
-        ]
+            if not is_unit_step(start, end):
+                out.append(
+                    Violation(
+                        ViolationCode.ROUTE_SEGMENT_NOT_UNIT,
+                        f"route for net {r.net_id!r} has a non-unit segment {start}->{end} "
+                        f"(a route hop must move exactly one cell)",
+                    )
+                )
         if not is_connected(edges):
             out.append(
                 Violation(
@@ -170,6 +201,24 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
                     f"route for net {r.net_id!r} is empty or not a single connected path",
                 )
             )
+        # A coarse cell that the placer/router treats as solid must not also carry a route -
+        # the abstraction would otherwise certify a pipe running through a machine body or a
+        # reserved cell (docs/ARCHITECTURE.md: cell->block realizability).
+        for cell in sorted(route_cells):
+            if cell in body_cells:
+                out.append(
+                    Violation(
+                        ViolationCode.ROUTE_THROUGH_MACHINE,
+                        f"route for net {r.net_id!r} passes through a machine body at {cell}",
+                    )
+                )
+            if cell in reserved:
+                out.append(
+                    Violation(
+                        ViolationCode.ROUTE_ON_RESERVED,
+                        f"route for net {r.net_id!r} passes through reserved cell {cell}",
+                    )
+                )
 
         if r.commodity is Commodity.POWER:
             tps = r.thickness_per_segment
@@ -271,6 +320,8 @@ def _check_terminals(problem: InputIR, layout: LayoutResult, out: list[Violation
 
 def _check_auto_connections(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
     machines = {m.id: m for m in problem.machines}
+    nets = {n.id: n for n in problem.nets}
+    port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
     placement_of: dict[str, Placement] = {}
     for pl in layout.placements:
         placement_of.setdefault(pl.machine_id, pl)
@@ -278,6 +329,16 @@ def _check_auto_connections(problem: InputIR, layout: LayoutResult, out: list[Vi
 
     for ac in layout.auto_connections:
         source_uses[ac.source_machine_id] += 1
+        net = nets.get(ac.net_id)
+        if net is None:
+            out.append(
+                Violation(
+                    ViolationCode.UNKNOWN_NET,
+                    f"auto-connection references unknown net {ac.net_id!r}",
+                )
+            )
+        else:
+            _check_auto_net(problem, net, ac, port_dir, out)
         sp = placement_of.get(ac.source_machine_id)
         sm = machines.get(ac.source_machine_id)
         tp = placement_of.get(ac.target_machine_id)
@@ -312,6 +373,55 @@ def _check_auto_connections(problem: InputIR, layout: LayoutResult, out: list[Vi
                     f"machine {machine_id!r} auto-outputs to {uses} nets (only one auto-output face)",
                 )
             )
+
+
+def _check_auto_net(
+    problem: InputIR,
+    net: Net,
+    ac: AutoConnection,
+    port_dir: dict[tuple[str, str], IODirection],
+    out: list[Violation],
+) -> None:
+    """Check an auto-connection actually satisfies its claimed net (not just any two machines).
+
+    Geometry alone is not enough: a layout could claim net ``n`` is auto-connected by two
+    adjacent machines that are not even ``n``'s endpoints. So the net must be a routable
+    item/fluid commodity, and ``source``/``target`` must be the net's real OUTPUT and INPUT
+    endpoint machines (resolved by port direction).
+    """
+    if net.commodity is Commodity.POWER or problem.me_toggles.toggled(net.commodity):
+        reason = (
+            "power is a shared-amperage net, not a face auto-output"
+            if net.commodity is Commodity.POWER
+            else "the commodity is ME-routed, not physically connected"
+        )
+        out.append(
+            Violation(
+                ViolationCode.AUTO_OUTPUT_ILLEGAL_COMMODITY,
+                f"net {ac.net_id!r} ({net.commodity.value}) cannot be satisfied by "
+                f"auto-output - {reason}",
+            )
+        )
+        return
+    out_machines = {
+        e.machine_id
+        for e in net.endpoints
+        if port_dir.get((e.machine_id, e.port_id)) is IODirection.OUTPUT
+    }
+    in_machines = {
+        e.machine_id
+        for e in net.endpoints
+        if port_dir.get((e.machine_id, e.port_id)) is IODirection.INPUT
+    }
+    if ac.source_machine_id not in out_machines or ac.target_machine_id not in in_machines:
+        out.append(
+            Violation(
+                ViolationCode.AUTO_OUTPUT_WRONG_ENDPOINTS,
+                f"auto-output for net {ac.net_id!r}: "
+                f"{ac.source_machine_id!r}->{ac.target_machine_id!r} are not the net's "
+                f"output->input endpoint machines",
+            )
+        )
 
 
 def _check_pinned(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:

@@ -190,6 +190,35 @@ def _pinned_off_route(p: InputIR, layout: LayoutResult) -> tuple[InputIR, Layout
     return p.model_copy(update={"pinned": [pin]}), layout
 
 
+def _segment_not_unit(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    # one segment jumps two cells (1,0,2)->(3,0,2): a single connected edge, so the old
+    # connectivity-only check passed it - a "teleport" the unit-step check must reject.
+    r = layout.routes[0].model_copy(
+        update={"segments": [Segment(start=_coord(1, 0, 2), end=_coord(3, 0, 2), channel=0)]}
+    )
+    return p, layout.model_copy(update={"routes": [r]})
+
+
+def _route_through_machine(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    # a unit-step, connected route that detours through m1's own body cell (1,0,1)
+    r = layout.routes[0].model_copy(
+        update={
+            "segments": [
+                Segment(start=_coord(1, 0, 2), end=_coord(1, 0, 1), channel=0),  # into m1's body
+                Segment(start=_coord(1, 0, 1), end=_coord(2, 0, 1), channel=0),
+                Segment(start=_coord(2, 0, 1), end=_coord(2, 0, 2), channel=0),
+                Segment(start=_coord(2, 0, 2), end=_coord(3, 0, 2), channel=0),
+            ]
+        }
+    )
+    return p, layout.model_copy(update={"routes": [r]})
+
+
+def _route_on_reserved(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    # reserve a cell the (unchanged) route already runs through
+    return p.model_copy(update={"reserved_cells": [_coord(2, 0, 2)]}), layout
+
+
 def _replace_first_terminal(layout: LayoutResult, **update: object) -> LayoutResult:
     r = layout.routes[0]
     bad = r.terminals[0].model_copy(update=update)
@@ -229,6 +258,9 @@ BAD_CASES: list[tuple[str, Mutator, ViolationCode]] = [
     ("missing_connection", _missing_route, ViolationCode.MISSING_CONNECTION),
     ("route_oob", _route_oob, ViolationCode.ROUTE_OUT_OF_BOUNDS),
     ("discontinuous", _discontinuous, ViolationCode.ROUTE_DISCONTINUOUS),
+    ("segment_not_unit", _segment_not_unit, ViolationCode.ROUTE_SEGMENT_NOT_UNIT),
+    ("route_through_machine", _route_through_machine, ViolationCode.ROUTE_THROUGH_MACHINE),
+    ("route_on_reserved", _route_on_reserved, ViolationCode.ROUTE_ON_RESERVED),
     ("pinned_off_route", _pinned_off_route, ViolationCode.PINNED_IO_NOT_ON_ROUTE),
     ("missing_terminal", _missing_terminal, ViolationCode.MISSING_TERMINAL),
     ("terminal_on_front", _terminal_on_front, ViolationCode.TERMINAL_ON_FRONT_FACE),
@@ -408,10 +440,42 @@ def _auto_duplicate(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutRe
     return p, layout.model_copy(update={"auto_connections": [ac, ac]})  # m1 auto-outputs twice
 
 
+def _auto_wrong_endpoints(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    # geometry is fine (m2 auto-outputs west into the adjacent m1), but that reverses the net's
+    # real output->input direction: m1 is the source, m2 the sink. Two unrelated adjacent
+    # machines must not be able to "claim" a net they are not the endpoints of.
+    ac = layout.auto_connections[0].model_copy(
+        update={
+            "source_machine_id": "m2",
+            "source_face": Facing.WEST,
+            "target_machine_id": "m1",
+            "target_face": Facing.EAST,
+        }
+    )
+    return p, layout.model_copy(update={"auto_connections": [ac]})
+
+
+def _auto_illegal_commodity(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    # an ME-routed commodity lives on the ME network; it must not be physically auto-connected
+    return p.model_copy(update={"me_toggles": METoggles(items=True)}), layout
+
+
+def _auto_unknown_net(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    ac = layout.auto_connections[0].model_copy(update={"net_id": "ghost"})
+    return p, layout.model_copy(update={"auto_connections": [ac]})
+
+
 AUTO_BAD_CASES: list[tuple[str, Mutator, ViolationCode]] = [
     ("auto_front", _auto_front, ViolationCode.AUTO_OUTPUT_ON_FRONT_FACE),
     ("auto_not_adjacent", _auto_not_adjacent, ViolationCode.AUTO_OUTPUT_NOT_ADJACENT),
     ("auto_duplicate", _auto_duplicate, ViolationCode.DUPLICATE_AUTO_OUTPUT),
+    ("auto_wrong_endpoints", _auto_wrong_endpoints, ViolationCode.AUTO_OUTPUT_WRONG_ENDPOINTS),
+    (
+        "auto_illegal_commodity",
+        _auto_illegal_commodity,
+        ViolationCode.AUTO_OUTPUT_ILLEGAL_COMMODITY,
+    ),
+    ("auto_unknown_net", _auto_unknown_net, ViolationCode.UNKNOWN_NET),
 ]
 
 

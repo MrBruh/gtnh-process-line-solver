@@ -86,4 +86,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   imported anywhere in the implementation. They will be re-added if and when the Phase 2
   optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
 
+### Fixed
+- **Validator route + auto-connection soundness holes** - the only automated correctness gate
+  was certifying some geometrically-impossible layouts. Routes are now checked for unit-step
+  segments (a single segment can no longer "teleport" two cells across a machine - connectivity
+  alone missed it), and no route cell may sit inside a machine body or on a reserved cell.
+  Auto-connections are now checked against the net they claim to satisfy: the connection must
+  join that net's real OUTPUT->INPUT endpoint machines (resolved by port direction), `net_id`
+  must resolve, and power/ME-routed commodities cannot be auto-output. New violation codes
+  (`route_segment_not_unit`, `route_through_machine`, `route_on_reserved`,
+  `auto_output_wrong_endpoints`, `auto_output_illegal_commodity`) with one negative test each.
+
 [Unreleased]: https://github.com/MrBruh/gtnh-process-line-solver/commits/main

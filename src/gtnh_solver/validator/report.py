@@ -32,6 +32,9 @@ class ViolationCode(str, Enum):
     MACHINE_ON_RESERVED = "machine_on_reserved"
     ROUTE_OUT_OF_BOUNDS = "route_out_of_bounds"
     ROUTE_DISCONTINUOUS = "route_discontinuous"
+    ROUTE_SEGMENT_NOT_UNIT = "route_segment_not_unit"  # a segment is not a single unit hop
+    ROUTE_THROUGH_MACHINE = "route_through_machine"  # a route cell sits inside a machine body
+    ROUTE_ON_RESERVED = "route_on_reserved"  # a route cell sits on a reserved cell
     PINNED_IO_NOT_ON_ROUTE = "pinned_io_not_on_route"
     # terminals / required-I/O-face reachability
     MISSING_TERMINAL = "missing_terminal"
@@ -42,6 +45,8 @@ class ViolationCode(str, Enum):
     AUTO_OUTPUT_ON_FRONT_FACE = "auto_output_on_front_face"
     AUTO_OUTPUT_NOT_ADJACENT = "auto_output_not_adjacent"
     DUPLICATE_AUTO_OUTPUT = "duplicate_auto_output"
+    AUTO_OUTPUT_WRONG_ENDPOINTS = "auto_output_wrong_endpoints"  # not the net's out->in machines
+    AUTO_OUTPUT_ILLEGAL_COMMODITY = "auto_output_illegal_commodity"  # power/ME can't auto-output
     # power (independent re-check of the shared-amperage primitive's output shape)
     POWER_THICKNESS_INVALID = "power_thickness_invalid"
 

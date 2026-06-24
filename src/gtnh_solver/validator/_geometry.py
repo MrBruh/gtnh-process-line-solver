@@ -12,7 +12,26 @@ from collections.abc import Iterable
 
 from gtnh_solver.ir.geometry import FACE_DELTAS, OPPOSITE_FACE, Cell, in_region, occupied_cells
 
-__all__ = ["FACE_DELTAS", "OPPOSITE_FACE", "Cell", "in_region", "is_connected", "occupied_cells"]
+__all__ = [
+    "FACE_DELTAS",
+    "OPPOSITE_FACE",
+    "Cell",
+    "in_region",
+    "is_connected",
+    "is_unit_step",
+    "occupied_cells",
+]
+
+
+def is_unit_step(a: Cell, b: Cell) -> bool:
+    """Whether ``a`` and ``b`` are exactly one axis-aligned cell apart (a legal single hop).
+
+    A :class:`~gtnh_solver.ir.Segment` must be a unit Manhattan step; connectivity alone does
+    not catch a single segment that "teleports" two cells (or diagonally) across a machine -
+    that route would still be one connected component. The validator checks every segment with
+    this so such a jump is rejected, not certified.
+    """
+    return abs(a[0] - b[0]) + abs(a[1] - b[1]) + abs(a[2] - b[2]) == 1
 
 
 def is_connected(edges: Iterable[tuple[Cell, Cell]]) -> bool:
