@@ -28,7 +28,7 @@ from gtnh_solver.ir import (
     Port,
 )
 from gtnh_solver.placement import place
-from gtnh_solver.router import route
+from gtnh_solver.router import route, route_power
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
 
@@ -81,13 +81,22 @@ def _at(mid: str, x: int, y: int, z: int) -> Placement:
 
 
 def test_route_sand_full_slice_validates() -> None:
+    # The generic router handles item/fluid; the power router handles power. Together they
+    # cover every net of the sand line, and the combined layout validates.
     ir = adapt_file(_SAND)
     pr = place(ir)
     rr = route(ir, pr.placements)
+    pwr = route_power(ir, pr.placements)
     assert rr.ok
-    assert len(rr.routes) == len(ir.nets)
+    assert pwr.ok
+    assert all(r.commodity is not Commodity.POWER for r in rr.routes)  # power is not its job
+    assert all(r.commodity is Commodity.POWER for r in pwr.routes)
+    assert len(rr.routes) + len(pwr.routes) == len(ir.nets)
     layout = LayoutResult(
-        status=LayoutStatus.VALID, seed=0, placements=list(pr.placements), routes=list(rr.routes)
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=list(pr.placements),
+        routes=[*rr.routes, *pwr.routes],
     )
     assert validate(ir, layout).ok, str(validate(ir, layout))
 
@@ -171,7 +180,8 @@ def test_route_infeasible_when_endpoint_has_no_placement() -> None:
     assert result.infeasibility is not None
 
 
-def test_route_power_net_gets_unit_thickness() -> None:
+def test_route_skips_power_commodity() -> None:
+    # The generic router no longer routes power - that is router.power's job (router.power).
     a = _machine("a", [Port(id="pa", commodity=Commodity.POWER, direction=IODirection.OUTPUT)])
     b = _machine("b", [Port(id="pb", commodity=Commodity.POWER, direction=IODirection.INPUT)])
     net = Net(
@@ -184,14 +194,6 @@ def test_route_power_net_gets_unit_thickness() -> None:
         ],
     )
     problem = InputIR(bounding_region=CellBox(sx=8, sy=4, sz=8), machines=[a, b], nets=[net])
-    placements = [_at("a", 1, 0, 1), _at("b", 3, 0, 1)]
-    result = route(problem, placements)
+    result = route(problem, [_at("a", 1, 0, 1), _at("b", 3, 0, 1)])
     assert result.ok
-    thickness = result.routes[0].thickness_per_segment
-    assert thickness is not None
-    assert len(thickness) == len(result.routes[0].segments)
-    assert all(t == 1 for t in thickness)
-    layout = LayoutResult(
-        status=LayoutStatus.VALID, seed=0, placements=placements, routes=list(result.routes)
-    )
-    assert validate(problem, layout).ok
+    assert result.routes == ()  # the power net is left for the power router

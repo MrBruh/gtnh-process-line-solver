@@ -1,9 +1,9 @@
 """Map a gtnh-factory-flow exported plan to the solver's ``InputIR``.
 
 Mapping (see docs/ARCHITECTURE.md, docs/IR.md):
-- ``node``    -> ``Machine`` (recipe.machineType -> type, overclockTier -> voltage_tier);
-                recipe inputs/outputs -> item/fluid ``Port``s. ``machineCount`` must be 1 -
-                multi-instance nodes are rejected (see the Phase 1 note below).
+- ``node``    -> ``Machine`` (recipe.machineType -> type, overclockTier -> voltage_tier,
+                recipe.eut -> eut); recipe inputs/outputs -> item/fluid ``Port``s.
+                ``machineCount`` must be 1 - multi-instance nodes are rejected (see below).
 - ``storage`` -> a boundary ``Machine`` typed **Super Chest** (items) or **Super Tank**
                 (fluids) - blocks that take I/O covers on their faces, so every cover rides a
                 machine/storage face and never a pipe (a deliberate Phase 1 simplification).
@@ -13,15 +13,16 @@ Mapping (see docs/ARCHITECTURE.md, docs/IR.md):
 - ``edge``    -> ``Net`` (resourceKind -> commodity, resourceId -> fluid_or_item); endpoints
                 reference the matching out/in ports; typed throughput is computed from the
                 recipe rate.
+- ``power``   -> synthesized, not in the export: a source machine + shared-amperage net per
+                voltage tier feed the powered machines (``power`` submodule, docs/DOMAIN.md).
 
 Crude-on-purpose for Phase 1 (docs/ROADMAP.md): single-block 1x1x1 footprints and default
-orientations for every machine (real footprints/faces come from the dataset lane), **power is
-not synthesized yet** (the export carries ``eut`` but no power source; power nets are a
-follow-up), and **multi-instance nodes (``machineCount > 1``) are rejected** rather than
-mapped - a net endpoint cannot address one instance of a group until routing is instance-aware
-(InputIR v1 dropped ``Machine.count``; see ``ir/__init__.py``, docs/ROADMAP.md). The InputIR's
-own referential-integrity check is the validation gate: a dangling edge or commodity mismatch
-fails loud here, which is the adapter contract (docs/TESTING.md).
+orientations for every machine (real footprints/faces come from the dataset lane), and
+**multi-instance nodes (``machineCount > 1``) are rejected** rather than mapped - a net endpoint
+cannot address one instance of a group until routing is instance-aware (InputIR v1 dropped
+``Machine.count``; see ``ir/__init__.py``, docs/ROADMAP.md). The InputIR's own
+referential-integrity check is the validation gate: a dangling edge or commodity mismatch fails
+loud here, which is the adapter contract (docs/TESTING.md).
 """
 
 from __future__ import annotations
@@ -43,6 +44,7 @@ from gtnh_solver.ir import (
 )
 
 from .plan import Edge, Node, Plan, Recipe
+from .power import synthesize_power
 
 # Crude single-block physical defaults until the dataset lane provides real footprints/faces.
 _DEFAULT_FOOTPRINT = CellBox()  # 1x1x1
@@ -94,6 +96,7 @@ def to_input_ir(plan: Plan) -> InputIR:
                 faces=FaceSpec(ports=_recipe_ports(recipe)),
                 voltage_tier=node.overclock_tier,
                 orientation_options=_DEFAULT_ORIENTATIONS,
+                eut=recipe.eut,  # EU/t draw; the power synthesis sizes amperage from this
             )
         )
 
@@ -111,6 +114,7 @@ def to_input_ir(plan: Plan) -> InputIR:
         )
 
     nets = [_net_for_edge(edge, nodes_by_id, recipes) for edge in plan.edges]
+    machines, nets = synthesize_power(machines, nets)  # the export has no power source; invent it
     return InputIR(bounding_region=_bounding_region(len(machines)), machines=machines, nets=nets)
 
 

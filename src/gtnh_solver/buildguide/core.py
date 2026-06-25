@@ -1,10 +1,11 @@
 """buildguide.core - render a LayoutResult as a human-readable text build guide.
 
-Four sections: a header (status / region / counts), a bill of materials (machines by type,
-pipe/cable cells per commodity, I/O cover count), the connections (per net: resource and the
-machine faces it links), and a per-layer ASCII map (one character per cell) with a key. This
-is the cheap, visible Phase 1 payoff - something a player can actually read and build from,
-ahead of the three.js previewer (docs/ROADMAP.md).
+Sections: a header (status / region / counts), a bill of materials (machines by type,
+pipe/cable cells per commodity, I/O cover count), a power note (where to feed external power,
+since synthetic sources are not self-powered), the connections (per net: resource and the
+machine faces it links), and a per-layer ASCII map (one character per cell) with a key. This is
+the cheap, visible Phase 1 payoff - something a player can actually read and build from, ahead
+of the three.js previewer (docs/ROADMAP.md).
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from __future__ import annotations
 import string
 from collections import Counter
 
-from gtnh_solver.ir import InputIR, LayoutResult, Machine, Net
+from gtnh_solver.ir import Commodity, InputIR, IODirection, LayoutResult, Machine, Net
 from gtnh_solver.ir.geometry import Cell, occupied_cells
 
 # Single-char machine markers (upper, lower, digits = 62; covers the ~30-50 machine target).
@@ -28,6 +29,7 @@ def build_guide(problem: InputIR, layout: LayoutResult) -> str:
     lines: list[str] = []
     lines += _header(problem, layout)
     lines += _bom(layout, machines)
+    lines += _power_note(layout, machines)
     lines += _connections(layout, machines, nets)
     lines += _layer_maps(problem, layout, machines)
     return "\n".join(lines) + "\n"
@@ -58,7 +60,8 @@ def _bom(layout: LayoutResult, machines: dict[str, Machine]) -> list[str]:
         for seg in r.segments:
             cells.add((seg.start.x, seg.start.y, seg.start.z))
             cells.add((seg.end.x, seg.end.y, seg.end.z))
-        covers += len(r.terminals)
+        if r.commodity is not Commodity.POWER:
+            covers += len(r.terminals)  # power cables connect bare; covers are item/fluid only
 
     lines = ["## Bill of materials", "", "Machines:"]
     lines += [f"  {n:>3}  x  {typ}" for typ, n in sorted(by_type.items())]
@@ -71,6 +74,35 @@ def _bom(layout: LayoutResult, machines: dict[str, Machine]) -> list[str]:
     lines.append(
         f"  {len(layout.auto_connections):>3}  x  auto-output connection (adjacent, no pipe)"
     )
+    lines.append("")
+    return lines
+
+
+def _is_power_source(machine: Machine) -> bool:
+    return any(
+        p.commodity is Commodity.POWER and p.direction is IODirection.OUTPUT
+        for p in machine.faces.ports
+    )
+
+
+def _power_note(layout: LayoutResult, machines: dict[str, Machine]) -> list[str]:
+    """Tell the builder where to feed external power - synthetic sources are not self-powered."""
+    sources = [
+        (p, machines[p.machine_id])
+        for p in layout.placements
+        if p.machine_id in machines and _is_power_source(machines[p.machine_id])
+    ]
+    if not sources:
+        return []
+    lines = [
+        "## Power",
+        "",
+        "Source-powering is left to you (docs/DOMAIN.md): place an external power source",
+        "feeding each synthetic source block below. Per-segment cable thickness is shown in the",
+        "layout; size each external source to its tier's total amperage.",
+        "",
+    ]
+    lines += [f"  {m.type} at ({p.cell.x}, {p.cell.y}, {p.cell.z})" for p, m in sources]
     lines.append("")
     return lines
 

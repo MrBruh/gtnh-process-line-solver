@@ -86,6 +86,9 @@ class Machine(StrictModel):
     faces: FaceSpec = Field(default_factory=FaceSpec)
     voltage_tier: str = Field(min_length=1)  # LV/MV/HV/... - sets cable voltage rating
     orientation_options: list[Facing] = Field(min_length=1)
+    #: EU/t this machine draws; with ``voltage_tier`` it sets the amperage it pulls on a
+    #: shared-amperage cable (dataset.amperage). 0 for an unpowered block or a power source.
+    eut: float = Field(default=0.0, ge=0.0)
 
     @model_validator(mode="after")
     def _check(self) -> Machine:

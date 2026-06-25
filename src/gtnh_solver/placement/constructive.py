@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from gtnh_solver.ir import (
     CellBox,
     CellCoord,
+    Commodity,
     Infeasibility,
     InputIR,
     IODirection,
@@ -93,14 +94,20 @@ def _first_fit(machine: Machine, region: CellBox, occupied: set[Cell]) -> CellCo
 def _flow_order(problem: InputIR) -> list[Machine]:
     """Machines in producer-before-consumer (topological) order, ties in input order.
 
-    Edges are source-machine -> sink-machine, read from each net's port directions. Cyclic /
-    unreachable machines fall back to input order at the end. This puts connected machines
-    adjacent so the solver can auto-feed them (docs/DOMAIN.md auto-output)."""
+    Edges are source-machine -> sink-machine, read from each net's port directions, over the
+    **item/fluid** nets only: power is always cabled, never auto-fed, so a power source must not
+    wedge itself into the material chain (it would split two machines that should sit adjacent).
+    Isolated machines and power sources therefore fall to the end. Cyclic machines also fall back
+    to input order. This puts the material chain adjacent so the solver can auto-feed it
+    (docs/DOMAIN.md auto-output)."""
     by_id = {m.id: m for m in problem.machines}
     port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
     succ: dict[str, set[str]] = {m.id: set() for m in problem.machines}
     indeg: dict[str, int] = {m.id: 0 for m in problem.machines}
+    material: set[str] = set()  # machines tied by an item/fluid net (the chain to keep adjacent)
     for net in problem.nets:
+        if net.commodity is Commodity.POWER:
+            continue
         sources = [
             e.machine_id
             for e in net.endpoints
@@ -111,13 +118,16 @@ def _flow_order(problem: InputIR) -> list[Machine]:
             for e in net.endpoints
             if port_dir.get((e.machine_id, e.port_id)) is IODirection.INPUT
         ]
+        material.update(sources, sinks)
         for s in sources:
             for t in sinks:
                 if s != t and t not in succ[s]:
                     succ[s].add(t)
                     indeg[t] += 1
 
-    ready = [m.id for m in problem.machines if indeg[m.id] == 0]
+    # Seed only with material producers (indeg 0 AND in a material net); isolated machines and
+    # power sources fall to the end so they never split an auto-feeding chain.
+    ready = [m.id for m in problem.machines if indeg[m.id] == 0 and m.id in material]
     order: list[str] = []
     seen: set[str] = set()
     while ready:
@@ -128,5 +138,5 @@ def _flow_order(problem: InputIR) -> list[Machine]:
             indeg[t] -= 1
             if indeg[t] == 0:
                 ready.append(t)
-    order += [m.id for m in problem.machines if m.id not in seen]  # cycles / leftovers
+    order += [m.id for m in problem.machines if m.id not in seen]  # cycles, isolated, sources
     return [by_id[i] for i in order]

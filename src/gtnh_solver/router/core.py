@@ -1,11 +1,12 @@
 """router.core - the Phase 1 crude per-commodity router.
 
-Given placed machines, connect each non-ME net: resolve a :class:`~gtnh_solver.ir.Terminal`
-per endpoint (a free cell just outside a usable, non-front machine face - the front comes from
-the placement orientation, so no dataset is needed), then A* between the terminals over the
-free cell grid (machine + reserved cells are obstacles). Crude on purpose (docs/ROADMAP.md):
-one channel, no inter-net capacity. The shared cell-grid primitives (obstacle building, docking,
-A*) live in ``_grid`` so this router and ``router.power`` route over one grid model.
+Given placed machines, connect each non-ME **item/fluid** net (power is the power router's job,
+``router.power``): resolve a :class:`~gtnh_solver.ir.Terminal` per endpoint (a free cell just
+outside a usable, non-front machine face - the front comes from the placement orientation, so no
+dataset is needed), then A* between the terminals over the free cell grid (machine + reserved
+cells are obstacles). Crude on purpose (docs/ROADMAP.md): one channel, no inter-net capacity. The
+shared cell-grid primitives (obstacle building, docking, A*) live in ``_grid`` so this router and
+``router.power`` route over one grid model.
 
 Returns routes, or an explicit ``Infeasibility`` naming the net that could not dock or route -
 never raises for the expected case, matching the placer/validator discipline. The validator
@@ -62,7 +63,11 @@ def route(
     docked: set[Cell] = set()
     routes: list[Route] = []
     for net in problem.nets:
-        if net.id in skip_nets or problem.me_toggles.toggled(net.commodity):
+        if (
+            net.id in skip_nets
+            or problem.me_toggles.toggled(net.commodity)
+            or net.commodity is Commodity.POWER  # power is the power router's job (router.power)
+        ):
             continue
 
         terminals: list[Terminal] = []
@@ -80,14 +85,12 @@ def route(
         segments = _connect([t.cell for t in terminals], obstacles, region)
         if segments is None:
             return RouteResult(tuple(routes), _no_path(net.id))
-        thickness = [1] * len(segments) if net.commodity is Commodity.POWER else None
         routes.append(
             Route(
                 net_id=net.id,
                 commodity=net.commodity,
                 terminals=terminals,
                 segments=segments,
-                thickness_per_segment=thickness,
             )
         )
     return RouteResult(tuple(routes))

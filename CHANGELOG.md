@@ -66,6 +66,20 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `mypy --strict`, file hygiene, commit-msg lint), a PR template, and bug/feature issue
   templates.
 
+- **Power (shared-amperage net) - synthesis + routing.** The export carries each machine's
+  `eut` + voltage tier but no power source, so the adapter now synthesizes the power network:
+  one synthetic source machine + one shared-amperage power net per voltage tier feeding the
+  powered machines (`adapter/power.py`). The new power router (`router/power.py`) routes each
+  per-tier net as a cable trunk and sizes every segment to the **summed amperage of the machines
+  downstream of it** (1x/2x/4x/8x/16x), rejecting a load over the 16x cap as an explicit
+  infeasibility - correctness-first single-source-per-tier (multi-source / voltage-loss
+  optimization is Phase 2). `solve()` runs it alongside the item/fluid router, and placement no
+  longer lets a power source split an auto-feeding material chain. The build guide gains a
+  **Power** section telling the builder where to feed external power (synthetic sources are not
+  self-powered). Backing it: a new `dataset` voltage ladder + `amperage` helper, `Machine.eut`
+  (additive, InputIR v1), and shared router grid/dock/A* primitives lifted into `router/_grid.py`
+  (the generic router no longer touches power). See `docs/DOMAIN.md`, `docs/ARCHITECTURE.md` #8.
+
 ### Changed
 - **InputIR bumped to v1 (breaking): dropped `Machine.count`.** Multi-instance machine groups
   are not modelled until routing is instance-aware (Phase 2): the placer expanded `count` into

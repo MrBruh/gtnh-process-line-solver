@@ -1,8 +1,9 @@
-"""Tests for the Phase 1 solver (place + auto-output + route).
+"""Tests for the Phase 1 solver (place + auto-output + item/fluid + power route).
 
-Headline: solving the real sand line yields a fully valid layout that uses **auto-output and
-zero pipes** - the row of adjacent machines just feed each other. Plus the invariants: the
-result is always either VALID-and-validator-clean or non-VALID-with-an-explicit-infeasibility.
+Headline: solving the real sand line yields a fully valid layout whose item chain **auto-feeds
+with zero pipes** and whose synthesized power net is cabled as a shared-amperage trunk. Plus the
+invariants: the result is always either VALID-and-validator-clean or
+non-VALID-with-an-explicit-infeasibility.
 """
 
 from __future__ import annotations
@@ -38,13 +39,16 @@ _SAND = _EXAMPLES / "gtnh-sand.json"
 _NITROBENZENE = _EXAMPLES / "gtnh-nitrobenzene.json"
 
 
-def test_solve_sand_is_valid_and_all_auto_output() -> None:
+def test_solve_sand_items_auto_feed_and_power_is_cabled() -> None:
     ir = adapt_file(_SAND)
     layout = solve(ir)
     assert layout.status is LayoutStatus.VALID
     assert validate(ir, layout).ok
-    assert len(layout.auto_connections) == len(ir.nets)  # every net auto-feeds
-    assert layout.routes == []  # no pipes needed for a straight chain
+    item_nets = [n for n in ir.nets if n.commodity is Commodity.ITEM]
+    assert len(layout.auto_connections) == len(item_nets)  # every item net auto-feeds: zero pipes
+    assert [r.commodity for r in layout.routes] == [
+        Commodity.POWER
+    ]  # only the power trunk is cabled
 
 
 def test_solve_is_deterministic() -> None:
@@ -121,39 +125,45 @@ def test_solve_fork_auto_outputs_one_and_pipes_the_other() -> None:
     assert len(layout.routes) == 1  # ...and the rest piped
 
 
+def _output_machine(mid: str) -> Machine:
+    return Machine(
+        id=mid,
+        type="t",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[Port(id="o", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)]
+        ),
+    )
+
+
 def test_solve_downgrades_when_assembled_layout_fails_validation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # place.ok && route.ok alone never proved the layout sound. With a buggy router that emits
     # a geometrically invalid route, solve() must run its own output through the independent
-    # validator and downgrade VALID -> partial_invalid instead of passing it off as valid.
+    # validator and downgrade VALID -> partial_invalid instead of passing it off as valid. (The
+    # two output ports keep auto-output out of it, so the injected route is what gets validated.)
     problem = InputIR(
-        bounding_region=CellBox(sx=4, sy=4, sz=4),
-        machines=[
-            Machine(
-                id="mp",
-                type="t",
-                voltage_tier="LV",
-                orientation_options=[Facing.NORTH],
-                faces=FaceSpec(
-                    ports=[Port(id="pwr", commodity=Commodity.POWER, direction=IODirection.INPUT)]
-                ),
-            )
-        ],
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[_output_machine("a"), _output_machine("b")],
         nets=[
             Net(
-                id="np",
-                commodity=Commodity.POWER,
-                throughput=32.0,
-                endpoints=[MachineFaceRef(machine_id="mp", port_id="pwr")],
+                id="n",
+                commodity=Commodity.ITEM,
+                fluid_or_item="x",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="a", port_id="o"),
+                    MachineFaceRef(machine_id="b", port_id="o"),
+                ],
             )
         ],
     )
     teleport = Route(  # a single segment that jumps two cells - the validator must reject it
-        net_id="np",
-        commodity=Commodity.POWER,
-        segments=[Segment(start=CellCoord(x=0, y=0, z=1), end=CellCoord(x=0, y=0, z=3), channel=0)],
-        thickness_per_segment=[8],
+        net_id="n",
+        commodity=Commodity.ITEM,
+        segments=[Segment(start=CellCoord(x=0, y=0, z=0), end=CellCoord(x=0, y=0, z=2), channel=0)],
     )
     monkeypatch.setattr(solver_core, "route", lambda *a, **k: RouteResult(routes=(teleport,)))
 

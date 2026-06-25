@@ -23,7 +23,7 @@ from gtnh_solver.adapter import (
     load_plan,
     to_input_ir,
 )
-from gtnh_solver.ir import Commodity, LayoutResult, LayoutStatus
+from gtnh_solver.ir import Commodity, IODirection, LayoutResult, LayoutStatus
 from gtnh_solver.placement import place
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
@@ -59,12 +59,14 @@ def test_load_plan_parses_sand() -> None:
 
 def test_adapt_sand_to_input_ir() -> None:
     ir = adapt_file(_SAND)
-    assert len(ir.machines) == 4  # 3 Forge Hammers + 1 Stone storage source
-    assert len(ir.nets) == 3
-    assert all(n.commodity is Commodity.ITEM for n in ir.nets)
+    assert len(ir.machines) == 5  # 3 Forge Hammers + 1 Super Chest + 1 synthesized LV power source
+    assert len(ir.nets) == 4  # 3 item edges + 1 synthesized LV power net
     types = {m.type for m in ir.machines}
     assert "Forge Hammer" in types
     assert "Super Chest" in types  # the item storage source (covers ride on it, not the pipe)
+    assert "Power Source (LV)" in types  # the export carries no source; the adapter invents one
+    assert len([n for n in ir.nets if n.commodity is Commodity.ITEM]) == 3
+    assert len([n for n in ir.nets if n.commodity is Commodity.POWER]) == 1
 
 
 def test_adapt_sand_end_to_end_places_and_validates() -> None:
@@ -83,9 +85,11 @@ def test_throughput_is_positive_for_sand_material_nets() -> None:
 
 def test_adapt_nitrobenzene_has_fluids_and_places() -> None:
     ir = adapt_file(_NITROBENZENE)
-    assert len(ir.machines) == 18  # 7 nodes + 11 storages
+    # 7 nodes + 11 storages + 3 synthesized power sources (its nodes span LV/MV/HV)
+    assert len(ir.machines) == 21
     assert any(n.commodity is Commodity.FLUID for n in ir.nets)
     assert any(n.commodity is Commodity.ITEM for n in ir.nets)
+    assert any(n.commodity is Commodity.POWER for n in ir.nets)
     assert "Super Tank" in {m.type for m in ir.machines}  # fluid storages
     assert place(ir).ok
 
@@ -152,6 +156,60 @@ def test_throughput_falls_back_to_consumer_demand() -> None:
         edges=[Edge(id="e", source="s", target="n", resource_kind="item", resource_id="R")],
     )
     assert to_input_ir(plan).nets[0].throughput == 1.5  # 3 / 2
+
+
+def test_synthesizes_one_power_source_and_net_per_tier() -> None:
+    # Two powered nodes on different tiers -> one source + one power net each; an unpowered
+    # storage stays out of the power network.
+    plan = Plan(
+        schema_version=1,
+        recipes=[
+            Recipe(
+                id="r1",
+                machine_type="M",
+                duration_ticks=10.0,
+                eut=16.0,
+                outputs=[_resource("item", "x")],
+            ),
+            Recipe(
+                id="r2",
+                machine_type="M",
+                duration_ticks=10.0,
+                eut=120.0,
+                inputs=[_resource("item", "x")],
+            ),
+        ],
+        nodes=[
+            Node(id="n1", recipe_id="r1", overclock_tier="LV"),
+            Node(id="n2", recipe_id="r2", overclock_tier="MV"),
+        ],
+        edges=[Edge(id="e", source="n1", target="n2", resource_kind="item", resource_id="x")],
+    )
+    ir = to_input_ir(plan)
+    sources = {m.type for m in ir.machines if m.type.startswith("Power Source")}
+    assert sources == {"Power Source (LV)", "Power Source (MV)"}  # one per tier in use
+    power_nets = [n for n in ir.nets if n.commodity is Commodity.POWER]
+    assert len(power_nets) == 2
+    n1 = next(m for m in ir.machines if m.id == "n1")
+    assert any(
+        p.commodity is Commodity.POWER and p.direction is IODirection.INPUT for p in n1.faces.ports
+    )  # the powered machine gained a power input port
+
+
+def test_unpowered_plan_synthesizes_no_power() -> None:
+    # eut defaults to 0 (no eut in the recipe) -> nothing draws power -> no source, no power net.
+    plan = Plan(
+        schema_version=1,
+        recipes=[
+            Recipe(id="r", machine_type="M", duration_ticks=4.0, outputs=[_resource("item", "x")])
+        ],
+        nodes=[Node(id="n", recipe_id="r", overclock_tier="LV")],
+        storages=[Storage(id="s", kind="item", resource_id="x")],
+        edges=[Edge(id="e", source="n", target="s", resource_kind="item", resource_id="x")],
+    )
+    ir = to_input_ir(plan)
+    assert not any(n.commodity is Commodity.POWER for n in ir.nets)
+    assert not any(m.type.startswith("Power Source") for m in ir.machines)
 
 
 def test_storage_to_storage_edge_has_zero_throughput() -> None:

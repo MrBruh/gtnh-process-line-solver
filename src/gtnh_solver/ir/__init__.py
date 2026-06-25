@@ -104,4 +104,9 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   were placed yet silently left unwired. Each `Machine` is now exactly one instance; the
 #   adapter rejects an export `machineCount > 1` with an explicit `AdapterError`. `count`
 #   returns once routing is instance-aware.
+#
+# InputIR v1 (additive, no version bump) - added `Machine.eut: float` (EU/t draw). With
+#   `voltage_tier` it gives the amperage a machine pulls on a shared-amperage cable
+#   (dataset.amperage); the adapter sets it from the recipe and synthesizes a power source +
+#   net per voltage tier. 0 for unpowered blocks / sources. Existing consumers default to 0.
 # ---------------------------------------------------------------------------

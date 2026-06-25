@@ -5,8 +5,9 @@ The Phase 1 orchestration (docs/ROADMAP.md):
   2. assign **auto-output** connections - a source machine ejecting straight into an adjacent
      target's input face, no pipe and no cover (GT's free connection; one auto-output per
      machine, items XOR fluids - docs/DOMAIN.md);
-  3. route pipes for the nets auto-output could NOT cover;
-  4. assemble the LayoutResult (or surface the placement/routing infeasibility);
+  3. route the rest: item/fluid pipes for the nets auto-output could NOT cover, and the
+     synthesized power nets as shared-amperage cable trunks (router.power);
+  4. assemble the LayoutResult (or surface the placement/routing/power infeasibility);
   5. **validate the assembled layout against the independent validator** and downgrade a
      VALID result to ``partial_invalid`` if it proves any violation. The validator's logic is
      written independently of the placer/router precisely to catch their bugs, so running it on
@@ -34,7 +35,7 @@ from gtnh_solver.ir import (
 )
 from gtnh_solver.ir.geometry import FACE_DELTAS, OPPOSITE_FACE, occupied_cells
 from gtnh_solver.placement import place
-from gtnh_solver.router import route
+from gtnh_solver.router import route, route_power
 from gtnh_solver.validator import ValidationReport, validate
 
 
@@ -47,14 +48,17 @@ def solve(problem: InputIR, *, seed: int = 0) -> LayoutResult:
         )
 
     autos, auto_net_ids = _assign_auto_outputs(problem, placement.placements)
-    routing = route(problem, placement.placements, skip_nets=auto_net_ids)
-    if not routing.ok:
+    routing = route(problem, placement.placements, skip_nets=auto_net_ids)  # item/fluid pipes
+    power = route_power(problem, placement.placements)  # shared-amperage power cables
+    routes = [*routing.routes, *power.routes]
+    infeasibility = routing.infeasibility or power.infeasibility
+    if infeasibility is not None:
         return LayoutResult(
             status=LayoutStatus.PARTIAL_INVALID,
             seed=seed,
-            infeasibility=routing.infeasibility,
+            infeasibility=infeasibility,
             placements=list(placement.placements),
-            routes=list(routing.routes),
+            routes=routes,
             auto_connections=autos,
         )
 
@@ -62,7 +66,7 @@ def solve(problem: InputIR, *, seed: int = 0) -> LayoutResult:
         status=LayoutStatus.VALID,
         seed=seed,
         placements=list(placement.placements),
-        routes=list(routing.routes),
+        routes=routes,
         auto_connections=autos,
     )
     # The placer and router each report success on their own terms; the validator is the only
@@ -76,7 +80,7 @@ def solve(problem: InputIR, *, seed: int = 0) -> LayoutResult:
             seed=seed,
             infeasibility=_validation_infeasibility(report),
             placements=list(placement.placements),
-            routes=list(routing.routes),
+            routes=routes,
             auto_connections=autos,
         )
     return layout

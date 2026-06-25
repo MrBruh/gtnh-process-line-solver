@@ -26,7 +26,7 @@ from gtnh_solver.ir import (
     Placement,
     Port,
 )
-from gtnh_solver.router import route
+from gtnh_solver.router import route_power
 from gtnh_solver.solver import solve
 
 _SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
@@ -56,11 +56,12 @@ def test_build_guide_bom_counts_machines_by_type() -> None:
     assert "1  x  Super Chest" in guide
 
 
-def test_build_guide_sand_uses_auto_output_not_pipes() -> None:
+def test_build_guide_sand_auto_feeds_items_and_cables_power() -> None:
     guide = _sand_guide()
     assert "minecraft:gravel" in guide
-    assert "(auto-output)" in guide  # the chain auto-feeds...
-    assert "(no pipes)" in guide  # ...so the BoM lists no pipes
+    assert "(auto-output)" in guide  # the item chain auto-feeds (no item pipes)...
+    assert "power cable" in guide  # ...but the synthesized power net still needs a cable
+    assert "## Power" in guide  # and the guide tells the builder to feed it externally
 
 
 def test_build_guide_is_deterministic() -> None:
@@ -107,10 +108,11 @@ def test_build_guide_renders_power_route_with_fallback_label() -> None:
         Placement(machine_id="a", cell=CellCoord(x=1, y=0, z=1), orientation=Facing.NORTH),
         Placement(machine_id="b", cell=CellCoord(x=3, y=0, z=1), orientation=Facing.NORTH),
     ]
-    rr = route(problem, placements)
+    rr = route_power(problem, placements)
     layout = LayoutResult(
         status=LayoutStatus.VALID, seed=0, placements=placements, routes=list(rr.routes)
     )
     guide = build_guide(problem, layout)
     assert "power cable" in guide  # BoM label
     assert "power" in guide  # connections falls back to the commodity (power has no fluid_or_item)
+    assert "## Power" in guide  # the external-power-source note (a is a power source)

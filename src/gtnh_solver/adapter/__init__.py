@@ -4,8 +4,9 @@ Parses the documented export (typed view in ``plan``) and maps it to the solver'
 contract (``core``). No upstream code is vendored; the consumed shape is pinned by the
 committed fixtures in ``examples/`` (docs/ARCHITECTURE.md decision #3).
 
-Crude for Phase 1 (docs/ROADMAP.md): single-block footprints, default orientations, and no
-synthesized power nets yet. Real footprints/faces arrive with the dataset lane.
+Crude for Phase 1 (docs/ROADMAP.md): single-block footprints and default orientations (real
+footprints/faces arrive with the dataset lane). It DOES synthesize the power network the export
+omits - a source + shared-amperage net per voltage tier (``power`` submodule).
 """
 
 from __future__ import annotations
