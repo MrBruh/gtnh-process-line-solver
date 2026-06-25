@@ -4,7 +4,8 @@ Given placed machines, connect each non-ME net: resolve a :class:`~gtnh_solver.i
 per endpoint (a free cell just outside a usable, non-front machine face - the front comes from
 the placement orientation, so no dataset is needed), then A* between the terminals over the
 free cell grid (machine + reserved cells are obstacles). Crude on purpose (docs/ROADMAP.md):
-one channel everywhere, no inter-net capacity, item/fluid only (power isn't synthesized yet).
+one channel, no inter-net capacity. The shared cell-grid primitives (obstacle building, docking,
+A*) live in ``_grid`` so this router and ``router.power`` route over one grid model.
 
 Returns routes, or an explicit ``Infeasibility`` naming the net that could not dock or route -
 never raises for the expected case, matching the placer/validator discipline. The validator
@@ -14,7 +15,6 @@ lies on the route.
 
 from __future__ import annotations
 
-import heapq
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
@@ -23,22 +23,16 @@ from gtnh_solver.ir import (
     CellBox,
     CellCoord,
     Commodity,
-    Facing,
     Infeasibility,
     InputIR,
-    Machine,
     Placement,
     Route,
     Segment,
     Terminal,
 )
-from gtnh_solver.ir.geometry import FACE_DELTAS, Cell, in_region, occupied_cells
+from gtnh_solver.ir.geometry import Cell
 
-# Order the router tries non-front faces (south first -> docks into the open +z row). The front
-# face (== placement orientation) is skipped at runtime.
-_FACE_ORDER = (Facing.SOUTH, Facing.NORTH, Facing.EAST, Facing.WEST, Facing.UP, Facing.DOWN)
-_NEIGHBORS = tuple(FACE_DELTAS.values())
-_UNREACHABLE = 1 << 30
+from ._grid import astar, coord, dock, obstacle_cells
 
 
 @dataclass(frozen=True)
@@ -64,12 +58,7 @@ def route(
         placement_by_machine.setdefault(placement.machine_id, placement)  # one placement/machine
     region = problem.bounding_region
 
-    obstacles: set[Cell] = {(c.x, c.y, c.z) for c in problem.reserved_cells}
-    for placement in placements:
-        machine = machines.get(placement.machine_id)
-        if machine is not None:
-            obstacles.update(occupied_cells(placement.cell, machine.footprint))
-
+    obstacles = obstacle_cells(problem, placements, machines)
     docked: set[Cell] = set()
     routes: list[Route] = []
     for net in problem.nets:
@@ -82,7 +71,7 @@ def route(
             ep_machine = machines.get(endpoint.machine_id)
             if ep_placement is None or ep_machine is None:
                 return RouteResult(tuple(routes), _no_dock(net.id, endpoint.machine_id))
-            terminal = _dock(endpoint.port_id, ep_placement, ep_machine, obstacles, docked, region)
+            terminal = dock(endpoint.port_id, ep_placement, ep_machine, obstacles, docked, region)
             if terminal is None:
                 return RouteResult(tuple(routes), _no_dock(net.id, endpoint.machine_id))
             docked.add((terminal.cell.x, terminal.cell.y, terminal.cell.z))
@@ -104,86 +93,18 @@ def route(
     return RouteResult(tuple(routes))
 
 
-def _dock(
-    port_id: str,
-    placement: Placement,
-    machine: Machine,
-    obstacles: set[Cell],
-    docked: set[Cell],
-    region: CellBox,
-) -> Terminal | None:
-    """First free cell just outside a usable (non-front) face of the machine, as a Terminal."""
-    body = set(occupied_cells(placement.cell, machine.footprint))
-    for face in _FACE_ORDER:
-        if face is placement.orientation:  # front face carries no I/O
-            continue
-        dx, dy, dz = FACE_DELTAS[face]
-        for bx, by, bz in sorted(body):
-            cand = (bx + dx, by + dy, bz + dz)
-            if cand in body or not in_region(cand, region) or cand in obstacles or cand in docked:
-                continue
-            return Terminal(
-                machine_id=placement.machine_id,
-                port_id=port_id,
-                face=face,
-                cell=CellCoord(x=cand[0], y=cand[1], z=cand[2]),
-            )
-    return None
-
-
 def _connect(
     cells: Sequence[CellCoord], obstacles: set[Cell], region: CellBox
 ) -> list[Segment] | None:
     """Chain consecutive terminals with A*; the union is a single connected subgraph."""
     segments: list[Segment] = []
     for a, b in pairwise(cells):
-        path = _astar((a.x, a.y, a.z), (b.x, b.y, b.z), obstacles, region)
+        path = astar((a.x, a.y, a.z), (b.x, b.y, b.z), obstacles, region)
         if path is None:
             return None
         for c0, c1 in pairwise(path):
-            segments.append(Segment(start=_coord(c0), end=_coord(c1), channel=0))
+            segments.append(Segment(start=coord(c0), end=coord(c1), channel=0))
     return segments
-
-
-def _astar(start: Cell, goal: Cell, obstacles: set[Cell], region: CellBox) -> list[Cell] | None:
-    heap: list[tuple[int, int, Cell]] = [(_manhattan(start, goal), 0, start)]
-    came_from: dict[Cell, Cell] = {}
-    best: dict[Cell, int] = {start: 0}
-    visited: set[Cell] = set()
-    while heap:
-        _, g, cur = heapq.heappop(heap)
-        if cur == goal:
-            return _reconstruct(came_from, cur)
-        if cur in visited:
-            continue
-        visited.add(cur)
-        for dx, dy, dz in _NEIGHBORS:
-            nxt = (cur[0] + dx, cur[1] + dy, cur[2] + dz)
-            if not in_region(nxt, region) or nxt in obstacles:
-                continue
-            ng = g + 1
-            if ng < best.get(nxt, _UNREACHABLE):
-                best[nxt] = ng
-                came_from[nxt] = cur
-                heapq.heappush(heap, (ng + _manhattan(nxt, goal), ng, nxt))
-    return None
-
-
-def _reconstruct(came_from: dict[Cell, Cell], cur: Cell) -> list[Cell]:
-    path = [cur]
-    while cur in came_from:
-        cur = came_from[cur]
-        path.append(cur)
-    path.reverse()
-    return path
-
-
-def _manhattan(a: Cell, b: Cell) -> int:
-    return abs(a[0] - b[0]) + abs(a[1] - b[1]) + abs(a[2] - b[2])
-
-
-def _coord(c: Cell) -> CellCoord:
-    return CellCoord(x=c[0], y=c[1], z=c[2])
 
 
 def _no_dock(net_id: str, machine_id: str) -> Infeasibility:
