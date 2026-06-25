@@ -47,8 +47,11 @@ class ViolationCode(str, Enum):
     DUPLICATE_AUTO_OUTPUT = "duplicate_auto_output"
     AUTO_OUTPUT_WRONG_ENDPOINTS = "auto_output_wrong_endpoints"  # not the net's out->in machines
     AUTO_OUTPUT_ILLEGAL_COMMODITY = "auto_output_illegal_commodity"  # power/ME can't auto-output
-    # power (independent re-check of the shared-amperage primitive's output shape)
-    POWER_THICKNESS_INVALID = "power_thickness_invalid"
+    # power (independent re-check of the shared-amperage primitive)
+    POWER_THICKNESS_INVALID = (
+        "power_thickness_invalid"  # missing/misaligned/illegal thickness value
+    )
+    POWER_THICKNESS_INSUFFICIENT = "power_thickness_insufficient"  # cable thinner than summed amps
 
 
 @dataclass(frozen=True)

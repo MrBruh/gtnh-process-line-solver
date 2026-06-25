@@ -122,5 +122,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   so the "never returns a silently-invalid layout" promise was not enforced end to end. `solve`
   now runs `validate()` on the assembled layout and downgrades a `valid` result to
   `partial_invalid` (carrying the violation) if anything is proven wrong.
+- **Validator enforces summed-amperage power sizing** (previously deferred). It independently
+  re-derives each power cable's load - rooting the cable tree at its source terminal and summing
+  the draw of the machines downstream of every segment - and flags a segment whose cable is
+  thinner than its load (`power_thickness_insufficient`), which also catches a load over the 16x
+  cap. So a power-sizing bug in the router is caught, not certified.
 
 [Unreleased]: https://github.com/MrBruh/gtnh-process-line-solver/commits/main

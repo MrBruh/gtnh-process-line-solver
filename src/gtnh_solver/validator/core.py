@@ -20,18 +20,22 @@ What is checked now (needs only the IR):
   auto-output - every auto-connection joins its net's real OUTPUT->INPUT endpoint machines
   (resolved by port direction) on adjacent usable faces; power/ME commodities cannot
   auto-output, and a machine has at most one auto-output face.
-  power - per-segment cable thickness is present and well-formed (1/2/4/8/16, aligned).
+  power - per-segment cable thickness is present and well-formed (1/2/4/8/16, aligned), AND
+  independently re-derived: rooting each power cable tree at its source terminal, every segment
+  carries the summed amperage of the machines downstream of it and its cable must be at least
+  that thick (which also rejects a load over the 16x cap).
 
 What is deferred to the dataset lane (rule data not available yet) - TODO:
-  throughput/tier caps, one-fluid-per-line, *summed* amperage <= cable rating, and the
-  dataset-specific half of face rules (which faces a given machine type may use, covers).
-  These need the physical-rules dataset; the checks above are the floor they build on.
+  throughput/tier caps, one-fluid-per-line, and the dataset-specific half of face rules (which
+  faces a given machine type may use, covers). These need the physical-rules dataset; the checks
+  above are the floor they build on.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
 
+from gtnh_solver.dataset import UnknownTierError, amperage
 from gtnh_solver.ir import (
     AutoConnection,
     Commodity,
@@ -40,6 +44,7 @@ from gtnh_solver.ir import (
     LayoutResult,
     Net,
     Placement,
+    Segment,
 )
 
 from ._geometry import (
@@ -61,6 +66,7 @@ def validate(problem: InputIR, layout: LayoutResult) -> ValidationReport:
     _check_routes(problem, layout, out)
     _check_terminals(problem, layout, out)
     _check_auto_connections(problem, layout, out)
+    _check_power_amperage(problem, layout, out)
     _check_pinned(problem, layout, out)
     return ValidationReport(tuple(out))
 
@@ -422,6 +428,116 @@ def _check_auto_net(
                 f"output->input endpoint machines",
             )
         )
+
+
+def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
+    """Independently re-derive each power cable's load and check the thickness can carry it.
+
+    The router sizes thickness to the summed amperage; this recomputes that amperage from
+    geometry + machine euts - rooting the route's cable tree at the source terminal and summing
+    the draw of every machine downstream of each segment - and flags any segment whose cable is
+    thinner than its load. A load over 16x has no legal thickness, so this also catches the
+    over-cap case the router is supposed to reject. Written independently of the router, so a
+    sizing bug is caught, not certified.
+    """
+    machines = {m.id: m for m in problem.machines}
+    port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
+    for r in layout.routes:
+        if r.commodity is not Commodity.POWER:
+            continue
+        tps = r.thickness_per_segment
+        if tps is None or len(tps) != len(r.segments):
+            continue  # POWER_THICKNESS_INVALID (shape) already covers a missing/misaligned list
+        source_cells = [
+            (t.cell.x, t.cell.y, t.cell.z)
+            for t in r.terminals
+            if port_dir.get((t.machine_id, t.port_id)) is IODirection.OUTPUT
+        ]
+        if len(source_cells) != 1:
+            continue  # malformed power route (no single source) - structure checks report it
+
+        amp_at: dict[Cell, int] = defaultdict(int)
+        uncheckable = False
+        for t in r.terminals:
+            if port_dir.get((t.machine_id, t.port_id)) is not IODirection.INPUT:
+                continue
+            machine = machines.get(t.machine_id)
+            if machine is None:
+                continue
+            try:
+                draw = amperage(machine.eut, machine.voltage_tier)
+            except UnknownTierError:
+                out.append(
+                    Violation(
+                        ViolationCode.POWER_THICKNESS_INSUFFICIENT,
+                        f"power route for net {r.net_id!r} serves machine {t.machine_id!r} of "
+                        f"unknown tier {machine.voltage_tier!r}; its amperage cannot be verified",
+                    )
+                )
+                uncheckable = True
+                break
+            amp_at[(t.cell.x, t.cell.y, t.cell.z)] += draw
+        if uncheckable:
+            continue
+
+        required = _downstream_amperage(r.segments, source_cells[0], amp_at)
+        if required is None:
+            continue  # not a single tree rooted at the source - connectivity checks report it
+        for seg_idx, (req, thick) in enumerate(zip(required, tps, strict=True)):
+            if thick < req:
+                out.append(
+                    Violation(
+                        ViolationCode.POWER_THICKNESS_INSUFFICIENT,
+                        f"power route for net {r.net_id!r} segment {seg_idx} carries {req} amps "
+                        f"but its cable is only {thick}x",
+                    )
+                )
+
+
+def _downstream_amperage(
+    segments: list[Segment], root: Cell, amp_at: dict[Cell, int]
+) -> list[int] | None:
+    """Per-segment summed amperage: rooting the cable tree at ``root``, each segment carries the
+    total draw of the machine terminals in the subtree on its far (leaf) side.
+
+    Returns one load per segment (aligned 1:1), or ``None`` if the segments are not a single tree
+    rooted at ``root`` (a cycle, a disconnected piece, or a missing root - the connectivity
+    checks report those, so the amperage check declines rather than guess)."""
+    adj: dict[Cell, set[Cell]] = defaultdict(set)
+    edges: list[tuple[Cell, Cell]] = []
+    nodes: set[Cell] = set()
+    for seg in segments:
+        a = (seg.start.x, seg.start.y, seg.start.z)
+        b = (seg.end.x, seg.end.y, seg.end.z)
+        adj[a].add(b)
+        adj[b].add(a)
+        edges.append((a, b))
+        nodes.add(a)
+        nodes.add(b)
+    if root not in nodes or len(edges) != len(nodes) - 1:
+        return None  # a tree on N nodes has exactly N-1 edges; otherwise it has a cycle/duplicate
+
+    parent: dict[Cell, Cell | None] = {root: None}
+    depth: dict[Cell, int] = {root: 0}
+    order: list[Cell] = [root]
+    i = 0
+    while i < len(order):
+        cur = order[i]
+        i += 1
+        for nb in adj[cur]:
+            if nb not in parent:
+                parent[nb] = cur
+                depth[nb] = depth[cur] + 1
+                order.append(nb)
+    if len(order) != len(nodes):
+        return None  # some cell is not reachable from the source
+
+    subtree: dict[Cell, int] = {c: amp_at.get(c, 0) for c in nodes}
+    for cur in reversed(order):  # leaves first
+        p = parent[cur]
+        if p is not None:
+            subtree[p] += subtree[cur]
+    return [subtree[a if depth[a] > depth[b] else b] for a, b in edges]
 
 
 def _check_pinned(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:

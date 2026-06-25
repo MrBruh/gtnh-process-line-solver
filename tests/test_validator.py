@@ -365,6 +365,104 @@ def test_power_thickness_defect_caught_even_when_model_validation_bypassed() -> 
     assert ViolationCode.POWER_THICKNESS_INVALID in validate(problem, broken).codes()
 
 
+def _power_trunk() -> tuple[InputIR, LayoutResult]:
+    """A valid source -> m0 power cable; m0 draws 2 amps (LV, eut 64), so the trunk must be 2x."""
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[
+            Machine(
+                id="src",
+                type="Power Source (LV)",
+                voltage_tier="LV",
+                eut=0.0,
+                orientation_options=[Facing.NORTH],
+                faces=FaceSpec(
+                    ports=[Port(id="po", commodity=Commodity.POWER, direction=IODirection.OUTPUT)]
+                ),
+            ),
+            Machine(
+                id="m0",
+                type="M",
+                voltage_tier="LV",
+                eut=64.0,  # ceil(64 / 32) = 2 amps
+                orientation_options=[Facing.NORTH],
+                faces=FaceSpec(
+                    ports=[Port(id="pi", commodity=Commodity.POWER, direction=IODirection.INPUT)]
+                ),
+            ),
+        ],
+        nets=[
+            Net(
+                id="pw",
+                commodity=Commodity.POWER,
+                throughput=64.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="src", port_id="po"),
+                    MachineFaceRef(machine_id="m0", port_id="pi"),
+                ],
+            )
+        ],
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id="src", cell=_coord(0, 0, 0), orientation=Facing.NORTH),
+            Placement(machine_id="m0", cell=_coord(2, 0, 0), orientation=Facing.NORTH),
+        ],
+        routes=[
+            Route(
+                net_id="pw",
+                commodity=Commodity.POWER,
+                terminals=[
+                    Terminal(
+                        machine_id="src", port_id="po", face=Facing.SOUTH, cell=_coord(0, 0, 1)
+                    ),
+                    Terminal(
+                        machine_id="m0", port_id="pi", face=Facing.SOUTH, cell=_coord(2, 0, 1)
+                    ),
+                ],
+                segments=[
+                    Segment(start=_coord(0, 0, 1), end=_coord(1, 0, 1), channel=0),
+                    Segment(start=_coord(1, 0, 1), end=_coord(2, 0, 1), channel=0),
+                ],
+                thickness_per_segment=[2, 2],
+            )
+        ],
+    )
+    return problem, layout
+
+
+def test_valid_power_trunk_amperage_passes() -> None:
+    assert validate(*_power_trunk()).ok, str(validate(*_power_trunk()))
+
+
+def test_power_cable_thinner_than_its_load_is_flagged() -> None:
+    # the 2-amp trunk re-cabled as 1x: the validator re-derives the load and rejects it
+    problem, layout = _power_trunk()
+    thin = layout.routes[0].model_copy(update={"thickness_per_segment": [1, 1]})
+    layout = layout.model_copy(update={"routes": [thin]})
+    assert ViolationCode.POWER_THICKNESS_INSUFFICIENT in validate(problem, layout).codes()
+
+
+def test_power_load_over_16x_has_no_sufficient_cable() -> None:
+    # 17 amps (eut 544 at LV) exceeds the 16x cap: even a maxed cable is too thin
+    problem, layout = _power_trunk()
+    big = problem.machines[1].model_copy(update={"eut": 544.0})
+    problem = problem.model_copy(update={"machines": [problem.machines[0], big]})
+    maxed = layout.routes[0].model_copy(update={"thickness_per_segment": [16, 16]})
+    layout = layout.model_copy(update={"routes": [maxed]})
+    assert ViolationCode.POWER_THICKNESS_INSUFFICIENT in validate(problem, layout).codes()
+
+
+def test_power_unknown_tier_cannot_be_amperage_verified() -> None:
+    # the validator can't compute amperage for an off-ladder tier, so it declines to certify
+    problem, layout = _power_trunk()
+    weird = problem.machines[1].model_copy(update={"voltage_tier": "NOPE"})
+    problem = problem.model_copy(update={"machines": [problem.machines[0], weird]})
+    assert ViolationCode.POWER_THICKNESS_INSUFFICIENT in validate(problem, layout).codes()
+
+
 # --------------------------------------------------------------- auto-output connections
 
 
