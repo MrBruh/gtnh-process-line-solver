@@ -1,38 +1,83 @@
-"""cli - the `gtnh-solve` entry point.
+"""cli - the ``gtnh-solve`` entry point.
 
-Planned: parse a gtnh-factory-flow exported plan JSON, run the solver, emit the previewer JSON + build guide,
-honor per-commodity ME flags, and surface infeasibility clearly. Not implemented yet; this
-stub wires the entry point and `--version` so the package is installable and CI is green.
+Wires the Phase 1 pipeline into one command: a gtnh-factory-flow exported plan JSON in, a
+human-readable build guide out::
+
+    gtnh-solve examples/gtnh-sand.json            # print the build guide to stdout
+    gtnh-solve plan.json -o guide.txt             # ...or write it to a file
+    gtnh-solve plan.json --seed 3                 # pick the solver seed
+
+It loads + adapts the export, solves (place -> auto-output -> item/fluid + power route ->
+self-validate), and renders ``build_guide``. Exit code: 0 when the layout is fully VALID, 1 when
+the solver could only return an explicit infeasibility (the reason is printed to stderr), 2 when
+the export could not be loaded. The three.js previewer JSON emit is a later milestone
+(docs/ROADMAP.md).
 """
 
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
+
+from pydantic import ValidationError
 
 from gtnh_solver import __version__
+from gtnh_solver.adapter import adapt_file
+from gtnh_solver.buildguide import build_guide
+from gtnh_solver.ir import LayoutStatus
+from gtnh_solver.solver import solve
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="gtnh-solve",
-        description="Physical place-and-route solver for GregTech: New Horizons.",
+        description=(
+            "Physical place-and-route solver for GregTech: New Horizons - turns a "
+            "gtnh-factory-flow exported plan into a buildable layout and a text build guide."
+        ),
     )
     parser.add_argument("--version", action="version", version=f"gtnh-solve {__version__}")
+    parser.add_argument("export", nargs="?", help="path to a gtnh-factory-flow exported plan JSON")
+    parser.add_argument("--seed", type=int, default=0, help="RNG seed for the solver (default: 0)")
     parser.add_argument(
-        "project", nargs="?", help="path to a gtnh-factory-flow exported plan JSON (planned)"
+        "-o", "--output", metavar="FILE", help="write the build guide to FILE instead of stdout"
     )
-    parser.add_argument("--out", default="out/", help="output directory (planned)")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    print(
-        "gtnh-solve is in planning/pre-alpha - the solver is not implemented yet.\n"
-        "See docs/ROADMAP.md for the build order and CONTRIBUTING.md to help.\n"
-        f"(requested project={args.project!r}, out={args.out!r})"
-    )
-    return 0
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.export is None:
+        print("error: an export path is required (try 'gtnh-solve --help')", file=sys.stderr)
+        return 2
+
+    try:
+        problem = adapt_file(args.export)
+    except (OSError, ValueError, ValidationError) as exc:
+        print(f"error: could not load {args.export!r}: {exc}", file=sys.stderr)
+        return 2
+
+    layout = solve(problem, seed=args.seed)
+    guide = build_guide(problem, layout)
+
+    if args.output:
+        Path(args.output).write_text(guide, encoding="utf-8")
+        print(f"wrote build guide to {args.output}", file=sys.stderr)
+    else:
+        print(guide, end="")
+
+    if layout.status is LayoutStatus.VALID:
+        return 0
+
+    detail = layout.infeasibility
+    if detail is not None:
+        print(f"\n[{layout.status.value}] {detail.constraint}: {detail.detail}", file=sys.stderr)
+        if detail.suggested_relaxation:
+            print(f"  try: {detail.suggested_relaxation}", file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":

@@ -80,6 +80,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (additive, InputIR v1), and shared router grid/dock/A* primitives lifted into `router/_grid.py`
   (the generic router no longer touches power). See `docs/DOMAIN.md`, `docs/ARCHITECTURE.md` #8.
 
+- **CLI (`gtnh-solve`)** - the first real Phase 1 entry point: `gtnh-solve <export.json>` loads +
+  adapts the export, solves (place -> auto-output -> item/fluid + power route -> self-validate),
+  and prints the build guide (`-o FILE` to write it, `--seed` to pick the seed). Exit code 0 when
+  the layout is fully VALID, 1 when the solver returns an explicit infeasibility (printed to
+  stderr), 2 when the export can't be loaded. Replaces the planning-stub entry point.
+
 ### Changed
 - **InputIR bumped to v1 (breaking): dropped `Machine.count`.** Multi-instance machine groups
   are not modelled until routing is instance-aware (Phase 2): the placer expanded `count` into

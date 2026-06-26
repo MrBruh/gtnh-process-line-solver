@@ -31,15 +31,17 @@ that into a physical, buildable layout.
                                      (three.js)     (BoM, layers)
 ```
 
-## Quickstart (planned)
+## Quickstart
 
 ```bash
 pip install -e ".[dev]"
-gtnh-solve plan.json --out out/   # plan.json exported from gtnh-factory-flow
-# opens the previewer; writes a build guide
+gtnh-solve examples/gtnh-sand.json        # solve a gtnh-factory-flow export, print the build guide
+gtnh-solve plan.json -o guide.txt         # ...or write the guide to a file
 ```
 
-(The CLI does not exist yet - this is the target interface. See the roadmap.)
+Exit code: 0 when the layout is fully valid, 1 when the solver can only return an explicit
+infeasibility (the reason prints to stderr), 2 when the export can't be loaded. The three.js
+previewer is a later milestone (see the roadmap).
 
 ## Documentation
 

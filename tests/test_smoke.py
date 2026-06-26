@@ -13,5 +13,7 @@ def test_version_is_nonempty_string() -> None:
     assert __version__
 
 
-def test_cli_runs_and_returns_zero() -> None:
-    assert main([]) == 0
+def test_cli_main_is_callable() -> None:
+    # with no export path the CLI returns a clean usage error (exit 2), not a crash;
+    # the real solve/output flows are covered in test_cli.py
+    assert main([]) == 2
