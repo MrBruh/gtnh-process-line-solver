@@ -16,6 +16,8 @@ from gtnh_solver.ir import (
     Facing,
     InputIR,
     IODirection,
+    LayoutResult,
+    LayoutStatus,
     Machine,
     MachineFaceRef,
     Net,
@@ -108,6 +110,30 @@ def test_scene_item_pipe_segments_have_null_thickness() -> None:
     assert all(seg["thickness"] is None for r in item_routes for seg in r["segments"])
 
 
+def test_scene_bounds_are_tight_not_the_search_region() -> None:
+    scene = _sand_scene()
+    region = scene["region"]
+    bounds = scene["bounds"]
+    span = [bounds["max"][i] - bounds["min"][i] for i in range(3)]
+    assert span[1] == 1  # the sand line is a single flat row, one layer tall
+    assert max(span) <= 6  # tight around the row...
+    assert max(span) < max(region["sx"], region["sy"], region["sz"])  # ...not the 10x4x10 region
+
+
+def test_scene_bounds_fall_back_to_region_when_empty() -> None:
+    problem = InputIR(bounding_region=CellBox(sx=3, sy=2, sz=4))
+    scene = build_scene(problem, LayoutResult(status=LayoutStatus.VALID, seed=0))
+    assert scene["bounds"] == {"min": [0, 0, 0], "max": [3, 2, 4]}
+
+
+def test_scene_routes_carry_terminals() -> None:
+    power = next(r for r in _sand_scene()["routes"] if r["commodity"] == "power")
+    assert power["terminals"]  # so the viewer can draw a lead to each machine face
+    term = power["terminals"][0]
+    assert set(term) == {"machine", "face", "cell"}
+    assert len(term["cell"]) == 3
+
+
 def test_scene_is_deterministic() -> None:
     assert _sand_scene() == _sand_scene()
 
@@ -120,6 +146,15 @@ def test_render_html_is_self_contained_with_camera_and_layer_controls() -> None:
     assert 'id="layer"' in html  # the layer-by-layer slider...
     assert 'type="range"' in html  # ...is a range input
     assert "Forge Hammer" in html  # the scene is inlined, not fetched
+
+
+def test_render_html_wires_the_requested_viewer_features() -> None:
+    html = render_html(_sand_scene())
+    assert "screenSpacePanning" in html  # camera can translate, not just orbit (#1)
+    assert "listenToKeyEvents" in html  # ...incl. arrow-key panning
+    assert "BoxGeometry" in html  # cables/pipes are rectangular bars, not cylinders (#2)
+    assert "PlaneGeometry" in html  # machine names live on the front face (#3)
+    assert "ConeGeometry" in html  # chunky, visible auto-output arrows (#4)
 
 
 def test_render_html_inlines_the_exact_scene() -> None:

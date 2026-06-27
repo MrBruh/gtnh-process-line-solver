@@ -75,12 +75,17 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
             }
             for i, seg in enumerate(route.segments)
         ]
+        terminals = [
+            {"machine": t.machine_id, "face": t.face.value, "cell": [t.cell.x, t.cell.y, t.cell.z]}
+            for t in route.terminals
+        ]
         scene_routes.append(
             {
                 "netId": route.net_id,
                 "commodity": route.commodity.value,
                 "color": _COMMODITY_COLOR[route.commodity],
                 "segments": segments,
+                "terminals": terminals,
             }
         )
 
@@ -102,6 +107,7 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
         "status": layout.status.value,
         "seed": layout.seed,
         "region": {"sx": region.sx, "sy": region.sy, "sz": region.sz},
+        "bounds": _content_bounds(problem, layout, machines),
         "machines": scene_machines,
         "routes": scene_routes,
         "autoConnections": scene_autos,
@@ -113,6 +119,45 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
             "buildability": metrics.buildability,
         },
     }
+
+
+def _content_bounds(
+    problem: InputIR, layout: LayoutResult, machines: dict[str, Machine]
+) -> dict[str, list[int]]:
+    """The tight axis-aligned extent the layout actually occupies (machine bodies + route cells).
+
+    The solver's ``bounding_region`` is deliberately oversized scratch space; the previewer frames
+    on what is *built*, so the build area shown matches the structure, not the search box. Falls
+    back to the full region when nothing is placed or routed.
+    """
+    lo: list[int | None] = [None, None, None]
+    hi: list[int | None] = [None, None, None]
+
+    def grow(corner_min: list[int], corner_max: list[int]) -> None:
+        for i in range(3):
+            cur_lo, cur_hi = lo[i], hi[i]
+            lo[i] = corner_min[i] if cur_lo is None else min(cur_lo, corner_min[i])
+            hi[i] = corner_max[i] if cur_hi is None else max(cur_hi, corner_max[i])
+
+    for pl in layout.placements:
+        m = machines.get(pl.machine_id)
+        if m is None:
+            continue
+        cell = [pl.cell.x, pl.cell.y, pl.cell.z]
+        size = [m.footprint.sx, m.footprint.sy, m.footprint.sz]
+        grow(cell, [cell[i] + size[i] for i in range(3)])
+    for route in layout.routes:
+        for seg in route.segments:
+            for cell in (
+                [seg.start.x, seg.start.y, seg.start.z],
+                [seg.end.x, seg.end.y, seg.end.z],
+            ):
+                grow(cell, [cell[i] + 1 for i in range(3)])
+
+    if lo[0] is None:  # nothing placed or routed - frame the whole region instead
+        region = problem.bounding_region
+        return {"min": [0, 0, 0], "max": [region.sx, region.sy, region.sz]}
+    return {"min": [v for v in lo if v is not None], "max": [v for v in hi if v is not None]}
 
 
 def _role(machine: Machine) -> str:

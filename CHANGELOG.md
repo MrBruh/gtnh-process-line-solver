@@ -88,11 +88,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Previewer (`previewer/`) + `gtnh-solve --preview`** - a self-contained, double-clickable 3D
   view of a solved layout. `build_scene(problem, layout)` flattens the layout into a render-ready
-  scene (machine boxes coloured by type, route segments coloured by commodity and sized by cable
-  thickness, auto-output links, region, legend) - a pure, fully-tested mapping; `render_html`
-  inlines it into a static three.js viewer (CDN, no npm build) with **orbit/pan/zoom and a
-  layer-by-layer slider**. `gtnh-solve plan.json --preview view.html` writes it. Build-assist
-  scope; the congestion heatmap, multi-seed compare, and offline (vendored three.js) are follow-ups.
+  scene (machine boxes coloured by type with the machine name on the front face, rectangular
+  cables/pipes sized by cable thickness with a lead to each machine face, auto-output arrows,
+  legend, and a tight `bounds` of the built extent) - a pure, fully-tested mapping; `render_html`
+  inlines it into a static three.js viewer (CDN, no npm build) with an **orbit + pan camera**
+  (right-drag / arrow keys) and a **layer-by-layer slider**, framed on the built extent rather
+  than the solver's oversized search region. `gtnh-solve plan.json --preview view.html` writes it.
+  Build-assist scope; the congestion heatmap, multi-seed compare, real block textures, and offline
+  (vendored three.js) are follow-ups.
 
 ### Changed
 - **InputIR bumped to v1 (breaking): dropped `Machine.count`.** Multi-instance machine groups
