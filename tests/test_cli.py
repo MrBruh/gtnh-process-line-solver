@@ -41,6 +41,29 @@ def test_cli_seed_is_accepted(capsys: pytest.CaptureFixture[str]) -> None:
     assert "# Build guide" in capsys.readouterr().out
 
 
+def test_cli_preview_writes_self_contained_html(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    target = tmp_path / "view.html"
+    code = main([_SAND, "--preview", str(target)])
+    assert code == 0
+    html = target.read_text(encoding="utf-8")
+    assert "<!doctype html>" in html
+    assert "OrbitControls" in html  # the camera controls are in the page
+    captured = capsys.readouterr()
+    assert captured.out == ""  # --preview alone suppresses the stdout guide dump
+    assert "wrote preview" in captured.err
+
+
+def test_cli_guide_and_preview_together(tmp_path: Path) -> None:
+    guide_file = tmp_path / "guide.txt"
+    preview_file = tmp_path / "view.html"
+    code = main([_SAND, "-o", str(guide_file), "--preview", str(preview_file)])
+    assert code == 0
+    assert "# Build guide" in guide_file.read_text(encoding="utf-8")
+    assert "<!doctype html>" in preview_file.read_text(encoding="utf-8")
+
+
 def test_cli_partial_invalid_returns_1(capsys: pytest.CaptureFixture[str]) -> None:
     # nitrobenzene's multiblocks overflow crude 1x1x1 faces -> partial_invalid, reported on stderr
     code = main([_NITROBENZENE])

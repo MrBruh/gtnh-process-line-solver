@@ -86,6 +86,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the layout is fully VALID, 1 when the solver returns an explicit infeasibility (printed to
   stderr), 2 when the export can't be loaded. Replaces the planning-stub entry point.
 
+- **Previewer (`previewer/`) + `gtnh-solve --preview`** - a self-contained, double-clickable 3D
+  view of a solved layout. `build_scene(problem, layout)` flattens the layout into a render-ready
+  scene (machine boxes coloured by type, route segments coloured by commodity and sized by cable
+  thickness, auto-output links, region, legend) - a pure, fully-tested mapping; `render_html`
+  inlines it into a static three.js viewer (CDN, no npm build) with **orbit/pan/zoom and a
+  layer-by-layer slider**. `gtnh-solve plan.json --preview view.html` writes it. Build-assist
+  scope; the congestion heatmap, multi-seed compare, and offline (vendored three.js) are follow-ups.
+
 ### Changed
 - **InputIR bumped to v1 (breaking): dropped `Machine.count`.** Multi-instance machine groups
   are not modelled until routing is instance-aware (Phase 2): the placer expanded `count` into

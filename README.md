@@ -37,6 +37,7 @@ that into a physical, buildable layout.
 pip install -e ".[dev]"
 gtnh-solve examples/gtnh-sand.json        # solve a gtnh-factory-flow export, print the build guide
 gtnh-solve plan.json -o guide.txt         # ...or write the guide to a file
+gtnh-solve plan.json --preview view.html  # ...or a double-clickable 3D preview (three.js)
 ```
 
 Exit code: 0 when the layout is fully valid, 1 when the solver can only return an explicit
