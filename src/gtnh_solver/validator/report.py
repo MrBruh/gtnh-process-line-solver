@@ -52,6 +52,8 @@ class ViolationCode(str, Enum):
         "power_thickness_invalid"  # missing/misaligned/illegal thickness value
     )
     POWER_THICKNESS_INSUFFICIENT = "power_thickness_insufficient"  # cable thinner than summed amps
+    POWER_NET_NO_SINGLE_SOURCE = "power_net_no_single_source"  # zero or >1 source terminals
+    POWER_ROUTE_NOT_A_TREE = "power_route_not_a_tree"  # cable graph has a cycle/disconnect
 
 
 @dataclass(frozen=True)

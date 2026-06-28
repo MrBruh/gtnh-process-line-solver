@@ -154,5 +154,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the draw of the machines downstream of every segment - and flags a segment whose cable is
   thinner than its load (`power_thickness_insufficient`), which also catches a load over the 16x
   cap. So a power-sizing bug in the router is caught, not certified.
+- **Validator no longer blesses an uncertifiable power route.** The amperage check used to
+  *skip* (certify by silence) a power route it could not verify - one with zero or multiple
+  source terminals, or whose cables form a cycle/tangle instead of a single tree - the exact
+  silently-invalid case the independent gate exists to catch. It now rejects both with explicit
+  violations (`power_net_no_single_source`, `power_route_not_a_tree`), each with a negative test.
 
 [Unreleased]: https://github.com/MrBruh/gtnh-process-line-solver/commits/main

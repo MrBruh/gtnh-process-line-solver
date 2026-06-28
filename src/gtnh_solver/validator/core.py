@@ -20,10 +20,12 @@ What is checked now (needs only the IR):
   auto-output - every auto-connection joins its net's real OUTPUT->INPUT endpoint machines
   (resolved by port direction) on adjacent usable faces; power/ME commodities cannot
   auto-output, and a machine has at most one auto-output face.
-  power - per-segment cable thickness is present and well-formed (1/2/4/8/16, aligned), AND
-  independently re-derived: rooting each power cable tree at its source terminal, every segment
-  carries the summed amperage of the machines downstream of it and its cable must be at least
-  that thick (which also rejects a load over the 16x cap).
+  power - per-segment cable thickness is present and well-formed (1/2/4/8/16, aligned); the route
+  has exactly one source terminal and its cables form a single tree rooted there (neither is
+  certifiable otherwise, so both are rejected, not skipped); AND independently re-derived: rooting
+  that cable tree at the source terminal, every segment carries the summed amperage of the machines
+  downstream of it and its cable must be at least that thick (which also rejects a load over the
+  16x cap).
 
 What is deferred to the dataset lane (rule data not available yet) - TODO:
   throughput/tier caps, one-fluid-per-line, and the dataset-specific half of face rules (which
@@ -454,7 +456,17 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
             if port_dir.get((t.machine_id, t.port_id)) is IODirection.OUTPUT
         ]
         if len(source_cells) != 1:
-            continue  # malformed power route (no single source) - structure checks report it
+            # The shared-amperage model roots the cable tree at exactly one source; without it
+            # the load cannot be re-derived. Nothing else proves this, so the gate must reject a
+            # source-less (or multi-source) power route rather than wave it through.
+            out.append(
+                Violation(
+                    ViolationCode.POWER_NET_NO_SINGLE_SOURCE,
+                    f"power route for net {r.net_id!r} has {len(source_cells)} source terminals "
+                    f"(a shared-amperage trunk needs exactly one); its load cannot be verified",
+                )
+            )
+            continue
 
         amp_at: dict[Cell, int] = defaultdict(int)
         uncheckable = False
@@ -482,7 +494,18 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
 
         required = _downstream_amperage(r.segments, source_cells[0], amp_at)
         if required is None:
-            continue  # not a single tree rooted at the source - connectivity checks report it
+            # The cable graph is not a single tree rooted at the source (a cycle, a tangle, or a
+            # piece disconnected from the source), so the per-segment load is undefined. The gate
+            # must reject what it cannot certify, not skip it - an unverified trunk is the exact
+            # silently-invalid case the validator exists to catch.
+            out.append(
+                Violation(
+                    ViolationCode.POWER_ROUTE_NOT_A_TREE,
+                    f"power route for net {r.net_id!r} is not a single cable tree rooted at its "
+                    f"source; its amperage cannot be verified",
+                )
+            )
+            continue
         for seg_idx, (req, thick) in enumerate(zip(required, tps, strict=True)):
             if thick < req:
                 out.append(
@@ -501,8 +524,8 @@ def _downstream_amperage(
     total draw of the machine terminals in the subtree on its far (leaf) side.
 
     Returns one load per segment (aligned 1:1), or ``None`` if the segments are not a single tree
-    rooted at ``root`` (a cycle, a disconnected piece, or a missing root - the connectivity
-    checks report those, so the amperage check declines rather than guess)."""
+    rooted at ``root`` (a cycle, a disconnected piece, or a missing root); the caller turns that
+    ``None`` into a ``POWER_ROUTE_NOT_A_TREE`` violation - the gate rejects what it cannot certify."""
     adj: dict[Cell, set[Cell]] = defaultdict(set)
     edges: list[tuple[Cell, Cell]] = []
     nodes: set[Cell] = set()

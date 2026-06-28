@@ -304,43 +304,72 @@ def test_me_toggled_net_that_is_routed_is_flagged() -> None:
 
 
 def _power_pair() -> tuple[InputIR, LayoutResult]:
+    """A genuinely valid 1-source -> 1-sink power net: a source (POWER OUTPUT) feeding ``mp``.
+
+    The source is what makes this valid - a power route the validator can root and amperage-check.
+    (An earlier version of this fixture had only the INPUT machine and no source, which the
+    validator's amperage check silently skipped: it asserted ``.ok`` on a source-less net, blessing
+    the exact bad case the gate exists to catch. The source closes that hole.)"""
     problem = InputIR(
         bounding_region=CellBox(sx=4, sy=4, sz=4),
         machines=[
             Machine(
+                id="src",
+                type="Power Source (LV)",
+                voltage_tier="LV",
+                eut=0.0,
+                orientation_options=[Facing.NORTH],
+                faces=FaceSpec(
+                    ports=[Port(id="po", commodity=Commodity.POWER, direction=IODirection.OUTPUT)]
+                ),
+            ),
+            Machine(
                 id="mp",
                 type="gt.machine",
                 voltage_tier="LV",
+                eut=32.0,  # 1 amp at LV -> a 1x cable carries it
                 orientation_options=[Facing.NORTH],
                 faces=FaceSpec(
                     ports=[Port(id="pwr", commodity=Commodity.POWER, direction=IODirection.INPUT)]
                 ),
-            )
+            ),
         ],
         nets=[
             Net(
                 id="np",
                 commodity=Commodity.POWER,
                 throughput=32.0,
-                endpoints=[MachineFaceRef(machine_id="mp", port_id="pwr")],
+                endpoints=[
+                    MachineFaceRef(machine_id="src", port_id="po"),
+                    MachineFaceRef(machine_id="mp", port_id="pwr"),
+                ],
             )
         ],
     )
     layout = LayoutResult(
         status=LayoutStatus.VALID,
         seed=0,
-        placements=[Placement(machine_id="mp", cell=_coord(0, 0, 0), orientation=Facing.NORTH)],
+        placements=[
+            Placement(machine_id="src", cell=_coord(0, 0, 0), orientation=Facing.NORTH),
+            Placement(machine_id="mp", cell=_coord(2, 0, 0), orientation=Facing.NORTH),
+        ],
         routes=[
             Route(
                 net_id="np",
                 commodity=Commodity.POWER,
                 terminals=[
                     Terminal(
-                        machine_id="mp", port_id="pwr", face=Facing.SOUTH, cell=_coord(0, 0, 1)
-                    )
+                        machine_id="src", port_id="po", face=Facing.SOUTH, cell=_coord(0, 0, 1)
+                    ),
+                    Terminal(
+                        machine_id="mp", port_id="pwr", face=Facing.SOUTH, cell=_coord(2, 0, 1)
+                    ),
                 ],
-                segments=[Segment(start=_coord(0, 0, 1), end=_coord(0, 0, 2), channel=0)],
-                thickness_per_segment=[8],
+                segments=[
+                    Segment(start=_coord(0, 0, 1), end=_coord(1, 0, 1), channel=0),
+                    Segment(start=_coord(1, 0, 1), end=_coord(2, 0, 1), channel=0),
+                ],
+                thickness_per_segment=[1, 1],
             )
         ],
     )
@@ -348,7 +377,17 @@ def _power_pair() -> tuple[InputIR, LayoutResult]:
 
 
 def test_valid_power_route_passes() -> None:
-    assert validate(*_power_pair()).ok
+    assert validate(*_power_pair()).ok, str(validate(*_power_pair()))
+
+
+def test_power_net_without_a_source_terminal_is_flagged() -> None:
+    # Drop the source terminal: the route now serves a sink with no OUTPUT terminal to root the
+    # tree at. The amperage check cannot re-derive the load, so it must reject - not skip.
+    problem, layout = _power_pair()
+    route = layout.routes[0]
+    sink_only = route.model_copy(update={"terminals": [route.terminals[1]]})
+    layout = layout.model_copy(update={"routes": [sink_only]})
+    assert ViolationCode.POWER_NET_NO_SINGLE_SOURCE in validate(problem, layout).codes()
 
 
 def test_power_thickness_defect_caught_even_when_model_validation_bypassed() -> None:
@@ -461,6 +500,41 @@ def test_power_unknown_tier_cannot_be_amperage_verified() -> None:
     weird = problem.machines[1].model_copy(update={"voltage_tier": "NOPE"})
     problem = problem.model_copy(update={"machines": [problem.machines[0], weird]})
     assert ViolationCode.POWER_THICKNESS_INSUFFICIENT in validate(problem, layout).codes()
+
+
+def test_power_route_with_a_cycle_is_rejected_not_skipped() -> None:
+    # A tangled (non-tree) trunk has an undefined per-segment amperage. Re-cable the valid
+    # source->m0 run as a square loop touching both terminals: the cable graph now has a cycle
+    # (edges == nodes, not nodes-1), so the gate must reject it rather than decline to certify -
+    # an unverified trunk is exactly the silently-invalid case this check exists to catch.
+    problem, _ = _power_trunk()
+    loop = Route(
+        net_id="pw",
+        commodity=Commodity.POWER,
+        terminals=[
+            Terminal(machine_id="src", port_id="po", face=Facing.SOUTH, cell=_coord(0, 0, 1)),
+            Terminal(machine_id="m0", port_id="pi", face=Facing.SOUTH, cell=_coord(2, 0, 1)),
+        ],
+        segments=[
+            Segment(start=_coord(0, 0, 1), end=_coord(1, 0, 1), channel=0),
+            Segment(start=_coord(1, 0, 1), end=_coord(2, 0, 1), channel=0),
+            Segment(start=_coord(2, 0, 1), end=_coord(2, 0, 2), channel=0),
+            Segment(start=_coord(2, 0, 2), end=_coord(1, 0, 2), channel=0),
+            Segment(start=_coord(1, 0, 2), end=_coord(0, 0, 2), channel=0),
+            Segment(start=_coord(0, 0, 2), end=_coord(0, 0, 1), channel=0),
+        ],
+        thickness_per_segment=[2, 2, 2, 2, 2, 2],
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id="src", cell=_coord(0, 0, 0), orientation=Facing.NORTH),
+            Placement(machine_id="m0", cell=_coord(2, 0, 0), orientation=Facing.NORTH),
+        ],
+        routes=[loop],
+    )
+    assert ViolationCode.POWER_ROUTE_NOT_A_TREE in validate(problem, layout).codes()
 
 
 # --------------------------------------------------------------- auto-output connections
