@@ -159,5 +159,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   source terminals, or whose cables form a cycle/tangle instead of a single tree - the exact
   silently-invalid case the independent gate exists to catch. It now rejects both with explicit
   violations (`power_net_no_single_source`, `power_route_not_a_tree`), each with a negative test.
+- **Power router always builds a tree.** `router/power` A*'d each leg of a trunk against
+  obstacles that excluded the cable already laid, so legs could overlap into a non-tree whose
+  per-segment amperage is undefined. Each laid leg's cells are now obstacles for the legs that
+  follow, so the trunk is always a single non-overlapping path the validator can verify.
 
 [Unreleased]: https://github.com/MrBruh/gtnh-process-line-solver/commits/main

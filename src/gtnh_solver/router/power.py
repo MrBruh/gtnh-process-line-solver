@@ -11,8 +11,9 @@ ASCII (one tier, a path-trunk; thickness sized to the summed downstream amperage
            |<- 3A ->|<-- 2A --->|<-- 1A -->|
 
 Crude on purpose (correctness-first, the handoff sequencing): **one source per tier**, the trunk
-is a path through the machines in endpoint order (A* per leg over the shared ``_grid``), and a
-leg needing **> 16x** is rejected (Phase 2 adds multi-source / parallel-run / voltage-upgrade
+is a path through the machines in endpoint order (A* per leg over the shared ``_grid``, each leg
+avoiding the cells already laid so the legs never overlap and the trunk stays a tree), and a leg
+needing **> 16x** is rejected (Phase 2 adds multi-source / parallel-run / voltage-upgrade
 optimization). The validator independently re-derives the per-segment amperage and checks the
 thickness, so a sizing bug here is caught, not certified.
 """
@@ -148,11 +149,19 @@ def _build_trunk(
     ``cells`` is ``[source, m0, m1, ...]``; ``amps[i]`` is the draw of machine ``m_i``. Leg ``i``
     (between ``cells[i]`` and ``cells[i+1]``) carries every machine from ``m_i`` onward, so its
     load is ``sum(amps[i:])`` - the suffix sum that defines a shared-amperage trunk.
+
+    Each laid leg's cells become obstacles for the legs that follow, so two legs never share a
+    cell: the trunk is always a simple, non-self-crossing path (a tree the validator can root at
+    the source and re-derive). Without this, A*-ing each leg independently could overlap legs into
+    a tangle whose per-segment amperage is undefined - which the validator then rejects as
+    POWER_ROUTE_NOT_A_TREE rather than certify (the start cell of each leg is the previous leg's
+    end, which A* never tests against obstacles, so chaining still connects).
     """
     segments: list[Segment] = []
     thickness: list[int] = []
+    blocked = set(obstacles)  # grows with each laid leg to keep the trunk a non-overlapping path
     for i, (a, b) in enumerate(pairwise(cells)):
-        path = astar((a.x, a.y, a.z), (b.x, b.y, b.z), obstacles, region)
+        path = astar((a.x, a.y, a.z), (b.x, b.y, b.z), blocked, region)
         if path is None:
             return Infeasibility(
                 constraint="routing",
@@ -171,6 +180,7 @@ def _build_trunk(
         for c0, c1 in pairwise(path):
             segments.append(Segment(start=coord(c0), end=coord(c1), channel=0))
             thickness.append(thick)
+        blocked.update(path)  # later legs must avoid these cells so the graph stays a tree
     return segments, thickness
 
 

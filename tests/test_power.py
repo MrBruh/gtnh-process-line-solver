@@ -92,6 +92,30 @@ def test_power_trunk_sizes_thickness_by_summed_amperage() -> None:
     assert validate(problem, layout).ok, str(validate(problem, layout))
 
 
+def test_power_trunk_stays_a_tree_when_legs_would_otherwise_overlap() -> None:
+    # Source in the MIDDLE of its two sinks: the m0->m1 leg's shortest path retraces the
+    # src->m0 leg, so routing each leg independently would lay overlapping segments - a tangle
+    # whose per-segment amperage is undefined (the validator rejects it as POWER_ROUTE_NOT_A_TREE).
+    # The router avoids the cells it already laid, so the trunk is a single non-overlapping tree.
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[_src(), _load("m0", 32), _load("m1", 32)],
+        nets=[_pnet("m0", "m1")],
+    )
+    placements = [_at("src", 2, 0, 0), _at("m0", 0, 0, 0), _at("m1", 4, 0, 0)]
+    result = route_power(problem, placements)
+    assert result.ok, result.infeasibility
+    route = result.routes[0]
+    edges = [
+        ((s.start.x, s.start.y, s.start.z), (s.end.x, s.end.y, s.end.z)) for s in route.segments
+    ]
+    nodes = {c for e in edges for c in e}
+    assert len(edges) == len(set(edges))  # no segment laid twice
+    assert len(edges) == len(nodes) - 1  # a tree on N nodes has exactly N-1 edges
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route])
+    assert validate(problem, layout).ok, str(validate(problem, layout))
+
+
 def test_power_single_machine_thickness_matches_its_amperage() -> None:
     # one machine drawing 3 amps at LV (eut just over 2 amps: 65 > 64) -> a 4x cable.
     problem = InputIR(
