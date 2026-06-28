@@ -196,6 +196,28 @@ def test_synthesizes_one_power_source_and_net_per_tier() -> None:
     )  # the powered machine gained a power input port
 
 
+def test_parallel_scales_eut_so_power_amperage_is_sized_for_it() -> None:
+    # A node running 4 recipes in parallel draws 4x the recipe's EU/t. The synthesized power net
+    # must size amperage from the scaled draw, not the single-recipe eut (otherwise the cable is
+    # under-sized for parallel > 1). The powered machine carries eut = recipe.eut * parallel.
+    plan = Plan(
+        schema_version=1,
+        recipes=[
+            Recipe(
+                id="r",
+                machine_type="M",
+                duration_ticks=10.0,
+                eut=30.0,
+                outputs=[_resource("item", "x")],
+            )
+        ],
+        nodes=[Node(id="n", recipe_id="r", overclock_tier="LV", parallel=4)],
+    )
+    ir = to_input_ir(plan)
+    powered = next(m for m in ir.machines if m.id == "n")
+    assert powered.eut == 120.0  # 30 EU/t * 4 parallel
+
+
 def test_unpowered_plan_synthesizes_no_power() -> None:
     # eut defaults to 0 (no eut in the recipe) -> nothing draws power -> no source, no power net.
     plan = Plan(

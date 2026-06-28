@@ -169,5 +169,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   auto-output. The cost now rewards orientations that enable auto-output (a shared
   `ir.geometry.auto_output_faces` helper, reused by the solver), so the optimizer preserves -
   and recovers - the free connections instead of degrading them.
+- **Adapter sizes power for `parallel`.** A node's `eut` is now `recipe.eut * parallel`: a node
+  running N recipes in parallel draws N times the power, matching how throughput already scales,
+  so the synthesized power cable is sized correctly for `parallel > 1` (was under-sized).
 
 [Unreleased]: https://github.com/MrBruh/gtnh-process-line-solver/commits/main

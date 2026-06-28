@@ -2,7 +2,7 @@
 
 Mapping (see docs/ARCHITECTURE.md, docs/IR.md):
 - ``node``    -> ``Machine`` (recipe.machineType -> type, overclockTier -> voltage_tier,
-                recipe.eut -> eut); recipe inputs/outputs -> item/fluid ``Port``s.
+                recipe.eut * parallel -> eut); recipe inputs/outputs -> item/fluid ``Port``s.
                 ``machineCount`` must be 1 - multi-instance nodes are rejected (see below).
 - ``storage`` -> a boundary ``Machine`` typed **Super Chest** (items) or **Super Tank**
                 (fluids) - blocks that take I/O covers on their faces, so every cover rides a
@@ -96,7 +96,10 @@ def to_input_ir(plan: Plan) -> InputIR:
                 faces=FaceSpec(ports=_recipe_ports(recipe)),
                 voltage_tier=node.overclock_tier,
                 orientation_options=_DEFAULT_ORIENTATIONS,
-                eut=recipe.eut,  # EU/t draw; the power synthesis sizes amperage from this
+                # EU/t draw the power synthesis sizes amperage from. ``parallel`` runs the recipe
+                # that many times at once, so the node draws ``recipe.eut`` per parallel - matching
+                # how ``_rate`` scales throughput. (``machineCount`` is forced to 1 above.)
+                eut=recipe.eut * node.parallel,
             )
         )
 
