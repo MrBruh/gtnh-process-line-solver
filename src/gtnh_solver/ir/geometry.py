@@ -93,3 +93,34 @@ OPPOSITE_FACE: dict[Facing, Facing] = {
     Facing.UP: Facing.DOWN,
     Facing.DOWN: Facing.UP,
 }
+
+
+def auto_output_faces(
+    source_origin: CellCoord,
+    source_footprint: CellBox,
+    source_front: Facing,
+    target_origin: CellCoord,
+    target_footprint: CellBox,
+    target_front: Facing,
+) -> tuple[Facing, Facing] | None:
+    """The ``(source_face, target_face)`` a source can auto-output across into a target, or None.
+
+    A GT machine ejects into the adjacent block on a usable face; the front face (a machine's
+    placement ``orientation``) carries no I/O. So a source auto-feeds a target iff some non-front
+    source face touches the target across the opposite face, and that opposite face is not the
+    target's own front. Pure geometry on cell *origins* + footprints + the two front faces - it
+    takes no IR model types, so it can be shared by the solver (which builds the connection) and
+    the placement cost (which rewards orientations that enable one) without either importing the
+    other. The validator deliberately re-derives this independently (docs/ARCHITECTURE.md #4).
+    """
+    source_cells = set(occupied_cells(source_origin, source_footprint))
+    target_cells = set(occupied_cells(target_origin, target_footprint))
+    for face, (dx, dy, dz) in FACE_DELTAS.items():
+        if face is source_front:  # the source's front carries no I/O
+            continue
+        opposite = OPPOSITE_FACE[face]
+        if opposite is target_front:  # the target's input face would be its front
+            continue
+        if any((x + dx, y + dy, z + dz) in target_cells for x, y, z in source_cells):
+            return face, opposite
+    return None

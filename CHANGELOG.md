@@ -163,5 +163,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   obstacles that excluded the cable already laid, so legs could overlap into a non-tree whose
   per-segment amperage is undefined. Each laid leg's cells are now obstacles for the legs that
   follow, so the trunk is always a single non-overlapping path the validator can verify.
+- **Placement optimizer keeps auto-output (orientation-aware cost).** The SA cost was
+  orientation-independent, so `reorient` moves were a free random walk that could finalize an
+  orientation putting a machine's front (no-I/O) face on a connecting side and **blocking**
+  auto-output. The cost now rewards orientations that enable auto-output (a shared
+  `ir.geometry.auto_output_faces` helper, reused by the solver), so the optimizer preserves -
+  and recovers - the free connections instead of degrading them.
 
 [Unreleased]: https://github.com/MrBruh/gtnh-process-line-solver/commits/main

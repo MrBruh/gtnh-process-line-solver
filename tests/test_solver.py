@@ -29,6 +29,7 @@ from gtnh_solver.ir import (
     Route,
     Segment,
 )
+from gtnh_solver.placement import place
 from gtnh_solver.router import RouteResult
 from gtnh_solver.solver import core as solver_core
 from gtnh_solver.solver import solve
@@ -109,6 +110,58 @@ def _net(nid: str, src: str, dst: str) -> Net:
             MachineFaceRef(machine_id=dst, port_id="in"),
         ],
     )
+
+
+# EAST-first orientation: the constructive seed faces every machine's front down the +x chain
+# axis, blocking the east/west auto-output - so only reorientation can recover the free connection.
+_EAST_FIRST = [Facing.EAST, Facing.NORTH, Facing.SOUTH, Facing.WEST]
+
+
+def _relay(mid: str) -> Machine:
+    # both an input and an output port; EAST-first orientation so reorient moves are exercised
+    return Machine(
+        id=mid,
+        type="t",
+        voltage_tier="LV",
+        orientation_options=_EAST_FIRST,
+        faces=FaceSpec(
+            ports=[
+                Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT),
+                Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT),
+            ]
+        ),
+    )
+
+
+def _east_first(machine: Machine) -> Machine:
+    return machine.model_copy(update={"orientation_options": _EAST_FIRST})
+
+
+def test_optimizer_reorients_to_enable_auto_output_the_seed_blocks() -> None:
+    # A straight chain m0->m1->m2->m3 packed along +x, every machine free to reorient. With the
+    # EAST-first default the constructive seed points each front down the chain axis, so NOTHING
+    # auto-feeds (seed = 0). SA's reorient move must therefore carry a cost signal that pulls fronts
+    # off the connecting faces and recovers the free connections - the FIX 3 guard. The old
+    # orientation-blind cost made reorient a free random walk (delta 0, never strictly better), so
+    # `best` stayed frozen on the seed orientation and auto-output never recovered (stuck at 0).
+    machines = [
+        _east_first(_producer("m0")),
+        _relay("m1"),
+        _relay("m2"),
+        _east_first(_consumer("m3")),
+    ]
+    problem = InputIR(
+        bounding_region=CellBox(sx=12, sy=4, sz=12),
+        machines=machines,
+        nets=[_net("n0", "m0", "m1"), _net("n1", "m1", "m2"), _net("n2", "m2", "m3")],
+    )
+    seed_autos, _ = solver_core._assign_auto_outputs(problem, place(problem).placements)
+    assert len(seed_autos) == 0  # the seed orientation blocks every link; reorientation must fix it
+    for s in range(8):
+        layout = solve(problem, seed=s)
+        assert layout.status is LayoutStatus.VALID, f"seed {s}: {layout.infeasibility}"
+        # the optimizer must recover auto-output the seed could not - strictly more than zero
+        assert len(layout.auto_connections) > len(seed_autos), f"seed {s} recovered no auto-output"
 
 
 def test_solve_fork_auto_outputs_one_and_pipes_the_other() -> None:

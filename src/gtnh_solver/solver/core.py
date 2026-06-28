@@ -34,7 +34,7 @@ from gtnh_solver.ir import (
     Machine,
     Placement,
 )
-from gtnh_solver.ir.geometry import FACE_DELTAS, OPPOSITE_FACE, occupied_cells
+from gtnh_solver.ir.geometry import auto_output_faces
 from gtnh_solver.placement import optimize_placement
 from gtnh_solver.router import route, route_power
 from gtnh_solver.validator import ValidationReport, validate
@@ -167,17 +167,18 @@ def _auto_faces(
     target_p: Placement | None,
     target_m: Machine | None,
 ) -> tuple[Facing, Facing] | None:
-    """The (source_face, target_face) if the two machines touch on a usable pair of faces."""
+    """The (source_face, target_face) if the two machines touch on a usable pair of faces.
+
+    Thin wrapper over the shared ``ir.geometry.auto_output_faces`` (the placement cost rewards the
+    same adjacency, so the geometry lives in one place); guards the unplaced/unknown-machine case.
+    """
     if source_p is None or source_m is None or target_p is None or target_m is None:
         return None
-    source_cells = set(occupied_cells(source_p.cell, source_m.footprint))
-    target_cells = set(occupied_cells(target_p.cell, target_m.footprint))
-    for face, (dx, dy, dz) in FACE_DELTAS.items():
-        if face is source_p.orientation:  # source's front carries no I/O
-            continue
-        opposite = OPPOSITE_FACE[face]
-        if opposite is target_p.orientation:  # the target's input face would be its front
-            continue
-        if any((x + dx, y + dy, z + dz) in target_cells for x, y, z in source_cells):
-            return face, opposite
-    return None
+    return auto_output_faces(
+        source_p.cell,
+        source_m.footprint,
+        source_p.orientation,
+        target_p.cell,
+        target_m.footprint,
+        target_p.orientation,
+    )

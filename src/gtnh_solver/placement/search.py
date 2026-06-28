@@ -2,9 +2,12 @@
 
 Starts from the constructive first-fit solution and improves it under a cost that proxies
 buildability: half-perimeter wirelength (HPWL) per net pulls connected machines together (more
-auto-output, shorter pipes), plus a mild compactness + flat-build bias. Moves are relocate / swap
-/ reorient (orientation is a search variable); Metropolis acceptance with geometric cooling keeps
-the best valid layout seen.
+auto-output, shorter pipes), an auto-output reward favours orientations whose usable (non-front)
+faces actually let a source eject into its sink, plus a mild compactness + flat-build bias. The
+auto reward is the only orientation-dependent term, so reorient moves carry a real cost signal -
+without it they were free random walk that could finalize an orientation BLOCKING auto-output.
+Moves are relocate / swap / reorient (orientation is a search variable); Metropolis acceptance
+with geometric cooling keeps the best valid layout seen.
 
     initial = constructive.place      # a valid seed
     repeat for a seeded budget:
@@ -21,16 +24,19 @@ from __future__ import annotations
 import math
 import random
 
-from gtnh_solver.ir import CellBox, CellCoord, InputIR, Machine, Placement
-from gtnh_solver.ir.geometry import Cell, in_region, occupied_cells
+from gtnh_solver.ir import CellBox, CellCoord, Commodity, InputIR, IODirection, Machine, Placement
+from gtnh_solver.ir.geometry import Cell, auto_output_faces, in_region, occupied_cells
 
 from .constructive import PlacementResult, place
 
-# Cost weights: wirelength dominates (it drives auto-output + short pipes); compactness and a
-# flat-build bias break ties without overriding routability.
+# Cost weights: wirelength dominates (it drives auto-output + short pipes); an auto-output reward
+# makes orientation matter (the front face carries no I/O, so the wrong orientation BLOCKS the
+# free connection - reorient moves are a no-op on the other terms); compactness and a flat-build
+# bias break ties without overriding routability.
 _W_WIRE = 1.0
 _W_COMPACT = 0.02
 _W_LAYERS = 1.0
+_W_AUTO = 4.0
 
 # Annealing schedule (geometric cooling). Budget scales with machine count, clamped.
 _T0 = 2.0
@@ -56,17 +62,21 @@ def optimize_placement(problem: InputIR, *, seed: int = 0) -> PlacementResult:
         for n in problem.nets
         if not problem.me_toggles.toggled(n.commodity)
     ]
+    # Directed source->sink pairs that COULD auto-output (simple 1->1 item/fluid nets, like the
+    # solver's own rule): the cost rewards each pair the current placement+orientation makes
+    # face-adjacent, so orientation has a gradient toward enabling the free connection.
+    auto_pairs = _auto_candidate_pairs(problem)
     rng = random.Random(seed)
 
     current = list(base.placements)
-    current_cost = _cost(current, machines, nets)
+    current_cost = _cost(current, machines, nets, auto_pairs)
     best, best_cost = current, current_cost
     iters = min(_MAX_ITERS, max(_MIN_ITERS, _PER_MACHINE * len(current)))
     temp = _T0
     for _ in range(iters):
         cand = _move(current, machines, region, reserved, rng)
         if cand is not None:
-            cand_cost = _cost(cand, machines, nets)
+            cand_cost = _cost(cand, machines, nets, auto_pairs)
             delta = cand_cost - current_cost
             if delta < 0 or rng.random() < math.exp(-delta / temp):
                 current, current_cost = cand, cand_cost
@@ -76,10 +86,38 @@ def optimize_placement(problem: InputIR, *, seed: int = 0) -> PlacementResult:
     return PlacementResult(placements=tuple(best))
 
 
+def _auto_candidate_pairs(problem: InputIR) -> list[tuple[str, str]]:
+    """Directed (source, sink) machine pairs for the simple 1->1 item/fluid nets that can
+    auto-output - the same nets ``solver._assign_auto_outputs`` covers (power/ME never auto-feed).
+    """
+    port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
+    pairs: list[tuple[str, str]] = []
+    for net in problem.nets:
+        if net.commodity is Commodity.POWER or problem.me_toggles.toggled(net.commodity):
+            continue
+        sources = [
+            e.machine_id
+            for e in net.endpoints
+            if port_dir.get((e.machine_id, e.port_id)) is IODirection.OUTPUT
+        ]
+        sinks = [
+            e.machine_id
+            for e in net.endpoints
+            if port_dir.get((e.machine_id, e.port_id)) is IODirection.INPUT
+        ]
+        if len(sources) == 1 and len(sinks) == 1:
+            pairs.append((sources[0], sinks[0]))
+    return pairs
+
+
 def _cost(
-    placements: list[Placement], machines: dict[str, Machine], nets: list[list[str]]
+    placements: list[Placement],
+    machines: dict[str, Machine],
+    nets: list[list[str]],
+    auto_pairs: list[tuple[str, str]],
 ) -> float:
-    """Routing-aware cost: sum of net HPWL + compactness (bbox volume) + layer count."""
+    """Routing-aware cost: net HPWL + compactness (bbox volume) + layer count, minus an
+    auto-output reward (the only orientation-dependent term, so reorient moves are not free)."""
     pos = {p.machine_id: p for p in placements}
     wire = 0.0
     for machine_ids in nets:
@@ -98,7 +136,25 @@ def _cost(
     zs = [c[2] for c in cells]
     volume = (max(xs) - min(xs) + 1) * (max(ys) - min(ys) + 1) * (max(zs) - min(zs) + 1)
     layers = len(set(ys))
-    return _W_WIRE * wire + _W_COMPACT * volume + _W_LAYERS * layers
+
+    auto = 0
+    for source_id, sink_id in auto_pairs:
+        sp, tp = pos.get(source_id), pos.get(sink_id)
+        if sp is None or tp is None:
+            continue
+        if (
+            auto_output_faces(
+                sp.cell,
+                machines[source_id].footprint,
+                sp.orientation,
+                tp.cell,
+                machines[sink_id].footprint,
+                tp.orientation,
+            )
+            is not None
+        ):
+            auto += 1
+    return _W_WIRE * wire + _W_COMPACT * volume + _W_LAYERS * layers - _W_AUTO * auto
 
 
 def _center(p: Placement, m: Machine) -> tuple[float, float, float]:
