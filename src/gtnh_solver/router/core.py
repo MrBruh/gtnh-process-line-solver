@@ -4,9 +4,13 @@ Given placed machines, connect each non-ME **item/fluid** net (power is the powe
 ``router.power``): resolve a :class:`~gtnh_solver.ir.Terminal` per endpoint (a free cell just
 outside a usable, non-front machine face - the front comes from the placement orientation, so no
 dataset is needed), then A* between the terminals over the free cell grid (machine + reserved
-cells are obstacles). Crude on purpose (docs/ROADMAP.md): one channel, no inter-net capacity. The
-shared cell-grid primitives (obstacle building, docking, A*) live in ``_grid`` so this router and
-``router.power`` route over one grid model.
+cells are obstacles). Routes are laid **capacity-aware**: each net's cells become obstacles for
+the nets after it, so two nets never share a cell - the crude single-channel cap (one route per
+cell), which the validator independently enforces. Crude on purpose (docs/ROADMAP.md): one channel
+per cell, first-come-first-served net order (no rip-up/reroute yet, so a bad order can wedge a
+later net into a false infeasibility - the next lane-D slice). The shared cell-grid primitives
+(obstacle building, docking, A*) live in ``_grid`` so this router and ``router.power`` route over
+one grid model.
 
 Returns routes, or an explicit ``Infeasibility`` naming the net that could not dock or route -
 never raises for the expected case, matching the placer/validator discipline. The validator
@@ -93,7 +97,21 @@ def route(
                 segments=segments,
             )
         )
+        # Capacity: this net now owns these cells, so later nets must route around them. Crude
+        # single-channel - one route per cell (the validator independently enforces it). A bad
+        # net order can now wedge a later net into a false infeasibility; rip-up/reroute (the next
+        # lane-D slice) handles that. docs/ARCHITECTURE.md #7.
+        obstacles.update(_segment_cells(segments))
     return RouteResult(tuple(routes))
+
+
+def _segment_cells(segments: Sequence[Segment]) -> set[Cell]:
+    """Every cell a route's segments touch (both endpoints of each hop)."""
+    cells: set[Cell] = set()
+    for seg in segments:
+        cells.add((seg.start.x, seg.start.y, seg.start.z))
+        cells.add((seg.end.x, seg.end.y, seg.end.z))
+    return cells
 
 
 def _connect(

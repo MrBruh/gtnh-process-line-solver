@@ -116,6 +116,28 @@ def test_power_trunk_stays_a_tree_when_legs_would_otherwise_overlap() -> None:
     assert validate(problem, layout).ok, str(validate(problem, layout))
 
 
+def test_power_cable_routes_around_extra_obstacles() -> None:
+    # The solver passes the item/fluid pipe cells as extra_obstacles so a cable never shares a
+    # cell with a pipe (crude single-channel capacity). Block the straight path's middle cell and
+    # the trunk must detour around it - still feasible and validator-clean.
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[_src(), _load("m0", 32)],
+        nets=[_pnet("m0")],
+    )
+    placements = [_at("src", 0, 0, 0), _at("m0", 2, 0, 0)]
+    blocked = {(1, 0, 1)}  # the cell the straight src->m0 cable would otherwise use
+    result = route_power(problem, placements, extra_obstacles=blocked)
+    assert result.ok, result.infeasibility
+    route = result.routes[0]
+    cells = {(s.start.x, s.start.y, s.start.z) for s in route.segments} | {
+        (s.end.x, s.end.y, s.end.z) for s in route.segments
+    }
+    assert blocked.isdisjoint(cells)  # the cable routed around the obstacle
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route])
+    assert validate(problem, layout).ok, str(validate(problem, layout))
+
+
 def test_power_single_machine_thickness_matches_its_amperage() -> None:
     # one machine drawing 3 amps at LV (eut just over 2 amps: 65 > 64) -> a 4x cable.
     problem = InputIR(

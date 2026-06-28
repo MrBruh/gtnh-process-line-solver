@@ -12,8 +12,9 @@ What is checked now (needs only the IR):
   orientation; every physically-routed net routed exactly once; ME-toggled commodities not
   routed; route commodity matches its net.
   geometry - machines in-bounds, non-overlapping, off reserved cells; routes in-bounds,
-  contiguous, every segment a unit (+/-1) hop, and never running through a machine body or a
-  reserved cell; pinned I/O actually sits on its net's route.
+  contiguous, every segment a unit (+/-1) hop, never running through a machine body or a
+  reserved cell, and no two nets' routes sharing a cell (crude single-channel capacity); pinned
+  I/O actually sits on its net's route.
   terminals - every net endpoint has a terminal on a usable (non-front) face adjacent to its
   machine, and that terminal cell lies on the route (the geometric half of required-I/O-face
   reachability).
@@ -69,6 +70,7 @@ def validate(problem: InputIR, layout: LayoutResult) -> ValidationReport:
     _check_terminals(problem, layout, out)
     _check_auto_connections(problem, layout, out)
     _check_power_amperage(problem, layout, out)
+    _check_route_capacity(problem, layout, out)
     _check_pinned(problem, layout, out)
     return ValidationReport(tuple(out))
 
@@ -561,6 +563,34 @@ def _downstream_amperage(
         if p is not None:
             subtree[p] += subtree[cur]
     return [subtree[a if depth[a] > depth[b] else b] for a, b in edges]
+
+
+def _check_route_capacity(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
+    """Crude single-channel realizability: at most one net's route may occupy a cell.
+
+    The coarse cell grid models one routing channel per cell in Phase 1, so two different nets
+    sharing a cell is unbuildable - one block cannot be two pipes/cables (the abstraction would
+    otherwise certify a layout that does not physically fit, docs/ARCHITECTURE.md #7). Computed
+    independently of the routers, which are meant to lay routes capacity-aware. The per-edge
+    multi-channel cap (a routing margin hosting several parallel channels) is the Phase 2 upgrade;
+    until then capacity is one route per cell. A net occupying its own cells is fine - only a cell
+    claimed by more than one net is a collision (a duplicate route of one net is DUPLICATE_ROUTE).
+    """
+    owners: dict[Cell, set[str]] = defaultdict(set)
+    for r in layout.routes:
+        for seg in r.segments:
+            owners[(seg.start.x, seg.start.y, seg.start.z)].add(r.net_id)
+            owners[(seg.end.x, seg.end.y, seg.end.z)].add(r.net_id)
+    for cell in sorted(owners):
+        nets = owners[cell]
+        if len(nets) > 1:
+            out.append(
+                Violation(
+                    ViolationCode.ROUTE_CELL_COLLISION,
+                    f"cell {cell} is shared by routes for nets {', '.join(sorted(nets))} "
+                    f"(single-channel capacity is one route per cell)",
+                )
+            )
 
 
 def _check_pinned(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:

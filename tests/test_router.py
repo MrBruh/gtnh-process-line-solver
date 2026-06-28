@@ -7,6 +7,7 @@ never-silently-invalid promise (incompleteness is always an explicit infeasibili
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 
 from gtnh_solver.adapter import adapt_file
@@ -26,6 +27,7 @@ from gtnh_solver.ir import (
     Net,
     Placement,
     Port,
+    Route,
 )
 from gtnh_solver.placement import place
 from gtnh_solver.router import route, route_power
@@ -77,16 +79,42 @@ def _at(mid: str, x: int, y: int, z: int) -> Placement:
     return Placement(machine_id=mid, cell=CellCoord(x=x, y=y, z=z), orientation=Facing.NORTH)
 
 
+def _route_cells(route: Route) -> set[tuple[int, int, int]]:
+    cells: set[tuple[int, int, int]] = set()
+    for seg in route.segments:
+        cells.add((seg.start.x, seg.start.y, seg.start.z))
+        cells.add((seg.end.x, seg.end.y, seg.end.z))
+    return cells
+
+
+def _route_cells_of(routes: Iterable[Route]) -> set[tuple[int, int, int]]:
+    cells: set[tuple[int, int, int]] = set()
+    for r in routes:
+        cells |= _route_cells(r)
+    return cells
+
+
 # --------------------------------------------------------------- real fixtures
 
 
 def test_route_sand_full_slice_validates() -> None:
-    # The generic router handles item/fluid; the power router handles power. Together they
-    # cover every net of the sand line, and the combined layout validates.
-    ir = adapt_file(_SAND)
-    pr = place(ir)
-    rr = route(ir, pr.placements)
-    pwr = route_power(ir, pr.placements)
+    # The generic router handles item/fluid; the power router handles power. Composed
+    # capacity-aware (the item cells become obstacles for the cables, as the solver does), they
+    # cover every net of the sand line collision-free, and the combined layout validates.
+    #
+    # A roomy hand-placement is used on purpose: the constructive packing is built for AUTO-OUTPUT
+    # (zero pipes), so forcing every item net through a *pipe* needs routing room. Under the
+    # single-channel capacity the packed row cannot host three non-overlapping pipes - it used to
+    # "validate" only because the old router silently overlapped them (now ROUTE_CELL_COLLISION).
+    ir = adapt_file(_SAND).model_copy(update={"bounding_region": CellBox(sx=14, sy=4, sz=14)})
+    coords = [(0, 0, 0), (4, 0, 0), (8, 0, 0), (8, 0, 4), (0, 0, 8)]
+    placements = [
+        Placement(machine_id=m.id, cell=CellCoord(x=x, y=y, z=z), orientation=Facing.NORTH)
+        for m, (x, y, z) in zip(ir.machines, coords, strict=True)
+    ]
+    rr = route(ir, placements)
+    item_cells = _route_cells_of(rr.routes)
+    pwr = route_power(ir, placements, extra_obstacles=item_cells)
     assert rr.ok
     assert pwr.ok
     assert all(r.commodity is not Commodity.POWER for r in rr.routes)  # power is not its job
@@ -95,7 +123,7 @@ def test_route_sand_full_slice_validates() -> None:
     layout = LayoutResult(
         status=LayoutStatus.VALID,
         seed=0,
-        placements=list(pr.placements),
+        placements=placements,
         routes=[*rr.routes, *pwr.routes],
     )
     assert validate(ir, layout).ok, str(validate(ir, layout))
@@ -128,6 +156,56 @@ def test_route_two_machines_ok_and_validates() -> None:
         status=LayoutStatus.VALID, seed=0, placements=placements, routes=list(result.routes)
     )
     assert validate(problem, layout).ok
+
+
+def test_route_two_crossing_nets_do_not_share_a_cell() -> None:
+    # Two item nets whose shortest paths cross near the centre. Routing is capacity-aware - the
+    # first net's cells become obstacles for the second - so they never share a cell (which would
+    # be unbuildable single-channel). Routed independently they overlap at the crossing.
+    def m(mid: str, port: str, direction: IODirection) -> Machine:
+        return _machine(mid, [Port(id=port, commodity=Commodity.ITEM, direction=direction)])
+
+    problem = InputIR(
+        bounding_region=CellBox(sx=7, sy=4, sz=7),
+        machines=[
+            m("a", "o", IODirection.OUTPUT),
+            m("b", "i", IODirection.INPUT),
+            m("c", "o", IODirection.OUTPUT),
+            m("d", "i", IODirection.INPUT),
+        ],
+        nets=[
+            Net(
+                id="n1",
+                commodity=Commodity.ITEM,
+                fluid_or_item="x",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="a", port_id="o"),
+                    MachineFaceRef(machine_id="b", port_id="i"),
+                ],
+            ),
+            Net(
+                id="n2",
+                commodity=Commodity.ITEM,
+                fluid_or_item="y",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="c", port_id="o"),
+                    MachineFaceRef(machine_id="d", port_id="i"),
+                ],
+            ),
+        ],
+    )
+    placements = [_at("a", 0, 0, 3), _at("b", 6, 0, 3), _at("c", 3, 0, 1), _at("d", 3, 0, 5)]
+    result = route(problem, placements)
+    assert result.ok
+    assert len(result.routes) == 2
+    assert _route_cells(result.routes[0]).isdisjoint(_route_cells(result.routes[1]))
+    layout = LayoutResult(
+        status=LayoutStatus.VALID, seed=0, placements=placements, routes=list(result.routes)
+    )
+    report = validate(problem, layout)
+    assert ViolationCode.ROUTE_CELL_COLLISION not in report.codes()
 
 
 def test_route_terminals_avoid_the_front_face() -> None:

@@ -286,6 +286,56 @@ def test_layout_claiming_valid_is_still_independently_rejected() -> None:
     assert validate(problem, layout).ok is False
 
 
+def test_two_routes_sharing_a_cell_collide() -> None:
+    # Two item nets whose routes cross at one cell: unbuildable under the crude single-channel cap
+    # (one block can't be two pipes). The validator flags it independently of the router.
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[_item_machine(m) for m in ("a", "b", "c", "d")],
+        nets=[
+            Net(
+                id="nx",
+                commodity=Commodity.ITEM,
+                fluid_or_item="x",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="a", port_id="out"),
+                    MachineFaceRef(machine_id="b", port_id="out"),
+                ],
+            ),
+            Net(
+                id="ny",
+                commodity=Commodity.ITEM,
+                fluid_or_item="y",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="c", port_id="out"),
+                    MachineFaceRef(machine_id="d", port_id="out"),
+                ],
+            ),
+        ],
+    )
+    shared = _coord(4, 0, 4)
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        routes=[
+            Route(
+                net_id="nx",
+                commodity=Commodity.ITEM,
+                segments=[Segment(start=_coord(3, 0, 4), end=shared, channel=0)],
+            ),
+            Route(
+                net_id="ny",
+                commodity=Commodity.ITEM,
+                segments=[Segment(start=_coord(4, 0, 3), end=shared, channel=0)],
+            ),
+        ],
+    )
+    codes = validate(problem, layout).codes()
+    assert ViolationCode.ROUTE_CELL_COLLISION in codes, codes
+
+
 # --------------------------------------------------------------- ME toggles & power
 
 

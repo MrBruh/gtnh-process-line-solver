@@ -107,6 +107,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Build-assist scope; the congestion heatmap, multi-seed compare, real block textures, and offline
   (vendored three.js) are follow-ups.
 
+- **Routing capacity invariant (lane D, first slice).** Routes are now laid **capacity-aware**:
+  each laid route's cells become obstacles for the routes after it - across item/fluid (`route`)
+  and power (`route_power` gains an `extra_obstacles` arg the solver feeds the item cells into) -
+  so no cell ever carries two routes (the crude single-channel cap: one route per cell). The
+  validator independently enforces it (`route_cell_collision`), closing the gap where item pipes
+  and power cables could share a cell and the abstraction would certify an unbuildable layout
+  (docs/ARCHITECTURE.md #7). Crude for now: one channel per cell and a fixed net order (no
+  rip-up/reroute yet, so a pathological order can report a false infeasibility); the per-edge
+  multi-channel cap and rip-up/reroute are the next lane-D slices.
+
 ### Changed
 - **InputIR bumped to v1 (breaking): dropped `Machine.count`.** Multi-instance machine groups
   are not modelled until routing is instance-aware (Phase 2): the placer expanded `count` into

@@ -20,7 +20,7 @@ thickness, so a sizing bug here is caught, not certified.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 
@@ -61,8 +61,19 @@ class PowerRouteResult:
         return self.infeasibility is None
 
 
-def route_power(problem: InputIR, placements: Sequence[Placement]) -> PowerRouteResult:
-    """Route each per-tier power net of ``problem`` as a shared-amperage trunk over ``placements``."""
+def route_power(
+    problem: InputIR,
+    placements: Sequence[Placement],
+    *,
+    extra_obstacles: Collection[Cell] = (),
+) -> PowerRouteResult:
+    """Route each per-tier power net of ``problem`` as a shared-amperage trunk over ``placements``.
+
+    ``extra_obstacles`` are cells already taken by other routes (the item/fluid pipes the solver
+    laid first), so power cables never share a cell with them - the crude single-channel capacity.
+    Each tier's trunk is likewise added to the obstacle set before the next tier routes, so two
+    power trunks never collide either.
+    """
     machines = {m.id: m for m in problem.machines}
     placement_by_machine: dict[str, Placement] = {}
     for placement in placements:
@@ -73,7 +84,7 @@ def route_power(problem: InputIR, placements: Sequence[Placement]) -> PowerRoute
     if problem.me_toggles.toggled(Commodity.POWER):
         return PowerRouteResult()  # power is on the ME network; nothing to route
 
-    obstacles = obstacle_cells(problem, placements, machines)
+    obstacles = obstacle_cells(problem, placements, machines) | set(extra_obstacles)
     docked: set[Cell] = set()
     routes: list[Route] = []
     for net in problem.nets:
@@ -111,6 +122,10 @@ def route_power(problem: InputIR, placements: Sequence[Placement]) -> PowerRoute
                 thickness_per_segment=thickness,
             )
         )
+        # Capacity: this trunk now owns these cells, so the next tier's trunk routes around it.
+        for seg in segments:
+            obstacles.add((seg.start.x, seg.start.y, seg.start.z))
+            obstacles.add((seg.end.x, seg.end.y, seg.end.z))
     return PowerRouteResult(tuple(routes))
 
 

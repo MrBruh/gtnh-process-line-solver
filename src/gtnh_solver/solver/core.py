@@ -50,7 +50,12 @@ def solve(problem: InputIR, *, seed: int = 0) -> LayoutResult:
 
     autos, auto_net_ids = _assign_auto_outputs(problem, placement.placements)
     routing = route(problem, placement.placements, skip_nets=auto_net_ids)  # item/fluid pipes
-    power = route_power(problem, placement.placements)  # shared-amperage power cables
+    # Power cables route around the item/fluid pipes already laid, so no cell carries two routes
+    # (the crude single-channel capacity the validator enforces). docs/ARCHITECTURE.md #7.
+    item_cells = {
+        (seg.start.x, seg.start.y, seg.start.z) for r in routing.routes for seg in r.segments
+    } | {(seg.end.x, seg.end.y, seg.end.z) for r in routing.routes for seg in r.segments}
+    power = route_power(problem, placement.placements, extra_obstacles=item_cells)
     routes = [*routing.routes, *power.routes]
     infeasibility = routing.infeasibility or power.infeasibility
     if infeasibility is not None:

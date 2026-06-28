@@ -35,6 +35,7 @@ class ViolationCode(str, Enum):
     ROUTE_SEGMENT_NOT_UNIT = "route_segment_not_unit"  # a segment is not a single unit hop
     ROUTE_THROUGH_MACHINE = "route_through_machine"  # a route cell sits inside a machine body
     ROUTE_ON_RESERVED = "route_on_reserved"  # a route cell sits on a reserved cell
+    ROUTE_CELL_COLLISION = "route_cell_collision"  # one cell carries >1 route (single-channel cap)
     PINNED_IO_NOT_ON_ROUTE = "pinned_io_not_on_route"
     # terminals / required-I/O-face reachability
     MISSING_TERMINAL = "missing_terminal"
