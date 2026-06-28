@@ -1,13 +1,16 @@
 """placement - machine placement over the coarse cell grid.
 
-Phase 1 ships a crude deterministic first-fit placer (:func:`place`, in ``constructive``);
-Phase 2 replaces it with SA/LNS + a cheap routing-aware cost and orientation as a search
-variable (docs/ROADMAP.md, docs/ARCHITECTURE.md #1). Both produce ``Placement``s the validator
-independently certifies, so the optimizer can be swapped in behind the same contract.
+Two placers behind one ``PlacementResult`` contract (the validator independently certifies
+either): :func:`place` is the crude deterministic first-fit constructive placer (``constructive``)
+and :func:`optimize_placement` is the Phase 2 simulated-annealing optimizer (``search``) that
+seeds from it and improves a routing-aware cost, with orientation as a search variable
+(docs/ROADMAP.md lane C, docs/ARCHITECTURE.md #1). The solver uses the optimizer; the constructive
+placer remains the SA seed (and a simple fallback). LNS + the place<->route feedback loop are next.
 """
 
 from __future__ import annotations
 
 from .constructive import PlacementResult, place
+from .search import optimize_placement
 
-__all__ = ["PlacementResult", "place"]
+__all__ = ["PlacementResult", "optimize_placement", "place"]

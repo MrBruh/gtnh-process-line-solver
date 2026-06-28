@@ -86,6 +86,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the layout is fully VALID, 1 when the solver returns an explicit infeasibility (printed to
   stderr), 2 when the export can't be loaded. Replaces the planning-stub entry point.
 
+- **Placement optimizer (`placement/search.py`) - Phase 2 simulated annealing.**
+  `optimize_placement(problem, *, seed)` seeds from the constructive first-fit placer and
+  improves a **routing-aware cost** (per-net half-perimeter wirelength + compactness + flat-build
+  bias) with relocate / swap / **reorient** moves (orientation is a search variable), Metropolis
+  acceptance, geometric cooling, best-valid-so-far. `solve()` now uses it (the crude placer stays
+  as the SA seed + a fallback). Every accepted state stays validator-clean; deterministic per
+  seed. Connected machines cluster - a hub+4-spoke star drops from HPWL 10 (first-fit row) to 5
+  (annealed cluster), and sand stays all-auto-output. LNS + the place<->route feedback loop are
+  next (docs/ROADMAP.md lane C).
+
 - **Previewer (`previewer/`) + `gtnh-solve --preview`** - a self-contained, double-clickable 3D
   view of a solved layout. `build_scene(problem, layout)` flattens the layout into a render-ready
   scene (machine boxes coloured by type with the machine name on the front face, rectangular

@@ -1,7 +1,8 @@
 """solver.core - compose placement + auto-output + routing into a LayoutResult.
 
 The Phase 1 orchestration (docs/ROADMAP.md):
-  1. place the machines (flow order, so producers land next to consumers);
+  1. place the machines (simulated annealing over a routing-aware cost, seeded from the
+     constructive first-fit solution - so connected machines cluster for auto-output);
   2. assign **auto-output** connections - a source machine ejecting straight into an adjacent
      target's input face, no pipe and no cover (GT's free connection; one auto-output per
      machine, items XOR fluids - docs/DOMAIN.md);
@@ -34,14 +35,14 @@ from gtnh_solver.ir import (
     Placement,
 )
 from gtnh_solver.ir.geometry import FACE_DELTAS, OPPOSITE_FACE, occupied_cells
-from gtnh_solver.placement import place
+from gtnh_solver.placement import optimize_placement
 from gtnh_solver.router import route, route_power
 from gtnh_solver.validator import ValidationReport, validate
 
 
 def solve(problem: InputIR, *, seed: int = 0) -> LayoutResult:
     """Produce a layout for ``problem``: placements + auto-output connections + pipe routes."""
-    placement = place(problem)
+    placement = optimize_placement(problem, seed=seed)
     if not placement.ok:
         return LayoutResult(
             status=LayoutStatus.INFEASIBLE, seed=seed, infeasibility=placement.infeasibility
