@@ -23,21 +23,21 @@ from .enums import HORIZONTAL_FACINGS, Commodity, Facing, IODirection
 from .geometry import CellBox, CellCoord
 
 #: Bump on any breaking change to the input contract; record it in ``ir/__init__.py``.
-INPUT_IR_VERSION = 1
+INPUT_IR_VERSION = 2
 
 
 class Port(StrictModel):
     """One required I/O point the solver must expose on a usable (non-front) machine face.
 
-    The *physical* face is chosen by the solver (placement + orientation); this only
-    states the requirement. A machine auto-outputs to a single face carrying items OR
-    fluids (not both), modelled with ``is_auto_output`` (see docs/DOMAIN.md).
+    The *physical* face is chosen by the solver (placement + orientation); this only states
+    the requirement. Whether a port is satisfied by auto-output is a **solver decision**, not a
+    problem input - it is recorded in the output's ``AutoConnection`` (and the validator enforces
+    one auto-output per machine there), so it is deliberately not a field here.
     """
 
     id: str = Field(min_length=1)
     commodity: Commodity
     direction: IODirection
-    is_auto_output: bool = False
     #: Cover required to drive this port (conveyor for items, pump/regulator for fluids),
     #: ``None`` if the bare face suffices. Recorded for the build guide / export.
     cover: str | None = None
@@ -57,14 +57,6 @@ class FaceSpec(StrictModel):
         ids = [p.id for p in self.ports]
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate port id within a machine's FaceSpec")
-        auto = [p for p in self.ports if p.is_auto_output]
-        if len(auto) > 1:
-            raise ValueError("a machine has at most one auto-output face")
-        for p in auto:
-            if p.commodity is Commodity.POWER:
-                raise ValueError("auto-output carries items or fluids, not power")
-            if p.direction is not IODirection.OUTPUT:
-                raise ValueError("an auto-output port must have direction=output")
         return self
 
 

@@ -133,6 +133,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   showed it.
 
 ### Changed
+- **InputIR bumped to v2 (breaking): dropped `Port.is_auto_output`.** It was a dead, contradictory
+  field - the adapter never set it and the solver auto-connects any adjacent output regardless of
+  it. Whether a port is satisfied by auto-output is a **solver decision**, not a problem input: it
+  is recorded in the output's `AutoConnection`, and the "one auto-output per machine, items-xor-
+  fluids, never power" rule is enforced there by the validator (`duplicate_auto_output` /
+  `auto_output_illegal_commodity`), not on the input contract. `FaceSpec`'s now-moot auto-output
+  validation is removed with it. (`ir/`.)
 - **InputIR bumped to v1 (breaking): dropped `Machine.count`.** Multi-instance machine groups
   are not modelled until routing is instance-aware (Phase 2): the placer expanded `count` into
   N placements sharing one machine id, but a `MachineFaceRef` cannot address a specific

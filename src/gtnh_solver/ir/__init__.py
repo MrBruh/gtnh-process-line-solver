@@ -81,8 +81,8 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #
 # InputIR v0 / LayoutResult v0 - initial implementation of the docs/IR.md draft.
 #   Concretizations made where the doc left shapes open (reconciled into docs/IR.md):
-#   - FaceSpec is a list of `Port` (id/commodity/direction/is_auto_output/cover); the
-#     physical face is a solver decision, so FaceSpec is a port catalog, not a face map.
+#   - FaceSpec is a list of `Port` (id/commodity/direction/cover); the physical face is a
+#     solver decision, so FaceSpec is a port catalog, not a face map.
 #   - MachineFaceRef references a machine + port_id (resolved to a face by the solver).
 #   - Geometry `Box`/`CellBox` unified into one `CellBox` (a size, each dim >= 1).
 #   - Segment fields named `start`/`end` (doc's `from` is a Python keyword).
@@ -109,4 +109,11 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   `voltage_tier` it gives the amperage a machine pulls on a shared-amperage cable
 #   (dataset.amperage); the adapter sets it from the recipe and synthesizes a power source +
 #   net per voltage tier. 0 for unpowered blocks / sources. Existing consumers default to 0.
+#
+# InputIR v2 (BREAKING) - dropped `Port.is_auto_output` (and its FaceSpec validation). It was a
+#   dead, contradictory field: the adapter never set it and the solver auto-connects any adjacent
+#   output regardless. Whether a port is satisfied by auto-output is a SOLVER DECISION, not a
+#   problem input - it lives in the output's `AutoConnection`, and the "one auto-output per
+#   machine, items-xor-fluids, never power" rule is enforced there by the validator
+#   (DUPLICATE_AUTO_OUTPUT / AUTO_OUTPUT_ILLEGAL_COMMODITY), not on the input contract.
 # ---------------------------------------------------------------------------

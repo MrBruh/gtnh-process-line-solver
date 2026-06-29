@@ -136,58 +136,15 @@ def test_facespec_rejects_duplicate_port_ids() -> None:
         )
 
 
-def test_facespec_allows_one_auto_output() -> None:
-    FaceSpec(
-        ports=[
-            Port(
-                id="o", commodity=Commodity.ITEM, direction=IODirection.OUTPUT, is_auto_output=True
-            )
-        ]
-    )
-
-
-def test_facespec_rejects_two_auto_outputs() -> None:
+def test_port_rejects_unknown_field() -> None:
+    # is_auto_output was dropped in InputIR v2 (auto-output is a solver decision, recorded in the
+    # output's AutoConnection); StrictModel forbids extras, so passing it now fails loud.
     with pytest.raises(ValidationError):
-        FaceSpec(
-            ports=[
-                Port(
-                    id="a",
-                    commodity=Commodity.ITEM,
-                    direction=IODirection.OUTPUT,
-                    is_auto_output=True,
-                ),
-                Port(
-                    id="b",
-                    commodity=Commodity.FLUID,
-                    direction=IODirection.OUTPUT,
-                    is_auto_output=True,
-                ),
-            ]
-        )
-
-
-def test_auto_output_cannot_be_power_or_input() -> None:
-    with pytest.raises(ValidationError):
-        FaceSpec(
-            ports=[
-                Port(
-                    id="p",
-                    commodity=Commodity.POWER,
-                    direction=IODirection.OUTPUT,
-                    is_auto_output=True,
-                )
-            ]
-        )
-    with pytest.raises(ValidationError):
-        FaceSpec(
-            ports=[
-                Port(
-                    id="p",
-                    commodity=Commodity.ITEM,
-                    direction=IODirection.INPUT,
-                    is_auto_output=True,
-                )
-            ]
+        Port(
+            id="o",
+            commodity=Commodity.ITEM,
+            direction=IODirection.OUTPUT,
+            is_auto_output=True,  # type: ignore[call-arg]
         )
 
 

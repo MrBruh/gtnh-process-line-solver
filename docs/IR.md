@@ -39,8 +39,9 @@ Port
   id: str
   commodity: "item" | "fluid" | "power"
   direction: "input" | "output"
-  is_auto_output: bool              # the single auto-output face; items XOR fluids, never power
   cover: str | null                 # conveyor/pump/regulator that drives this port, if any
+                                    # (auto-output is a solver decision -> output's AutoConnection,
+                                    #  not a Port input; is_auto_output was dropped in v2)
 
 Net
   id: str
