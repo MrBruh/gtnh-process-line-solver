@@ -113,9 +113,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   so no cell ever carries two routes (the crude single-channel cap: one route per cell). The
   validator independently enforces it (`route_cell_collision`), closing the gap where item pipes
   and power cables could share a cell and the abstraction would certify an unbuildable layout
-  (docs/ARCHITECTURE.md #7). Crude for now: one channel per cell and a fixed net order (no
-  rip-up/reroute yet, so a pathological order can report a false infeasibility); the per-edge
-  multi-channel cap and rip-up/reroute are the next lane-D slices.
+  (docs/ARCHITECTURE.md #7). Crude for now: one channel per cell; the per-edge multi-channel cap
+  (a routing margin hosting several parallel channels) is a later lane-D slice.
+
+- **Rip-up/reroute (lane D, second slice).** Capacity makes routing order-dependent - a net that
+  grabs a scarce cell can wedge a later net out (a *false* infeasibility, not a real one). The
+  item/fluid router now routes a pass, and if any net failed, rips everything up and retries with
+  the failed nets moved to the front (most-constrained-first), stopping when a pass is clean or a
+  failed-net set repeats (a genuine infeasibility, not an ordering accident). So a bad net order is
+  no longer mistaken for unroutable. Crude failed-first reordering; negotiated-congestion routing
+  (the gold-standard, order-independent approach) is tracked as a follow-up (GitHub #7).
 
 ### Changed
 - **InputIR bumped to v1 (breaking): dropped `Machine.count`.** Multi-instance machine groups

@@ -6,11 +6,13 @@ outside a usable, non-front machine face - the front comes from the placement or
 dataset is needed), then A* between the terminals over the free cell grid (machine + reserved
 cells are obstacles). Routes are laid **capacity-aware**: each net's cells become obstacles for
 the nets after it, so two nets never share a cell - the crude single-channel cap (one route per
-cell), which the validator independently enforces. Crude on purpose (docs/ROADMAP.md): one channel
-per cell, first-come-first-served net order (no rip-up/reroute yet, so a bad order can wedge a
-later net into a false infeasibility - the next lane-D slice). The shared cell-grid primitives
-(obstacle building, docking, A*) live in ``_grid`` so this router and ``router.power`` route over
-one grid model.
+cell), which the validator independently enforces. Because that makes the result order-dependent,
+the router does **rip-up/reroute**: route a pass, and if any net failed, rip everything up and
+retry with the failed nets first (most-constrained-first), until a pass is clean or the failed-net
+set repeats (a genuine infeasibility, not an ordering accident). Crude on purpose
+(docs/ROADMAP.md): one channel per cell; the per-edge multi-channel cap and negotiated-congestion
+routing are later lane-D work (GitHub #7). The shared cell-grid primitives (obstacle building,
+docking, A*) live in ``_grid`` so this router and ``router.power`` route over one grid model.
 
 Returns routes, or an explicit ``Infeasibility`` naming the net that could not dock or route -
 never raises for the expected case, matching the placer/validator discipline. The validator
@@ -30,6 +32,8 @@ from gtnh_solver.ir import (
     Commodity,
     Infeasibility,
     InputIR,
+    Machine,
+    Net,
     Placement,
     Route,
     Segment,
@@ -38,6 +42,9 @@ from gtnh_solver.ir import (
 from gtnh_solver.ir.geometry import Cell
 
 from ._grid import astar, coord, dock, obstacle_cells
+
+#: Backstop on rip-up/reroute passes (cycle detection on the failed-net set usually stops first).
+_MAX_PASSES = 16
 
 
 @dataclass(frozen=True)
@@ -56,7 +63,59 @@ class RouteResult:
 def route(
     problem: InputIR, placements: Sequence[Placement], *, skip_nets: Collection[str] = ()
 ) -> RouteResult:
-    """Route each non-ME net of ``problem`` (except ``skip_nets``) over the given placements."""
+    """Route each non-ME net of ``problem`` (except ``skip_nets``) over the given placements.
+
+    Routing is capacity-aware (one route per cell), so the order nets are routed in matters -
+    a net that grabs a scarce cell can wedge a later net out. So this does **rip-up/reroute**:
+    route a pass in the current order, and if any net failed, rip everything up and retry with the
+    failed nets moved to the front (most-constrained-first). A failed-net set already seen means
+    reordering is cycling rather than progressing, so it stops and reports the failure - what is
+    left is a genuine infeasibility, not an ordering accident. Crude: the per-edge multi-channel
+    cap and negotiated-congestion routing are later lane-D work (GitHub #7).
+    """
+    nets = [
+        net
+        for net in problem.nets
+        if net.id not in skip_nets
+        and not problem.me_toggles.toggled(net.commodity)
+        and net.commodity is not Commodity.POWER  # power is the power router's job (router.power)
+    ]
+    if not nets:
+        return RouteResult()
+
+    order = list(nets)
+    seen_failed: set[frozenset[str]] = set()
+    routes: list[Route] = []
+    failures: dict[str, Infeasibility] = {}
+    for _ in range(_MAX_PASSES):
+        routes, failures = _route_pass(problem, placements, order)
+        if not failures:
+            return RouteResult(tuple(routes))
+        key = frozenset(failures)
+        if key in seen_failed:
+            break  # this failed-net set already came up - reordering is cycling, not progressing
+        seen_failed.add(key)
+        # Rip everything up; give the nets that failed first pick next pass (most-constrained-first).
+        failed_ids = set(failures)
+        order = [n for n in nets if n.id in failed_ids] + [
+            n for n in nets if n.id not in failed_ids
+        ]
+
+    # Exhausted: report the first net still failing (in original order), with its specific reason.
+    first_failed = next(net.id for net in nets if net.id in failures)
+    return RouteResult(tuple(routes), failures[first_failed])
+
+
+def _route_pass(
+    problem: InputIR, placements: Sequence[Placement], nets: Sequence[Net]
+) -> tuple[list[Route], dict[str, Infeasibility]]:
+    """Route ``nets`` once in the given order, capacity-aware, skipping (not aborting on) failures.
+
+    Returns the routes laid plus, per net that could not be routed *given the cells the earlier
+    nets in this order claimed*, why. Failures here are order-dependent - the caller retries with
+    a different order. Caller owns net filtering (ME/power/skip); this routes exactly what it is
+    given.
+    """
     machines = {m.id: m for m in problem.machines}
     placement_by_machine: dict[str, Placement] = {}
     for placement in placements:
@@ -64,45 +123,46 @@ def route(
     region = problem.bounding_region
 
     obstacles = obstacle_cells(problem, placements, machines)
-    docked: set[Cell] = set()
     routes: list[Route] = []
-    for net in problem.nets:
-        if (
-            net.id in skip_nets
-            or problem.me_toggles.toggled(net.commodity)
-            or net.commodity is Commodity.POWER  # power is the power router's job (router.power)
-        ):
+    failures: dict[str, Infeasibility] = {}
+    for net in nets:
+        outcome = _route_one_net(net, placement_by_machine, machines, obstacles, region)
+        if isinstance(outcome, Infeasibility):
+            failures[net.id] = outcome
             continue
+        routes.append(outcome)
+        # Capacity: this net now owns these cells, so the nets after it route around them.
+        obstacles.update(_segment_cells(outcome.segments))
+    return routes, failures
 
-        terminals: list[Terminal] = []
-        for endpoint in net.endpoints:
-            ep_placement = placement_by_machine.get(endpoint.machine_id)
-            ep_machine = machines.get(endpoint.machine_id)
-            if ep_placement is None or ep_machine is None:
-                return RouteResult(tuple(routes), _no_dock(net.id, endpoint.machine_id))
-            terminal = dock(endpoint.port_id, ep_placement, ep_machine, obstacles, docked, region)
-            if terminal is None:
-                return RouteResult(tuple(routes), _no_dock(net.id, endpoint.machine_id))
-            docked.add((terminal.cell.x, terminal.cell.y, terminal.cell.z))
-            terminals.append(terminal)
 
-        segments = _connect([t.cell for t in terminals], obstacles, region)
-        if segments is None:
-            return RouteResult(tuple(routes), _no_path(net.id))
-        routes.append(
-            Route(
-                net_id=net.id,
-                commodity=net.commodity,
-                terminals=terminals,
-                segments=segments,
-            )
-        )
-        # Capacity: this net now owns these cells, so later nets must route around them. Crude
-        # single-channel - one route per cell (the validator independently enforces it). A bad
-        # net order can now wedge a later net into a false infeasibility; rip-up/reroute (the next
-        # lane-D slice) handles that. docs/ARCHITECTURE.md #7.
-        obstacles.update(_segment_cells(segments))
-    return RouteResult(tuple(routes))
+def _route_one_net(
+    net: Net,
+    placement_by_machine: dict[str, Placement],
+    machines: dict[str, Machine],
+    obstacles: set[Cell],
+    region: CellBox,
+) -> Route | Infeasibility:
+    """Dock a terminal per endpoint and A* between them over the free grid, or the reason it could
+    not. Nothing is committed to ``obstacles`` here - the caller does that only on success, so a
+    partly-docked failed net leaves no trace for the retry."""
+    chosen: set[Cell] = set()  # this net's own terminals, so two of its ports don't co-locate
+    terminals: list[Terminal] = []
+    for endpoint in net.endpoints:
+        ep_placement = placement_by_machine.get(endpoint.machine_id)
+        ep_machine = machines.get(endpoint.machine_id)
+        if ep_placement is None or ep_machine is None:
+            return _no_dock(net.id, endpoint.machine_id)
+        terminal = dock(endpoint.port_id, ep_placement, ep_machine, obstacles, chosen, region)
+        if terminal is None:
+            return _no_dock(net.id, endpoint.machine_id)
+        chosen.add((terminal.cell.x, terminal.cell.y, terminal.cell.z))
+        terminals.append(terminal)
+
+    segments = _connect([t.cell for t in terminals], obstacles, region)
+    if segments is None:
+        return _no_path(net.id)
+    return Route(net_id=net.id, commodity=net.commodity, terminals=terminals, segments=segments)
 
 
 def _segment_cells(segments: Sequence[Segment]) -> set[Cell]:

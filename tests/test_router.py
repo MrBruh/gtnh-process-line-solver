@@ -31,6 +31,7 @@ from gtnh_solver.ir import (
 )
 from gtnh_solver.placement import place
 from gtnh_solver.router import route, route_power
+from gtnh_solver.router.core import _route_pass
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
 
@@ -206,6 +207,66 @@ def test_route_two_crossing_nets_do_not_share_a_cell() -> None:
     )
     report = validate(problem, layout)
     assert ViolationCode.ROUTE_CELL_COLLISION not in report.codes()
+
+
+def test_rip_up_reroute_fixes_an_ordering_induced_failure() -> None:
+    # A wall at z=3 with two gaps (x=1 and x=5); x=2 is walled for z<3, making a top-left pocket
+    # (x=0..1, z=0..2) whose only exit down is gap x=1. net2 (c in the pocket -> d below) can ONLY
+    # cross via gap x=1; net1 (a top-right -> b below) prefers gap x=1 but can detour to gap x=5.
+    # In problem order net1 grabs gap x=1 first and wedges net2 out; rip-up/reroute reorders net2
+    # first and net1 detours - so capacity-aware routing is not hostage to net order.
+    def m(mid: str, direction: IODirection) -> Machine:
+        return _machine(mid, [Port(id="p", commodity=Commodity.ITEM, direction=direction)])
+
+    reserved = [CellCoord(x=x, y=0, z=3) for x in range(7) if x not in (1, 5)] + [
+        CellCoord(x=2, y=0, z=z) for z in range(3)
+    ]
+    problem = InputIR(
+        bounding_region=CellBox(sx=7, sy=1, sz=6),
+        machines=[
+            m("a", IODirection.OUTPUT),
+            m("b", IODirection.INPUT),
+            m("c", IODirection.OUTPUT),
+            m("d", IODirection.INPUT),
+        ],
+        nets=[
+            Net(
+                id="n1",
+                commodity=Commodity.ITEM,
+                fluid_or_item="x",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="a", port_id="p"),
+                    MachineFaceRef(machine_id="b", port_id="p"),
+                ],
+            ),
+            Net(
+                id="n2",
+                commodity=Commodity.ITEM,
+                fluid_or_item="y",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="c", port_id="p"),
+                    MachineFaceRef(machine_id="d", port_id="p"),
+                ],
+            ),
+        ],
+        reserved_cells=reserved,
+    )
+    placements = [_at("a", 3, 0, 0), _at("b", 0, 0, 5), _at("c", 0, 0, 0), _at("d", 0, 0, 4)]
+
+    # One greedy pass in problem order wedges net2 out (net1 took the pocket's only exit)...
+    _, failures = _route_pass(problem, placements, problem.nets)
+    assert failures, "expected the problem-order pass to fail a net"
+    # ...but rip-up/reroute reorders (failed net first) and routes both, collision-free.
+    result = route(problem, placements)
+    assert result.ok, result.infeasibility
+    assert len(result.routes) == 2
+    layout = LayoutResult(
+        status=LayoutStatus.VALID, seed=0, placements=placements, routes=list(result.routes)
+    )
+    report = validate(problem, layout)
+    assert report.ok, str(report)
 
 
 def test_route_terminals_avoid_the_front_face() -> None:
