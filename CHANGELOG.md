@@ -124,6 +124,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no longer mistaken for unroutable. Crude failed-first reordering; negotiated-congestion routing
   (the gold-standard, order-independent approach) is tracked as a follow-up (GitHub #7).
 
+- **Build guide is buildable from alone.** The text guide was a sketch; it now carries the detail a
+  player needs to build the line without guessing: a **Placement** table (each machine's exact
+  `(x, y, z)` cell, front face, and footprint), per-pipe-terminal **covers** (conveyor for items,
+  pump for fluids, in input/output mode - docs/DOMAIN.md), the exact **cells** each pipe/cable runs
+  along, and **per-segment cable thickness** for power. The Power note now states the amperage to
+  feed each source (its trunk-root thickness) instead of pointing at the ASCII map that never
+  showed it.
+
 ### Changed
 - **InputIR bumped to v1 (breaking): dropped `Machine.count`.** Multi-instance machine groups
   are not modelled until routing is instance-aware (Phase 2): the placer expanded `count` into

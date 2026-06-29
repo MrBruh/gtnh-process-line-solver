@@ -1,11 +1,13 @@
 """buildguide.core - render a LayoutResult as a human-readable text build guide.
 
-Sections: a header (status / region / counts), a bill of materials (machines by type,
-pipe/cable cells per commodity, I/O cover count), a power note (where to feed external power,
-since synthetic sources are not self-powered), the connections (per net: resource and the
-machine faces it links), and a per-layer ASCII map (one character per cell) with a key. This is
-the cheap, visible Phase 1 payoff - something a player can actually read and build from, ahead
-of the three.js previewer (docs/ROADMAP.md).
+Aimed at being *buildable from alone*: a header (status / region / counts), a bill of materials,
+a **placement table** (each machine's exact cell + front face + footprint), a power note (where to
+feed external power and at what amperage, since synthetic sources are not self-powered), the
+**connections** (per net: the machine faces, the cover each pipe terminal needs, the exact cell
+path, and per-segment cable thickness for power), and a per-layer ASCII map with a key. This is
+the cheap, visible Phase 1 payoff - something a player can actually read and build from, ahead of
+the three.js previewer (docs/ROADMAP.md). Covers follow docs/DOMAIN.md (conveyor for items,
+pump/regulator for fluids); auto-output needs no cover (the machine ejects into the neighbour).
 """
 
 from __future__ import annotations
@@ -13,24 +15,39 @@ from __future__ import annotations
 import string
 from collections import Counter
 
-from gtnh_solver.ir import Commodity, InputIR, IODirection, LayoutResult, Machine, Net
+from gtnh_solver.ir import (
+    CellCoord,
+    Commodity,
+    InputIR,
+    IODirection,
+    LayoutResult,
+    Machine,
+    Net,
+    Route,
+)
 from gtnh_solver.ir.geometry import Cell, occupied_cells
 
 # Single-char machine markers (upper, lower, digits = 62; covers the ~30-50 machine target).
 _MARKERS = string.ascii_uppercase + string.ascii_lowercase + string.digits
 _PIPE_CHAR = {"item": "+", "fluid": "~", "power": "="}
 _PIPE_LABEL = {"item": "item pipe", "fluid": "fluid pipe", "power": "power cable"}
+# The GT cover a physical pipe terminal needs, by commodity (docs/DOMAIN.md). Power cables connect
+# bare (no cover); auto-output needs none either.
+_COVER = {"item": "conveyor cover", "fluid": "pump cover"}
 
 
 def build_guide(problem: InputIR, layout: LayoutResult) -> str:
     """Render ``layout`` (its problem supplies machine types and net resources) as text."""
     machines = {m.id: m for m in problem.machines}
     nets = {n.id: n for n in problem.nets}
+    port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
+    coord_of = {p.machine_id: p.cell for p in layout.placements}
     lines: list[str] = []
     lines += _header(problem, layout)
     lines += _bom(layout, machines)
+    lines += _placement_table(layout, machines)
     lines += _power_note(layout, machines)
-    lines += _connections(layout, machines, nets)
+    lines += _connections(layout, machines, nets, port_dir, coord_of)
     lines += _layer_maps(problem, layout, machines)
     return "\n".join(lines) + "\n"
 
@@ -78,6 +95,30 @@ def _bom(layout: LayoutResult, machines: dict[str, Machine]) -> list[str]:
     return lines
 
 
+def _placement_table(layout: LayoutResult, machines: dict[str, Machine]) -> list[str]:
+    """Exact build coordinates: where each machine goes and which way its front faces."""
+    if not layout.placements:
+        return []
+    lines = [
+        "## Placement",
+        "",
+        "Place each machine at its (x, y, z) cell, facing the listed front (the front face carries",
+        "no I/O - covers and auto-output go on the other five faces):",
+        "",
+    ]
+    for p in sorted(layout.placements, key=lambda pl: (pl.cell.y, pl.cell.z, pl.cell.x)):
+        machine = machines.get(p.machine_id)
+        typ = machine.type if machine else p.machine_id
+        fp = machine.footprint if machine else None
+        size = f"{fp.sx}x{fp.sy}x{fp.sz}" if fp else "?"
+        lines.append(
+            f"  {typ:<22} at ({p.cell.x}, {p.cell.y}, {p.cell.z})"
+            f"   front {p.orientation.value:<5}   {size}"
+        )
+    lines.append("")
+    return lines
+
+
 def _is_power_source(machine: Machine) -> bool:
     return any(
         p.commodity is Commodity.POWER and p.direction is IODirection.OUTPUT
@@ -86,7 +127,11 @@ def _is_power_source(machine: Machine) -> bool:
 
 
 def _power_note(layout: LayoutResult, machines: dict[str, Machine]) -> list[str]:
-    """Tell the builder where to feed external power - synthetic sources are not self-powered."""
+    """Tell the builder where to feed external power - synthetic sources are not self-powered.
+
+    Each source must supply at least the cable thickness at its trunk root (the summed amperage of
+    its whole tier); the per-segment thickness is listed under Connections.
+    """
     sources = [
         (p, machines[p.machine_id])
         for p in layout.placements
@@ -97,22 +142,68 @@ def _power_note(layout: LayoutResult, machines: dict[str, Machine]) -> list[str]
     lines = [
         "## Power",
         "",
-        "Source-powering is left to you (docs/DOMAIN.md): place an external power source",
-        "feeding each synthetic source block below. Per-segment cable thickness is shown in the",
-        "layout; size each external source to its tier's total amperage.",
+        "Source-powering is left to you (docs/DOMAIN.md): place an external power source feeding",
+        "each synthetic source block below, sized to the cable thickness at its trunk root (the",
+        "total amperage of its tier). Per-segment thickness is listed under Connections.",
         "",
     ]
-    lines += [f"  {m.type} at ({p.cell.x}, {p.cell.y}, {p.cell.z})" for p, m in sources]
+    for p, m in sources:
+        root = _root_thickness(layout, p.machine_id)
+        size = f" - feed at least {root}x amperage" if root else ""
+        lines.append(f"  {m.type} at ({p.cell.x}, {p.cell.y}, {p.cell.z}){size}")
     lines.append("")
     return lines
 
 
-def _machine_label(machine_id: str, machines: dict[str, Machine]) -> str:
-    return machines[machine_id].type if machine_id in machines else machine_id
+def _root_thickness(layout: LayoutResult, source_machine_id: str) -> int | None:
+    """The thickest cable segment on the trunk this source feeds (its root carries the whole tier)."""
+    best: int | None = None
+    for r in layout.routes:
+        if r.commodity is not Commodity.POWER or not r.thickness_per_segment:
+            continue
+        if any(t.machine_id == source_machine_id for t in r.terminals):
+            best = max(best or 0, max(r.thickness_per_segment))
+    return best
+
+
+def _machine_at(
+    machine_id: str, machines: dict[str, Machine], coord_of: dict[str, CellCoord]
+) -> str:
+    """``Type (x,y,z)`` - the machine's type and where it sits (so a net names the right instance)."""
+    label = machines[machine_id].type if machine_id in machines else machine_id
+    cell = coord_of.get(machine_id)
+    return f"{label} ({cell.x},{cell.y},{cell.z})" if cell is not None else label
+
+
+def _cover_label(commodity: Commodity, direction: IODirection | None) -> str:
+    """The GT cover a pipe terminal needs: conveyor (items) / pump (fluids), in input/output mode."""
+    cover = _COVER.get(commodity.value, "cover")
+    mode = direction.value if direction is not None else "i/o"
+    return f"{cover} ({mode})"
+
+
+def _route_path(route: Route) -> str:
+    """The route's cells in order, joined by ``->`` (items/fluids) or ``=Nx=`` per power segment.
+
+    Assumes the segments form a single ordered chain (each segment starts where the previous ended)
+    - which the crude A* pipes and path-trunk cables do; a branching tree would render approximately.
+    """
+    if not route.segments:
+        return "(no cells)"
+    first = route.segments[0].start
+    parts = [f"({first.x},{first.y},{first.z})"]
+    for i, seg in enumerate(route.segments):
+        link = f" ={route.thickness_per_segment[i]}x= " if route.thickness_per_segment else " -> "
+        parts.append(f"{link}({seg.end.x},{seg.end.y},{seg.end.z})")
+    return "".join(parts)
 
 
 def _connections(
-    layout: LayoutResult, machines: dict[str, Machine], nets: dict[str, Net]
+    layout: LayoutResult,
+    machines: dict[str, Machine],
+    nets: dict[str, Net],
+    port_dir: dict[tuple[str, str], IODirection],
+    coord_of: dict[str, CellCoord],
 ) -> list[str]:
     if not layout.routes and not layout.auto_connections:
         return []
@@ -120,16 +211,26 @@ def _connections(
     for ac in layout.auto_connections:
         net = nets.get(ac.net_id)
         resource = net.fluid_or_item if net and net.fluid_or_item else ac.net_id
-        src = _machine_label(ac.source_machine_id, machines)
-        tgt = _machine_label(ac.target_machine_id, machines)
+        src = _machine_at(ac.source_machine_id, machines, coord_of)
+        tgt = _machine_at(ac.target_machine_id, machines, coord_of)
         lines.append(
-            f"  {resource:<22} {src} [{ac.source_face.value}] => {tgt} [{ac.target_face.value}]   (auto-output)"
+            f"  {resource:<22} {src} [{ac.source_face.value}] => "
+            f"{tgt} [{ac.target_face.value}]   (auto-output)"
         )
     for r in layout.routes:
         net = nets.get(r.net_id)
         resource = net.fluid_or_item if net and net.fluid_or_item else r.commodity.value
-        ends = [f"{_machine_label(t.machine_id, machines)} [{t.face.value}]" for t in r.terminals]
-        lines.append(f"  {resource:<22} {' -> '.join(ends)}   (pipe)")
+        kind = "power" if r.commodity is Commodity.POWER else "pipe"
+        ends = []
+        for t in r.terminals:
+            label = _machine_at(t.machine_id, machines, coord_of)
+            if r.commodity is Commodity.POWER:
+                ends.append(f"{label} [{t.face.value}]")  # cables connect bare, no cover
+            else:
+                cover = _cover_label(r.commodity, port_dir.get((t.machine_id, t.port_id)))
+                ends.append(f"{label} [{t.face.value}, {cover}]")
+        lines.append(f"  {resource:<22} {' -> '.join(ends)}   ({kind})")
+        lines.append(f"      lay along: {_route_path(r)}")
     lines.append("")
     return lines
 

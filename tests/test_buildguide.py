@@ -68,6 +68,80 @@ def test_build_guide_is_deterministic() -> None:
     assert _sand_guide() == _sand_guide()
 
 
+def test_build_guide_placement_table_has_coords_and_front() -> None:
+    guide = _sand_guide()
+    assert "## Placement" in guide
+    assert "at (0, 0, 0)" in guide  # exact build coordinate per machine
+    assert "front north" in guide  # ...and which way the front (no-I/O) face points
+
+
+def test_build_guide_power_note_states_required_amperage() -> None:
+    # the sand trunk tapers 4x->2x->1x, so its root (the source's draw) is 4x
+    guide = _sand_guide()
+    assert "feed at least 4x amperage" in guide
+
+
+def test_build_guide_power_connection_lists_per_segment_thickness() -> None:
+    guide = _sand_guide()
+    assert "lay along:" in guide  # the exact cells to lay the cable
+    assert "=4x=" in guide  # the trunk root segment...
+    assert "=1x=" in guide  # ...tapering to the far end
+
+
+def _item_fork_problem() -> InputIR:
+    out_port = Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)
+    in_port = Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT)
+
+    def producer(mid: str) -> Machine:
+        return Machine(
+            id=mid,
+            type="Maker",
+            voltage_tier="LV",
+            orientation_options=[Facing.NORTH],
+            faces=FaceSpec(ports=[out_port]),
+        )
+
+    def consumer(mid: str) -> Machine:
+        return Machine(
+            id=mid,
+            type="Taker",
+            voltage_tier="LV",
+            orientation_options=[Facing.NORTH],
+            faces=FaceSpec(ports=[in_port]),
+        )
+
+    def item_net(nid: str, src: str, dst: str) -> Net:
+        return Net(
+            id=nid,
+            commodity=Commodity.ITEM,
+            fluid_or_item="thing",
+            throughput=1.0,
+            endpoints=[
+                MachineFaceRef(machine_id=src, port_id="out"),
+                MachineFaceRef(machine_id=dst, port_id="in"),
+            ],
+        )
+
+    # m1 feeds m2 (auto-output) and m3 (piped - its single auto-output is spent on the first)
+    return InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[producer("m1"), consumer("m2"), consumer("m3")],
+        nets=[item_net("n1", "m1", "m2"), item_net("n2", "m1", "m3")],
+    )
+
+
+def test_build_guide_pipe_lists_covers_and_cells() -> None:
+    # the piped item net's terminals need conveyor covers (docs/DOMAIN.md), and the guide gives
+    # the exact cells to lay the pipe along - the buildable detail the old sketch lacked.
+    problem = _item_fork_problem()
+    layout = solve(problem)
+    assert layout.status is LayoutStatus.VALID
+    guide = build_guide(problem, layout)
+    assert "conveyor cover (output)" in guide  # the source end pushes via a conveyor
+    assert "conveyor cover (input)" in guide  # the sink end pulls via a conveyor
+    assert "lay along:" in guide
+
+
 def test_build_guide_handles_empty_layout() -> None:
     ir = adapt_file(_SAND)
     guide = build_guide(ir, LayoutResult(status=LayoutStatus.VALID, seed=0))
