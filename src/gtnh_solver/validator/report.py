@@ -39,6 +39,8 @@ class ViolationCode(str, Enum):
     PINNED_IO_NOT_ON_ROUTE = "pinned_io_not_on_route"
     # terminals / required-I/O-face reachability
     MISSING_TERMINAL = "missing_terminal"
+    TERMINAL_NOT_AN_ENDPOINT = "terminal_not_an_endpoint"  # terminal's (machine,port) not in net
+    DUPLICATE_TERMINAL = "duplicate_terminal"  # >1 terminal for the same net endpoint
     TERMINAL_ON_FRONT_FACE = "terminal_on_front_face"
     TERMINAL_NOT_ADJACENT = "terminal_not_adjacent"
     TERMINAL_NOT_ON_ROUTE = "terminal_not_on_route"

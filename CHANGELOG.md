@@ -189,5 +189,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Adapter sizes power for `parallel`.** A node's `eut` is now `recipe.eut * parallel`: a node
   running N recipes in parallel draws N times the power, matching how throughput already scales,
   so the synthesized power cable is sized correctly for `parallel > 1` (was under-sized).
+- **Validator checks terminals belong to their net.** `_check_terminals` only verified that every
+  net endpoint *had* a terminal; a route could still carry a **foreign** terminal (a machine/port
+  that is not one of the net's endpoints) or two terminals for one endpoint and pass. It now flags
+  both (`terminal_not_an_endpoint`, `duplicate_terminal`), closing the structural half of
+  required-I/O-face reachability so the gate cannot certify a route with bogus docks.
 
 [Unreleased]: https://github.com/MrBruh/gtnh-process-line-solver/commits/main

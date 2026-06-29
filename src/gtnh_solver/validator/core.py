@@ -15,9 +15,10 @@ What is checked now (needs only the IR):
   contiguous, every segment a unit (+/-1) hop, never running through a machine body or a
   reserved cell, and no two nets' routes sharing a cell (crude single-channel capacity); pinned
   I/O actually sits on its net's route.
-  terminals - every net endpoint has a terminal on a usable (non-front) face adjacent to its
-  machine, and that terminal cell lies on the route (the geometric half of required-I/O-face
-  reachability).
+  terminals - every net endpoint has a terminal, and every terminal pins one of the net's own
+  endpoints exactly once (no foreign or duplicate terminals), on a usable (non-front) face adjacent
+  to its machine, with that terminal cell on the route (the geometric + structural halves of
+  required-I/O-face reachability).
   auto-output - every auto-connection joins its net's real OUTPUT->INPUT endpoint machines
   (resolved by port direction) on adjacent usable faces; power/ME commodities cannot
   auto-output, and a machine has at most one auto-output face.
@@ -285,6 +286,7 @@ def _check_terminals(problem: InputIR, layout: LayoutResult, out: list[Violation
                 (seg.end.x, seg.end.y, seg.end.z),
             )
         }
+        endpoint_keys = {(ep.machine_id, ep.port_id) for ep in net.endpoints}
         have = {(t.machine_id, t.port_id) for t in r.terminals}
         for ep in net.endpoints:
             if (ep.machine_id, ep.port_id) not in have:
@@ -295,7 +297,31 @@ def _check_terminals(problem: InputIR, layout: LayoutResult, out: list[Violation
                         f"has no terminal",
                     )
                 )
+        seen_terminals: set[tuple[str, str]] = set()
         for t in r.terminals:
+            key = (t.machine_id, t.port_id)
+            # A terminal must pin one of the net's OWN endpoints, exactly once. Otherwise a route
+            # could carry a foreign terminal (some other machine/port) or two docks for one
+            # endpoint and still pass - the structural half of required-I/O-face reachability.
+            if key not in endpoint_keys:
+                out.append(
+                    Violation(
+                        ViolationCode.TERMINAL_NOT_AN_ENDPOINT,
+                        f"terminal on {t.machine_id!r} port {t.port_id!r} is not an endpoint of "
+                        f"net {r.net_id!r}",
+                    )
+                )
+                continue  # not this net's terminal - the geometric checks below do not apply
+            if key in seen_terminals:
+                out.append(
+                    Violation(
+                        ViolationCode.DUPLICATE_TERMINAL,
+                        f"net {r.net_id!r} has more than one terminal for endpoint {t.port_id!r} "
+                        f"on {t.machine_id!r}",
+                    )
+                )
+            seen_terminals.add(key)
+
             placement = placement_by_machine.get(t.machine_id)
             machine = machines.get(t.machine_id)
             if placement is None or machine is None:

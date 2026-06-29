@@ -245,6 +245,24 @@ def _terminal_off_route(p: InputIR, layout: LayoutResult) -> tuple[InputIR, Layo
     return p, _replace_first_terminal(layout, face=Facing.EAST, cell=_coord(2, 0, 1))
 
 
+def _terminal_foreign(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    # a terminal whose (machine, port) is not one of the net's endpoints - a foreign dock the
+    # route must not be able to "claim" (m1 has no port 'ghost', and it is not an endpoint of n1)
+    r = layout.routes[0]
+    bogus = Terminal(machine_id="m1", port_id="ghost", face=Facing.EAST, cell=_coord(2, 0, 1))
+    return p, layout.model_copy(
+        update={"routes": [r.model_copy(update={"terminals": [*r.terminals, bogus]})]}
+    )
+
+
+def _terminal_duplicate(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    # two terminals for the same endpoint - which one is THE dock is ambiguous; reject it
+    r = layout.routes[0]
+    return p, layout.model_copy(
+        update={"routes": [r.model_copy(update={"terminals": [*r.terminals, r.terminals[0]]})]}
+    )
+
+
 BAD_CASES: list[tuple[str, Mutator, ViolationCode]] = [
     ("overlap", _overlap, ViolationCode.MACHINE_OVERLAP),
     ("machine_oob", _machine_oob, ViolationCode.MACHINE_OUT_OF_BOUNDS),
@@ -263,6 +281,8 @@ BAD_CASES: list[tuple[str, Mutator, ViolationCode]] = [
     ("route_on_reserved", _route_on_reserved, ViolationCode.ROUTE_ON_RESERVED),
     ("pinned_off_route", _pinned_off_route, ViolationCode.PINNED_IO_NOT_ON_ROUTE),
     ("missing_terminal", _missing_terminal, ViolationCode.MISSING_TERMINAL),
+    ("terminal_foreign", _terminal_foreign, ViolationCode.TERMINAL_NOT_AN_ENDPOINT),
+    ("terminal_duplicate", _terminal_duplicate, ViolationCode.DUPLICATE_TERMINAL),
     ("terminal_on_front", _terminal_on_front, ViolationCode.TERMINAL_ON_FRONT_FACE),
     ("terminal_not_adjacent", _terminal_not_adjacent, ViolationCode.TERMINAL_NOT_ADJACENT),
     ("terminal_off_route", _terminal_off_route, ViolationCode.TERMINAL_NOT_ON_ROUTE),
