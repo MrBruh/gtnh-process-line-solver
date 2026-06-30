@@ -196,6 +196,7 @@ def test_power_net_without_a_source_is_infeasible() -> None:
     assert not result.ok
     assert result.infeasibility is not None
     assert result.infeasibility.constraint == "power_net"
+    assert result.failed_nets == ("power:LV",)  # the stalled net, for the solver's feedback loop
 
 
 def test_power_me_toggled_is_skipped() -> None:

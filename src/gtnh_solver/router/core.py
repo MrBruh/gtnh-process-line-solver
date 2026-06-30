@@ -49,10 +49,15 @@ _MAX_PASSES = 16
 
 @dataclass(frozen=True)
 class RouteResult:
-    """Crude router output: all routes, or a partial set plus why it stalled."""
+    """Crude router output: all routes, or a partial set plus why it stalled.
+
+    ``failed_nets`` lists the nets left unrouted (empty when ``ok``), in problem order, so the
+    solver's place<->route feedback loop can penalize exactly those nets and re-place.
+    """
 
     routes: tuple[Route, ...] = ()
     infeasibility: Infeasibility | None = None
+    failed_nets: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -101,9 +106,10 @@ def route(
             n for n in nets if n.id not in failed_ids
         ]
 
-    # Exhausted: report the first net still failing (in original order), with its specific reason.
-    first_failed = next(net.id for net in nets if net.id in failures)
-    return RouteResult(tuple(routes), failures[first_failed])
+    # Exhausted: report the first net still failing (in original order), with its specific reason,
+    # plus every still-failing net so the solver's feedback loop can penalize them all.
+    still_failing = tuple(net.id for net in nets if net.id in failures)
+    return RouteResult(tuple(routes), failures[still_failing[0]], still_failing)
 
 
 def _route_pass(

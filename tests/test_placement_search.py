@@ -106,6 +106,24 @@ def _total_hpwl(problem: InputIR, placements: tuple[Placement, ...]) -> float:
     return total
 
 
+def _net_hpwl(problem: InputIR, placements: tuple[Placement, ...], net_id: str) -> float:
+    pos = {p.machine_id: p for p in placements}
+    sizes = {m.id: m.footprint for m in problem.machines}
+    net = next(n for n in problem.nets if n.id == net_id)
+    centers = [
+        (
+            pos[e.machine_id].cell.x + sizes[e.machine_id].sx / 2,
+            pos[e.machine_id].cell.y + sizes[e.machine_id].sy / 2,
+            pos[e.machine_id].cell.z + sizes[e.machine_id].sz / 2,
+        )
+        for e in net.endpoints
+        if e.machine_id in pos
+    ]
+    if len(centers) < 2:
+        return 0.0
+    return sum(max(c[a] for c in centers) - min(c[a] for c in centers) for a in range(3))
+
+
 def _validates(problem: InputIR, placements: tuple[Placement, ...]) -> bool:
     layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=list(placements))
     return _PLACEMENT_CODES.isdisjoint(validate(problem, layout).codes())
@@ -124,6 +142,20 @@ def test_optimize_output_is_validator_clean() -> None:
     result = optimize_placement(problem, seed=3)
     assert result.ok
     assert _validates(problem, result.placements)
+
+
+def test_net_penalty_pulls_the_penalized_net_tighter() -> None:
+    # A 5-spoke star: the hub can't sit adjacent to every spoke, so by default some spoke net is
+    # non-minimal. Penalizing one net (the place<->route feedback signal for an unrouted net) makes
+    # the optimizer pull that spoke adjacent to the hub - its wirelength strictly shrinks.
+    problem = _star(5, region=CellBox(sx=5, sy=1, sz=5))
+    base = optimize_placement(problem, seed=0)
+    penalized = optimize_placement(problem, seed=0, net_penalties={"n0": 50.0})
+    assert base.ok
+    assert penalized.ok
+    assert _net_hpwl(problem, penalized.placements, "n0") < _net_hpwl(
+        problem, base.placements, "n0"
+    )
 
 
 def test_optimize_is_deterministic_per_seed() -> None:

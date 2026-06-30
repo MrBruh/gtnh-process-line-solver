@@ -50,10 +50,16 @@ _MAX_THICKNESS = _THICKNESSES[-1]
 
 @dataclass(frozen=True)
 class PowerRouteResult:
-    """Power router output: all power routes, or a partial set plus why it stalled."""
+    """Power router output: all power routes, or a partial set plus why it stalled.
+
+    ``failed_nets`` names the power net that stalled (empty when ``ok``), so the solver's
+    place<->route feedback loop can penalize it and re-place (helps a dock/path failure; an
+    amperage/tier failure is not placement-fixable, but the loop's cycle detection stops quickly).
+    """
 
     routes: tuple[Route, ...] = ()
     infeasibility: Infeasibility | None = None
+    failed_nets: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -93,13 +99,13 @@ def route_power(
         sources = [e for e in net.endpoints if port_dir.get(_key(e)) is IODirection.OUTPUT]
         sinks = [e for e in net.endpoints if port_dir.get(_key(e)) is IODirection.INPUT]
         if len(sources) != 1 or not sinks:
-            return PowerRouteResult(tuple(routes), _malformed(net.id))
+            return PowerRouteResult(tuple(routes), _malformed(net.id), (net.id,))
 
         terminals = _dock_all(
             [sources[0], *sinks], placement_by_machine, machines, obstacles, docked, region
         )
         if terminals is None:
-            return PowerRouteResult(tuple(routes), _no_dock(net.id))
+            return PowerRouteResult(tuple(routes), _no_dock(net.id), (net.id,))
 
         try:
             amps = [
@@ -107,11 +113,11 @@ def route_power(
                 for e in sinks
             ]
         except UnknownTierError as exc:
-            return PowerRouteResult(tuple(routes), _unknown_tier(net.id, str(exc)))
+            return PowerRouteResult(tuple(routes), _unknown_tier(net.id, str(exc)), (net.id,))
 
         built = _build_trunk([t.cell for t in terminals], amps, obstacles, region)
         if isinstance(built, Infeasibility):
-            return PowerRouteResult(tuple(routes), _tag(built, net.id))
+            return PowerRouteResult(tuple(routes), _tag(built, net.id), (net.id,))
         segments, thickness = built
         routes.append(
             Route(

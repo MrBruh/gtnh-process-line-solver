@@ -132,6 +132,18 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   feed each source (its trunk-root thickness) instead of pointing at the ASCII map that never
   showed it.
 
+- **Place↔route feedback loop in `solve()`** (docs/ARCHITECTURE.md #1, #6). `solve()` no longer
+  takes a single placement on faith: it assembles an attempt (place → auto-output → route →
+  validate), and if the router leaves nets unrouted it **penalizes exactly those nets** so the next
+  placement pulls their machines tighter (shorter routes, or adjacency that auto-outputs) and
+  re-places with the next seed. It keeps the best layout seen and returns the first fully-VALID one
+  (anytime: best-so-far), stopping early when re-placing cannot help - a non-routing defect, or the
+  same nets failing again. A layout a single attempt leaves `partial_invalid` (one net it could not
+  pipe in a congested placement) now solves VALID. Deterministic (bounded attempts keyed off `seed`
+  + the accumulated penalties, no wall-clock). The routers gained `failed_nets` (which nets stalled)
+  and `optimize_placement` a `net_penalties` weight to carry the signal. Crude feedback (penalize +
+  re-seed); a richer incremental routing estimate inside the SA move is future work.
+
 ### Changed
 - **InputIR bumped to v2 (breaking): dropped `Port.is_auto_output`.** It was a dead, contradictory
   field - the adapter never set it and the solver auto-connects any adjacent output regardless of

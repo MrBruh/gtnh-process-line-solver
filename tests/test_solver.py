@@ -29,7 +29,7 @@ from gtnh_solver.ir import (
     Route,
     Segment,
 )
-from gtnh_solver.placement import place
+from gtnh_solver.placement import optimize_placement, place
 from gtnh_solver.router import RouteResult
 from gtnh_solver.solver import core as solver_core
 from gtnh_solver.solver import solve
@@ -162,6 +162,58 @@ def test_optimizer_reorients_to_enable_auto_output_the_seed_blocks() -> None:
         assert layout.status is LayoutStatus.VALID, f"seed {s}: {layout.infeasibility}"
         # the optimizer must recover auto-output the seed could not - strictly more than zero
         assert len(layout.auto_connections) > len(seed_autos), f"seed {s} recovered no auto-output"
+
+
+def _io_machine(mid: str) -> Machine:
+    # both an output and an input port, free to reorient - usable anywhere in a small graph
+    return Machine(
+        id=mid,
+        type="t",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH, Facing.SOUTH, Facing.EAST, Facing.WEST],
+        faces=FaceSpec(
+            ports=[
+                Port(id="o", commodity=Commodity.ITEM, direction=IODirection.OUTPUT),
+                Port(id="i", commodity=Commodity.ITEM, direction=IODirection.INPUT),
+            ]
+        ),
+    )
+
+
+def _edge(nid: str, src: str, dst: str) -> Net:
+    return Net(
+        id=nid,
+        commodity=Commodity.ITEM,
+        fluid_or_item="x",
+        throughput=1.0,
+        endpoints=[
+            MachineFaceRef(machine_id=src, port_id="o"),
+            MachineFaceRef(machine_id=dst, port_id="i"),
+        ],
+    )
+
+
+def test_feedback_loop_recovers_a_layout_a_single_attempt_leaves_partial() -> None:
+    # A tight single-layer graph where the seed-0 placement strands one net (e2) - the router
+    # cannot lay its pipe in the congested layout, so one assembly attempt is partial_invalid.
+    # The place<->route feedback loop penalizes the failed net and re-places (next seed), and that
+    # placement routes cleanly: solve() returns VALID where a single attempt did not.
+    edges = [("m3", "m2"), ("m0", "m3"), ("m0", "m4"), ("m1", "m4")]
+    problem = InputIR(
+        bounding_region=CellBox(sx=7, sy=1, sz=7),
+        machines=[_io_machine(f"m{i}") for i in range(5)],
+        nets=[_edge(f"e{k}", a, b) for k, (a, b) in enumerate(edges)],
+    )
+    seed0 = optimize_placement(problem, seed=0)
+    single_attempt, failed = solver_core._assemble(problem, seed0.placements, 0)
+    assert single_attempt.status is LayoutStatus.PARTIAL_INVALID  # one attempt cannot route it...
+    assert failed  # ...and it names the net it could not lay (the feedback signal)
+
+    layout = solve(problem)
+    assert layout.status is LayoutStatus.VALID, layout.infeasibility  # ...but the loop recovers it
+    assert validate(problem, layout).ok
+    assert layout.seed != 0  # it took a later attempt (different seed + penalty), not attempt 0
+    assert solve(problem) == solve(problem)  # still deterministic
 
 
 def test_solve_fork_auto_outputs_one_and_pipes_the_other() -> None:

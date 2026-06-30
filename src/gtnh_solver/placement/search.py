@@ -47,8 +47,15 @@ _MAX_ITERS = 6000
 _RELOCATE_TRIES = 20
 
 
-def optimize_placement(problem: InputIR, *, seed: int = 0) -> PlacementResult:
-    """Anneal the constructive placement toward a lower routing-aware cost (seeded, validated)."""
+def optimize_placement(
+    problem: InputIR, *, seed: int = 0, net_penalties: dict[str, float] | None = None
+) -> PlacementResult:
+    """Anneal the constructive placement toward a lower routing-aware cost (seeded, validated).
+
+    ``net_penalties`` (net id -> extra weight) boosts a net's wirelength term so its machines pull
+    tighter - the place<->route feedback signal: the solver penalizes the nets the router could
+    not lay, so the next placement clusters them (shorter routes, or adjacency that auto-outputs).
+    """
     base = place(problem)
     if not base.ok or len(base.placements) < 2:
         return base  # infeasible, or nothing to optimize (0/1 machine)
@@ -56,9 +63,11 @@ def optimize_placement(problem: InputIR, *, seed: int = 0) -> PlacementResult:
     machines = {m.id: m for m in problem.machines}
     region = problem.bounding_region
     reserved = {(c.x, c.y, c.z) for c in problem.reserved_cells}
-    # Nets that are physically routed (skip ME-toggled commodities); just the machine ids per net.
+    penalties = net_penalties or {}
+    # Nets that are physically routed (skip ME-toggled): each is (machine ids, wirelength weight),
+    # where a penalized net weighs more so the optimizer shortens it preferentially.
     nets = [
-        [e.machine_id for e in n.endpoints]
+        ([e.machine_id for e in n.endpoints], 1.0 + penalties.get(n.id, 0.0))
         for n in problem.nets
         if not problem.me_toggles.toggled(n.commodity)
     ]
@@ -113,20 +122,22 @@ def _auto_candidate_pairs(problem: InputIR) -> list[tuple[str, str]]:
 def _cost(
     placements: list[Placement],
     machines: dict[str, Machine],
-    nets: list[list[str]],
+    nets: list[tuple[list[str], float]],
     auto_pairs: list[tuple[str, str]],
 ) -> float:
-    """Routing-aware cost: net HPWL + compactness (bbox volume) + layer count, minus an
-    auto-output reward (the only orientation-dependent term, so reorient moves are not free)."""
+    """Routing-aware cost: weighted net HPWL + compactness (bbox volume) + layer count, minus an
+    auto-output reward (the only orientation-dependent term, so reorient moves are not free).
+
+    Each net's HPWL is scaled by its weight (1.0, or more for a feedback-penalized net)."""
     pos = {p.machine_id: p for p in placements}
     wire = 0.0
-    for machine_ids in nets:
+    for machine_ids, weight in nets:
         centers = [_center(pos[mid], machines[mid]) for mid in machine_ids if mid in pos]
         if len(centers) < 2:
             continue
         for axis in range(3):
             coords = [c[axis] for c in centers]
-            wire += max(coords) - min(coords)
+            wire += weight * (max(coords) - min(coords))
 
     cells = [
         c for p in placements for c in occupied_cells(p.cell, machines[p.machine_id].footprint)

@@ -310,6 +310,7 @@ def test_route_infeasible_when_no_path_between_terminals() -> None:
     assert not result.ok
     assert result.infeasibility is not None
     assert result.infeasibility.constraint == "routing"
+    assert result.failed_nets == ("n",)  # the unrouted net, for the solver's feedback loop
 
 
 def test_route_infeasible_when_endpoint_has_no_placement() -> None:
