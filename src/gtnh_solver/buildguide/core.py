@@ -15,6 +15,7 @@ from __future__ import annotations
 import string
 from collections import Counter
 
+from gtnh_solver.dataset import tier_voltage
 from gtnh_solver.ir import (
     CellCoord,
     Commodity,
@@ -23,6 +24,7 @@ from gtnh_solver.ir import (
     LayoutResult,
     Machine,
     Net,
+    Port,
     Route,
 )
 from gtnh_solver.ir.geometry import Cell, occupied_cells
@@ -34,6 +36,8 @@ _PIPE_LABEL = {"item": "item pipe", "fluid": "fluid pipe", "power": "power cable
 # The GT cover a physical pipe terminal needs, by commodity (docs/DOMAIN.md). Power cables connect
 # bare (no cover); auto-output needs none either.
 _COVER = {"item": "conveyor cover", "fluid": "pump cover"}
+# Per-commodity throughput unit for the System I/O rates (typed, docs/IR.md).
+_RATE_UNIT = {Commodity.ITEM: "items/t", Commodity.FLUID: "mB/t", Commodity.POWER: "EU/t"}
 
 
 def build_guide(problem: InputIR, layout: LayoutResult) -> str:
@@ -46,6 +50,7 @@ def build_guide(problem: InputIR, layout: LayoutResult) -> str:
     lines += _header(problem, layout)
     lines += _bom(layout, machines)
     lines += _placement_table(layout, machines)
+    lines += _system_io(problem, port_dir, coord_of)
     lines += _power_note(layout, machines)
     lines += _connections(layout, machines, nets, port_dir, coord_of)
     lines += _layer_maps(problem, layout, machines)
@@ -119,6 +124,86 @@ def _placement_table(layout: LayoutResult, machines: dict[str, Machine]) -> list
     return lines
 
 
+def _is_boundary_storage(machine: Machine) -> bool:
+    """A Super Chest / Super Tank boundary buffer (matches the previewer's storage role)."""
+    return machine.type.startswith("Super ")
+
+
+def _port_resource(port: Port) -> str:
+    """The resource a non-power port carries, recovered from its ``{direction}:{resource}`` id."""
+    prefix = f"{port.direction.value}:"
+    return port.id[len(prefix) :] if port.id.startswith(prefix) else port.id
+
+
+def _rate_note(net: Net | None) -> str:
+    """`` (~<rate> <unit>)`` for a net's typed throughput, or `` `` when the net is unknown."""
+    if net is None:
+        return ""
+    return f" (~{net.throughput:g} {_RATE_UNIT[net.commodity]})"
+
+
+def _system_io(
+    problem: InputIR,
+    port_dir: dict[tuple[str, str], IODirection],
+    coord_of: dict[str, CellCoord],
+) -> list[str]:
+    """The line's boundary: raw inputs to load, finished products to collect (GitHub #15).
+
+    Inputs are boundary storages (Super Chest/Tank) that only *source* the line - nothing feeds
+    them, so you fill them by hand. Outputs are machine OUTPUT ports no net consumes - the product
+    exits there with nothing collecting it, so the builder must place a Super Chest/Tank. Both come
+    straight from the IR (storage roles; output ports minus the ones a net wires), so the guide is
+    buildable without reading the source plan.
+    """
+    # The net each output port sources, keyed by (machine, port) - gives its resource + rate, and
+    # its presence means the port is consumed (not a dangling system output).
+    net_by_source: dict[tuple[str, str], Net] = {}
+    for net in problem.nets:
+        for ep in net.endpoints:
+            if port_dir.get((ep.machine_id, ep.port_id)) is IODirection.OUTPUT:
+                net_by_source[(ep.machine_id, ep.port_id)] = net
+
+    inputs: list[str] = []
+    outputs: list[str] = []
+    for machine in problem.machines:
+        cell = coord_of.get(machine.id)
+        if cell is None:  # only describe machines the layout actually placed
+            continue
+        where = f"{machine.type} at ({cell.x}, {cell.y}, {cell.z})"
+        out_ports = [p for p in machine.faces.ports if p.direction is IODirection.OUTPUT]
+        dirs = {p.direction for p in machine.faces.ports}
+        only_sources = IODirection.INPUT not in dirs and IODirection.OUTPUT in dirs
+
+        if _is_boundary_storage(machine) and only_sources:
+            for port in out_ports:
+                src_net = net_by_source.get((machine.id, port.id))
+                resource = (
+                    src_net.fluid_or_item
+                    if src_net and src_net.fluid_or_item
+                    else _port_resource(port)
+                )
+                inputs.append(f"  load {where} with {resource}{_rate_note(src_net)}")
+            continue
+
+        for port in out_ports:
+            if port.commodity is Commodity.POWER:
+                continue  # a power output is a source, not a product to collect
+            if (machine.id, port.id) in net_by_source:
+                continue  # consumed by a net or auto-output
+            outputs.append(
+                f"  {_port_resource(port)} exits {where} - place a Super Chest/Tank to collect it"
+            )
+
+    if not inputs and not outputs:
+        return []
+    lines = ["## System inputs / outputs", ""]
+    if inputs:
+        lines += ["Inputs (load these yourself):", *inputs, ""]
+    if outputs:
+        lines += ["Outputs (place a buffer to collect each):", *outputs, ""]
+    return lines
+
+
 def _is_power_source(machine: Machine) -> bool:
     return any(
         p.commodity is Commodity.POWER and p.direction is IODirection.OUTPUT
@@ -129,8 +214,9 @@ def _is_power_source(machine: Machine) -> bool:
 def _power_note(layout: LayoutResult, machines: dict[str, Machine]) -> list[str]:
     """Tell the builder where to feed external power - synthetic sources are not self-powered.
 
-    Each source must supply at least the cable thickness at its trunk root (the summed amperage of
-    its whole tier); the per-segment thickness is listed under Connections.
+    Each source is stated as a wiring spec: its tier voltage, the amperage to feed (the cable
+    thickness at the trunk root, i.e. the summed amps of its tier), and the EU/t that buys. The
+    per-segment thickness along the trunk is listed under Connections.
     """
     sources = [
         (p, machines[p.machine_id])
@@ -143,14 +229,21 @@ def _power_note(layout: LayoutResult, machines: dict[str, Machine]) -> list[str]
         "## Power",
         "",
         "Source-powering is left to you (docs/DOMAIN.md): place an external power source feeding",
-        "each synthetic source block below, sized to the cable thickness at its trunk root (the",
-        "total amperage of its tier). Per-segment thickness is listed under Connections.",
+        "each synthetic source block below at the listed tier voltage and amperage. Per-segment",
+        "cable thickness is listed under Connections.",
         "",
     ]
     for p, m in sources:
         root = _root_thickness(layout, p.machine_id)
-        size = f" - feed at least {root}x amperage" if root else ""
-        lines.append(f"  {m.type} at ({p.cell.x}, {p.cell.y}, {p.cell.z}){size}")
+        cell = f"({p.cell.x}, {p.cell.y}, {p.cell.z})"
+        if root is None:  # source with no cable (nothing to size against)
+            lines.append(f"  {m.type} at {cell}")
+            continue
+        volts = tier_voltage(m.voltage_tier)
+        lines.append(
+            f"  {m.type} at {cell}: feed {m.voltage_tier} ({volts} V), "
+            f">={root} A -> up to {volts * root} EU/t"
+        )
     lines.append("")
     return lines
 

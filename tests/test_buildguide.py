@@ -42,6 +42,7 @@ def test_build_guide_sand_has_all_sections() -> None:
     for marker in (
         "# Build guide",
         "## Bill of materials",
+        "## System inputs / outputs",
         "## Connections",
         "## Layout",
         "### Layer y = 0",
@@ -75,10 +76,57 @@ def test_build_guide_placement_table_has_coords_and_front() -> None:
     assert "front north" in guide  # ...and which way the front (no-I/O) face points
 
 
-def test_build_guide_power_note_states_required_amperage() -> None:
-    # the sand trunk tapers 4x->2x->1x, so its root (the source's draw) is 4x
+def test_build_guide_power_note_states_feed_spec_as_tier_amps_eut() -> None:
+    # the source must be fed as a wiring spec, not a bare cable thickness (GitHub #15 B2): the sand
+    # trunk roots at 4x, the source is LV (32 V), so 4 A buys up to 32*4 = 128 EU/t.
     guide = _sand_guide()
-    assert "feed at least 4x amperage" in guide
+    assert "feed LV (32 V), >=4 A -> up to 128 EU/t" in guide
+
+
+def test_build_guide_system_io_loads_input_chest_and_names_output_product() -> None:
+    # GitHub #15 B1: the guide must say what to load the boundary input with (resource + rate) and
+    # where the finished product exits, so it is buildable without reading the source plan.
+    guide = _sand_guide()
+    assert "## System inputs / outputs" in guide
+    assert "load Super Chest at (0, 0, 0) with minecraft:stone (~0.1 items/t)" in guide
+    assert "minecraft:sand exits Forge Hammer at (3, 0, 0)" in guide
+    assert "place a Super Chest/Tank to collect it" in guide
+
+
+def test_build_guide_system_io_falls_back_without_a_sourcing_net() -> None:
+    # A boundary storage whose output feeds no net (so no typed rate), and a producer whose output
+    # no net consumes: the resource is recovered from the port id and the rate is simply omitted.
+    chest = Machine(
+        id="chest",
+        type="Super Chest",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[Port(id="output:thing", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)]
+        ),
+    )
+    maker = Machine(
+        id="maker",
+        type="Maker",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)]
+        ),
+    )
+    problem = InputIR(bounding_region=CellBox(sx=8, sy=4, sz=8), machines=[chest, maker])
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id="chest", cell=CellCoord(x=0, y=0, z=0), orientation=Facing.NORTH),
+            Placement(machine_id="maker", cell=CellCoord(x=2, y=0, z=0), orientation=Facing.NORTH),
+        ],
+    )
+    guide = build_guide(problem, layout)
+    assert "load Super Chest at (0, 0, 0) with thing" in guide  # resource from id
+    assert "with thing (~" not in guide  # ...and no rate suffix, since no net gives a throughput
+    assert "out exits Maker at (2, 0, 0) - place a Super Chest/Tank to collect it" in guide
 
 
 def test_build_guide_power_connection_lists_per_segment_thickness() -> None:

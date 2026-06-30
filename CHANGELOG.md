@@ -144,6 +144,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and `optimize_placement` a `net_penalties` weight to carry the signal. Crude feedback (penalize +
   re-seed); a richer incremental routing estimate inside the SA move is future work.
 
+- **Build guide states the boundary + a real power-feed spec (GitHub #15).** Two gaps that made
+  the "buildable from alone" guide actually need guesswork are closed, both from data already in the
+  IR. A new **System inputs / outputs** section names what to load each boundary input storage with
+  (resource + typed rate, e.g. `load Super Chest at (0, 0, 0) with minecraft:stone (~0.1 items/t)`)
+  and where each finished product exits with nothing collecting it (`minecraft:sand exits Forge
+  Hammer at (3, 0, 0) - place a Super Chest/Tank to collect it`) - boundary storages that only
+  source, and machine output ports no net consumes. And the **Power** note now reads as a wiring
+  spec - `feed LV (32 V), >=4 A -> up to 128 EU/t` (tier voltage from the `dataset` ladder × the
+  trunk-root amperage) - instead of the bare cable thickness (`4x amperage`) it printed before.
+
 ### Changed
 - **InputIR bumped to v2 (breaking): dropped `Port.is_auto_output`.** It was a dead, contradictory
   field - the adapter never set it and the solver auto-connects any adjacent output regardless of
