@@ -117,6 +117,9 @@ def to_input_ir(plan: Plan) -> InputIR:
         )
 
     nets = [_net_for_edge(edge, nodes_by_id, recipes) for edge in plan.edges]
+    machines, nets = _add_output_buffers(
+        machines, nets
+    )  # close the line: collect each output (#16)
     machines, nets = synthesize_power(machines, nets)  # the export has no power source; invent it
     return InputIR(bounding_region=_bounding_region(len(machines)), machines=machines, nets=nets)
 
@@ -175,6 +178,61 @@ def _storage_ports(plan: Plan, storage_ids: set[str]) -> dict[str, list[Port]]:
                 id=pid, commodity=commodity, direction=IODirection.INPUT
             )
     return {sid: list(ports.values()) for sid, ports in by_storage.items()}
+
+
+def _add_output_buffers(
+    machines: list[Machine], nets: list[Net]
+) -> tuple[list[Machine], list[Net]]:
+    """Close the line: synthesize a boundary Super Chest/Tank + net to collect each unconsumed
+    system output - a machine OUTPUT port (item/fluid) that no net already sources (GitHub #16), so
+    a final product is placed and wired to a buffer instead of exiting into thin air. The net's rate
+    is the port's recorded throughput (``Port.rate``)."""
+    wired = {(ep.machine_id, ep.port_id) for net in nets for ep in net.endpoints}
+    buffers: list[Machine] = []
+    buffer_nets: list[Net] = []
+    for machine in machines:
+        if machine.type.startswith("Super "):  # a storage's own output is a boundary, not collected
+            continue
+        for port in machine.faces.ports:
+            if port.direction is not IODirection.OUTPUT or port.commodity is Commodity.POWER:
+                continue
+            if (machine.id, port.id) in wired:
+                continue  # already consumed by a net
+            resource = port.id.split(":", 1)[1]  # strip the "output:" prefix -> the resource id
+            buffer_id = f"output-buffer:{machine.id}:{resource}"
+            in_pid = _port_id(IODirection.INPUT, resource)
+            buffers.append(
+                Machine(
+                    id=buffer_id,
+                    type=_STORAGE_TYPE[port.commodity.value],
+                    footprint=_DEFAULT_FOOTPRINT,
+                    faces=FaceSpec(
+                        ports=[
+                            Port(
+                                id=in_pid,
+                                commodity=port.commodity,
+                                direction=IODirection.INPUT,
+                                rate=port.rate,
+                            )
+                        ]
+                    ),
+                    voltage_tier=_STORAGE_TIER,
+                    orientation_options=_DEFAULT_ORIENTATIONS,
+                )
+            )
+            buffer_nets.append(
+                Net(
+                    id=f"output-net:{machine.id}:{resource}",
+                    commodity=port.commodity,
+                    fluid_or_item=resource,
+                    throughput=port.rate or 0.0,
+                    endpoints=[
+                        MachineFaceRef(machine_id=machine.id, port_id=port.id),
+                        MachineFaceRef(machine_id=buffer_id, port_id=in_pid),
+                    ],
+                )
+            )
+    return machines + buffers, nets + buffer_nets
 
 
 def _net_for_edge(edge: Edge, nodes_by_id: dict[str, Node], recipes: dict[str, Recipe]) -> Net:
