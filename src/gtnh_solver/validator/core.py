@@ -26,9 +26,11 @@ What is checked now (needs only the IR):
   power - per-segment cable thickness is present and well-formed (1/2/4/8/16, aligned); the route
   has exactly one source terminal and its cables form a single tree rooted there (neither is
   certifiable otherwise, so both are rejected, not skipped); AND independently re-derived: rooting
-  that cable tree at the source terminal, every segment carries the summed amperage of the machines
-  downstream of it and its cable must be at least that thick (which also rejects a load over the
-  16x cap).
+  that cable tree at the source terminal, each machine's amperage is recomputed at its *delivered*
+  voltage (tier voltage minus 1 per cable block of distance from the source - GT cable loss), every
+  segment carries the summed amperage of the machines downstream of it and its cable must be at
+  least that thick (which also rejects a load over the 16x cap), and a run whose loss drops the
+  delivered voltage to <= 0 is rejected as unpowerable at its tier.
 
 What is deferred to the dataset lane (rule data not available yet) - TODO:
   throughput/tier caps, one-fluid-per-line, and the dataset-specific half of face rules (which
@@ -40,7 +42,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from gtnh_solver.dataset import UnknownTierError, amperage
+from gtnh_solver.dataset import UnknownTierError, UnpowerableError, amperage
 from gtnh_solver.ir import (
     AutoConnection,
     Commodity,
@@ -508,11 +510,14 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
     """Independently re-derive each power cable's load and check the thickness can carry it.
 
     The router sizes thickness to the summed amperage; this recomputes that amperage from
-    geometry + machine euts - rooting the route's cable tree at the source terminal and summing
-    the draw of every machine downstream of each segment - and flags any segment whose cable is
-    thinner than its load. A load over 16x has no legal thickness, so this also catches the
-    over-cap case the router is supposed to reject. Written independently of the router, so a
-    sizing bug is caught, not certified.
+    geometry + machine euts - rooting the route's cable tree at the source terminal, re-deriving
+    each machine's cable-block distance from the source (its depth in that tree), sizing its
+    amperage at the loss-reduced *delivered* voltage that distance implies, and summing the draw of
+    every machine downstream of each segment - and flags any segment whose cable is thinner than its
+    load. A load over 16x has no legal thickness, so this also catches the over-cap case the router
+    is supposed to reject; a distance so long that loss drops the delivered voltage to <= 0 is
+    flagged as unpowerable. Written independently of the router, so a sizing bug is caught, not
+    certified.
     """
     machines = {m.id: m for m in problem.machines}
     port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
@@ -540,6 +545,25 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
             )
             continue
 
+        rooted = _root_power_tree(r.segments, source_cells[0])
+        if rooted is None:
+            # The cable graph is not a single tree rooted at the source (a cycle, a tangle, or a
+            # piece disconnected from the source), so cable distance and the per-segment load are
+            # undefined. The gate must reject what it cannot certify, not skip it - an unverified
+            # trunk is the exact silently-invalid case the validator exists to catch.
+            out.append(
+                Violation(
+                    ViolationCode.POWER_ROUTE_NOT_A_TREE,
+                    f"power route for net {r.net_id!r} is not a single cable tree rooted at its "
+                    f"source; its amperage cannot be verified",
+                )
+            )
+            continue
+        order, parent, depth, edges = rooted
+
+        # Each machine's amperage at its *delivered* voltage: its cable-block distance from the
+        # source is its depth in the rooted tree, and cable loss lowers the voltage (and so raises
+        # the amps) accordingly. Re-derived from geometry, independent of the router's numbers.
         amp_at: dict[Cell, int] = defaultdict(int)
         uncheckable = False
         for t in r.terminals:
@@ -548,8 +572,12 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
             machine = machines.get(t.machine_id)
             if machine is None:
                 continue
+            cell = (t.cell.x, t.cell.y, t.cell.z)
+            distance = depth.get(cell)
+            if distance is None:
+                continue  # a terminal not on the cable tree draws no load through it (as before)
             try:
-                draw = amperage(machine.eut, machine.voltage_tier)
+                draw = amperage(machine.eut, machine.voltage_tier, distance=distance)
             except UnknownTierError:
                 out.append(
                     Violation(
@@ -560,24 +588,22 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
                 )
                 uncheckable = True
                 break
-            amp_at[(t.cell.x, t.cell.y, t.cell.z)] += draw
+            except UnpowerableError:
+                out.append(
+                    Violation(
+                        ViolationCode.POWER_VOLTAGE_DROP_EXCESSIVE,
+                        f"power route for net {r.net_id!r} serves machine {t.machine_id!r} "
+                        f"{distance} cable-blocks from the source, past where its "
+                        f"{machine.voltage_tier} voltage survives the cable loss",
+                    )
+                )
+                uncheckable = True
+                break
+            amp_at[cell] += draw
         if uncheckable:
             continue
 
-        required = _downstream_amperage(r.segments, source_cells[0], amp_at)
-        if required is None:
-            # The cable graph is not a single tree rooted at the source (a cycle, a tangle, or a
-            # piece disconnected from the source), so the per-segment load is undefined. The gate
-            # must reject what it cannot certify, not skip it - an unverified trunk is the exact
-            # silently-invalid case the validator exists to catch.
-            out.append(
-                Violation(
-                    ViolationCode.POWER_ROUTE_NOT_A_TREE,
-                    f"power route for net {r.net_id!r} is not a single cable tree rooted at its "
-                    f"source; its amperage cannot be verified",
-                )
-            )
-            continue
+        required = _subtree_loads(order, parent, depth, edges, amp_at)
         for seg_idx, (req, thick) in enumerate(zip(required, tps, strict=True)):
             if thick < req:
                 out.append(
@@ -589,15 +615,17 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
                 )
 
 
-def _downstream_amperage(
-    segments: list[Segment], root: Cell, amp_at: dict[Cell, int]
-) -> list[int] | None:
-    """Per-segment summed amperage: rooting the cable tree at ``root``, each segment carries the
-    total draw of the machine terminals in the subtree on its far (leaf) side.
+def _root_power_tree(
+    segments: list[Segment], root: Cell
+) -> tuple[list[Cell], dict[Cell, Cell | None], dict[Cell, int], list[tuple[Cell, Cell]]] | None:
+    """Root the cable graph at ``root``; return ``(order, parent, depth, edges)`` or ``None``.
 
-    Returns one load per segment (aligned 1:1), or ``None`` if the segments are not a single tree
-    rooted at ``root`` (a cycle, a disconnected piece, or a missing root); the caller turns that
-    ``None`` into a ``POWER_ROUTE_NOT_A_TREE`` violation - the gate rejects what it cannot certify."""
+    ``order`` is a BFS order from ``root``, ``parent``/``depth`` map each cell to its parent and
+    its cable-block distance from the source (used both to size amperage after loss and to orient
+    each segment), and ``edges`` lists the segments as cell pairs in their original order. Returns
+    ``None`` if the segments are not a single tree rooted at ``root`` (a cycle, a disconnected
+    piece, or a missing root); the caller turns that into a ``POWER_ROUTE_NOT_A_TREE`` violation -
+    the gate rejects what it cannot certify."""
     adj: dict[Cell, set[Cell]] = defaultdict(set)
     edges: list[tuple[Cell, Cell]] = []
     nodes: set[Cell] = set()
@@ -626,8 +654,21 @@ def _downstream_amperage(
                 order.append(nb)
     if len(order) != len(nodes):
         return None  # some cell is not reachable from the source
+    return order, parent, depth, edges
 
-    subtree: dict[Cell, int] = {c: amp_at.get(c, 0) for c in nodes}
+
+def _subtree_loads(
+    order: list[Cell],
+    parent: dict[Cell, Cell | None],
+    depth: dict[Cell, int],
+    edges: list[tuple[Cell, Cell]],
+    amp_at: dict[Cell, int],
+) -> list[int]:
+    """Per-segment summed amperage over a rooted cable tree: each segment carries the total draw of
+    the machine terminals in the subtree on its far (leaf) side. ``depth`` orients each edge (the
+    deeper endpoint is the child). One load per segment, aligned 1:1 with ``edges`` (and so with the
+    route's segments)."""
+    subtree: dict[Cell, int] = {c: amp_at.get(c, 0) for c in order}
     for cur in reversed(order):  # leaves first
         p = parent[cur]
         if p is not None:

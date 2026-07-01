@@ -39,7 +39,8 @@ silently invalid.
 4. **placement (crude)** - deterministic constructive placement: topological / row order, a
    simple legal-orientation pick, in-bounds, no overlap. No SA/LNS yet.
 5. **router (crude)** - A* per-commodity with obstacle avoidance + single-channel capacity.
-   Power: sum the load on the produced path/tree and size-or-reject; no optimization yet.
+   Power: sum the load on the produced path/tree, size at each machine's delivered voltage (cable
+   loss over distance, flat 1 EU/block), and size-or-reject; no optimization yet.
 6. **previewer + build guide (minimal)** - emit the `LayoutResult` so it is visible/buildable.
 7. **validator** - certify it (done; it gates Phase 1's output).
 8. **the Assignment (in-game)** - can a human build this line from the output, and does it run?
@@ -62,7 +63,9 @@ is demonstrably valid-but-bad (too large, unroutable, ugly). This is the recorde
 - **solver** - the **place<->route feedback loop** + anytime wall-clock budget
   (best-valid-so-far on timeout).
 - **power** - shared-amperage optimization (Steiner-like summing, thickness sizing, the 16x
-  split/upgrade) beyond Phase 1's size-or-reject.
+  split/upgrade) beyond Phase 1's size-or-reject. Voltage loss is now modelled as a flat
+  1 EU/block; Phase 2 adds **per-material cable loss** and, driven by it, **multi-source
+  count/placement** (a nearer source instead of thickening a too-lossy run) and voltage upgrades.
 - **validator (rule half)** - throughput/tier caps, summed amperage <= cable rating,
   one-fluid-per-line, required-I/O-face reachability, once the physical dataset is real.
 - **tests** - the on-disk golden corpus + broader hypothesis property tests.

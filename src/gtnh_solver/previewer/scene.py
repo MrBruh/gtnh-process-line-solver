@@ -13,11 +13,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from gtnh_solver.dataset import tier_voltage
 from gtnh_solver.ir import Commodity, InputIR, IODirection, LayoutResult, Machine
 from gtnh_solver.system_io import RATE_STEM, system_io
 
 #: Bump if the scene shape the viewer template expects changes.
-SCENE_VERSION = 0
+SCENE_VERSION = 1
 
 #: Distinct, readable-on-dark machine box colours, assigned per machine type (sorted, so the
 #: same line always colours the same way).
@@ -103,9 +104,18 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
     ]
 
     sysio = system_io(problem, layout)
+    # Per-tier power feed spec: the FULL tier voltage (32 V for LV, always the whole tier, never a
+    # machine's sub-tier draw) and the amps to supply. That is how a GT power feed is specified -
+    # N amps at the tier voltage - so the builder reads it straight off ("LV 32V x 3A"). ``total``
+    # is the EU/t that feed delivers (sum of tier voltage x amps), so it matches the breakdown
+    # (32 V x 3 A -> 96 EU/t), not the machines' lower actual draw (``sysio.power_total``).
+    power_by_tier = {
+        tier: {"volts": tier_voltage(tier), "amps": amps}
+        for tier, amps in sysio.power_amps_by_tier.items()
+    }
     scene_io = {
         # ``rate`` is per-tick; ``unit`` is the stem (items/mB/EU) so the viewer can append /t or
-        # /s for its toggle. ``power.byTier`` is summed amperage (the tier already implies volts).
+        # /s for its toggle.
         "inputs": [
             {"resource": f.resource, "rate": f.rate, "unit": RATE_STEM[f.commodity]}
             for f in sysio.inputs
@@ -114,7 +124,10 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
             {"resource": f.resource, "rate": f.rate, "unit": RATE_STEM[f.commodity]}
             for f in sysio.outputs
         ],
-        "power": {"total": sysio.power_total, "byTier": sysio.power_amps_by_tier},
+        "power": {
+            "total": sum(d["volts"] * d["amps"] for d in power_by_tier.values()),
+            "byTier": power_by_tier,
+        },
     }
 
     region = problem.bounding_region

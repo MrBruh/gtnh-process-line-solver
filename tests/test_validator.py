@@ -577,7 +577,7 @@ def _power_pair() -> tuple[InputIR, LayoutResult]:
                 id="mp",
                 type="gt.machine",
                 voltage_tier="LV",
-                eut=32.0,  # 1 amp at LV -> a 1x cable carries it
+                eut=16.0,  # 2 blocks out (30 V after loss): ceil(16/30)=1 amp -> a 1x cable carries it
                 orientation_options=[Facing.NORTH],
                 faces=FaceSpec(
                     ports=[Port(id="pwr", commodity=Commodity.POWER, direction=IODirection.INPUT)]
@@ -673,7 +673,7 @@ def _power_trunk() -> tuple[InputIR, LayoutResult]:
                 id="m0",
                 type="M",
                 voltage_tier="LV",
-                eut=64.0,  # ceil(64 / 32) = 2 amps
+                eut=48.0,  # docked 2 blocks out (30 V after loss): ceil(48 / 30) = 2 amps
                 orientation_options=[Facing.NORTH],
                 faces=FaceSpec(
                     ports=[Port(id="pi", commodity=Commodity.POWER, direction=IODirection.INPUT)]
@@ -735,7 +735,8 @@ def test_power_cable_thinner_than_its_load_is_flagged() -> None:
 
 
 def test_power_load_over_16x_has_no_sufficient_cable() -> None:
-    # 17 amps (eut 544 at LV) exceeds the 16x cap: even a maxed cable is too thin
+    # eut 544 at LV, 2 blocks out (30 V): ceil(544/30)=19 amps exceeds the 16x cap - even a maxed
+    # cable is too thin
     problem, layout = _power_trunk()
     big = problem.machines[1].model_copy(update={"eut": 544.0})
     problem = problem.model_copy(update={"machines": [problem.machines[0], big]})
@@ -785,6 +786,70 @@ def test_power_route_with_a_cycle_is_rejected_not_skipped() -> None:
         routes=[loop],
     )
     assert ViolationCode.POWER_ROUTE_NOT_A_TREE in validate(problem, layout).codes()
+
+
+def test_power_run_too_long_for_its_tier_is_flagged_as_voltage_drop() -> None:
+    # A 40-block LV cable: loss (1 V/block) drops the 32 V tier below 0 long before the machine, so
+    # no thickness can power it. The validator re-derives the distance from the cable tree and
+    # rejects the run as unpowerable rather than certifying an unbuildable layout.
+    src = Machine(
+        id="src",
+        type="Power Source (LV)",
+        voltage_tier="LV",
+        eut=0.0,
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[Port(id="po", commodity=Commodity.POWER, direction=IODirection.OUTPUT)]
+        ),
+    )
+    m0 = Machine(
+        id="m0",
+        type="M",
+        voltage_tier="LV",
+        eut=32.0,
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[Port(id="pi", commodity=Commodity.POWER, direction=IODirection.INPUT)]
+        ),
+    )
+    n = 40
+    problem = InputIR(
+        bounding_region=CellBox(sx=n + 4, sy=4, sz=4),
+        machines=[src, m0],
+        nets=[
+            Net(
+                id="pw",
+                commodity=Commodity.POWER,
+                throughput=32.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="src", port_id="po"),
+                    MachineFaceRef(machine_id="m0", port_id="pi"),
+                ],
+            )
+        ],
+    )
+    route = Route(
+        net_id="pw",
+        commodity=Commodity.POWER,
+        terminals=[
+            Terminal(machine_id="src", port_id="po", face=Facing.SOUTH, cell=_coord(0, 0, 1)),
+            Terminal(machine_id="m0", port_id="pi", face=Facing.SOUTH, cell=_coord(n, 0, 1)),
+        ],
+        segments=[
+            Segment(start=_coord(i, 0, 1), end=_coord(i + 1, 0, 1), channel=0) for i in range(n)
+        ],
+        thickness_per_segment=[16] * n,  # even a maxed cable cannot rescue a collapsed voltage
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id="src", cell=_coord(0, 0, 0), orientation=Facing.NORTH),
+            Placement(machine_id="m0", cell=_coord(n, 0, 0), orientation=Facing.NORTH),
+        ],
+        routes=[route],
+    )
+    assert ViolationCode.POWER_VOLTAGE_DROP_EXCESSIVE in validate(problem, layout).codes()
 
 
 # --------------------------------------------------------------- auto-output connections

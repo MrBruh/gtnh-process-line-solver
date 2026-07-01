@@ -59,6 +59,9 @@ class ViolationCode(str, Enum):
     POWER_THICKNESS_INSUFFICIENT = "power_thickness_insufficient"  # cable thinner than summed amps
     POWER_NET_NO_SINGLE_SOURCE = "power_net_no_single_source"  # zero or >1 source terminals
     POWER_ROUTE_NOT_A_TREE = "power_route_not_a_tree"  # cable graph has a cycle/disconnect
+    POWER_VOLTAGE_DROP_EXCESSIVE = (
+        "power_voltage_drop_excessive"  # cable loss leaves a machine <= 0 V: unpowerable at tier
+    )
 
 
 @dataclass(frozen=True)

@@ -182,6 +182,27 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   21 to 23.
 
 ### Changed
+- **Power sizing now models cable voltage loss over distance.** GT cables lose voltage per block,
+  so a machine `d` blocks from the source receives `tier_voltage - loss·d`, not the full tier. The
+  source stays at the machine's tier and the cable is thickened to compensate: each machine's
+  amperage is sized at its *delivered* voltage (`ceil(eut / (tier_voltage - loss·d))`), so a
+  machine farther out draws more amps, and a run whose voltage drops to 0 is reported infeasible
+  (`voltage_drop`). Loss is a flat 1 EU/block for every tier for now (per-material loss is Phase 2).
+  The power router (`router/power.py`) accumulates each machine's cable distance while building the
+  trunk and sizes from it; the validator independently re-derives the distance from the cable tree
+  and re-checks (new `power_voltage_drop_excessive` violation); the boundary summary
+  (`system_io.py`, feeding the previewer and build guide) reports the loss-inclusive amperage the
+  builder must supply. Backing it: `dataset` gains `CABLE_LOSS_PER_BLOCK`, `delivered_voltage`, an
+  `UnpowerableError`, and a `distance=` argument on `amperage`. This makes the emitted line
+  actually buildable: a too-long low-voltage cable is no longer certified as valid. See
+  `docs/DOMAIN.md`, `docs/ARCHITECTURE.md` #8.
+- **Previewer power HUD shows the feed spec with correct values.** The system-i/o panel showed
+  power as `48 EU/t (LV 3A)`, where the 48 is the machines' sub-tier draw (16 x 3) and the tier
+  breakdown omitted the voltage - easy to mis-supply in game. It now shows the input the way a GT
+  source is fed: a total EU/t supplied plus the per-tier **full tier voltage x amps**
+  (`power: 96 EU/t (LV 32V x 3A)`, where 96 = 32 V x 3 A, so the total matches the breakdown). The
+  scene's `io.power.byTier` entries gain a per-tier `volts` and `total` is the summed feed (scene
+  version 1). (`previewer/`.)
 - **InputIR bumped to v2 (breaking): dropped `Port.is_auto_output`.** It was a dead, contradictory
   field - the adapter never set it and the solver auto-connects any adjacent output regardless of
   it. Whether a port is satisfied by auto-output is a **solver decision**, not a problem input: it
