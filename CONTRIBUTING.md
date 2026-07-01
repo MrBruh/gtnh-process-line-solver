@@ -1,15 +1,19 @@
 # Contributing to gtnh_solver
 
-Thanks for helping build a place-and-route solver for GT:NH. This project is in the
-planning/pre-alpha stage: the design is reviewed and the skeleton is here, but most modules
-are stubs.
+Thanks for helping build a place-and-route solver for GT:NH. Phase 1 has shipped a crude but
+end-to-end pipeline (adapter through solver, validator, previewer, and build guide); the work
+now is Phase 2 quality, organized as the **Build lanes** below.
 
 ## Setup
+
+Requires **Python 3.10+** (`pyproject.toml` pins `requires-python = ">=3.10"`). If your default
+`python` is older (3.8 is a common system default), `pip install` fails opaquely, so create the
+venv with an explicit 3.10+ interpreter - e.g. `py -3.12` on Windows.
 
 ```bash
 git clone <repo>
 cd gtnh-process-line-solver
-python -m venv .venv && . .venv/bin/activate   # Windows: .venv\Scripts\activate
+python -m venv .venv && . .venv/bin/activate   # Windows: py -3.12 -m venv .venv; .venv\Scripts\activate
 pip install -e ".[dev]"
 pre-commit install   # wire the git hooks (lint, format, types, commit-msg)
 pytest               # run tests (with coverage)
@@ -26,6 +30,25 @@ checks CI does. To run them all on demand: `pre-commit run --all-files`.
 Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (how it fits together and why) and
 [`docs/DOMAIN.md`](docs/DOMAIN.md) (the GT:NH rules you'll need). The [`CLAUDE.md`](CLAUDE.md)
 file is a fast orientation for both agents and people.
+
+## Build lanes
+
+Phase 1 shipped a crude end-to-end slice; Phase 2 is the quality work, fanned out into parallel
+lanes (from [`docs/ROADMAP.md`](docs/ROADMAP.md)). Each lane is an *upgrade* on a piece Phase 1
+already built, so most have already landed a first slice. The lanes are formally gated behind
+Phase 1's in-game Assignment (does the pinned demo line build and run in GT:NH), so read status
+as "safe to start on" rather than "unblocked".
+
+| Lane | Phase 2 work | Status |
+|------|--------------|--------|
+| A | adapter hardening: pin the plan-schema + recipe-dataset version | Open - Phase 1 adapter done; pinning not started |
+| B | full physical dataset (footprints / faces / tiers / cell->block) beyond the demo line | Open - only the demo line's entries exist |
+| C | placement: SA/LNS + routing-aware cost | In progress - SA + routing-aware cost landed; LNS remains |
+| D | router: negotiated-congestion, multi-channel cap, shared-amperage power optimization | In progress - rip-up/reroute, single-channel capacity, and size-or-reject power landed |
+| E | validator rule-half: tier caps, summed amperage, face reachability | Blocked on the real dataset (lane B) |
+| F | previewer / build-guide polish | Previewer polish in progress; build-guide polish deferred |
+
+Pick a lane, comment on (or open) an issue to claim it, and ship one logical change per PR.
 
 ## Issues, branches, and PRs
 
