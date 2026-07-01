@@ -10,7 +10,8 @@ machines is caught (``report.ok is False``).
 What is checked now (needs only the IR):
   completeness/referential - every machine placed the right number of times with a legal
   orientation; every physically-routed net routed exactly once; ME-toggled commodities not
-  routed; route commodity matches its net.
+  routed; route commodity matches its net; a routed net has a consumer (>=1 INPUT endpoint,
+  any number of same-commodity producers) and one commodity across its endpoints.
   geometry - machines in-bounds, non-overlapping, off reserved cells; routes in-bounds,
   contiguous, every segment a unit (+/-1) hop, never running through a machine body or a
   reserved cell, and no two nets' routes sharing a cell (crude single-channel capacity); pinned
@@ -143,6 +144,8 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
     region = problem.bounding_region
     reserved = {(c.x, c.y, c.z) for c in problem.reserved_cells}
     machines = {m.id: m for m in problem.machines}
+    port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
+    port_commodity = {(m.id, p.id): p.commodity for m in problem.machines for p in m.faces.ports}
     body_cells: set[Cell] = set()
     for pl in layout.placements:
         m = machines.get(pl.machine_id)
@@ -263,6 +266,47 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
                 Violation(
                     ViolationCode.MISSING_CONNECTION,
                     f"net {net.id!r} is neither routed nor auto-connected",
+                )
+            )
+        if routed_here:
+            _check_routed_net_endpoints(net, port_dir, port_commodity, out)
+
+
+def _check_routed_net_endpoints(
+    net: Net,
+    port_dir: dict[tuple[str, str], IODirection],
+    port_commodity: dict[tuple[str, str], Commodity],
+    out: list[Violation],
+) -> None:
+    """A physically-routed net must actually deliver, and carry a single commodity.
+
+    GT lets several machines eject into one pipe, so a net may have *multiple* producer (OUTPUT)
+    endpoints - this deliberately does not cap them. What it requires is a **consumer**: at least
+    one INPUT endpoint, or the producers are piping to nowhere. The auto-connection path already
+    enforces the OUTPUT->INPUT direction (``_check_auto_net``); before this the routed path did
+    not, so a consumer-less net slipped through the gate (docs/ARCHITECTURE.md #4). It also flags a
+    net whose endpoints mix commodities - one pipe carries one resource. (The input IR enforces
+    both, but the validator re-derives them independently so a producer that bypasses the IR is
+    still caught.)
+    """
+    if not any(port_dir.get((e.machine_id, e.port_id)) is IODirection.INPUT for e in net.endpoints):
+        out.append(
+            Violation(
+                ViolationCode.ROUTE_NET_NO_CONSUMER,
+                f"routed net {net.id!r} has no INPUT endpoint: its producer(s) have no consumer "
+                f"to deliver to",
+            )
+        )
+    for e in net.endpoints:
+        # An unknown port defaults to the net's own commodity so it is not double-flagged here (a
+        # missing endpoint/port is a different violation's concern), leaving only a real mismatch.
+        commodity = port_commodity.get((e.machine_id, e.port_id), net.commodity)
+        if commodity is not net.commodity:
+            out.append(
+                Violation(
+                    ViolationCode.ROUTE_NET_MIXED_COMMODITY,
+                    f"routed net {net.id!r} ({net.commodity.value}) has endpoint {e.port_id!r} on "
+                    f"{e.machine_id!r} carrying {commodity.value}, not the net's commodity",
                 )
             )
 

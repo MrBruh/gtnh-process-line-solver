@@ -46,23 +46,33 @@ def _coord(x: int, y: int, z: int) -> CellCoord:
     return CellCoord(x=x, y=y, z=z)
 
 
-def _item_machine(mid: str) -> Machine:
+def _item_machine(
+    mid: str,
+    *,
+    direction: IODirection = IODirection.OUTPUT,
+    port: str = "out",
+) -> Machine:
     return Machine(
         id=mid,
         type="gt.macerator",
         voltage_tier="LV",
         orientation_options=[Facing.NORTH, Facing.SOUTH],
-        faces=FaceSpec(
-            ports=[Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)]
-        ),
+        faces=FaceSpec(ports=[Port(id=port, commodity=Commodity.ITEM, direction=direction)]),
     )
 
 
 def _base() -> tuple[InputIR, LayoutResult]:
-    """A fresh, fully valid 2-machine item line with a routed net + honored pin."""
+    """A fresh, fully valid 2-machine item line: a producer piping to a real consumer + a pin.
+
+    ``m1`` outputs, ``m2`` consumes (INPUT) - a routed net needs at least one consumer or its
+    producers deliver nowhere, so the "valid" golden fixture must wire one (an earlier version
+    routed between two OUTPUT endpoints and still passed, normalizing a consumer-less net)."""
     problem = InputIR(
         bounding_region=CellBox(sx=8, sy=4, sz=8),
-        machines=[_item_machine("m1"), _item_machine("m2")],
+        machines=[
+            _item_machine("m1"),
+            _item_machine("m2", direction=IODirection.INPUT, port="in"),
+        ],
         nets=[
             Net(
                 id="n1",
@@ -71,7 +81,7 @@ def _base() -> tuple[InputIR, LayoutResult]:
                 throughput=1.0,
                 endpoints=[
                     MachineFaceRef(machine_id="m1", port_id="out"),
-                    MachineFaceRef(machine_id="m2", port_id="out"),
+                    MachineFaceRef(machine_id="m2", port_id="in"),
                 ],
             )
         ],
@@ -94,7 +104,7 @@ def _base() -> tuple[InputIR, LayoutResult]:
                         machine_id="m1", port_id="out", face=Facing.SOUTH, cell=_coord(1, 0, 2)
                     ),
                     Terminal(
-                        machine_id="m2", port_id="out", face=Facing.SOUTH, cell=_coord(3, 0, 2)
+                        machine_id="m2", port_id="in", face=Facing.SOUTH, cell=_coord(3, 0, 2)
                     ),
                 ],
                 segments=[
@@ -311,7 +321,12 @@ def test_two_routes_sharing_a_cell_collide() -> None:
     # (one block can't be two pipes). The validator flags it independently of the router.
     problem = InputIR(
         bounding_region=CellBox(sx=8, sy=4, sz=8),
-        machines=[_item_machine(m) for m in ("a", "b", "c", "d")],
+        machines=[
+            _item_machine("a"),
+            _item_machine("b", direction=IODirection.INPUT, port="in"),
+            _item_machine("c"),
+            _item_machine("d", direction=IODirection.INPUT, port="in"),
+        ],
         nets=[
             Net(
                 id="nx",
@@ -320,7 +335,7 @@ def test_two_routes_sharing_a_cell_collide() -> None:
                 throughput=1.0,
                 endpoints=[
                     MachineFaceRef(machine_id="a", port_id="out"),
-                    MachineFaceRef(machine_id="b", port_id="out"),
+                    MachineFaceRef(machine_id="b", port_id="in"),
                 ],
             ),
             Net(
@@ -330,7 +345,7 @@ def test_two_routes_sharing_a_cell_collide() -> None:
                 throughput=1.0,
                 endpoints=[
                     MachineFaceRef(machine_id="c", port_id="out"),
-                    MachineFaceRef(machine_id="d", port_id="out"),
+                    MachineFaceRef(machine_id="d", port_id="in"),
                 ],
             ),
         ],
@@ -354,6 +369,171 @@ def test_two_routes_sharing_a_cell_collide() -> None:
     )
     codes = validate(problem, layout).codes()
     assert ViolationCode.ROUTE_CELL_COLLISION in codes, codes
+
+
+# ----------------------------------------------------------- routed-net direction / commodity
+
+
+def test_routed_net_without_a_consumer_is_flagged() -> None:
+    # Two producers, no INPUT endpoint: the pipe has nowhere to deliver. The auto path already
+    # rejected this (wrong endpoints); the routed path used to wave it through - now it doesn't.
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[_item_machine("m1"), _item_machine("m2")],  # both OUTPUT
+        nets=[
+            Net(
+                id="n1",
+                commodity=Commodity.ITEM,
+                fluid_or_item="gt.dust.iron",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="m1", port_id="out"),
+                    MachineFaceRef(machine_id="m2", port_id="out"),
+                ],
+            )
+        ],
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id="m1", cell=_coord(1, 0, 1), orientation=Facing.NORTH),
+            Placement(machine_id="m2", cell=_coord(3, 0, 1), orientation=Facing.NORTH),
+        ],
+        routes=[
+            Route(
+                net_id="n1",
+                commodity=Commodity.ITEM,
+                terminals=[
+                    Terminal(
+                        machine_id="m1", port_id="out", face=Facing.SOUTH, cell=_coord(1, 0, 2)
+                    ),
+                    Terminal(
+                        machine_id="m2", port_id="out", face=Facing.SOUTH, cell=_coord(3, 0, 2)
+                    ),
+                ],
+                segments=[
+                    Segment(start=_coord(1, 0, 2), end=_coord(2, 0, 2), channel=0),
+                    Segment(start=_coord(2, 0, 2), end=_coord(3, 0, 2), channel=0),
+                ],
+            )
+        ],
+    )
+    assert ViolationCode.ROUTE_NET_NO_CONSUMER in validate(problem, layout).codes()
+
+
+def test_routed_net_with_multiple_same_commodity_producers_passes() -> None:
+    # GT lets several machines eject into one pipe: two OUTPUT producers feeding one INPUT consumer
+    # is a legitimate net the gate must accept (multiple producers are not an error).
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[
+            _item_machine("p1"),
+            _item_machine("p2"),
+            _item_machine("c", direction=IODirection.INPUT, port="in"),
+        ],
+        nets=[
+            Net(
+                id="n1",
+                commodity=Commodity.ITEM,
+                fluid_or_item="gt.dust.iron",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="p1", port_id="out"),
+                    MachineFaceRef(machine_id="p2", port_id="out"),
+                    MachineFaceRef(machine_id="c", port_id="in"),
+                ],
+            )
+        ],
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id="p1", cell=_coord(1, 0, 1), orientation=Facing.NORTH),
+            Placement(machine_id="p2", cell=_coord(3, 0, 1), orientation=Facing.NORTH),
+            Placement(machine_id="c", cell=_coord(5, 0, 1), orientation=Facing.NORTH),
+        ],
+        routes=[
+            Route(
+                net_id="n1",
+                commodity=Commodity.ITEM,
+                terminals=[
+                    Terminal(
+                        machine_id="p1", port_id="out", face=Facing.SOUTH, cell=_coord(1, 0, 2)
+                    ),
+                    Terminal(
+                        machine_id="p2", port_id="out", face=Facing.SOUTH, cell=_coord(3, 0, 2)
+                    ),
+                    Terminal(machine_id="c", port_id="in", face=Facing.SOUTH, cell=_coord(5, 0, 2)),
+                ],
+                segments=[
+                    Segment(start=_coord(1, 0, 2), end=_coord(2, 0, 2), channel=0),
+                    Segment(start=_coord(2, 0, 2), end=_coord(3, 0, 2), channel=0),
+                    Segment(start=_coord(3, 0, 2), end=_coord(4, 0, 2), channel=0),
+                    Segment(start=_coord(4, 0, 2), end=_coord(5, 0, 2), channel=0),
+                ],
+            )
+        ],
+    )
+    report = validate(problem, layout)
+    assert report.ok, str(report)
+
+
+def test_routed_net_with_mixed_commodity_endpoints_is_flagged() -> None:
+    # The input IR forbids wiring a fluid port onto an item net; the validator is independent and
+    # must catch it anyway, so build the mismatch past the IR's check with model_construct.
+    fluid_sink = Machine(
+        id="m2",
+        type="gt.macerator",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH, Facing.SOUTH],
+        faces=FaceSpec(
+            ports=[Port(id="in", commodity=Commodity.FLUID, direction=IODirection.INPUT)]
+        ),
+    )
+    net = Net(
+        id="n1",
+        commodity=Commodity.ITEM,
+        fluid_or_item="gt.dust.iron",
+        throughput=1.0,
+        endpoints=[
+            MachineFaceRef(machine_id="m1", port_id="out"),
+            MachineFaceRef(machine_id="m2", port_id="in"),
+        ],
+    )
+    problem = InputIR.model_construct(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[_item_machine("m1"), fluid_sink],
+        nets=[net],
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id="m1", cell=_coord(1, 0, 1), orientation=Facing.NORTH),
+            Placement(machine_id="m2", cell=_coord(3, 0, 1), orientation=Facing.NORTH),
+        ],
+        routes=[
+            Route(
+                net_id="n1",
+                commodity=Commodity.ITEM,
+                terminals=[
+                    Terminal(
+                        machine_id="m1", port_id="out", face=Facing.SOUTH, cell=_coord(1, 0, 2)
+                    ),
+                    Terminal(
+                        machine_id="m2", port_id="in", face=Facing.SOUTH, cell=_coord(3, 0, 2)
+                    ),
+                ],
+                segments=[
+                    Segment(start=_coord(1, 0, 2), end=_coord(2, 0, 2), channel=0),
+                    Segment(start=_coord(2, 0, 2), end=_coord(3, 0, 2), channel=0),
+                ],
+            )
+        ],
+    )
+    assert ViolationCode.ROUTE_NET_MIXED_COMMODITY in validate(problem, layout).codes()
 
 
 # --------------------------------------------------------------- ME toggles & power
