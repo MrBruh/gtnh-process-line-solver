@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from gtnh_solver.ir import Commodity, InputIR, IODirection, LayoutResult, Machine
-from gtnh_solver.system_io import RATE_UNIT, system_io
+from gtnh_solver.system_io import RATE_STEM, system_io
 
 #: Bump if the scene shape the viewer template expects changes.
 SCENE_VERSION = 0
@@ -104,12 +104,14 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
 
     sysio = system_io(problem, layout)
     scene_io = {
+        # ``rate`` is per-tick; ``unit`` is the stem (items/mB/EU) so the viewer can append /t or
+        # /s for its toggle. ``power.byTier`` is summed amperage (the tier already implies volts).
         "inputs": [
-            {"resource": f.resource, "rate": f.rate, "unit": RATE_UNIT[f.commodity]}
+            {"resource": f.resource, "rate": f.rate, "unit": RATE_STEM[f.commodity]}
             for f in sysio.inputs
         ],
         "outputs": [{"resource": f.resource} for f in sysio.outputs],
-        "power": {"total": sysio.power_total, "byTier": sysio.power_by_tier},
+        "power": {"total": sysio.power_total, "byTier": sysio.power_amps_by_tier},
     }
 
     region = problem.bounding_region
