@@ -225,6 +225,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every endpoint carries the net's own commodity (`route_net_mixed_commodity`), so a mixed-
   commodity net is caught even if a producer bypasses the input IR's own check. The base test
   fixture now wires a real consumer.
+- **Previewer floor grid aligns to cell boundaries (GitHub #19).** The grid lines landed on
+  integer boundaries on one axis but cut through the middle of the blocks on the other (a
+  `GridHelper` centering artifact: integer line offsets need an even division count, half-integer
+  offsets an odd one, so parity decided it per axis). The grid now uses an even span snapped to an
+  integer center, so every line sits on a cell edge and the blocks read as sitting in their cells.
 - **Validator route + auto-connection soundness holes** - the only automated correctness gate
   was certifying some geometrically-impossible layouts. Routes are now checked for unit-step
   segments (a single segment can no longer "teleport" two cells across a machine - connectivity

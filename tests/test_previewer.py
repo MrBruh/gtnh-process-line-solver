@@ -180,6 +180,13 @@ def test_render_html_shows_system_io_panel_with_rate_toggle() -> None:
     assert "TICKS_PER_SECOND" in html  # ...and the x20 conversion behind it
 
 
+def test_render_html_grid_aligns_to_cell_boundaries() -> None:
+    # the floor grid must land on integer cell boundaries, not cut through blocks (GitHub #19)
+    html = render_html(_sand_scene())
+    assert "Math.round(center.x)" in html  # integer-snapped grid center...
+    assert "gspanRaw % 2" in html  # ...paired with an even division count
+
+
 def test_render_html_inlines_the_exact_scene() -> None:
     scene = _sand_scene()
     assert json.dumps(scene) in render_html(scene)  # embedded verbatim - no file:// fetch needed

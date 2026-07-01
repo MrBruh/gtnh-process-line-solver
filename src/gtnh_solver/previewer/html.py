@@ -106,9 +106,13 @@ const sun = new THREE.DirectionalLight(0xffffff, 0.75);
 sun.position.set(1, 2, 1.5);
 scene.add(sun);
 
-const gspan = Math.ceil(Math.max(bmax.x - bmin.x, bmax.z - bmin.z)) + 2;
+// Align grid lines to integer cell boundaries so they frame the blocks instead of cutting through
+// them (#19). A GridHelper's lines sit at integer offsets from its center only when the division
+// count is even; pairing that with an integer-snapped center lands every line on a cell edge.
+const gspanRaw = Math.ceil(Math.max(bmax.x - bmin.x, bmax.z - bmin.z)) + 2;
+const gspan = gspanRaw + (gspanRaw % 2);
 const grid = new THREE.GridHelper(gspan, gspan, 0x2c323b, 0x23282f);
-grid.position.set(center.x, bmin.y, center.z);
+grid.position.set(Math.round(center.x), bmin.y, Math.round(center.z));
 scene.add(grid);
 scene.add(new THREE.Box3Helper(new THREE.Box3(bmin.clone(), bmax.clone()), new THREE.Color('#46506a')));
 
