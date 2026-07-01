@@ -1,0 +1,120 @@
+"""Tests for the shared boundary/power derivation (``system_io``) the guide and previewer share.
+
+Mostly against the real sand line (the artifact both surfaces render), plus a hand-built case for
+the fallbacks: a boundary storage with no sourcing net (no rate) and a dangling output whose
+resource is recovered from an unprefixed port id.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from gtnh_solver.adapter import adapt_file
+from gtnh_solver.ir import (
+    CellBox,
+    CellCoord,
+    Commodity,
+    FaceSpec,
+    Facing,
+    InputIR,
+    IODirection,
+    LayoutResult,
+    LayoutStatus,
+    Machine,
+    Placement,
+    Port,
+)
+from gtnh_solver.solver import solve
+from gtnh_solver.system_io import (
+    BoundaryFlow,
+    SystemIO,
+    is_boundary_storage,
+    port_resource,
+    system_io,
+)
+
+_SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
+
+
+def _sand_io() -> SystemIO:
+    ir = adapt_file(_SAND)
+    return system_io(ir, solve(ir))
+
+
+def test_sand_input_is_the_super_chest_with_its_typed_rate() -> None:
+    io = _sand_io()
+    assert len(io.inputs) == 1
+    stone = io.inputs[0]
+    assert (stone.machine_type, stone.resource, stone.cell) == (
+        "Super Chest",
+        "minecraft:stone",
+        (0, 0, 0),
+    )
+    assert stone.commodity is Commodity.ITEM
+    assert stone.rate == pytest.approx(0.1)
+
+
+def test_sand_output_is_the_uncollected_sand_product() -> None:
+    io = _sand_io()
+    # the last hammer produces sand with no consuming net -> a dangling system output
+    assert [(f.machine_type, f.resource, f.cell) for f in io.outputs] == [
+        ("Forge Hammer", "minecraft:sand", (3, 0, 0))
+    ]
+    assert io.outputs[0].rate is None  # a dangling output has no throughput
+
+
+def test_sand_power_sums_by_tier() -> None:
+    io = _sand_io()
+    assert io.power_total == pytest.approx(48.0)  # 3 Forge Hammers x 16 EU/t
+    assert io.power_by_tier == {"LV": pytest.approx(48.0)}
+
+
+def test_falls_back_without_a_sourcing_net_and_on_unprefixed_ids() -> None:
+    chest = Machine(
+        id="chest",
+        type="Super Chest",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[Port(id="output:thing", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)]
+        ),
+    )
+    maker = Machine(
+        id="maker",
+        type="Maker",
+        voltage_tier="LV",
+        eut=8.0,
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)]
+        ),
+    )
+    problem = InputIR(bounding_region=CellBox(sx=8, sy=4, sz=8), machines=[chest, maker])
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id="chest", cell=CellCoord(x=0, y=0, z=0), orientation=Facing.NORTH),
+            Placement(machine_id="maker", cell=CellCoord(x=2, y=0, z=0), orientation=Facing.NORTH),
+        ],
+    )
+    io = system_io(problem, layout)
+    # storage output with no net -> resource from the ``output:`` prefix, rate omitted
+    assert io.inputs == [
+        BoundaryFlow("chest", "Super Chest", (0, 0, 0), "thing", Commodity.ITEM, None)
+    ]
+    # dangling output on a plain (non-``{dir}:``-prefixed) port id -> id used verbatim
+    assert io.outputs == [BoundaryFlow("maker", "Maker", (2, 0, 0), "out", Commodity.ITEM, None)]
+    assert io.power_total == pytest.approx(8.0)
+    assert io.power_by_tier == {"LV": pytest.approx(8.0)}
+
+
+def test_helper_predicates() -> None:
+    assert is_boundary_storage("Super Tank")
+    assert not is_boundary_storage("Forge Hammer")
+    out = Port(id="output:minecraft:sand", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)
+    assert port_resource(out) == "minecraft:sand"
+    bare = Port(id="widget", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)
+    assert port_resource(bare) == "widget"  # no ``output:`` prefix -> used as-is

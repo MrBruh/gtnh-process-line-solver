@@ -4,7 +4,8 @@ The output-layout contract (``LayoutResult``) references machines by id and leav
 geometry in the ``InputIR``; a renderer needs it all in one place. ``build_scene`` flattens both
 into a plain dict the three.js viewer can draw with no further lookups (machine boxes, route
 segments coloured by commodity + sized by cable thickness, auto-output links, the region, a
-legend). This is a *previewer-internal* format - NOT the versioned contract - so the un-testable
+legend, and the ``io`` boundary summary - inputs to load, outputs to collect, summed power). This
+is a *previewer-internal* format - NOT the versioned contract - so the un-testable
 WebGL last mile stays a thin static template while the mapping here is pure and fully tested.
 """
 
@@ -13,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from gtnh_solver.ir import Commodity, InputIR, IODirection, LayoutResult, Machine
+from gtnh_solver.system_io import RATE_UNIT, system_io
 
 #: Bump if the scene shape the viewer template expects changes.
 SCENE_VERSION = 0
@@ -100,6 +102,16 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
         for ac in layout.auto_connections
     ]
 
+    sysio = system_io(problem, layout)
+    scene_io = {
+        "inputs": [
+            {"resource": f.resource, "rate": f.rate, "unit": RATE_UNIT[f.commodity]}
+            for f in sysio.inputs
+        ],
+        "outputs": [{"resource": f.resource} for f in sysio.outputs],
+        "power": {"total": sysio.power_total, "byTier": sysio.power_by_tier},
+    }
+
     region = problem.bounding_region
     metrics = layout.metrics
     return {
@@ -111,6 +123,7 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
         "machines": scene_machines,
         "routes": scene_routes,
         "autoConnections": scene_autos,
+        "io": scene_io,
         "legend": [{"label": t, "color": color_for_type[t]} for t in types],
         "metrics": {
             "footprint": metrics.footprint,
