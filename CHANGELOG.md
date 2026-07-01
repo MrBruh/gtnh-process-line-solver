@@ -154,6 +154,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   spec - `feed LV (32 V), >=4 A -> up to 128 EU/t` (tier voltage from the `dataset` ladder × the
   trunk-root amperage) - instead of the bare cable thickness (`4x amperage`) it printed before.
 
+- **Previewer shows the system's inputs, outputs, and power (GitHub #5).** The 3D preview now
+  surfaces the same boundary the text guide does: a **System I/O** panel in the HUD lists the
+  inputs to load (resource + rate), the products to collect, the total EU/t draw, and the summed
+  **amperage per voltage tier** (the tier already implies the volts, so amps is the useful number,
+  e.g. `LV 3A`). A toggle switches every rate between **per tick and per second**. Both surfaces
+  read from one new shared, fully-tested helper - `system_io(problem, layout)`
+  (`gtnh_solver/system_io.py`) - so the guide and previewer can never disagree on what crosses the
+  line's edge; `build_scene` emits it as `scene.io` and the build guide was refactored onto the
+  same helper (its text output is unchanged).
+
 ### Changed
 - **InputIR bumped to v2 (breaking): dropped `Port.is_auto_output`.** It was a dead, contradictory
   field - the adapter never set it and the solver auto-connects any adjacent output regardless of

@@ -5,8 +5,10 @@ clickable ``.html`` that pulls three.js from a CDN and draws the layout. The cam
 pans (right-drag / arrow keys), and a layer-by-layer slider isolates each y-level. Machines are
 solid boxes with their name on the front face (placeholder until real textures); cables/pipes are
 square bars sized by thickness, with a short lead connecting each route to the machine face it
-docks on; auto-output is a chunky arrow. The view frames the layout's *actual* extent
-(``scene.bounds``), not the solver's oversized search region.
+docks on; auto-output is a chunky arrow. A side panel lists the machine/route legend plus the
+system's boundary inputs, outputs, and power (``scene.io``), with a per-tick / per-second rate
+toggle. The view frames the layout's *actual* extent (``scene.bounds``), not the solver's
+oversized search region.
 
 The scene JSON is *inlined*, not fetched, so there is no ``file://`` CORS problem. The template is
 assembled by replacing a single ``__SCENE_JSON__`` token (NOT an f-string / ``.format``) so the
@@ -52,6 +54,7 @@ _TEMPLATE = (
   <span>layer <b id="layerVal">all</b></span>
   <input id="layer" type="range" min="-1" max="0" value="-1" step="1">
   <button id="reset">reset camera</button>
+  <button id="rateUnit" title="toggle throughput units">rate: per tick</button>
 </div>
 
 <script type="importmap">
@@ -255,12 +258,44 @@ document.getElementById('hud').firstChild.textContent =
   '   build ' + (bmax.x - bmin.x) + 'x' + (bmax.y - bmin.y) + 'x' + (bmax.z - bmin.z) +
   '   machines ' + SCENE.machines.length;
 
-let html = '<b>machines</b><br>';
-for (const e of SCENE.legend) html += '<span class="sw" style="background:' + e.color + '"></span>' + e.label + '<br>';
-html += '<b>routes</b><br>';
-for (const k of ['item', 'fluid', 'power']) html += '<span class="sw" style="background:' + COMMODITY[k] + '"></span>' + k + '<br>';
-html += '<span class="sw" style="background:#00e5ff"></span>auto-output<br>';
-document.getElementById('legend').innerHTML = html;
+// System-I/O rates are stored per tick; the toggle re-renders them as per second (x20). Cable
+// amperage (byTier) is a steady value, so it never scales with the time unit.
+let perSecond = false;
+const TICKS_PER_SECOND = 20;
+// Render a rate at 6 significant figures. The plan value is exact, so prefix '~' ONLY when that
+// 6-sig-fig form actually loses precision (a non-terminating decimal like 25/12); exact rates
+// (0.1, 6.25, ...) print clean. The relative tolerance ignores binary-float noise (e.g. 0.1 * 20).
+function rateText(perTick) {
+  const v = perSecond ? perTick * TICKS_PER_SECOND : perTick;
+  const shown = parseFloat(v.toPrecision(6));
+  const rounded = Math.abs(shown - v) > Math.abs(v) * 1e-9;
+  return (rounded ? '~' : '') + shown;
+}
+function renderLegend() {
+  let html = '<b>machines</b><br>';
+  for (const e of SCENE.legend) html += '<span class="sw" style="background:' + e.color + '"></span>' + e.label + '<br>';
+  html += '<b>routes</b><br>';
+  for (const k of ['item', 'fluid', 'power']) html += '<span class="sw" style="background:' + COMMODITY[k] + '"></span>' + k + '<br>';
+  html += '<span class="sw" style="background:#00e5ff"></span>auto-output<br>';
+  if (SCENE.io) {
+    const io = SCENE.io, sfx = perSecond ? '/s' : '/t';
+    html += '<b>system i/o</b><br>';
+    for (const i of io.inputs)
+      html += 'in: ' + i.resource + (i.rate != null ? ' (' + rateText(i.rate) + ' ' + i.unit + sfx + ')' : '') + '<br>';
+    for (const o of io.outputs)
+      html += 'out: ' + o.resource + (o.rate != null ? ' (' + rateText(o.rate) + ' ' + o.unit + sfx + ')' : '') + '<br>';
+    const tiers = Object.keys(io.power.byTier);
+    const byTier = tiers.map((t) => t + ' ' + io.power.byTier[t] + 'A').join(', ');
+    html += 'power: ' + rateText(io.power.total) + ' EU' + sfx + (tiers.length ? ' (' + byTier + ')' : '') + '<br>';
+  }
+  document.getElementById('legend').innerHTML = html;
+}
+renderLegend();
+document.getElementById('rateUnit').addEventListener('click', () => {
+  perSecond = !perSecond;
+  document.getElementById('rateUnit').textContent = 'rate: per ' + (perSecond ? 'second' : 'tick');
+  renderLegend();
+});
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;

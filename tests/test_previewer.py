@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.ir import (
     CellBox,
@@ -134,6 +136,17 @@ def test_scene_routes_carry_terminals() -> None:
     assert len(term["cell"]) == 3
 
 
+def test_scene_reports_system_io() -> None:
+    # the boundary summary the HUD renders (GitHub #5): what to feed, what comes out, total power
+    io = _sand_scene()["io"]
+    assert len(io["inputs"]) == 1
+    assert io["inputs"][0]["resource"] == "minecraft:stone"
+    assert io["inputs"][0]["rate"] == pytest.approx(0.1)
+    assert io["inputs"][0]["unit"] == "items"  # stem only; the viewer appends /t or /s
+    assert io["outputs"] == [{"resource": "minecraft:sand"}]
+    assert io["power"] == {"total": pytest.approx(48.0), "byTier": {"LV": 3}}  # amps, not EU/t
+
+
 def test_scene_is_deterministic() -> None:
     assert _sand_scene() == _sand_scene()
 
@@ -155,6 +168,14 @@ def test_render_html_wires_the_requested_viewer_features() -> None:
     assert "BoxGeometry" in html  # cables/pipes are rectangular bars, not cylinders (#2)
     assert "PlaneGeometry" in html  # machine names live on the front face (#3)
     assert "ConeGeometry" in html  # chunky, visible auto-output arrows (#4)
+
+
+def test_render_html_shows_system_io_panel_with_rate_toggle() -> None:
+    html = render_html(_sand_scene())
+    assert "system i/o" in html  # the boundary panel label (viewer template, not scene data)
+    assert "io.power.byTier" in html  # ...renders the power draw (amps) by tier
+    assert 'id="rateUnit"' in html  # the per-tick / per-second toggle button...
+    assert "TICKS_PER_SECOND" in html  # ...and the x20 conversion behind it
 
 
 def test_render_html_inlines_the_exact_scene() -> None:
