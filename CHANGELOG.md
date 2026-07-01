@@ -236,6 +236,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   face perpendicular to the ejecting direction (the two side faces plus top and bottom), each
   pointing the way the machine ejects, so at least one stays visible from any angle however tightly
   the machines are packed.
+- **Previewer renders routes GT-style (GitHub #31).** Cables and pipes were flat bars spanning
+  cell-center to cell-center plus a separate fixed lead to each machine face, which did not read like
+  an in-game pipe/cable. Every route (item, fluid, power) is now a small cube at each cell centre
+  with a uniform cross-section arm out to the block edge for each connection (an adjacent route cell,
+  or a docked machine face), power sized by cable thickness. One node per cell keeps a run readable
+  however tightly the routes are packed.
 - **Validator route + auto-connection soundness holes** - the only automated correctness gate
   was certifying some geometrically-impossible layouts. Routes are now checked for unit-step
   segments (a single segment can no longer "teleport" two cells across a machine - connectivity
