@@ -59,13 +59,14 @@ def test_load_plan_parses_sand() -> None:
 
 def test_adapt_sand_to_input_ir() -> None:
     ir = adapt_file(_SAND)
-    assert len(ir.machines) == 5  # 3 Forge Hammers + 1 Super Chest + 1 synthesized LV power source
-    assert len(ir.nets) == 4  # 3 item edges + 1 synthesized LV power net
+    # 3 Forge Hammers + 2 Super Chests (the input source + the synthesized output buffer) + LV source
+    assert len(ir.machines) == 6
+    assert len(ir.nets) == 5  # 3 item edges + 1 synthesized output-collection net + 1 LV power net
     types = {m.type for m in ir.machines}
     assert "Forge Hammer" in types
-    assert "Super Chest" in types  # the item storage source (covers ride on it, not the pipe)
+    assert "Super Chest" in types  # item storages: the input source and the output buffer (#16)
     assert "Power Source (LV)" in types  # the export carries no source; the adapter invents one
-    assert len([n for n in ir.nets if n.commodity is Commodity.ITEM]) == 3
+    assert len([n for n in ir.nets if n.commodity is Commodity.ITEM]) == 4  # incl. the sand output
     assert len([n for n in ir.nets if n.commodity is Commodity.POWER]) == 1
 
 
@@ -85,8 +86,8 @@ def test_throughput_is_positive_for_sand_material_nets() -> None:
 
 def test_adapt_nitrobenzene_has_fluids_and_places() -> None:
     ir = adapt_file(_NITROBENZENE)
-    # 7 nodes + 11 storages + 3 synthesized power sources (its nodes span LV/MV/HV)
-    assert len(ir.machines) == 21
+    # 7 nodes + 11 input storages + 2 synthesized output buffers + 3 power sources (LV/MV/HV)
+    assert len(ir.machines) == 23
     assert any(n.commodity is Commodity.FLUID for n in ir.nets)
     assert any(n.commodity is Commodity.ITEM for n in ir.nets)
     assert any(n.commodity is Commodity.POWER for n in ir.nets)

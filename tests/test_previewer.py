@@ -40,7 +40,7 @@ def test_scene_has_machines_region_and_legend() -> None:
     scene = _sand_scene()
     assert scene["status"] == "valid"
     assert scene["region"]["sy"] == 4  # the adapter's bounding region is 4 tall
-    assert len(scene["machines"]) == 5  # 3 hammers + chest + LV source
+    assert len(scene["machines"]) == 6  # 3 hammers + 2 chests (input + output buffer) + LV source
     assert any(m["role"] == "source" for m in scene["machines"])  # the synthesized power source
     assert any(m["role"] == "storage" for m in scene["machines"])  # the Super Chest
     assert scene["legend"]  # one entry per machine type
@@ -62,7 +62,7 @@ def test_scene_power_route_carries_thickness() -> None:
 def test_scene_items_auto_feed_so_no_item_pipes() -> None:
     scene = _sand_scene()
     assert [r["commodity"] for r in scene["routes"]] == ["power"]  # only the power cable is routed
-    assert len(scene["autoConnections"]) == 3  # the three item nets auto-feed
+    assert len(scene["autoConnections"]) == 4  # the 3 item chain links + the sand->output buffer
 
 
 def test_scene_item_pipe_segments_have_null_thickness() -> None:

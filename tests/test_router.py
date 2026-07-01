@@ -105,10 +105,13 @@ def test_route_sand_full_slice_validates() -> None:
     #
     # A roomy hand-placement is used on purpose: the constructive packing is built for AUTO-OUTPUT
     # (zero pipes), so forcing every item net through a *pipe* needs routing room. Under the
-    # single-channel capacity the packed row cannot host three non-overlapping pipes - it used to
+    # single-channel capacity the packed row cannot host four non-overlapping pipes - it used to
     # "validate" only because the old router silently overlapped them (now ROUTE_CELL_COLLISION).
-    ir = adapt_file(_SAND).model_copy(update={"bounding_region": CellBox(sx=14, sy=4, sz=14)})
-    coords = [(0, 0, 0), (4, 0, 0), (8, 0, 0), (8, 0, 4), (0, 0, 8)]
+    ir = adapt_file(_SAND).model_copy(update={"bounding_region": CellBox(sx=20, sy=4, sz=20)})
+    # 6 machines now: 3 hammers, the input chest, the synthesized output buffer (#16), the power
+    # source. Placed interior and well-spaced so every machine keeps free faces to dock its ports
+    # and the four item pipes + the power trunk have room to route without collision.
+    coords = [(2, 0, 2), (8, 0, 2), (14, 0, 2), (14, 0, 8), (2, 0, 8), (8, 0, 14)]
     placements = [
         Placement(machine_id=m.id, cell=CellCoord(x=x, y=y, z=z), orientation=Facing.NORTH)
         for m, (x, y, z) in zip(ir.machines, coords, strict=True)
