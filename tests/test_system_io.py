@@ -65,10 +65,10 @@ def test_sand_output_is_the_uncollected_sand_product() -> None:
     assert io.outputs[0].rate is None  # a dangling output has no throughput
 
 
-def test_sand_power_sums_by_tier() -> None:
+def test_sand_power_totals_eut_and_sums_amps_by_tier() -> None:
     io = _sand_io()
     assert io.power_total == pytest.approx(48.0)  # 3 Forge Hammers x 16 EU/t
-    assert io.power_by_tier == {"LV": pytest.approx(48.0)}
+    assert io.power_amps_by_tier == {"LV": 3}  # each draws ceil(16 / 32) = 1 A on the LV cable
 
 
 def test_falls_back_without_a_sourcing_net_and_on_unprefixed_ids() -> None:
@@ -108,7 +108,7 @@ def test_falls_back_without_a_sourcing_net_and_on_unprefixed_ids() -> None:
     # dangling output on a plain (non-``{dir}:``-prefixed) port id -> id used verbatim
     assert io.outputs == [BoundaryFlow("maker", "Maker", (2, 0, 0), "out", Commodity.ITEM, None)]
     assert io.power_total == pytest.approx(8.0)
-    assert io.power_by_tier == {"LV": pytest.approx(8.0)}
+    assert io.power_amps_by_tier == {"LV": 1}  # ceil(8 / 32) = 1 A
 
 
 def test_helper_predicates() -> None:

@@ -17,10 +17,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from gtnh_solver.dataset import amperage
 from gtnh_solver.ir import Commodity, InputIR, IODirection, LayoutResult, Net, Port
 
-#: Per-commodity throughput unit (typed, docs/IR.md). The canonical map both renderers share.
-RATE_UNIT = {Commodity.ITEM: "items/t", Commodity.FLUID: "mB/t", Commodity.POWER: "EU/t"}
+#: Per-commodity rate unit stem, no time suffix. The previewer appends ``/t`` or ``/s`` for its
+#: tick-vs-second toggle; the text guide uses ``RATE_UNIT`` below.
+RATE_STEM = {Commodity.ITEM: "items", Commodity.FLUID: "mB", Commodity.POWER: "EU"}
+#: Per-tick throughput unit (typed, docs/IR.md). The canonical map the text guide renders with.
+RATE_UNIT = {commodity: f"{stem}/t" for commodity, stem in RATE_STEM.items()}
 
 
 @dataclass(frozen=True)
@@ -39,12 +43,14 @@ class BoundaryFlow:
 
 @dataclass(frozen=True)
 class SystemIO:
-    """The whole boundary: inputs to load, outputs to collect, and the summed power draw."""
+    """The whole boundary: inputs to load, outputs to collect, the total EU/t draw, and the summed
+    **amperage** per voltage tier (what an external source must supply, docs/DOMAIN.md - the tier
+    already implies the voltage, so amps is the useful per-tier number)."""
 
     inputs: list[BoundaryFlow]
     outputs: list[BoundaryFlow]
     power_total: float
-    power_by_tier: dict[str, float]
+    power_amps_by_tier: dict[str, int]
 
 
 def is_boundary_storage(machine_type: str) -> bool:
@@ -104,15 +110,17 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
             )
 
     power_total = 0.0
-    power_by_tier: dict[str, float] = {}
+    power_amps_by_tier: dict[str, int] = {}
     for machine in problem.machines:
         if machine.eut <= 0 or machine.id not in coord_of:
             continue  # unpowered blocks / sources draw nothing; describe only placed machines
+        tier = machine.voltage_tier
         power_total += machine.eut
-        power_by_tier[machine.voltage_tier] = (
-            power_by_tier.get(machine.voltage_tier, 0.0) + machine.eut
-        )
+        power_amps_by_tier[tier] = power_amps_by_tier.get(tier, 0) + amperage(machine.eut, tier)
 
     return SystemIO(
-        inputs=inputs, outputs=outputs, power_total=power_total, power_by_tier=power_by_tier
+        inputs=inputs,
+        outputs=outputs,
+        power_total=power_total,
+        power_amps_by_tier=power_amps_by_tier,
     )

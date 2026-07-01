@@ -142,9 +142,9 @@ def test_scene_reports_system_io() -> None:
     assert len(io["inputs"]) == 1
     assert io["inputs"][0]["resource"] == "minecraft:stone"
     assert io["inputs"][0]["rate"] == pytest.approx(0.1)
-    assert io["inputs"][0]["unit"] == "items/t"
+    assert io["inputs"][0]["unit"] == "items"  # stem only; the viewer appends /t or /s
     assert io["outputs"] == [{"resource": "minecraft:sand"}]
-    assert io["power"] == {"total": pytest.approx(48.0), "byTier": {"LV": pytest.approx(48.0)}}
+    assert io["power"] == {"total": pytest.approx(48.0), "byTier": {"LV": 3}}  # amps, not EU/t
 
 
 def test_scene_is_deterministic() -> None:
@@ -170,10 +170,12 @@ def test_render_html_wires_the_requested_viewer_features() -> None:
     assert "ConeGeometry" in html  # chunky, visible auto-output arrows (#4)
 
 
-def test_render_html_shows_system_io_panel() -> None:
+def test_render_html_shows_system_io_panel_with_rate_toggle() -> None:
     html = render_html(_sand_scene())
     assert "system i/o" in html  # the boundary panel label (viewer template, not scene data)
-    assert "io.power.byTier" in html  # ...and it renders the power draw by tier
+    assert "io.power.byTier" in html  # ...renders the power draw (amps) by tier
+    assert 'id="rateUnit"' in html  # the per-tick / per-second toggle button...
+    assert "TICKS_PER_SECOND" in html  # ...and the x20 conversion behind it
 
 
 def test_render_html_inlines_the_exact_scene() -> None:
