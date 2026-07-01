@@ -4,15 +4,17 @@
 up front (minimal, not exhaustive) and grown with explicit version bumps. Implemented as
 typed schemas in `src/gtnh_solver/ir/` (Pydantic v2).
 
-> Status: **v0 draft.** Fields below are the intended starting shape. Refine during the
-> integration spike; bump `version` on any breaking change.
+> Status: **implemented** (Pydantic v2, `src/gtnh_solver/ir/`). The shapes below match the
+> code: `InputIR` is at **v2**, `LayoutResult` at **v0** (the contract changelog lives at the
+> bottom of `ir/__init__.py`). Bump the relevant `*_VERSION` on any breaking change.
 
 ## Input IR - the problem
 
 What the solver consumes (produced by the adapter from gtnh-factory-flow's exported plan JSON,
-recipes embedded, plus the physical-rules dataset). Source format: gtnh-factory-flow's
-Zod-validated plan JSON (graph nodes/edges, fuel profiles, targets, and the exact recipes
-placed); the adapter maps that → InputIR and pins the plan-schema + recipe-dataset versions.
+recipes embedded, plus the physical-rules dataset). Source format: gtnh-factory-flow's plan
+JSON (graph nodes/edges, fuel profiles, targets, and the exact recipes placed), which the
+*upstream exporter* validates with Zod; the adapter re-parses that → InputIR with Pydantic.
+(Pinning an explicit plan-schema + recipe-dataset version is Phase 2, lane A.)
 
 ```
 InputIR

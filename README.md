@@ -2,10 +2,14 @@
 
 **Physical place-and-route solver for GregTech: New Horizons process lines.**
 
-> **Status: pre-alpha.** The design is complete and reviewed; the IR contracts (`ir/`) and
-> the validator are implemented. The rest of the pipeline - adapter, dataset, placement,
-> router, solver, previewer, build guide - is scaffolded stubs. This repo is the
-> contributable foundation. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+> **Status: Phase 1 complete - crude but end-to-end.** A real gtnh-factory-flow export now
+> goes all the way to a validated, buildable layout: the IR contracts (`ir/`), adapter,
+> dataset (demo-scale), placement, router, solver, validator, previewer, and build guide are
+> all implemented - each is an `Added` entry in [`CHANGELOG.md`](CHANGELOG.md). They are
+> deliberately crude (single-channel routing, size-or-reject power, a small pinned dataset), so
+> **Phase 2 is quality**: SA/LNS placement polish, the multi-channel realizability invariant,
+> power optimization, the full physical dataset, and previewer polish. See
+> [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 Yes, this project is heavily vibe coded. If you see any areas in the code or documentation that can be
 de-slopified, feel free to contribute and make issues or PR's!
@@ -41,8 +45,9 @@ gtnh-solve plan.json --preview view.html  # ...or a double-clickable 3D preview 
 ```
 
 Exit code: 0 when the layout is fully valid, 1 when the solver can only return an explicit
-infeasibility (the reason prints to stderr), 2 when the export can't be loaded. The three.js
-previewer is a later milestone (see the roadmap).
+infeasibility (the reason prints to stderr), 2 when the export can't be loaded. The `--preview`
+three.js viewer is built; a congestion heatmap, multi-seed compare, and offline (vendored)
+three.js are Phase 2 (see the roadmap).
 
 ## Documentation
 
