@@ -262,9 +262,14 @@ document.getElementById('hud').firstChild.textContent =
 // amperage (byTier) is a steady value, so it never scales with the time unit.
 let perSecond = false;
 const TICKS_PER_SECOND = 20;
-function fmtRate(perTick) {
+// Render a rate at 6 significant figures. The plan value is exact, so prefix '~' ONLY when that
+// 6-sig-fig form actually loses precision (a non-terminating decimal like 25/12); exact rates
+// (0.1, 6.25, ...) print clean. The relative tolerance ignores binary-float noise (e.g. 0.1 * 20).
+function rateText(perTick) {
   const v = perSecond ? perTick * TICKS_PER_SECOND : perTick;
-  return Math.round(v * 1e4) / 1e4;  // trim binary-float noise (e.g. 0.1 * 20)
+  const shown = parseFloat(v.toPrecision(6));
+  const rounded = Math.abs(shown - v) > Math.abs(v) * 1e-9;
+  return (rounded ? '~' : '') + shown;
 }
 function renderLegend() {
   let html = '<b>machines</b><br>';
@@ -276,12 +281,12 @@ function renderLegend() {
     const io = SCENE.io, sfx = perSecond ? '/s' : '/t';
     html += '<b>system i/o</b><br>';
     for (const i of io.inputs)
-      html += 'in: ' + i.resource + (i.rate != null ? ' (~' + fmtRate(i.rate) + ' ' + i.unit + sfx + ')' : '') + '<br>';
+      html += 'in: ' + i.resource + (i.rate != null ? ' (' + rateText(i.rate) + ' ' + i.unit + sfx + ')' : '') + '<br>';
     for (const o of io.outputs)
-      html += 'out: ' + o.resource + (o.rate != null ? ' (~' + fmtRate(o.rate) + ' ' + o.unit + sfx + ')' : '') + '<br>';
+      html += 'out: ' + o.resource + (o.rate != null ? ' (' + rateText(o.rate) + ' ' + o.unit + sfx + ')' : '') + '<br>';
     const tiers = Object.keys(io.power.byTier);
     const byTier = tiers.map((t) => t + ' ' + io.power.byTier[t] + 'A').join(', ');
-    html += 'power: ' + fmtRate(io.power.total) + ' EU' + sfx + (tiers.length ? ' (' + byTier + ')' : '') + '<br>';
+    html += 'power: ' + rateText(io.power.total) + ' EU' + sfx + (tiers.length ? ' (' + byTier + ')' : '') + '<br>';
   }
   document.getElementById('legend').innerHTML = html;
 }
