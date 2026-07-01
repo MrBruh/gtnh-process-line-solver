@@ -42,6 +42,8 @@ Port
   cover: str | null                 # conveyor/pump/regulator that drives this port, if any
                                     # (auto-output is a solver decision -> output's AutoConnection,
                                     #  not a Port input; is_auto_output was dropped in v2)
+  rate: float | null                # throughput moved (items/t or mB/t); null for power/unknown.
+                                    #  Adapter fills it; surfaces boundary I/O rates (added v2, additive)
 
 Net
   id: str

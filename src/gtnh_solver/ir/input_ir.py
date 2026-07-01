@@ -41,6 +41,9 @@ class Port(StrictModel):
     #: Cover required to drive this port (conveyor for items, pump/regulator for fluids),
     #: ``None`` if the bare face suffices. Recorded for the build guide / export.
     cover: str | None = None
+    #: Throughput through this port - items/t or mB/t (``None`` for power, or when unknown). The
+    #: adapter fills it from the recipe; it surfaces boundary I/O rates (``system_io``, previewer).
+    rate: float | None = Field(default=None, ge=0.0)
 
 
 class FaceSpec(StrictModel):

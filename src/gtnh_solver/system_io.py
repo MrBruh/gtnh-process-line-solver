@@ -105,7 +105,7 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
                 continue  # consumed by a net or auto-output
             outputs.append(
                 BoundaryFlow(
-                    machine.id, machine.type, cell_t, port_resource(port), port.commodity, None
+                    machine.id, machine.type, cell_t, port_resource(port), port.commodity, port.rate
                 )
             )
 

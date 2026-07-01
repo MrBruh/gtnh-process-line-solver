@@ -110,7 +110,10 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
             {"resource": f.resource, "rate": f.rate, "unit": RATE_STEM[f.commodity]}
             for f in sysio.inputs
         ],
-        "outputs": [{"resource": f.resource} for f in sysio.outputs],
+        "outputs": [
+            {"resource": f.resource, "rate": f.rate, "unit": RATE_STEM[f.commodity]}
+            for f in sysio.outputs
+        ],
         "power": {"total": sysio.power_total, "byTier": sysio.power_amps_by_tier},
     }
 

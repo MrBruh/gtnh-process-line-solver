@@ -164,6 +164,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   line's edge; `build_scene` emits it as `scene.io` and the build guide was refactored onto the
   same helper (its text output is unchanged).
 
+- **Boundary output rates in the previewer (GitHub #16).** A finished product exits a machine
+  output port that no net consumes, so its rate lived nowhere - the previewer showed the product
+  with no throughput. The adapter now records each port's rate from the recipe on a new additive
+  `Port.rate` (items/t or mB/t, InputIR v2, no version bump), and `system_io` reads it, so the HUD
+  shows e.g. `out: minecraft:sand (0.1 items/t)`. Input rates are unchanged (still the net's typed
+  throughput).
+
 ### Changed
 - **InputIR bumped to v2 (breaking): dropped `Port.is_auto_output`.** It was a dead, contradictory
   field - the adapter never set it and the solver auto-connects any adjacent output regardless of
