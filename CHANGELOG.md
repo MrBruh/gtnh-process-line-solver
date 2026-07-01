@@ -196,6 +196,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `UnpowerableError`, and a `distance=` argument on `amperage`. This makes the emitted line
   actually buildable: a too-long low-voltage cable is no longer certified as valid. See
   `docs/DOMAIN.md`, `docs/ARCHITECTURE.md` #8.
+- **Previewer power HUD shows the feed spec with correct values.** The system-i/o panel showed
+  power as `48 EU/t (LV 3A)`, where the 48 is the machines' sub-tier draw (16 x 3) and the tier
+  breakdown omitted the voltage - easy to mis-supply in game. It now shows the input the way a GT
+  source is fed: a total EU/t supplied plus the per-tier **full tier voltage x amps**
+  (`power: 96 EU/t (LV 32V x 3A)`, where 96 = 32 V x 3 A, so the total matches the breakdown). The
+  scene's `io.power.byTier` entries gain a per-tier `volts` and `total` is the summed feed (scene
+  version 1). (`previewer/`.)
 - **InputIR bumped to v2 (breaking): dropped `Port.is_auto_output`.** It was a dead, contradictory
   field - the adapter never set it and the solver auto-connects any adjacent output regardless of
   it. Whether a port is satisfied by auto-output is a **solver decision**, not a problem input: it

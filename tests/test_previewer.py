@@ -146,7 +146,13 @@ def test_scene_reports_system_io() -> None:
     assert io["outputs"] == [
         {"resource": "minecraft:sand", "rate": pytest.approx(0.1), "unit": "items"}
     ]
-    assert io["power"] == {"total": pytest.approx(48.0), "byTier": {"LV": 3}}  # amps, not EU/t
+    # the power feed per tier: the FULL LV tier voltage (32, not the hammers' 16 EU/t draw) x the
+    # amps to supply - what a GT source is fed. ``total`` is that feed (32 V x 3 A = 96 EU/t), so it
+    # matches the breakdown, not the machines' lower actual draw.
+    assert io["power"] == {
+        "total": pytest.approx(96),
+        "byTier": {"LV": {"volts": 32, "amps": 3}},
+    }
 
 
 def test_scene_is_deterministic() -> None:
@@ -193,7 +199,9 @@ def test_render_html_auto_output_arrows_on_perpendicular_faces() -> None:
 def test_render_html_shows_system_io_panel_with_rate_toggle() -> None:
     html = render_html(_sand_scene())
     assert "system i/o" in html  # the boundary panel label (viewer template, not scene data)
-    assert "io.power.byTier" in html  # ...renders the power draw (amps) by tier
+    assert "io.power.byTier" in html  # ...renders the power feed by tier
+    assert "io.power.total" in html  # ...as a total EU/t supplied...
+    assert "'V x '" in html  # ...plus the full tier voltage x amps feed spec the builder reads off
     assert 'id="rateUnit"' in html  # the per-tick / per-second toggle button...
     assert "TICKS_PER_SECOND" in html  # ...and the x20 conversion behind it
 

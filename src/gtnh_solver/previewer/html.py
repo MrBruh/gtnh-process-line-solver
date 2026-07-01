@@ -340,9 +340,12 @@ function renderLegend() {
       html += 'in: ' + i.resource + (i.rate != null ? ' (' + rateText(i.rate) + ' ' + i.unit + sfx + ')' : '') + '<br>';
     for (const o of io.outputs)
       html += 'out: ' + o.resource + (o.rate != null ? ' (' + rateText(o.rate) + ' ' + o.unit + sfx + ')' : '') + '<br>';
+    // Power: total EU/t supplied plus the per-tier feed spec, the full tier voltage x amps to
+    // supply (how a GT source is fed). The total is that feed (tier voltage x amps), so it matches
+    // the breakdown, e.g. 'power: 96 EU/t (LV 32V x 3A)' where 96 = 32 x 3.
     const tiers = Object.keys(io.power.byTier);
-    const byTier = tiers.map((t) => t + ' ' + io.power.byTier[t] + 'A').join(', ');
-    html += 'power: ' + rateText(io.power.total) + ' EU' + sfx + (tiers.length ? ' (' + byTier + ')' : '') + '<br>';
+    const feed = tiers.map((t) => t + ' ' + io.power.byTier[t].volts + 'V x ' + io.power.byTier[t].amps + 'A').join(', ');
+    html += 'power: ' + rateText(io.power.total) + ' EU' + sfx + (tiers.length ? ' (' + feed + ')' : '') + '<br>';
   }
   document.getElementById('legend').innerHTML = html;
 }
