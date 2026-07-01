@@ -23,8 +23,13 @@ from gtnh_solver.ir import (
     LayoutResult,
     LayoutStatus,
     Machine,
+    MachineFaceRef,
+    Net,
     Placement,
     Port,
+    Route,
+    Segment,
+    Terminal,
 )
 from gtnh_solver.solver import solve
 from gtnh_solver.system_io import (
@@ -109,7 +114,87 @@ def test_falls_back_without_a_sourcing_net_and_on_unprefixed_ids() -> None:
     # dangling output on a plain (non-``{dir}:``-prefixed) port id -> id used verbatim
     assert io.outputs == [BoundaryFlow("maker", "Maker", (2, 0, 0), "out", Commodity.ITEM, None)]
     assert io.power_total == pytest.approx(8.0)
-    assert io.power_amps_by_tier == {"LV": 1}  # ceil(8 / 32) = 1 A
+    assert io.power_amps_by_tier == {"LV": 1}  # ceil(8 / 32) = 1 A (no power route -> distance 0)
+
+
+def test_power_amps_account_for_cable_loss_over_distance() -> None:
+    # 16 EU/t at LV is 1 amp at the source, but along a 20-block cable the delivered voltage is
+    # 12 V, so the source must actually supply ceil(16 / 12) = 2 amps. The summary reflects what the
+    # builder feeds, loss included - not the lossless ideal.
+    src = Machine(
+        id="src",
+        type="Power Source (LV)",
+        voltage_tier="LV",
+        eut=0.0,
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[Port(id="po", commodity=Commodity.POWER, direction=IODirection.OUTPUT)]
+        ),
+    )
+    m0 = Machine(
+        id="m0",
+        type="M",
+        voltage_tier="LV",
+        eut=16.0,
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[Port(id="pi", commodity=Commodity.POWER, direction=IODirection.INPUT)]
+        ),
+    )
+    n = 20
+    problem = InputIR(
+        bounding_region=CellBox(sx=n + 4, sy=4, sz=4),
+        machines=[src, m0],
+        nets=[
+            Net(
+                id="pw",
+                commodity=Commodity.POWER,
+                throughput=16.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="src", port_id="po"),
+                    MachineFaceRef(machine_id="m0", port_id="pi"),
+                ],
+            )
+        ],
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id="src", cell=CellCoord(x=0, y=0, z=0), orientation=Facing.NORTH),
+            Placement(machine_id="m0", cell=CellCoord(x=n, y=0, z=0), orientation=Facing.NORTH),
+        ],
+        routes=[
+            Route(
+                net_id="pw",
+                commodity=Commodity.POWER,
+                terminals=[
+                    Terminal(
+                        machine_id="src",
+                        port_id="po",
+                        face=Facing.SOUTH,
+                        cell=CellCoord(x=0, y=0, z=1),
+                    ),
+                    Terminal(
+                        machine_id="m0",
+                        port_id="pi",
+                        face=Facing.SOUTH,
+                        cell=CellCoord(x=n, y=0, z=1),
+                    ),
+                ],
+                segments=[
+                    Segment(
+                        start=CellCoord(x=i, y=0, z=1), end=CellCoord(x=i + 1, y=0, z=1), channel=0
+                    )
+                    for i in range(n)
+                ],
+                thickness_per_segment=[2] * n,
+            )
+        ],
+    )
+    io = system_io(problem, layout)
+    assert io.power_total == pytest.approx(16.0)
+    assert io.power_amps_by_tier == {"LV": 2}  # loss over 20 blocks doubles the amps vs lossless
 
 
 def test_helper_predicates() -> None:

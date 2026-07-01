@@ -46,6 +46,14 @@ where load **sums** along shared segments (Steiner-tree-like):
 
 - **Voltage tier** of a cable segment follows the **machine voltage tier** it serves (cable
   rated ≥ that voltage).
+- **Voltage loss over distance.** A cable loses voltage per block travelled, so a machine `d`
+  blocks from the source receives `tier_voltage - loss·d`, not the full tier voltage. The solver
+  keeps the source at the machine's tier and *thickens the cable to compensate*: a machine's
+  amperage is sized at its **delivered** voltage (`ceil(eut / (tier_voltage - loss·d))`), so a
+  machine farther from the source draws **more** amps for the same `eut`. A run so long that the
+  delivered voltage reaches 0 cannot be powered at that tier and is reported infeasible. Loss is a
+  flat **1 EU/block for every tier** for now (a simplifying assumption; per-material cable loss is
+  Phase 2 dataset work).
 - **Thickness** (1x / 2x / 4x / 8x / 16x, **16x max**) is sized to the **summed amperage**
   through that segment.
 - A segment needing **> 16x** must split into **parallel runs** or move to a **higher voltage

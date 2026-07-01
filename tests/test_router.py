@@ -107,11 +107,13 @@ def test_route_sand_full_slice_validates() -> None:
     # (zero pipes), so forcing every item net through a *pipe* needs routing room. Under the
     # single-channel capacity the packed row cannot host four non-overlapping pipes - it used to
     # "validate" only because the old router silently overlapped them (now ROUTE_CELL_COLLISION).
-    ir = adapt_file(_SAND).model_copy(update={"bounding_region": CellBox(sx=20, sy=4, sz=20)})
-    # 6 machines now: 3 hammers, the input chest, the synthesized output buffer (#16), the power
-    # source. Placed interior and well-spaced so every machine keeps free faces to dock its ports
-    # and the four item pipes + the power trunk have room to route without collision.
-    coords = [(2, 0, 2), (8, 0, 2), (14, 0, 2), (14, 0, 8), (2, 0, 8), (8, 0, 14)]
+    ir = adapt_file(_SAND).model_copy(update={"bounding_region": CellBox(sx=14, sy=4, sz=20)})
+    # 6 machines (order: 3 hammers, input chest, output buffer #16, power source). Roomy enough for
+    # the four item pipes, but the LV power trunk (source->h0->h1->h2) must stay compact: cable loss
+    # is 1 V/block and LV is 32 V, so a trunk spanning more than ~31 blocks would leave a far hammer
+    # under 0 V (unpowerable). The hammers sit in a short column with the source beside the first, so
+    # the whole cable run is a dozen-odd blocks - well within reach - while the pipes keep their room.
+    coords = [(6, 0, 6), (6, 0, 10), (6, 0, 14), (2, 0, 14), (2, 0, 6), (10, 0, 6)]
     placements = [
         Placement(machine_id=m.id, cell=CellCoord(x=x, y=y, z=z), orientation=Facing.NORTH)
         for m, (x, y, z) in zip(ir.machines, coords, strict=True)

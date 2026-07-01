@@ -72,8 +72,10 @@ def _at(mid: str, x: int, y: int, z: int) -> Placement:
 
 
 def test_power_trunk_sizes_thickness_by_summed_amperage() -> None:
-    # source + two 1-amp machines (LV, eut=32). Leg source->m0 carries both (2 amps -> 2x);
-    # leg m0->m1 carries one (1 amp -> 1x). The trunk tapers from the source.
+    # source + two full-tier machines (LV, eut=32). At the source each is 1 amp, but cable loss
+    # (1 EU/block) means m0 is 2 blocks out -> 30 V -> ceil(32/30)=2 amps, and m1 is 4 blocks out
+    # -> 28 V -> 2 amps. Leg source->m0 carries both (4 amps -> 4x); leg m0->m1 carries m1 alone
+    # (2 amps -> 2x). The trunk still tapers from the source, now thickened for loss.
     problem = InputIR(
         bounding_region=CellBox(sx=10, sy=4, sz=10),
         machines=[_src(), _load("m0", 32), _load("m1", 32)],
@@ -86,8 +88,8 @@ def test_power_trunk_sizes_thickness_by_summed_amperage() -> None:
     assert route.commodity is _POWER
     assert route.thickness_per_segment is not None
     assert len(route.thickness_per_segment) == len(route.segments)
-    assert set(route.thickness_per_segment) == {1, 2}  # the 2-amp leg and the 1-amp leg
-    assert max(route.thickness_per_segment) == 2
+    assert set(route.thickness_per_segment) == {2, 4}  # the 4-amp leg and the 2-amp leg (loss)
+    assert max(route.thickness_per_segment) == 4
     layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route])
     assert validate(problem, layout).ok, str(validate(problem, layout))
 
@@ -139,7 +141,7 @@ def test_power_cable_routes_around_extra_obstacles() -> None:
 
 
 def test_power_single_machine_thickness_matches_its_amperage() -> None:
-    # one machine drawing 3 amps at LV (eut just over 2 amps: 65 > 64) -> a 4x cable.
+    # one machine at LV, eut=65, docked 2 blocks out (30 V after loss) -> ceil(65/30)=3 amps -> 4x.
     problem = InputIR(
         bounding_region=CellBox(sx=8, sy=4, sz=8),
         machines=[_src(), _load("m0", 65)],
@@ -147,7 +149,40 @@ def test_power_single_machine_thickness_matches_its_amperage() -> None:
     )
     result = route_power(problem, [_at("src", 0, 0, 0), _at("m0", 2, 0, 0)])
     assert result.ok
-    assert set(result.routes[0].thickness_per_segment or []) == {4}  # ceil(65/32)=3 -> 4x
+    assert set(result.routes[0].thickness_per_segment or []) == {4}  # ceil(65/30)=3 -> 4x
+
+
+def test_power_loss_thickens_a_far_cable_past_its_lossless_size() -> None:
+    # 16 EU/t at LV is 1 amp at the source (16/32) and would stay 1 amp lossless, but 20 blocks
+    # out the delivered voltage is 12 V -> ceil(16/12)=2 amps -> a 2x cable. Loss, not the raw
+    # draw, is what thickened it - the far machine would starve on a 1x run.
+    problem = InputIR(
+        bounding_region=CellBox(sx=30, sy=4, sz=10),
+        machines=[_src(), _load("m0", 16)],
+        nets=[_pnet("m0")],
+    )
+    placements = [_at("src", 0, 0, 0), _at("m0", 20, 0, 0)]
+    result = route_power(problem, placements)
+    assert result.ok, result.infeasibility
+    route = result.routes[0]
+    assert set(route.thickness_per_segment or []) == {2}  # 1 amp lossless, 2 with 20 blocks of loss
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route])
+    assert validate(problem, layout).ok, str(validate(problem, layout))
+
+
+def test_power_rejects_a_run_too_long_to_keep_voltage() -> None:
+    # LV is 32 V and the cable loses 1 V/block, so a machine >= 32 blocks out receives <= 0 V -
+    # unpowerable at this tier no matter how thick the cable. Rejected, not silently certified.
+    problem = InputIR(
+        bounding_region=CellBox(sx=40, sy=4, sz=10),
+        machines=[_src(), _load("m0", 32)],
+        nets=[_pnet("m0")],
+    )
+    result = route_power(problem, [_at("src", 0, 0, 0), _at("m0", 35, 0, 0)])
+    assert not result.ok
+    assert result.infeasibility is not None
+    assert result.infeasibility.constraint == "voltage_drop"
+    assert result.failed_nets == ("power:LV",)  # the stalled net, for the solver's feedback loop
 
 
 def test_power_rejects_over_16x_amperage() -> None:
