@@ -143,7 +143,9 @@ def test_scene_reports_system_io() -> None:
     assert io["inputs"][0]["resource"] == "minecraft:stone"
     assert io["inputs"][0]["rate"] == pytest.approx(0.1)
     assert io["inputs"][0]["unit"] == "items"  # stem only; the viewer appends /t or /s
-    assert io["outputs"] == [{"resource": "minecraft:sand"}]
+    assert io["outputs"] == [
+        {"resource": "minecraft:sand", "rate": pytest.approx(0.1), "unit": "items"}
+    ]
     assert io["power"] == {"total": pytest.approx(48.0), "byTier": {"LV": 3}}  # amps, not EU/t
 
 

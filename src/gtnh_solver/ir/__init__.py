@@ -116,4 +116,10 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   problem input - it lives in the output's `AutoConnection`, and the "one auto-output per
 #   machine, items-xor-fluids, never power" rule is enforced there by the validator
 #   (DUPLICATE_AUTO_OUTPUT / AUTO_OUTPUT_ILLEGAL_COMMODITY), not on the input contract.
+#
+# InputIR v2 (additive, no version bump) - added `Port.rate: float | None` (items/t or mB/t moved
+#   through the port; None for power or when unknown). The adapter computes it from the recipe;
+#   `system_io` + the previewer use it to surface boundary input/output rates - notably a dangling
+#   OUTPUT port, whose product rate lives nowhere else (no consuming net). Existing consumers
+#   default to None. (GitHub #16.)
 # ---------------------------------------------------------------------------
