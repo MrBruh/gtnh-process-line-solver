@@ -26,6 +26,8 @@ class ViolationCode(str, Enum):
     MISSING_CONNECTION = "missing_connection"  # net has neither a route nor an auto-connection
     NET_DOUBLE_CONNECTED = "net_double_connected"  # both a route and an auto-connection
     UNEXPECTED_ME_ROUTE = "unexpected_me_route"
+    ROUTE_NET_NO_CONSUMER = "route_net_no_consumer"  # routed net has no INPUT endpoint (consumer)
+    ROUTE_NET_MIXED_COMMODITY = "route_net_mixed_commodity"  # endpoints mix commodities on one net
     # geometry
     MACHINE_OUT_OF_BOUNDS = "machine_out_of_bounds"
     MACHINE_OVERLAP = "machine_overlap"

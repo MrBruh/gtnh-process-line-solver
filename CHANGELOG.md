@@ -199,6 +199,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
 
 ### Fixed
+- **Validator requires a consumer on routed nets (GitHub #8).** The gate enforced the
+  OUTPUT->INPUT port direction on the auto-connection path but not on the routed-pipe path, so a
+  routed net with no consumer (every endpoint an OUTPUT producer) passed - the golden "valid"
+  fixture even normalized one. A routed net now needs at least one INPUT endpoint
+  (`route_net_no_consumer`), while still allowing multiple same-commodity producers feeding one
+  pipe (GT lets several machines eject into one line). The routed path also independently checks
+  every endpoint carries the net's own commodity (`route_net_mixed_commodity`), so a mixed-
+  commodity net is caught even if a producer bypasses the input IR's own check. The base test
+  fixture now wires a real consumer.
 - **Validator route + auto-connection soundness holes** - the only automated correctness gate
   was certifying some geometrically-impossible layouts. Routes are now checked for unit-step
   segments (a single segment can no longer "teleport" two cells across a machine - connectivity
