@@ -37,12 +37,18 @@ that into a physical, buildable layout.
 
 ## Quickstart
 
+Needs **Python 3.10+** (`pyproject.toml` sets `requires-python = ">=3.10"`; an older default
+`python` makes `pip install` fail opaquely). Work inside a virtual env:
+
 ```bash
+python -m venv .venv && . .venv/bin/activate   # Windows: py -3.12 -m venv .venv; .venv\Scripts\activate
 pip install -e ".[dev]"
 gtnh-solve examples/gtnh-sand.json        # solve a gtnh-factory-flow export, print the build guide
 gtnh-solve plan.json -o guide.txt         # ...or write the guide to a file
 gtnh-solve plan.json --preview view.html  # ...or a double-clickable 3D preview (three.js)
 ```
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md#setup) for the full dev setup (hooks, tests, lint).
 
 Exit code: 0 when the layout is fully valid, 1 when the solver can only return an explicit
 infeasibility (the reason prints to stderr), 2 when the export can't be loaded. The `--preview`
@@ -62,10 +68,10 @@ three.js are Phase 2 (see the roadmap).
 
 ## Contributing
 
-New here? Read [`CONTRIBUTING.md`](CONTRIBUTING.md) - it maps the parallel workstreams
-("lanes") so you can pick an independent piece and start. The architecture is designed so
-the adapter, placement, router, validator, dataset, and previewer can be built in parallel
-once the IR contract lands.
+New here? Read [`CONTRIBUTING.md`](CONTRIBUTING.md) - its **Build lanes** table maps the
+Phase 2 workstreams with a status for each, so you can pick an actionable piece and start.
+Phase 1 already built a crude end-to-end version of the whole pipeline; the lanes are the
+quality upgrades on top of it (deeper phase context in [`docs/ROADMAP.md`](docs/ROADMAP.md)).
 
 ## License
 
