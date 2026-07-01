@@ -24,10 +24,10 @@ from gtnh_solver.ir import (
     LayoutResult,
     Machine,
     Net,
-    Port,
     Route,
 )
 from gtnh_solver.ir.geometry import Cell, occupied_cells
+from gtnh_solver.system_io import RATE_UNIT, BoundaryFlow, SystemIO, system_io
 
 # Single-char machine markers (upper, lower, digits = 62; covers the ~30-50 machine target).
 _MARKERS = string.ascii_uppercase + string.ascii_lowercase + string.digits
@@ -36,8 +36,6 @@ _PIPE_LABEL = {"item": "item pipe", "fluid": "fluid pipe", "power": "power cable
 # The GT cover a physical pipe terminal needs, by commodity (docs/DOMAIN.md). Power cables connect
 # bare (no cover); auto-output needs none either.
 _COVER = {"item": "conveyor cover", "fluid": "pump cover"}
-# Per-commodity throughput unit for the System I/O rates (typed, docs/IR.md).
-_RATE_UNIT = {Commodity.ITEM: "items/t", Commodity.FLUID: "mB/t", Commodity.POWER: "EU/t"}
 
 
 def build_guide(problem: InputIR, layout: LayoutResult) -> str:
@@ -50,7 +48,7 @@ def build_guide(problem: InputIR, layout: LayoutResult) -> str:
     lines += _header(problem, layout)
     lines += _bom(layout, machines)
     lines += _placement_table(layout, machines)
-    lines += _system_io(problem, port_dir, coord_of)
+    lines += _system_io_section(system_io(problem, layout))
     lines += _power_note(layout, machines)
     lines += _connections(layout, machines, nets, port_dir, coord_of)
     lines += _layer_maps(problem, layout, machines)
@@ -124,83 +122,39 @@ def _placement_table(layout: LayoutResult, machines: dict[str, Machine]) -> list
     return lines
 
 
-def _is_boundary_storage(machine: Machine) -> bool:
-    """A Super Chest / Super Tank boundary buffer (matches the previewer's storage role)."""
-    return machine.type.startswith("Super ")
-
-
-def _port_resource(port: Port) -> str:
-    """The resource a non-power port carries, recovered from its ``{direction}:{resource}`` id."""
-    prefix = f"{port.direction.value}:"
-    return port.id[len(prefix) :] if port.id.startswith(prefix) else port.id
-
-
-def _rate_note(net: Net | None) -> str:
-    """`` (~<rate> <unit>)`` for a net's typed throughput, or `` `` when the net is unknown."""
-    if net is None:
+def _rate_note(flow: BoundaryFlow) -> str:
+    """`` (~<rate> <unit>)`` for a boundary flow's typed throughput, or `` `` when it has none."""
+    if flow.rate is None:
         return ""
-    return f" (~{net.throughput:g} {_RATE_UNIT[net.commodity]})"
+    return f" (~{flow.rate:g} {RATE_UNIT[flow.commodity]})"
 
 
-def _system_io(
-    problem: InputIR,
-    port_dir: dict[tuple[str, str], IODirection],
-    coord_of: dict[str, CellCoord],
-) -> list[str]:
-    """The line's boundary: raw inputs to load, finished products to collect (GitHub #15).
+def _flow_at(flow: BoundaryFlow) -> str:
+    """``Type at (x, y, z)`` - the machine and where it sits, matching the placement table."""
+    x, y, z = flow.cell
+    return f"{flow.machine_type} at ({x}, {y}, {z})"
 
-    Inputs are boundary storages (Super Chest/Tank) that only *source* the line - nothing feeds
-    them, so you fill them by hand. Outputs are machine OUTPUT ports no net consumes - the product
-    exits there with nothing collecting it, so the builder must place a Super Chest/Tank. Both come
-    straight from the IR (storage roles; output ports minus the ones a net wires), so the guide is
-    buildable without reading the source plan.
+
+def _system_io_section(sysio: SystemIO) -> list[str]:
+    """The line's boundary as text: raw inputs to load, finished products to collect (GitHub #15).
+
+    Renders the shared ``system_io`` derivation (boundary storages that only source; machine output
+    ports no net consumes) so the guide and the previewer never disagree on what crosses the edge.
     """
-    # The net each output port sources, keyed by (machine, port) - gives its resource + rate, and
-    # its presence means the port is consumed (not a dangling system output).
-    net_by_source: dict[tuple[str, str], Net] = {}
-    for net in problem.nets:
-        for ep in net.endpoints:
-            if port_dir.get((ep.machine_id, ep.port_id)) is IODirection.OUTPUT:
-                net_by_source[(ep.machine_id, ep.port_id)] = net
-
-    inputs: list[str] = []
-    outputs: list[str] = []
-    for machine in problem.machines:
-        cell = coord_of.get(machine.id)
-        if cell is None:  # only describe machines the layout actually placed
-            continue
-        where = f"{machine.type} at ({cell.x}, {cell.y}, {cell.z})"
-        out_ports = [p for p in machine.faces.ports if p.direction is IODirection.OUTPUT]
-        dirs = {p.direction for p in machine.faces.ports}
-        only_sources = IODirection.INPUT not in dirs and IODirection.OUTPUT in dirs
-
-        if _is_boundary_storage(machine) and only_sources:
-            for port in out_ports:
-                src_net = net_by_source.get((machine.id, port.id))
-                resource = (
-                    src_net.fluid_or_item
-                    if src_net and src_net.fluid_or_item
-                    else _port_resource(port)
-                )
-                inputs.append(f"  load {where} with {resource}{_rate_note(src_net)}")
-            continue
-
-        for port in out_ports:
-            if port.commodity is Commodity.POWER:
-                continue  # a power output is a source, not a product to collect
-            if (machine.id, port.id) in net_by_source:
-                continue  # consumed by a net or auto-output
-            outputs.append(
-                f"  {_port_resource(port)} exits {where} - place a Super Chest/Tank to collect it"
-            )
-
-    if not inputs and not outputs:
+    if not sysio.inputs and not sysio.outputs:
         return []
     lines = ["## System inputs / outputs", ""]
-    if inputs:
-        lines += ["Inputs (load these yourself):", *inputs, ""]
-    if outputs:
-        lines += ["Outputs (place a buffer to collect each):", *outputs, ""]
+    if sysio.inputs:
+        lines.append("Inputs (load these yourself):")
+        lines += [f"  load {_flow_at(f)} with {f.resource}{_rate_note(f)}" for f in sysio.inputs]
+        lines.append("")
+    if sysio.outputs:
+        lines.append("Outputs (place a buffer to collect each):")
+        lines += [
+            f"  {f.resource} exits {_flow_at(f)} - place a Super Chest/Tank to collect it"
+            for f in sysio.outputs
+        ]
+        lines.append("")
     return lines
 
 
