@@ -171,6 +171,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   shows e.g. `out: minecraft:sand (0.1 items/t)`. Input rates are unchanged (still the net's typed
   throughput).
 
+- **The adapter closes the line: output buffers (GitHub #16).** A system output used to exit a
+  machine into thin air (only inputs got a boundary storage), so a line was never fully collectible
+  without hand-editing. The adapter now synthesizes a **Super Chest/Tank + net per unconsumed
+  output** (a machine OUTPUT port no net sources), placed and wired at the port's recorded rate, so
+  the product is gathered automatically - the sand line now auto-outputs its sand into a collection
+  chest (still zero pipes). `system_io` reports a boundary storage that only *sinks* as a system
+  output (mirroring the only-*sources* input), and the build guide reads `minecraft:sand collected
+  by Super Chest at (x, y, z) (~0.1 items/t)`. Sand grows from 5 machines to 6, nitrobenzene from
+  21 to 23.
+
 ### Changed
 - **InputIR bumped to v2 (breaking): dropped `Port.is_auto_output`.** It was a dead, contradictory
   field - the adapter never set it and the solver auto-connects any adjacent output regardless of

@@ -7,8 +7,8 @@ the two surfaces drift. This module is the single source, pure over the ``InputI
 
 - **inputs**: a boundary storage (Super Chest/Tank) that *only* sources the line - nothing feeds it,
   so the builder fills it. Each carries the resource + its typed rate.
-- **outputs**: a machine OUTPUT port no net consumes - the finished product exits there with
-  nothing collecting it, so the builder must place a Super Chest/Tank.
+- **outputs**: the product the line makes - normally a boundary storage that only *sinks* (a
+  synthesized collection buffer, #16), or, as a fallback, a machine OUTPUT port no net consumes.
 - **power**: the summed ``eut`` the placed machines draw, broken down by voltage tier
   (docs/DOMAIN.md - a shared-amperage net's draw is what the source must supply).
 """
@@ -69,13 +69,18 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
     port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
     coord_of = {pl.machine_id: pl.cell for pl in layout.placements}
 
-    # The net each output port sources (keyed by machine+port): its presence means the port is
-    # consumed (not a dangling system output), and it carries the resource + rate.
+    # The net each output port sources / each input port sinks (keyed by machine+port). A source's
+    # presence means the port is consumed (not a dangling output); a sink's carries the rate feeding
+    # a collection buffer.
     net_by_source: dict[tuple[str, str], Net] = {}
+    net_by_sink: dict[tuple[str, str], Net] = {}
     for net in problem.nets:
         for ep in net.endpoints:
-            if port_dir.get((ep.machine_id, ep.port_id)) is IODirection.OUTPUT:
+            direction = port_dir.get((ep.machine_id, ep.port_id))
+            if direction is IODirection.OUTPUT:
                 net_by_source[(ep.machine_id, ep.port_id)] = net
+            elif direction is IODirection.INPUT:
+                net_by_sink[(ep.machine_id, ep.port_id)] = net
 
     inputs: list[BoundaryFlow] = []
     outputs: list[BoundaryFlow] = []
@@ -98,11 +103,28 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
                 )
             continue
 
+        in_ports = [p for p in machine.faces.ports if p.direction is IODirection.INPUT]
+        only_sinks = IODirection.OUTPUT not in dirs and IODirection.INPUT in dirs
+        if is_boundary_storage(machine.type) and only_sinks:
+            # a collection buffer (#16): the product it gathers is a system output, its rate the net
+            for port in in_ports:
+                if port.commodity is Commodity.POWER:
+                    continue
+                sink = net_by_sink.get((machine.id, port.id))
+                resource = (
+                    sink.fluid_or_item if sink and sink.fluid_or_item else port_resource(port)
+                )
+                rate = sink.throughput if sink else port.rate
+                outputs.append(
+                    BoundaryFlow(machine.id, machine.type, cell_t, resource, port.commodity, rate)
+                )
+            continue
+
         for port in out_ports:
             if port.commodity is Commodity.POWER:
                 continue  # a power output is a source, not a product to collect
             if (machine.id, port.id) in net_by_source:
-                continue  # consumed by a net or auto-output
+                continue  # consumed by a net or auto-output (e.g. wired to a collection buffer)
             outputs.append(
                 BoundaryFlow(
                     machine.id, machine.type, cell_t, port_resource(port), port.commodity, port.rate

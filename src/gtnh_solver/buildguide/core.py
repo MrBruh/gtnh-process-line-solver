@@ -27,7 +27,13 @@ from gtnh_solver.ir import (
     Route,
 )
 from gtnh_solver.ir.geometry import Cell, occupied_cells
-from gtnh_solver.system_io import RATE_UNIT, BoundaryFlow, SystemIO, system_io
+from gtnh_solver.system_io import (
+    RATE_UNIT,
+    BoundaryFlow,
+    SystemIO,
+    is_boundary_storage,
+    system_io,
+)
 
 # Single-char machine markers (upper, lower, digits = 62; covers the ~30-50 machine target).
 _MARKERS = string.ascii_uppercase + string.ascii_lowercase + string.digits
@@ -149,11 +155,14 @@ def _system_io_section(sysio: SystemIO) -> list[str]:
         lines += [f"  load {_flow_at(f)} with {f.resource}{_rate_note(f)}" for f in sysio.inputs]
         lines.append("")
     if sysio.outputs:
-        lines.append("Outputs (place a buffer to collect each):")
-        lines += [
-            f"  {f.resource} exits {_flow_at(f)} - place a Super Chest/Tank to collect it"
-            for f in sysio.outputs
-        ]
+        lines.append("Outputs:")
+        for f in sysio.outputs:
+            if is_boundary_storage(f.machine_type):  # a synthesized collection buffer (#16)
+                lines.append(f"  {f.resource} collected by {_flow_at(f)}{_rate_note(f)}")
+            else:  # a dangling output with no buffer - the builder places one
+                lines.append(
+                    f"  {f.resource} exits {_flow_at(f)} - place a Super Chest/Tank to collect it"
+                )
         lines.append("")
     return lines
 

@@ -54,7 +54,7 @@ def test_build_guide_sand_has_all_sections() -> None:
 def test_build_guide_bom_counts_machines_by_type() -> None:
     guide = _sand_guide()
     assert "3  x  Forge Hammer" in guide
-    assert "1  x  Super Chest" in guide
+    assert "2  x  Super Chest" in guide  # the input source + the synthesized output buffer (#16)
 
 
 def test_build_guide_sand_auto_feeds_items_and_cables_power() -> None:
@@ -83,14 +83,13 @@ def test_build_guide_power_note_states_feed_spec_as_tier_amps_eut() -> None:
     assert "feed LV (32 V), >=4 A -> up to 128 EU/t" in guide
 
 
-def test_build_guide_system_io_loads_input_chest_and_names_output_product() -> None:
-    # GitHub #15 B1: the guide must say what to load the boundary input with (resource + rate) and
-    # where the finished product exits, so it is buildable without reading the source plan.
+def test_build_guide_system_io_loads_input_chest_and_collects_output_product() -> None:
+    # GitHub #15/#16: the guide says what to load the boundary input with (resource + rate) and
+    # which buffer collects the finished product, so it is buildable without reading the source plan.
     guide = _sand_guide()
     assert "## System inputs / outputs" in guide
     assert "load Super Chest at (0, 0, 0) with minecraft:stone (~0.1 items/t)" in guide
-    assert "minecraft:sand exits Forge Hammer at (3, 0, 0)" in guide
-    assert "place a Super Chest/Tank to collect it" in guide
+    assert "minecraft:sand collected by Super Chest at (4, 0, 0) (~0.1 items/t)" in guide
 
 
 def test_build_guide_system_io_falls_back_without_a_sourcing_net() -> None:

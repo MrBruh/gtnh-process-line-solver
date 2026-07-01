@@ -56,13 +56,14 @@ def test_sand_input_is_the_super_chest_with_its_typed_rate() -> None:
     assert stone.rate == pytest.approx(0.1)
 
 
-def test_sand_output_is_the_uncollected_sand_product() -> None:
+def test_sand_output_is_collected_by_a_synthesized_buffer() -> None:
     io = _sand_io()
-    # the last hammer produces sand with no consuming net -> a dangling system output
-    assert [(f.machine_type, f.resource, f.cell) for f in io.outputs] == [
-        ("Forge Hammer", "minecraft:sand", (3, 0, 0))
-    ]
-    assert io.outputs[0].rate == pytest.approx(0.1)  # rate now carried from the producing recipe
+    # the final sand is wired to a synthesized output Super Chest (#16), a boundary storage that
+    # only sinks -> a system output whose rate is the net feeding the buffer
+    assert len(io.outputs) == 1
+    out = io.outputs[0]
+    assert (out.machine_type, out.resource) == ("Super Chest", "minecraft:sand")
+    assert out.rate == pytest.approx(0.1)
 
 
 def test_sand_power_totals_eut_and_sums_amps_by_tier() -> None:
