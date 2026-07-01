@@ -3,9 +3,10 @@
 ``render_html`` injects ``build_scene``'s dict (as JSON) into a static template: one double-
 clickable ``.html`` that pulls three.js from a CDN and draws the layout. The camera orbits AND
 pans (right-drag / arrow keys), and a layer-by-layer slider isolates each y-level. Machines are
-solid boxes with their name on the front face (placeholder until real textures); cables/pipes are
-square bars sized by thickness, with a short lead connecting each route to the machine face it
-docks on; auto-output is a small arrow on each source-machine face perpendicular to the ejecting
+solid boxes with their name on the front face (placeholder until real textures); routes (cables and
+pipes) are drawn GT-style, a small cube at each cell centre with a uniform arm out to the block edge
+for every connection (an adjacent route cell or a docked machine face), power sized by cable
+thickness; auto-output is a small arrow on each source-machine face perpendicular to the ejecting
 direction (so one stays visible however the machines are packed). A side panel lists the
 machine/route legend plus the
 system's boundary inputs, outputs, and power (``scene.io``), with a per-tick / per-second rate
@@ -133,6 +134,15 @@ function bar(a, b, cross, color) {
   return mesh;
 }
 
+// A small cube at a cell centre - the node a route's connection arms fan out from.
+function node(pos, size, color) {
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(size, size, size),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.1 }));
+  mesh.position.copy(pos);
+  return mesh;
+}
+
 // A small flat arrow decal (a canvas texture on a plane) pointing along the plane's local +x.
 function faceArrow(color) {
   const S = 128, cnv = document.createElement('canvas');
@@ -227,19 +237,37 @@ for (const m of SCENE.machines) {
   track(plane, minY, maxY);
 }
 
+// A route is drawn GT-style: a small cube at each cell centre, with a UNIFORM cross-section arm from
+// that cube out to the block edge for every connection - an adjacent route cell, or a docked machine
+// face. One node per cell keeps the run readable however tightly the routes are packed.
 for (const r of SCENE.routes) {
+  const isPower = r.commodity === 'power';
+  const cells = new Map();   // "x,y,z" -> { cell, dirs: Set of "dx,dy,dz", thick }
+  const touch = (c, thick) => {
+    const k = c.join(',');
+    let e = cells.get(k);
+    if (!e) { e = { cell: c, dirs: new Set(), thick: 1 }; cells.set(k, e); }
+    e.thick = Math.max(e.thick, thick);
+    return e;
+  };
   for (const s of r.segments) {
-    const cross = r.commodity === 'power' ? 0.09 * Math.sqrt(s.thickness || 1) : 0.07;
-    track(bar(cc(s.from), cc(s.to), cross, r.color),
-          Math.min(s.from[1], s.to[1]), Math.max(s.from[1], s.to[1]));
+    const a = s.from, b = s.to, th = s.thickness || 1;
+    touch(a, th).dirs.add([b[0] - a[0], b[1] - a[1], b[2] - a[2]].join(','));
+    touch(b, th).dirs.add([a[0] - b[0], a[1] - b[1], a[2] - b[2]].join(','));
   }
-  // A short lead from each docked terminal to the machine face, so the cable visibly connects.
   for (const t of (r.terminals || [])) {
-    const n = FACE_NORMAL[t.face]; if (!n) continue;
-    const term = cc(t.cell);
-    const faceMid = term.clone().addScaledVector(new THREE.Vector3(n[0], n[1], n[2]), -0.5);
-    const cross = r.commodity === 'power' ? 0.11 : 0.08;
-    track(bar(term, faceMid, cross, r.color), t.cell[1], t.cell[1]);
+    const nrm = FACE_NORMAL[t.face]; if (!nrm) continue;
+    touch(t.cell, 1).dirs.add([-nrm[0], -nrm[1], -nrm[2]].join(','));   // an arm toward the machine
+  }
+  for (const e of cells.values()) {
+    const cross = isPower ? 0.09 * Math.sqrt(e.thick) : 0.07;
+    const c = cc(e.cell);
+    track(node(c, cross, r.color), e.cell[1], e.cell[1]);
+    for (const dk of e.dirs) {
+      const d = dk.split(',').map(Number);
+      const end = c.clone().add(new THREE.Vector3(d[0] * 0.5, d[1] * 0.5, d[2] * 0.5));
+      track(bar(c, end, cross, r.color), e.cell[1], e.cell[1]);
+    }
   }
 }
 

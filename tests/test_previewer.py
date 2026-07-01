@@ -172,6 +172,15 @@ def test_render_html_wires_the_requested_viewer_features() -> None:
     assert "faceArrow" in html  # per-face auto-output direction arrows (#4)
 
 
+def test_render_html_routes_render_as_node_and_arms() -> None:
+    # routes are drawn GT-style: a cube at each cell centre with a uniform arm out to the block edge
+    # per connection, not a center-to-center bar or a separate machine lead (GitHub #31)
+    html = render_html(_sand_scene())
+    assert "function node(" in html  # the per-cell centre cube...
+    assert "dirs.add" in html  # ...with one connection arm per direction
+    assert "an arm toward the machine" in html  # ...including the docked-terminal connections
+
+
 def test_render_html_auto_output_arrows_on_perpendicular_faces() -> None:
     # a small arrow on each face perpendicular to the ejecting direction, so the auto-output
     # direction stays visible from any angle even when machines are packed together (GitHub #20)
