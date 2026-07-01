@@ -148,6 +148,15 @@ def test_port_rejects_unknown_field() -> None:
         )
 
 
+def test_port_rate_is_optional_and_non_negative() -> None:
+    # additive in InputIR v2: the throughput a port moves, for boundary I/O reporting (#16)
+    c, d = Commodity.ITEM, IODirection.OUTPUT
+    assert Port(id="o", commodity=c, direction=d).rate is None  # defaults to unknown
+    assert Port(id="o", commodity=c, direction=d, rate=2.5).rate == 2.5
+    with pytest.raises(ValidationError):
+        Port(id="o", commodity=c, direction=d, rate=-1.0)  # a rate cannot be negative
+
+
 # --------------------------------------------------------------------------- machine
 
 

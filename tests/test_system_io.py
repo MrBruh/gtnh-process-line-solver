@@ -62,7 +62,7 @@ def test_sand_output_is_the_uncollected_sand_product() -> None:
     assert [(f.machine_type, f.resource, f.cell) for f in io.outputs] == [
         ("Forge Hammer", "minecraft:sand", (3, 0, 0))
     ]
-    assert io.outputs[0].rate is None  # a dangling output has no throughput
+    assert io.outputs[0].rate == pytest.approx(0.1)  # rate now carried from the producing recipe
 
 
 def test_sand_power_totals_eut_and_sums_amps_by_tier() -> None:

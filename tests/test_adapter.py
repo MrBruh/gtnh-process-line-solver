@@ -196,6 +196,19 @@ def test_synthesizes_one_power_source_and_net_per_tier() -> None:
     )  # the powered machine gained a power input port
 
 
+def test_recipe_output_ports_carry_throughput() -> None:
+    # a machine output port records the rate it produces, so a dangling boundary output (no net)
+    # still has a reportable throughput (#16). The sand line's Forge Hammers output 0.1 items/t.
+    ir = adapt_file(_SAND)
+    hammer = next(m for m in ir.machines if m.type == "Forge Hammer")
+    out = next(
+        p
+        for p in hammer.faces.ports
+        if p.direction is IODirection.OUTPUT and p.commodity is Commodity.ITEM
+    )
+    assert out.rate == pytest.approx(0.1)
+
+
 def test_parallel_scales_eut_so_power_amperage_is_sized_for_it() -> None:
     # A node running 4 recipes in parallel draws 4x the recipe's EU/t. The synthesized power net
     # must size amperage from the scaled draw, not the single-recipe eut (otherwise the cable is

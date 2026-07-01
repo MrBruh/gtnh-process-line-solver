@@ -93,7 +93,7 @@ def to_input_ir(plan: Plan) -> InputIR:
                 id=node.id,
                 type=recipe.machine_type,
                 footprint=_DEFAULT_FOOTPRINT,
-                faces=FaceSpec(ports=_recipe_ports(recipe)),
+                faces=FaceSpec(ports=_recipe_ports(recipe, node)),
                 voltage_tier=node.overclock_tier,
                 orientation_options=_DEFAULT_ORIENTATIONS,
                 # EU/t draw the power synthesis sizes amperage from. ``parallel`` runs the recipe
@@ -139,16 +139,23 @@ def _port_id(direction: IODirection, resource_id: str) -> str:
     return f"{direction.value}:{resource_id}"  # e.g. "output:minecraft:sand"
 
 
-def _recipe_ports(recipe: Recipe) -> list[Port]:
-    """One input/output port per distinct recipe resource (deduped by id)."""
+def _recipe_ports(recipe: Recipe, node: Node) -> list[Port]:
+    """One input/output port per distinct recipe resource (deduped by id), each carrying the
+    throughput it moves (items/t or mB/t) so boundary rates - notably a dangling output's product,
+    which no net records - are reportable downstream."""
     ports: dict[str, Port] = {}
-    for direction, pool in (
-        (IODirection.INPUT, recipe.inputs),
-        (IODirection.OUTPUT, recipe.outputs),
+    for direction, pool, outputs in (
+        (IODirection.INPUT, recipe.inputs, False),
+        (IODirection.OUTPUT, recipe.outputs, True),
     ):
         for res in pool:
             pid = _port_id(direction, res.id)
-            ports[pid] = Port(id=pid, commodity=_commodity(res.kind), direction=direction)
+            ports[pid] = Port(
+                id=pid,
+                commodity=_commodity(res.kind),
+                direction=direction,
+                rate=_rate(recipe, res.id, node, outputs=outputs),
+            )
     return list(ports.values())
 
 
