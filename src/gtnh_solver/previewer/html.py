@@ -5,7 +5,9 @@ clickable ``.html`` that pulls three.js from a CDN and draws the layout. The cam
 pans (right-drag / arrow keys), and a layer-by-layer slider isolates each y-level. Machines are
 solid boxes with their name on the front face (placeholder until real textures); cables/pipes are
 square bars sized by thickness, with a short lead connecting each route to the machine face it
-docks on; auto-output is a chunky arrow. A side panel lists the machine/route legend plus the
+docks on; auto-output is a small arrow on each source-machine face perpendicular to the ejecting
+direction (so one stays visible however the machines are packed). A side panel lists the
+machine/route legend plus the
 system's boundary inputs, outputs, and power (``scene.io``), with a per-tick / per-second rate
 toggle. The view frames the layout's *actual* extent (``scene.bounds``), not the solver's
 oversized search region.
@@ -131,25 +133,28 @@ function bar(a, b, cross, color) {
   return mesh;
 }
 
-function arrow(a, b, color) {
-  const g = new THREE.Group();
-  const d = new THREE.Vector3().subVectors(b, a);
-  const len = d.length() || 0.001;
-  const dir = d.clone().normalize();
-  const headLen = Math.min(0.32, len * 0.45);
-  const shaftLen = Math.max(len - headLen, 0.001);
-  const mat = new THREE.MeshStandardMaterial(
-    { color, emissive: color, emissiveIntensity: 0.35, roughness: 0.4 });
-  const up = new THREE.Vector3(0, 1, 0);
-  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, shaftLen, 12), mat);
-  shaft.position.copy(a).addScaledVector(dir, shaftLen * 0.5);
-  shaft.quaternion.setFromUnitVectors(up, dir);
-  g.add(shaft);
-  const head = new THREE.Mesh(new THREE.ConeGeometry(0.17, headLen, 14), mat);
-  head.position.copy(a).addScaledVector(dir, shaftLen + headLen * 0.5);
-  head.quaternion.setFromUnitVectors(up, dir);
-  g.add(head);
-  return g;
+// A small flat arrow decal (a canvas texture on a plane) pointing along the plane's local +x.
+function faceArrow(color) {
+  const S = 128, cnv = document.createElement('canvas');
+  cnv.width = S; cnv.height = S;
+  const ctx = cnv.getContext('2d');
+  ctx.fillStyle = color;
+  ctx.beginPath();                 // an arrowhead + shaft pointing +x (right)
+  ctx.moveTo(0.14 * S, 0.40 * S);
+  ctx.lineTo(0.55 * S, 0.40 * S);
+  ctx.lineTo(0.55 * S, 0.24 * S);
+  ctx.lineTo(0.90 * S, 0.50 * S);
+  ctx.lineTo(0.55 * S, 0.76 * S);
+  ctx.lineTo(0.55 * S, 0.60 * S);
+  ctx.lineTo(0.14 * S, 0.60 * S);
+  ctx.closePath();
+  ctx.fill();
+  // alphaTest (not transparent) so it renders in the opaque pass with depth testing - that lets the
+  // machine-name plane, sitting a hair further out, draw ON TOP of it where they share the front face.
+  return new THREE.Mesh(
+    new THREE.PlaneGeometry(0.25, 0.25),
+    new THREE.MeshBasicMaterial(
+      { map: new THREE.CanvasTexture(cnv), alphaTest: 0.5, side: THREE.DoubleSide }));
 }
 
 function textColor(hex) {
@@ -196,11 +201,12 @@ function frontFace(text, bg, size, normal) {
   return { plane, axis };
 }
 
-const centerById = {};
+const centerById = {}, sizeById = {};
 for (const m of SCENE.machines) {
   const [sx, sy, sz] = m.size;
   const pos = new THREE.Vector3(m.cell[0] + sx / 2, m.cell[1] + sy / 2, m.cell[2] + sz / 2);
   centerById[m.id] = pos;
+  sizeById[m.id] = m.size;
   const minY = m.cell[1], maxY = m.cell[1] + sy - 1;
 
   const geo = new THREE.BoxGeometry(sx * 0.92, sy * 0.92, sz * 0.92);
@@ -237,10 +243,28 @@ for (const r of SCENE.routes) {
   }
 }
 
+// Auto-output: a small arrow on each source-machine face whose plane CONTAINS the ejecting
+// direction - the two side faces perpendicular to it plus the top and bottom. (The output face and
+// its opposite can't show an in-plane arrow.) At least one is visible from any angle, however
+// tightly the machines are packed together, so the flow direction is never fully occluded.
 for (const ac of SCENE.autoConnections) {
-  const a = centerById[ac.source], b = centerById[ac.target];
-  if (!a || !b) continue;
-  track(arrow(a, b, '#00e5ff'), Math.min(a.y, b.y) | 0, Math.max(a.y, b.y) | 0);
+  const src = centerById[ac.source], n = FACE_NORMAL[ac.sourceFace];
+  if (!src || !n) continue;
+  const size = sizeById[ac.source] || [1, 1, 1], cellY = Math.round(src.y - size[1] / 2);
+  const nv = new THREE.Vector3(n[0], n[1], n[2]);
+  for (const m of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]) {
+    if (m[0]*n[0] + m[1]*n[1] + m[2]*n[2] !== 0) continue;   // skip the output face and its opposite
+    const mv = new THREE.Vector3(m[0], m[1], m[2]);
+    const alongM = Math.abs(m[0])*size[0] + Math.abs(m[1])*size[1] + Math.abs(m[2])*size[2];
+    const alongN = Math.abs(n[0])*size[0] + Math.abs(n[1])*size[1] + Math.abs(n[2])*size[2];
+    const deco = faceArrow('#00e5ff');
+    deco.position.copy(src)
+      .addScaledVector(mv, 0.46 * alongM + 0.008)   // just off the box face; < the name's +0.012 offset
+      .addScaledVector(nv, 0.46 * alongN - 0.10);   // slide toward the output edge so the tip touches it
+    deco.quaternion.setFromRotationMatrix(
+      new THREE.Matrix4().makeBasis(nv, new THREE.Vector3().crossVectors(mv, nv), mv));
+    track(deco, cellY, cellY + size[1] - 1);
+  }
 }
 
 const layer = document.getElementById('layer');

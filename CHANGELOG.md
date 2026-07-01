@@ -230,6 +230,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `GridHelper` centering artifact: integer line offsets need an even division count, half-integer
   offsets an odd one, so parity decided it per axis). The grid now uses an even span snapped to an
   integer center, so every line sits on a cell edge and the blocks read as sitting in their cells.
+- **Previewer draws auto-output direction on the machine faces (GitHub #20).** The cyan auto-output
+  arrow ran center-to-center between the two adjacent machines, so it was buried inside their opaque
+  boxes and you could not tell which machine fed which. It is now a small flat arrow on each source
+  face perpendicular to the ejecting direction (the two side faces plus top and bottom), each
+  pointing the way the machine ejects, so at least one stays visible from any angle however tightly
+  the machines are packed.
 - **Validator route + auto-connection soundness holes** - the only automated correctness gate
   was certifying some geometrically-impossible layouts. Routes are now checked for unit-step
   segments (a single segment can no longer "teleport" two cells across a machine - connectivity

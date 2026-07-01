@@ -169,7 +169,16 @@ def test_render_html_wires_the_requested_viewer_features() -> None:
     assert "listenToKeyEvents" in html  # ...incl. arrow-key panning
     assert "BoxGeometry" in html  # cables/pipes are rectangular bars, not cylinders (#2)
     assert "PlaneGeometry" in html  # machine names live on the front face (#3)
-    assert "ConeGeometry" in html  # chunky, visible auto-output arrows (#4)
+    assert "faceArrow" in html  # per-face auto-output direction arrows (#4)
+
+
+def test_render_html_auto_output_arrows_on_perpendicular_faces() -> None:
+    # a small arrow on each face perpendicular to the ejecting direction, so the auto-output
+    # direction stays visible from any angle even when machines are packed together (GitHub #20)
+    html = render_html(_sand_scene())
+    assert "FACE_NORMAL[ac.sourceFace]" in html  # direction comes from the ejecting face...
+    assert "faceArrow" in html  # ...drawn as a flat decal on each perpendicular face
+    assert "sizeById[ac.source]" in html  # positioned against the source machine's faces
 
 
 def test_render_html_shows_system_io_panel_with_rate_toggle() -> None:
