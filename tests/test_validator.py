@@ -640,6 +640,49 @@ def test_power_net_without_a_source_terminal_is_flagged() -> None:
     assert ViolationCode.POWER_NET_NO_SINGLE_SOURCE in validate(problem, layout).codes()
 
 
+def _lone_source(cell: CellCoord, orientation: Facing) -> tuple[InputIR, LayoutResult]:
+    """Just a placed power source (no nets): isolates the feed-on-boundary check."""
+    problem = InputIR(
+        bounding_region=CellBox(sx=4, sy=4, sz=4),
+        machines=[
+            Machine(
+                id="src",
+                type="Power Source (LV)",
+                voltage_tier="LV",
+                orientation_options=[Facing.NORTH, Facing.SOUTH, Facing.EAST, Facing.WEST],
+                faces=FaceSpec(
+                    ports=[Port(id="po", commodity=Commodity.POWER, direction=IODirection.OUTPUT)]
+                ),
+            )
+        ],
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[Placement(machine_id="src", cell=cell, orientation=orientation)],
+    )
+    return problem, layout
+
+
+def test_power_source_feed_face_on_the_boundary_passes() -> None:
+    # Front north at z=0: the feed face is flush on the region wall - the external feed can enter.
+    assert validate(*_lone_source(_coord(1, 0, 0), Facing.NORTH)).ok
+
+
+def test_power_source_buried_mid_region_is_flagged() -> None:
+    # The source's front face is its reserved external-feed face; facing an in-region cell there
+    # is nowhere for the external feed to come in from, so the layout is not buildable as claimed.
+    problem, layout = _lone_source(_coord(1, 0, 1), Facing.NORTH)
+    assert ViolationCode.POWER_FEED_NOT_ON_BOUNDARY in validate(problem, layout).codes()
+
+
+def test_power_source_at_a_wall_facing_the_interior_is_flagged() -> None:
+    # Touching the boundary is not enough: the FRONT face is the reserved feed entry, so a source
+    # on the west wall facing east (into the room) still has no external feed face.
+    problem, layout = _lone_source(_coord(0, 0, 1), Facing.EAST)
+    assert ViolationCode.POWER_FEED_NOT_ON_BOUNDARY in validate(problem, layout).codes()
+
+
 def test_power_thickness_defect_caught_even_when_model_validation_bypassed() -> None:
     # A buggy producer using model_construct() can skip the IR's own thickness check; the
     # validator is independent and must still catch the malformed power route.

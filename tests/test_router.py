@@ -111,9 +111,10 @@ def test_route_sand_full_slice_validates() -> None:
     # 6 machines (order: 3 hammers, input chest, output buffer #16, power source). Roomy enough for
     # the four item pipes, but the LV power trunk (source->h0->h1->h2) must stay compact: cable loss
     # is 1 V/block and LV is 32 V, so a trunk spanning more than ~31 blocks would leave a far hammer
-    # under 0 V (unpowerable). The hammers sit in a short column with the source beside the first, so
-    # the whole cable run is a dozen-odd blocks - well within reach - while the pipes keep their room.
-    coords = [(6, 0, 6), (6, 0, 10), (6, 0, 14), (2, 0, 14), (2, 0, 6), (10, 0, 6)]
+    # under 0 V (unpowerable). The hammers sit in a short column near the source, so the whole cable
+    # run is a couple dozen blocks - within reach - while the pipes keep their room. The source sits
+    # on the z=0 row so its north-facing front (the reserved external-feed face) is on the boundary.
+    coords = [(6, 0, 6), (6, 0, 10), (6, 0, 14), (2, 0, 14), (2, 0, 6), (10, 0, 0)]
     placements = [
         Placement(machine_id=m.id, cell=CellCoord(x=x, y=y, z=z), orientation=Facing.NORTH)
         for m, (x, y, z) in zip(ir.machines, coords, strict=True)

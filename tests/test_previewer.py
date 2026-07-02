@@ -32,8 +32,10 @@ _SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
 
 
 def _sand_scene() -> dict:
+    # The fast (constructive) solve: deterministic layout coordinates that the exact-cell
+    # assertions below can rely on; scene building does not care which placer produced them.
     ir = adapt_file(_SAND)
-    return build_scene(ir, solve(ir))
+    return build_scene(ir, solve(ir, optimize=False))
 
 
 def test_scene_has_machines_region_and_legend() -> None:

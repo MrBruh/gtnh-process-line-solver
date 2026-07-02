@@ -167,13 +167,6 @@ def _system_io_section(sysio: SystemIO) -> list[str]:
     return lines
 
 
-def _is_power_source(machine: Machine) -> bool:
-    return any(
-        p.commodity is Commodity.POWER and p.direction is IODirection.OUTPUT
-        for p in machine.faces.ports
-    )
-
-
 def _power_note(layout: LayoutResult, machines: dict[str, Machine]) -> list[str]:
     """Tell the builder where to feed external power - synthetic sources are not self-powered.
 
@@ -184,7 +177,7 @@ def _power_note(layout: LayoutResult, machines: dict[str, Machine]) -> list[str]
     sources = [
         (p, machines[p.machine_id])
         for p in layout.placements
-        if p.machine_id in machines and _is_power_source(machines[p.machine_id])
+        if p.machine_id in machines and machines[p.machine_id].is_power_source
     ]
     if not sources:
         return []

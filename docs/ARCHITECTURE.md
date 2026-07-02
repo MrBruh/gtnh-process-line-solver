@@ -113,7 +113,10 @@ doc as intent and reconcile.
    summed amperage; past 16x split into parallel runs or a higher voltage. **Cable loss over
    distance** is modelled: a machine `d` blocks out receives `tier_voltage - loss·d`, so amperage
    is sized at that delivered voltage (thicker cable the farther out), and a run whose voltage
-   drops to 0 is infeasible; loss is a flat 1 EU/block for now. See [`DOMAIN.md`](DOMAIN.md).
+   drops to 0 is infeasible; loss is a flat 1 EU/block for now. The synthesized per-tier source
+   is fed **from outside the structure**: its front face is the reserved feed entry, pinned flush
+   on the region boundary by placement and enforced independently by the validator (the front-face
+   rule already keeps internal cables off it). See [`DOMAIN.md`](DOMAIN.md).
 9. **Spec corrections.** Required-I/O-face reachability is a HARD constraint; the output-layout
    schema is a versioned contract.
 

@@ -30,7 +30,9 @@ What is checked now (needs only the IR):
   voltage (tier voltage minus 1 per cable block of distance from the source - GT cable loss), every
   segment carries the summed amperage of the machines downstream of it and its cable must be at
   least that thick (which also rejects a load over the 16x cap), and a run whose loss drops the
-  delivered voltage to <= 0 is rejected as unpowerable at its tier.
+  delivered voltage to <= 0 is rejected as unpowerable at its tier. A power source's front face
+  is its reserved external-feed face and must lie flush on the region boundary (power enters
+  from outside the structure; the front-face rule already keeps internal cables off it).
 
 What is deferred to the dataset lane (rule data not available yet) - TODO:
   throughput/tier caps, one-fluid-per-line, and the dataset-specific half of face rules (which
@@ -74,9 +76,40 @@ def validate(problem: InputIR, layout: LayoutResult) -> ValidationReport:
     _check_terminals(problem, layout, out)
     _check_auto_connections(problem, layout, out)
     _check_power_amperage(problem, layout, out)
+    _check_power_feed(problem, layout, out)
     _check_route_capacity(problem, layout, out)
     _check_pinned(problem, layout, out)
     return ValidationReport(tuple(out))
+
+
+def _check_power_feed(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
+    """A power source's front face is its reserved external-feed face: it must lie flush on the
+    region boundary, so the builder can run power in from outside the structure (docs/DOMAIN.md).
+
+    Re-derived from geometry alone, independent of the placer's rule: step every body cell one
+    cell in the orientation direction; any stepped cell that is neither part of the body nor
+    outside the region proves the front plane faces the interior. The front face carries no
+    internal cable regardless (TERMINAL_ON_FRONT_FACE), so this check is what makes the feed
+    reservation real - a source buried mid-region has no face left for the external feed.
+    """
+    machines = {m.id: m for m in problem.machines}
+    region = problem.bounding_region
+    for pl in layout.placements:
+        m = machines.get(pl.machine_id)
+        if m is None or not m.is_power_source:
+            continue
+        dx, dy, dz = FACE_DELTAS[pl.orientation]
+        body = set(occupied_cells(pl.cell, m.footprint))
+        front_plane = ((x + dx, y + dy, z + dz) for x, y, z in body)
+        if any(c not in body and in_region(c, region) for c in front_plane):
+            out.append(
+                Violation(
+                    ViolationCode.POWER_FEED_NOT_ON_BOUNDARY,
+                    f"power source {pl.machine_id!r} front (feed) face "
+                    f"{pl.orientation.value} faces the region interior, not the boundary "
+                    f"(the external power feed must enter from outside)",
+                )
+            )
 
 
 def _check_placements(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:

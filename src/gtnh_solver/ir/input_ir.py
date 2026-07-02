@@ -85,6 +85,21 @@ class Machine(StrictModel):
     #: shared-amperage cable (dataset.amperage). 0 for an unpowered block or a power source.
     eut: float = Field(default=0.0, ge=0.0)
 
+    @property
+    def is_power_source(self) -> bool:
+        """Whether this machine *supplies* power (it has a power OUTPUT port).
+
+        Today only the adapter's synthesized per-tier source matches (a plan export has no power
+        nodes). Such a machine is fed externally by the builder: its front face is the reserved
+        feed face and placement pins that face on the region boundary (validator-enforced), so
+        power enters from outside the structure. When real in-plan generators arrive with the
+        dataset lane, this structural predicate needs a dataset-driven refinement.
+        """
+        return any(
+            p.commodity is Commodity.POWER and p.direction is IODirection.OUTPUT
+            for p in self.faces.ports
+        )
+
     @model_validator(mode="after")
     def _check(self) -> Machine:
         if len(self.orientation_options) != len(set(self.orientation_options)):

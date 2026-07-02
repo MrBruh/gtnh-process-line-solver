@@ -8,6 +8,11 @@ never overlapping. Orientation is the machine's first listed legal option. One p
 machine (multi-instance groups are Phase 2 - see ``Machine`` / docs/ROADMAP.md). No search, no
 compaction; that is Phase 2 (SA/LNS) too, docs/ROADMAP.md.
 
+A **power source** additionally must sit with its front face flush on the region boundary: the
+front is its reserved external-feed face (the builder runs power in from outside the structure -
+docs/DOMAIN.md), so first-fit for a source scans for the first slot + orientation that puts the
+front on a region wall. The validator enforces the same rule independently.
+
 It returns a :class:`PlacementResult`: either every instance placed, or a partial set plus an
 explicit :class:`~gtnh_solver.ir.Infeasibility` naming the machine that did not fit. It never
 raises for the expected won't-fit case, matching the validator's report-don't-throw
@@ -17,19 +22,21 @@ reserved-cell / bad-orientation violations.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 from gtnh_solver.ir import (
     CellBox,
     CellCoord,
     Commodity,
+    Facing,
     Infeasibility,
     InputIR,
     IODirection,
     Machine,
     Placement,
 )
-from gtnh_solver.ir.geometry import Cell, in_region, occupied_cells
+from gtnh_solver.ir.geometry import Cell, front_on_boundary, in_region, occupied_cells
 
 
 @dataclass(frozen=True)
@@ -52,31 +59,62 @@ def place(problem: InputIR) -> PlacementResult:
     placements: list[Placement] = []
 
     for machine in _flow_order(problem):
-        orientation = machine.orientation_options[0]
-        origin = _first_fit(machine, region, occupied)
-        if origin is None:
-            detail = (
-                f"machine {machine.id!r} does not fit in the free space of the "
-                f"{region.sx}x{region.sy}x{region.sz} region"
-            )
+        fit = _fit(machine, region, occupied)
+        if fit is None:
             return PlacementResult(
-                placements=tuple(placements),
-                infeasibility=Infeasibility(
-                    constraint="bounding_region",
-                    detail=detail,
-                    suggested_relaxation=(
-                        "enlarge bounding_region, or remove machines / reserved cells"
-                    ),
-                ),
+                placements=tuple(placements), infeasibility=_wont_fit(machine, region)
             )
+        origin, orientation = fit
         occupied.update(occupied_cells(origin, machine.footprint))
         placements.append(Placement(machine_id=machine.id, cell=origin, orientation=orientation))
 
     return PlacementResult(placements=tuple(placements))
 
 
+def _wont_fit(machine: Machine, region: CellBox) -> Infeasibility:
+    if machine.is_power_source:
+        return Infeasibility(
+            constraint="power_feed",
+            detail=(
+                f"power source {machine.id!r} has no free slot with its front (feed) face "
+                f"on the boundary of the {region.sx}x{region.sy}x{region.sz} region"
+            ),
+            suggested_relaxation="enlarge bounding_region, or free cells along its boundary",
+        )
+    return Infeasibility(
+        constraint="bounding_region",
+        detail=(
+            f"machine {machine.id!r} does not fit in the free space of the "
+            f"{region.sx}x{region.sy}x{region.sz} region"
+        ),
+        suggested_relaxation="enlarge bounding_region, or remove machines / reserved cells",
+    )
+
+
+def _fit(machine: Machine, region: CellBox, occupied: set[Cell]) -> tuple[CellCoord, Facing] | None:
+    """The first valid (origin, orientation) for ``machine``, or ``None`` if none exists.
+
+    A normal machine takes the first free origin with its first legal orientation. A power
+    source must also put its front face - the reserved external-feed face - flush on the region
+    boundary, so it takes the first free origin at which *some* legal orientation does that.
+    """
+    if not machine.is_power_source:
+        origin = _first_fit(machine, region, occupied)
+        return None if origin is None else (origin, machine.orientation_options[0])
+    for origin in _free_origins(machine, region, occupied):
+        for orientation in machine.orientation_options:
+            if front_on_boundary(origin, machine.footprint, orientation, region):
+                return origin, orientation
+    return None
+
+
 def _first_fit(machine: Machine, region: CellBox, occupied: set[Cell]) -> CellCoord | None:
-    """The first in-bounds, non-overlapping origin for ``machine``, or ``None`` if none fits.
+    """The first in-bounds, non-overlapping origin for ``machine``, or ``None`` if none fits."""
+    return next(_free_origins(machine, region, occupied), None)
+
+
+def _free_origins(machine: Machine, region: CellBox, occupied: set[Cell]) -> Iterator[CellCoord]:
+    """Every in-bounds, non-overlapping origin for ``machine``, in first-fit scan order.
 
     Scans floor layer first (``y`` outer), then rows (``z``), then columns (``x``), so layouts
     fill the ground before stacking - the buildable-compact bias, crudely.
@@ -87,8 +125,7 @@ def _first_fit(machine: Machine, region: CellBox, occupied: set[Cell]) -> CellCo
                 origin = CellCoord(x=x, y=y, z=z)
                 cells = list(occupied_cells(origin, machine.footprint))
                 if all(in_region(c, region) for c in cells) and occupied.isdisjoint(cells):
-                    return origin
-    return None
+                    yield origin
 
 
 def _flow_order(problem: InputIR) -> list[Machine]:

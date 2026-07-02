@@ -95,6 +95,30 @@ OPPOSITE_FACE: dict[Facing, Facing] = {
 }
 
 
+def front_on_boundary(
+    origin: CellCoord, footprint: CellBox, front: Facing, region: CellBox
+) -> bool:
+    """Whether a placed box's front-face plane lies flush on the bounding-region boundary.
+
+    True iff stepping the front-face plane one cell in ``front``'s direction leaves the region -
+    the face is up against a region wall (or its floor/ceiling), with no in-region cell in front
+    of it. Placement uses this to pin a power source's reserved feed face on the boundary (the
+    external power feed enters from outside the structure - docs/DOMAIN.md); the validator
+    re-derives the same predicate independently from the occupied cells.
+    """
+    if front is Facing.NORTH:
+        return origin.z == 0
+    if front is Facing.SOUTH:
+        return origin.z + footprint.sz == region.sz
+    if front is Facing.WEST:
+        return origin.x == 0
+    if front is Facing.EAST:
+        return origin.x + footprint.sx == region.sx
+    if front is Facing.DOWN:
+        return origin.y == 0
+    return origin.y + footprint.sy == region.sy  # UP
+
+
 def auto_output_faces(
     source_origin: CellCoord,
     source_footprint: CellBox,

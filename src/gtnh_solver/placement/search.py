@@ -26,8 +26,11 @@ best valid layout seen.
 
 Every accepted state is overlap/bounds/reserved-clean (moves build only valid candidates, and
 recreate falls back to a machine's freed origin), so the validator still independently certifies
-the output. Deterministic for a given ``seed``. A true place<->route feedback loop lives in
-``solver.core`` (docs/ROADMAP.md lane C + solver).
+the output. A **power source** keeps its front face - the reserved external-feed face - flush on
+the region boundary through every move (relocate/swap re-orient it back onto a wall when they
+can, reorient only offers wall-facing options), the same hard constraint the constructive seed
+satisfies and the validator enforces. Deterministic for a given ``seed``. A true place<->route
+feedback loop lives in ``solver.core`` (docs/ROADMAP.md lane C + solver).
 """
 
 from __future__ import annotations
@@ -49,11 +52,12 @@ from gtnh_solver.ir.geometry import (
     FACE_DELTAS,
     Cell,
     auto_output_faces,
+    front_on_boundary,
     in_region,
     occupied_cells,
 )
 
-from .constructive import PlacementResult, _first_fit, place
+from .constructive import PlacementResult, _fit, place
 
 #: The six face-adjacent offsets, for growing LNS insertion candidates around placed neighbours.
 _FACE_DELTAS = tuple(FACE_DELTAS.values())
@@ -268,6 +272,28 @@ def _center(p: Placement, m: Machine) -> tuple[float, float, float]:
     )
 
 
+def _feed_ok(machine: Machine, origin: CellCoord, orientation: Facing, region: CellBox) -> bool:
+    """Whether placing ``machine`` here honors the power-source feed rule (trivially true for
+    non-sources): a source's front face is its reserved external-feed face and must lie flush on
+    the region boundary (docs/DOMAIN.md; validator-enforced)."""
+    return not machine.is_power_source or front_on_boundary(
+        origin, machine.footprint, orientation, region
+    )
+
+
+def _feed_orientation(
+    machine: Machine, origin: CellCoord, current: Facing, region: CellBox
+) -> Facing | None:
+    """The orientation ``machine`` should take at ``origin``: ``current`` when it is legal there,
+    else the first option that puts a source's feed face back on the boundary, else ``None``
+    (the move cannot place this machine here)."""
+    if _feed_ok(machine, origin, current, region):
+        return current
+    return next(
+        (o for o in machine.orientation_options if _feed_ok(machine, origin, o, region)), None
+    )
+
+
 def _move(
     placements: list[Placement],
     machines: dict[str, Machine],
@@ -281,7 +307,7 @@ def _move(
         return _relocate(placements, machines, region, reserved, rng)
     if roll < 0.67:
         return _swap(placements, machines, region, reserved, rng)
-    return _reorient(placements, machines, rng)
+    return _reorient(placements, machines, region, rng)
 
 
 def _relocate(
@@ -305,8 +331,11 @@ def _relocate(
             and reserved.isdisjoint(cells)
             and others.isdisjoint(cells)
         ):
+            orientation = _feed_orientation(m, origin, p.orientation, region)
+            if orientation is None:
+                continue  # a source relocated off the boundary: no legal feed face, keep trying
             new = list(placements)
-            new[i] = p.model_copy(update={"cell": origin})
+            new[i] = p.model_copy(update={"cell": origin, "orientation": orientation})
             return new
     return None
 
@@ -332,27 +361,39 @@ def _swap(
         or not others.isdisjoint(moved)
     ):
         return None
+    oi = _feed_orientation(mi, pj.cell, pi.orientation, region)
+    oj = _feed_orientation(mj, pi.cell, pj.orientation, region)
+    if oi is None or oj is None:
+        return None  # the swap would strand a source's feed face off the boundary
     new = list(placements)
-    new[i] = pi.model_copy(update={"cell": pj.cell})
-    new[j] = pj.model_copy(update={"cell": pi.cell})
+    new[i] = pi.model_copy(update={"cell": pj.cell, "orientation": oi})
+    new[j] = pj.model_copy(update={"cell": pi.cell, "orientation": oj})
     return new
 
 
 def _reorient(
-    placements: list[Placement], machines: dict[str, Machine], rng: random.Random
+    placements: list[Placement],
+    machines: dict[str, Machine],
+    region: CellBox,
+    rng: random.Random,
 ) -> list[Placement] | None:
-    options = [
-        k for k, p in enumerate(placements) if len(machines[p.machine_id].orientation_options) > 1
-    ]
-    if not options:
+    candidates: list[tuple[int, list[Facing]]] = []
+    for k, p in enumerate(placements):
+        m = machines[p.machine_id]
+        # A source only reorients among feed-legal facings (its front must stay on the boundary).
+        alts = [
+            o
+            for o in m.orientation_options
+            if o != p.orientation and _feed_ok(m, p.cell, o, region)
+        ]
+        if alts:
+            candidates.append((k, alts))
+    if not candidates:
         return None
-    k = rng.choice(options)
+    k, alts = candidates[rng.randrange(len(candidates))]
     p = placements[k]
-    new_o = rng.choice(
-        [o for o in machines[p.machine_id].orientation_options if o != p.orientation]
-    )
     new = list(placements)
-    new[k] = p.model_copy(update={"orientation": new_o})
+    new[k] = p.model_copy(update={"orientation": rng.choice(alts)})
     return new
 
 
@@ -485,6 +526,8 @@ def _best_insertion(
         ):
             continue
         for orientation in m.orientation_options:
+            if not _feed_ok(m, origin, orientation, region):
+                continue  # a source's feed face must stay on the boundary
             cost = _marginal_insertion_cost(
                 p.machine_id,
                 origin,
@@ -499,8 +542,9 @@ def _best_insertion(
                 best_cost, best = cost, (origin, orientation)
     if best is not None:
         return best
-    fallback = _first_fit(m, region, occupied | reserved)  # last resort: any free slot (in-order)
-    return (fallback, m.orientation_options[0]) if fallback is not None else None
+    # Last resort: any free slot in first-fit order (a source additionally requires a slot +
+    # orientation with its feed face on the boundary - the same rule the constructive seed used).
+    return _fit(m, region, occupied | reserved)
 
 
 def _marginal_insertion_cost(

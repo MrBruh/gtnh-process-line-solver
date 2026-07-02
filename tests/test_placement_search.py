@@ -23,6 +23,7 @@ from gtnh_solver.ir import (
     Placement,
     Port,
 )
+from gtnh_solver.ir.geometry import front_on_boundary
 from gtnh_solver.placement import optimize_placement, place
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
@@ -34,6 +35,7 @@ _PLACEMENT_CODES = {
     ViolationCode.BAD_ORIENTATION,
     ViolationCode.PLACEMENT_COUNT_MISMATCH,
     ViolationCode.UNKNOWN_MACHINE,
+    ViolationCode.POWER_FEED_NOT_ON_BOUNDARY,
 }
 
 
@@ -201,6 +203,80 @@ def test_lns_fills_a_tight_region_using_the_first_fit_fallback() -> None:
     assert result.ok
     assert len(result.placements) == 4
     assert _validates(problem, result.placements)
+
+
+def _powered_star(n_spokes: int = 3) -> InputIR:
+    """A hub feeding powered spokes plus a power source + per-tier net (the adapter's shape)."""
+    spokes = [
+        Machine(
+            id=f"s{i}",
+            type="spoke",
+            voltage_tier="LV",
+            eut=32.0,
+            orientation_options=[Facing.NORTH, Facing.SOUTH],
+            faces=FaceSpec(
+                ports=[
+                    Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT),
+                    Port(id="pin", commodity=Commodity.POWER, direction=IODirection.INPUT),
+                ]
+            ),
+        )
+        for i in range(n_spokes)
+    ]
+    source = Machine(
+        id="psrc",
+        type="Power Source (LV)",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH, Facing.SOUTH, Facing.EAST, Facing.WEST],
+        faces=FaceSpec(
+            ports=[Port(id="po", commodity=Commodity.POWER, direction=IODirection.OUTPUT)]
+        ),
+    )
+    nets = [
+        Net(
+            id=f"n{i}",
+            commodity=Commodity.ITEM,
+            fluid_or_item="x",
+            throughput=1.0,
+            endpoints=[
+                MachineFaceRef(machine_id="hub", port_id="out"),
+                MachineFaceRef(machine_id=f"s{i}", port_id="in"),
+            ],
+        )
+        for i in range(n_spokes)
+    ]
+    nets.append(
+        Net(
+            id="power:LV",
+            commodity=Commodity.POWER,
+            throughput=32.0 * n_spokes,
+            endpoints=[
+                MachineFaceRef(machine_id="psrc", port_id="po"),
+                *(MachineFaceRef(machine_id=f"s{i}", port_id="pin") for i in range(n_spokes)),
+            ],
+        )
+    )
+    return InputIR(
+        bounding_region=CellBox(sx=8, sy=2, sz=8),
+        machines=[_hub("hub"), *spokes, source],
+        nets=nets,
+    )
+
+
+def test_optimize_keeps_the_power_source_feed_on_the_boundary() -> None:
+    # The power net pulls the source toward the hub cluster, but every move must keep its front
+    # (feed) face flush on a region wall - the hard constraint the validator enforces. Several
+    # seeds so relocate/swap/reorient and the LNS recreate all get exercised against it.
+    problem = _powered_star()
+    machine = next(m for m in problem.machines if m.id == "psrc")
+    for seed in range(4):
+        result = optimize_placement(problem, seed=seed)
+        assert result.ok
+        src = next(p for p in result.placements if p.machine_id == "psrc")
+        assert front_on_boundary(
+            src.cell, machine.footprint, src.orientation, problem.bounding_region
+        ), f"seed {seed}: source feed face left the boundary"
+        assert _validates(problem, result.placements)
 
 
 def test_optimize_respects_reserved_and_bounds() -> None:

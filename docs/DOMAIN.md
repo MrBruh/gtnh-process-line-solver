@@ -58,6 +58,11 @@ where load **sums** along shared segments (Steiner-tree-like):
   through that segment.
 - A segment needing **> 16x** must split into **parallel runs** or move to a **higher voltage
   tier** (more power per amp).
+- **The synthesized source is fed from outside.** A plan export has no power node, so the
+  adapter invents one source per voltage tier; *how* it is powered is left to the builder. The
+  layout reserves **the source's front face as the external feed entry**: placement pins that
+  face flush on the region boundary (validator-enforced), internal cables use the other five
+  faces, and the builder runs power in through the wall the front touches.
 
 ## ME networks (AE2)
 

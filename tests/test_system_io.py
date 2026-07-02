@@ -44,8 +44,10 @@ _SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
 
 
 def _sand_io() -> SystemIO:
+    # The fast (constructive) solve: deterministic layout coordinates that the exact-cell
+    # assertions below can rely on; system_io does not care which placer produced them.
     ir = adapt_file(_SAND)
-    return system_io(ir, solve(ir))
+    return system_io(ir, solve(ir, optimize=False))
 
 
 def test_sand_input_is_the_super_chest_with_its_typed_rate() -> None:

@@ -62,6 +62,9 @@ class ViolationCode(str, Enum):
     POWER_VOLTAGE_DROP_EXCESSIVE = (
         "power_voltage_drop_excessive"  # cable loss leaves a machine <= 0 V: unpowerable at tier
     )
+    POWER_FEED_NOT_ON_BOUNDARY = (
+        "power_feed_not_on_boundary"  # a source's front (feed) face is not on the region boundary
+    )
 
 
 @dataclass(frozen=True)

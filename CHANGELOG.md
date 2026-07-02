@@ -204,6 +204,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   by Super Chest at (x, y, z) (~0.1 items/t)`. Sand grows from 5 machines to 6, nitrobenzene from
   21 to 23.
 
+- **Power sources reserve a boundary feed face.** A synthesized power source is fed by the builder
+  from outside the structure, but nothing said *where* - it was placed like any machine, so the
+  optimizer could bury it mid-region with no face left for the external feed. Its **front face is
+  now the reserved feed entry**: constructive and SA/LNS placement pin that face flush on the
+  region boundary (every move preserves it; a problem with no such slot is an explicit
+  `power_feed` infeasibility), and the validator enforces the same rule independently (new
+  `POWER_FEED_NOT_ON_BOUNDARY`). Internal cables keep using the other five faces - the existing
+  front-face rule already keeps them off the feed face. New shared helpers:
+  `Machine.is_power_source` (the buildguide's private predicate, promoted) and
+  `ir.geometry.front_on_boundary`.
+
 ### Changed
 - **Power cables dock route-aware, on whichever face is nearest the trunk.** The power router
   (`router/power.py`) used to commit each terminal to the first free non-front face in a fixed
