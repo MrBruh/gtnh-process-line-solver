@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import math
 import random
+from dataclasses import dataclass
 from typing import Literal
 
 from gtnh_solver.ir import (
@@ -99,6 +100,9 @@ _OBJECTIVE_WEIGHTS: dict[str, tuple[float, float]] = {
 }
 
 # Annealing schedule (geometric cooling). Budget scales with machine count, clamped.
+# _T0 is a fixed initial temperature (not scaled to the cost): at 2.0 a candidate costing +2 is
+# still accepted ~e^-1 (37%) of the time, so early iterations explore before cooling tightens.
+# Fixed; see #41.
 _T0 = 2.0
 _ALPHA = 0.995
 _MIN_ITERS = 250
@@ -113,7 +117,42 @@ _RELOCATE_TRIES = 20
 _P_LNS = 0.1
 _MAX_RUIN = 6
 _LNS_RANDOM_CANDIDATES = 8
-_MAX_CANDIDATES = 16  # cap neighbour-adjacent insertion sites so recreate stays cheap on hubs
+# Approximate cap on neighbour-adjacent insertion sites so recreate stays cheap on hubs. It is
+# checked once per placed neighbour, so one large neighbour's cells can spill a little past it -
+# left approximate on purpose (enforcing it mid-neighbour would drop candidates and change results).
+_MAX_CANDIDATES = 16
+
+# Small-move mix for a non-LNS iteration: one uniform draw picks relocate below _P_RELOCATE, swap
+# below _P_SWAP, else reorient - a ~1/3 : 1/3 : 1/3 split. Named so the mix lives in one place; the
+# exact values are load-bearing for per-seed determinism, so keep them if you retune the split.
+_P_RELOCATE = 0.34
+_P_SWAP = 0.67
+
+
+#: A routed net as the placement cost sees it: ``(member machine ids, weight)``. Item/fluid nets
+#: weigh ``1.0`` plus any feedback penalty; a power net appears here only once a feedback penalty
+#: puts it in play, carrying that penalty (module docstring).
+_WeightedNet = tuple[list[str], float]
+
+
+@dataclass(frozen=True)
+class _SearchContext:
+    """Immutable per-solve context threaded through the neighbourhood + recreate helpers.
+
+    Built once in :func:`optimize_placement`, it bundles the read-only lookups every move shares -
+    the machines by id, the bounding region, the reserved cells, the net adjacency, and the
+    per-machine net/power/auto views the LNS recreate ranks insertions with - so the helpers take a
+    few varying arguments (the placements, the growing occupied set, the rng) instead of threading a
+    dozen constants three levels deep. Purely a container: it changes no value the cost computes.
+    """
+
+    machines: dict[str, Machine]
+    region: CellBox
+    reserved: set[Cell]
+    adjacency: dict[str, set[str]]
+    machine_nets: dict[str, list[_WeightedNet]]
+    machine_power: dict[str, list[_WeightedNet]]
+    machine_auto: dict[str, list[tuple[str, str]]]
 
 
 def optimize_placement(
@@ -144,8 +183,8 @@ def optimize_placement(
     # penalized net weighs more so the optimizer shortens it preferentially. Item/fluid nets pay
     # HPWL. Power nets have NO base term (module docstring says why) - one enters the cost, as
     # an MST trunk-length pull, only once the router fails it and the feedback penalizes it.
-    wire_nets: list[tuple[list[str], float]] = []
-    power_nets: list[tuple[list[str], float]] = []
+    wire_nets: list[_WeightedNet] = []
+    power_nets: list[_WeightedNet] = []
     for n in problem.nets:
         if problem.me_toggles.toggled(n.commodity):
             continue
@@ -159,46 +198,72 @@ def optimize_placement(
     # router's own rule): the cost rewards each pair the current placement+orientation makes
     # face-adjacent, so orientation has a gradient toward enabling the free connection.
     auto_pairs = _auto_candidate_pairs(problem)
-    # Which machines share a net (any commodity): the LNS ruin step grows a *related* cluster along
-    # these edges, and recreate biases each insertion toward its net-neighbours' cells.
-    adjacency = _net_adjacency(problem)
-    # Per-machine views the LNS recreate ranks candidate insertions with, cheaply and without a full
-    # cost recompute: the nets each machine is in, and the auto-output pairs it participates in.
-    machine_nets = _machine_nets(problem, wire_nets)
-    machine_power = _machine_nets(problem, power_nets)
-    machine_auto = _machine_auto(problem, auto_pairs)
+    # The immutable per-solve context every move + recreate helper shares, built once and threaded
+    # instead of a dozen loose parameters: adjacency (LNS grows a *related* ruin cluster along the
+    # net edges), and the per-machine net/power/auto views recreate ranks insertions with cheaply,
+    # without a full cost recompute.
+    ctx = _SearchContext(
+        machines=machines,
+        region=region,
+        reserved=reserved,
+        adjacency=_net_adjacency(problem),
+        machine_nets=_machine_nets(problem, wire_nets),
+        machine_power=_machine_nets(problem, power_nets),
+        machine_auto=_machine_auto(problem, auto_pairs),
+    )
     weights = _OBJECTIVE_WEIGHTS[objective]
     rng = random.Random(seed)
 
     current = list(base.placements)
+    # ``current``'s occupied-cell set, maintained incrementally: relocate/swap test a candidate
+    # against it (temporarily lifting the moved machine's own cells) instead of rebuilding the whole
+    # set per proposal, and each accepted move folds in only its delta (see _apply_occupied_delta).
+    occupied = {
+        c for p in current for c in occupied_cells(p.cell, machines[p.machine_id].footprint)
+    }
     current_cost = _cost(current, machines, wire_nets, power_nets, auto_pairs, weights)
     best, best_cost = current, current_cost
     iters = min(_MAX_ITERS, max(_MIN_ITERS, _PER_MACHINE * len(current)))
     temp = _T0
     for _ in range(iters):
         if rng.random() < _P_LNS:
-            cand = _ruin_and_recreate(
-                current,
-                machines,
-                region,
-                reserved,
-                adjacency,
-                machine_nets,
-                machine_power,
-                machine_auto,
-                rng,
-            )
+            cand = _ruin_and_recreate(current, ctx, rng)
         else:
-            cand = _move(current, machines, region, reserved, rng)
+            cand = _move(current, ctx, occupied, rng)
         if cand is not None:
             cand_cost = _cost(cand, machines, wire_nets, power_nets, auto_pairs, weights)
             delta = cand_cost - current_cost
             if delta < 0 or rng.random() < math.exp(-delta / temp):
+                _apply_occupied_delta(occupied, current, cand, machines)
                 current, current_cost = cand, cand_cost
                 if current_cost < best_cost:
                     best, best_cost = current, current_cost
         temp *= _ALPHA
     return PlacementResult(placements=tuple(best))
+
+
+def _apply_occupied_delta(
+    occupied: set[Cell],
+    before: list[Placement],
+    after: list[Placement],
+    machines: dict[str, Machine],
+) -> None:
+    """Fold an accepted move into ``occupied`` in place, instead of rebuilding it.
+
+    ``before`` and ``after`` list the same machines in the same order, so a differing ``cell`` at an
+    index marks a machine that relocated (a pure reorient leaves its cells unchanged). Every vacated
+    cell is removed before any new cell is added, so two machines swapping into each other's
+    footprints stay occupied. The result is exactly the full-rebuild occupied set of ``after`` -
+    every layout the loop holds is overlap-free - only far cheaper to reach."""
+    removed: set[Cell] = set()
+    added: set[Cell] = set()
+    for old_p, new_p in zip(before, after, strict=True):
+        if old_p.cell != new_p.cell:
+            footprint = machines[old_p.machine_id].footprint
+            removed.update(occupied_cells(old_p.cell, footprint))
+            added.update(occupied_cells(new_p.cell, footprint))
+    occupied.difference_update(removed)
+    occupied.update(added)
 
 
 def _net_adjacency(problem: InputIR) -> dict[str, set[str]]:
@@ -213,12 +278,10 @@ def _net_adjacency(problem: InputIR) -> dict[str, set[str]]:
     return adj
 
 
-def _machine_nets(
-    problem: InputIR, nets: list[tuple[list[str], float]]
-) -> dict[str, list[tuple[list[str], float]]]:
+def _machine_nets(problem: InputIR, nets: list[_WeightedNet]) -> dict[str, list[_WeightedNet]]:
     """Machine -> the (routed) nets it belongs to, so LNS can score an insertion from only the
     machine's own nets instead of re-summing every net's HPWL."""
-    by_machine: dict[str, list[tuple[list[str], float]]] = {m.id: [] for m in problem.machines}
+    by_machine: dict[str, list[_WeightedNet]] = {m.id: [] for m in problem.machines}
     for entry in nets:
         for mid in entry[0]:
             if mid in by_machine:
@@ -268,8 +331,8 @@ def _auto_candidate_pairs(problem: InputIR) -> list[tuple[str, str]]:
 def _cost(
     placements: list[Placement],
     machines: dict[str, Machine],
-    wire_nets: list[tuple[list[str], float]],
-    power_nets: list[tuple[list[str], float]],
+    wire_nets: list[_WeightedNet],
+    power_nets: list[_WeightedNet],
     auto_pairs: list[tuple[str, str]],
     weights: tuple[float, float],
 ) -> float:
@@ -300,14 +363,18 @@ def _cost(
         centers = [_center(pos[mid], machines[mid]) for mid in machine_ids if mid in pos]
         cable += weight * _mst_length(centers)
 
-    cells = [
-        c for p in placements for c in occupied_cells(p.cell, machines[p.machine_id].footprint)
-    ]
-    xs = [c[0] for c in cells]
-    ys = [c[1] for c in cells]
-    zs = [c[2] for c in cells]
-    footprint = (max(xs) - min(xs) + 1) * (max(zs) - min(zs) + 1)
-    volume = footprint * (max(ys) - min(ys) + 1)
+    # Bounding box from each footprint's two extreme corners (its origin and origin+size-1) rather
+    # than enumerating every occupied cell: for axis-aligned footprints the min/max over the corners
+    # equals the min/max over all their cells, so footprint area and volume are bit-identical - but
+    # this is O(machines), not O(total cell volume), on the hottest path in the solver.
+    min_x = min(p.cell.x for p in placements)
+    max_x = max(p.cell.x + machines[p.machine_id].footprint.sx - 1 for p in placements)
+    min_y = min(p.cell.y for p in placements)
+    max_y = max(p.cell.y + machines[p.machine_id].footprint.sy - 1 for p in placements)
+    min_z = min(p.cell.z for p in placements)
+    max_z = max(p.cell.z + machines[p.machine_id].footprint.sz - 1 for p in placements)
+    footprint = (max_x - min_x + 1) * (max_z - min_z + 1)
+    volume = footprint * (max_y - min_y + 1)
 
     auto = 0
     for source_id, sink_id in auto_pairs:
@@ -390,95 +457,107 @@ def _feed_orientation(
 
 def _move(
     placements: list[Placement],
-    machines: dict[str, Machine],
-    region: CellBox,
-    reserved: set[Cell],
+    ctx: _SearchContext,
+    occupied: set[Cell],
     rng: random.Random,
 ) -> list[Placement] | None:
-    """Propose one move; return a VALID candidate layout, or None if it could not be made."""
+    """Propose one small move; return a VALID candidate layout, or None if it could not be made.
+
+    ``occupied`` is ``placements``' occupied-cell set (owned by the annealing loop): relocate and
+    swap borrow it to test a candidate and restore it before returning, so the caller keeps the
+    single incrementally-maintained copy."""
     roll = rng.random()
-    if roll < 0.34:
-        return _relocate(placements, machines, region, reserved, rng)
-    if roll < 0.67:
-        return _swap(placements, machines, region, reserved, rng)
-    return _reorient(placements, machines, region, rng)
+    if roll < _P_RELOCATE:
+        return _relocate(placements, ctx, occupied, rng)
+    if roll < _P_SWAP:
+        return _swap(placements, ctx, occupied, rng)
+    return _reorient(placements, ctx, rng)
 
 
 def _relocate(
     placements: list[Placement],
-    machines: dict[str, Machine],
-    region: CellBox,
-    reserved: set[Cell],
+    ctx: _SearchContext,
+    occupied: set[Cell],
     rng: random.Random,
 ) -> list[Placement] | None:
     i = rng.randrange(len(placements))
     p = placements[i]
-    m = machines[p.machine_id]
-    others = _cells_except(placements, machines, {i})
-    for _ in range(_RELOCATE_TRIES):
-        origin = _rand_origin(m, region, rng)
-        if origin is None:
-            return None
-        cells = list(occupied_cells(origin, m.footprint))
-        if (
-            all(in_region(c, region) for c in cells)
-            and reserved.isdisjoint(cells)
-            and others.isdisjoint(cells)
-        ):
-            orientation = _feed_orientation(m, origin, p.orientation, region)
-            if orientation is None:
-                continue  # a source relocated off the boundary: no legal feed face, keep trying
-            new = list(placements)
-            new[i] = p.model_copy(update={"cell": origin, "orientation": orientation})
-            return new
-    return None
+    m = ctx.machines[p.machine_id]
+    # Lift machine i's own cells out of the shared occupied set so a candidate may reuse them; the
+    # remainder is exactly the other machines' cells (what ``others`` was). Restored in the finally.
+    own = set(occupied_cells(p.cell, m.footprint))
+    occupied.difference_update(own)
+    try:
+        for _ in range(_RELOCATE_TRIES):
+            origin = _rand_origin(m, ctx.region, rng)
+            if origin is None:
+                return None
+            cells = list(occupied_cells(origin, m.footprint))
+            if (
+                all(in_region(c, ctx.region) for c in cells)
+                and ctx.reserved.isdisjoint(cells)
+                and occupied.isdisjoint(cells)
+            ):
+                orientation = _feed_orientation(m, origin, p.orientation, ctx.region)
+                if orientation is None:
+                    continue  # a source relocated off the boundary: no legal feed face, keep trying
+                new = list(placements)
+                new[i] = p.model_copy(update={"cell": origin, "orientation": orientation})
+                return new
+        return None
+    finally:
+        occupied.update(own)
 
 
 def _swap(
     placements: list[Placement],
-    machines: dict[str, Machine],
-    region: CellBox,
-    reserved: set[Cell],
+    ctx: _SearchContext,
+    occupied: set[Cell],
     rng: random.Random,
 ) -> list[Placement] | None:
     i, j = rng.sample(range(len(placements)), 2)
     pi, pj = placements[i], placements[j]
-    mi, mj = machines[pi.machine_id], machines[pj.machine_id]
-    others = _cells_except(placements, machines, {i, j})
-    moved = list(occupied_cells(pj.cell, mi.footprint)) + list(
-        occupied_cells(pi.cell, mj.footprint)
-    )
-    if (
-        not all(in_region(c, region) for c in moved)
-        or len(set(moved)) != len(moved)  # the two swapped bodies overlap each other
-        or not reserved.isdisjoint(moved)
-        or not others.isdisjoint(moved)
-    ):
-        return None
-    oi = _feed_orientation(mi, pj.cell, pi.orientation, region)
-    oj = _feed_orientation(mj, pi.cell, pj.orientation, region)
-    if oi is None or oj is None:
-        return None  # the swap would strand a source's feed face off the boundary
-    new = list(placements)
-    new[i] = pi.model_copy(update={"cell": pj.cell, "orientation": oi})
-    new[j] = pj.model_copy(update={"cell": pi.cell, "orientation": oj})
-    return new
+    mi, mj = ctx.machines[pi.machine_id], ctx.machines[pj.machine_id]
+    # Lift both machines' current cells so the remainder is the other machines' (what ``others``
+    # was); restored in the finally on every exit.
+    own = set(occupied_cells(pi.cell, mi.footprint)) | set(occupied_cells(pj.cell, mj.footprint))
+    occupied.difference_update(own)
+    try:
+        moved = list(occupied_cells(pj.cell, mi.footprint)) + list(
+            occupied_cells(pi.cell, mj.footprint)
+        )
+        if (
+            not all(in_region(c, ctx.region) for c in moved)
+            or len(set(moved)) != len(moved)  # the two swapped bodies overlap each other
+            or not ctx.reserved.isdisjoint(moved)
+            or not occupied.isdisjoint(moved)
+        ):
+            return None
+        oi = _feed_orientation(mi, pj.cell, pi.orientation, ctx.region)
+        oj = _feed_orientation(mj, pi.cell, pj.orientation, ctx.region)
+        if oi is None or oj is None:
+            return None  # the swap would strand a source's feed face off the boundary
+        new = list(placements)
+        new[i] = pi.model_copy(update={"cell": pj.cell, "orientation": oi})
+        new[j] = pj.model_copy(update={"cell": pi.cell, "orientation": oj})
+        return new
+    finally:
+        occupied.update(own)
 
 
 def _reorient(
     placements: list[Placement],
-    machines: dict[str, Machine],
-    region: CellBox,
+    ctx: _SearchContext,
     rng: random.Random,
 ) -> list[Placement] | None:
     candidates: list[tuple[int, list[Facing]]] = []
     for k, p in enumerate(placements):
-        m = machines[p.machine_id]
+        m = ctx.machines[p.machine_id]
         # A source only reorients among feed-legal facings (its front must stay on the boundary).
         alts = [
             o
             for o in m.orientation_options
-            if o != p.orientation and _feed_ok(m, p.cell, o, region)
+            if o != p.orientation and _feed_ok(m, p.cell, o, ctx.region)
         ]
         if alts:
             candidates.append((k, alts))
@@ -493,13 +572,7 @@ def _reorient(
 
 def _ruin_and_recreate(
     placements: list[Placement],
-    machines: dict[str, Machine],
-    region: CellBox,
-    reserved: set[Cell],
-    adjacency: dict[str, set[str]],
-    machine_nets: dict[str, list[tuple[list[str], float]]],
-    machine_power: dict[str, list[tuple[list[str], float]]],
-    machine_auto: dict[str, list[tuple[str, str]]],
+    ctx: _SearchContext,
     rng: random.Random,
 ) -> list[Placement] | None:
     """Ruin a related cluster of machines and greedily re-insert them (the LNS large move).
@@ -514,12 +587,12 @@ def _ruin_and_recreate(
     n = len(placements)
     if n < 2:
         return None
-    ruined = _related_cluster(placements, adjacency, rng.randint(2, min(n, _MAX_RUIN)), rng)
+    ruined = _related_cluster(placements, ctx.adjacency, rng.randint(2, min(n, _MAX_RUIN)), rng)
     kept = [p for i, p in enumerate(placements) if i not in ruined]
 
     occupied: set[Cell] = set()
     for p in kept:
-        occupied.update(occupied_cells(p.cell, machines[p.machine_id].footprint))
+        occupied.update(occupied_cells(p.cell, ctx.machines[p.machine_id].footprint))
 
     placed = list(kept)
     placed_ids = {p.machine_id for p in placed}
@@ -527,24 +600,11 @@ def _ruin_and_recreate(
     # pulls choose their spot before the freer machines fill in around them.
     to_insert = sorted(
         (placements[i] for i in sorted(ruined)),
-        key=lambda p: -_placed_neighbor_count(p.machine_id, adjacency, placed_ids),
+        key=lambda p: -_placed_neighbor_count(p.machine_id, ctx.adjacency, placed_ids),
     )
     for p in to_insert:
-        m = machines[p.machine_id]
-        spot = _best_insertion(
-            p,
-            m,
-            placed,
-            occupied,
-            region,
-            reserved,
-            machines,
-            adjacency,
-            machine_nets,
-            machine_power,
-            machine_auto,
-            rng,
-        )
+        m = ctx.machines[p.machine_id]
+        spot = _best_insertion(p, placed, occupied, ctx, rng)
         if spot is None:
             return None  # could not re-place this machine; abandon the move, the loop skips it
         origin, orientation = spot
@@ -591,58 +651,42 @@ def _placed_neighbor_count(
 
 def _best_insertion(
     p: Placement,
-    m: Machine,
     placed: list[Placement],
     occupied: set[Cell],
-    region: CellBox,
-    reserved: set[Cell],
-    machines: dict[str, Machine],
-    adjacency: dict[str, set[str]],
-    machine_nets: dict[str, list[tuple[list[str], float]]],
-    machine_power: dict[str, list[tuple[list[str], float]]],
-    machine_auto: dict[str, list[tuple[str, str]]],
+    ctx: _SearchContext,
     rng: random.Random,
 ) -> tuple[CellCoord, Facing] | None:
-    """The valid (origin, orientation) for ``m`` that minimises its *marginal* cost, over candidate
-    cells beside its placed net-neighbours plus a few random ones; falls back to any first-fit free
-    slot, or ``None`` if the machine cannot be placed at all.
+    """The valid (origin, orientation) for ``p``'s machine that minimises its *marginal* cost, over
+    candidate cells beside its placed net-neighbours plus a few random ones; falls back to any
+    first-fit free slot, or ``None`` if the machine cannot be placed at all.
 
-    Ranking uses only the terms that depend on this machine (its nets + auto pairs + flat bias), so
-    an insertion costs O(machine degree), not a full O(all nets) recompute - the loop's ``_cost``
-    still gates acceptance globally.
+    Ranking uses only the terms that depend on this machine (its nets + auto pairs), so an insertion
+    costs O(machine degree), not a full O(all nets) recompute - the loop's ``_cost`` still gates
+    acceptance globally.
     """
+    m = ctx.machines[p.machine_id]
     placed_pos = {q.machine_id: q for q in placed}
     best: tuple[CellCoord, Facing] | None = None
     best_cost = math.inf
-    for origin in _candidate_origins(p, m, placed, region, adjacency, machines, rng):
+    for origin in _candidate_origins(p, m, placed, ctx, rng):
         cells = list(occupied_cells(origin, m.footprint))
         if (
-            not all(in_region(c, region) for c in cells)
-            or not reserved.isdisjoint(cells)
+            not all(in_region(c, ctx.region) for c in cells)
+            or not ctx.reserved.isdisjoint(cells)
             or not occupied.isdisjoint(cells)
         ):
             continue
         for orientation in m.orientation_options:
-            if not _feed_ok(m, origin, orientation, region):
+            if not _feed_ok(m, origin, orientation, ctx.region):
                 continue  # a source's feed face must stay on the boundary
-            cost = _marginal_insertion_cost(
-                p.machine_id,
-                origin,
-                orientation,
-                m,
-                placed_pos,
-                machines,
-                machine_nets,
-                machine_power,
-                machine_auto,
-            )
+            cost = _marginal_insertion_cost(p.machine_id, origin, orientation, m, placed_pos, ctx)
             if cost < best_cost:
                 best_cost, best = cost, (origin, orientation)
     if best is not None:
         return best
     # Last resort: any free slot in first-fit order (a source additionally requires a slot +
     # orientation with its feed face on the boundary - the same rule the constructive seed used).
-    return _fit(m, region, occupied | reserved)
+    return _fit(m, ctx.region, occupied | ctx.reserved)
 
 
 def _marginal_insertion_cost(
@@ -651,10 +695,7 @@ def _marginal_insertion_cost(
     orientation: Facing,
     m: Machine,
     placed_pos: dict[str, Placement],
-    machines: dict[str, Machine],
-    machine_nets: dict[str, list[tuple[list[str], float]]],
-    machine_power: dict[str, list[tuple[list[str], float]]],
-    machine_auto: dict[str, list[tuple[str, str]]],
+    ctx: _SearchContext,
 ) -> float:
     """The cost terms that change with where ``machine_id`` goes: the weighted HPWL of its own
     item/fluid nets over their already-placed members (this candidate included), plus for each of
@@ -667,21 +708,21 @@ def _marginal_insertion_cost(
     cy = origin.y + m.footprint.sy / 2
     cz = origin.z + m.footprint.sz / 2
     wire = 0.0
-    for ids, weight in machine_nets[machine_id]:
+    for ids, weight in ctx.machine_nets[machine_id]:
         xs, ys, zs = [cx], [cy], [cz]
         for mid in ids:
             if mid != machine_id and mid in placed_pos:
-                ox, oy, oz = _center(placed_pos[mid], machines[mid])
+                ox, oy, oz = _center(placed_pos[mid], ctx.machines[mid])
                 xs.append(ox)
                 ys.append(oy)
                 zs.append(oz)
         if len(xs) > 1:
             wire += weight * (max(xs) - min(xs) + max(ys) - min(ys) + max(zs) - min(zs))
     cable = 0.0
-    for ids, weight in machine_power[machine_id]:
+    for ids, weight in ctx.machine_power[machine_id]:
         attach = min(
             (
-                _manhattan((cx, cy, cz), _center(placed_pos[mid], machines[mid]))
+                _manhattan((cx, cy, cz), _center(placed_pos[mid], ctx.machines[mid]))
                 for mid in ids
                 if mid != machine_id and mid in placed_pos
             ),
@@ -689,12 +730,12 @@ def _marginal_insertion_cost(
         )
         cable += weight * attach
     auto = 0
-    for src, sink in machine_auto[machine_id]:
+    for src, sink in ctx.machine_auto[machine_id]:
         other = sink if src == machine_id else src
         op = placed_pos.get(other)
         if op is None:
             continue
-        om = machines[other]
+        om = ctx.machines[other]
         if src == machine_id:
             faces = auto_output_faces(
                 origin, m.footprint, orientation, op.cell, om.footprint, op.orientation
@@ -712,19 +753,17 @@ def _candidate_origins(
     p: Placement,
     m: Machine,
     placed: list[Placement],
-    region: CellBox,
-    adjacency: dict[str, set[str]],
-    machines: dict[str, Machine],
+    ctx: _SearchContext,
     rng: random.Random,
 ) -> list[CellCoord]:
     """Origins to try inserting ``m`` at: its freed origin, the cells face-adjacent to each placed
     net-neighbour (to cluster / auto-output), and a few random free origins - deduped, in-region."""
-    neighbor_ids = adjacency.get(p.machine_id, set())
+    neighbor_ids = ctx.adjacency.get(p.machine_id, set())
     origins: list[CellCoord] = []
     seen: set[Cell] = set()
 
     def add(c: Cell) -> None:
-        if c not in seen and in_region(c, region):
+        if c not in seen and in_region(c, ctx.region):
             seen.add(c)
             origins.append(CellCoord(x=c[0], y=c[1], z=c[2]))
 
@@ -733,24 +772,14 @@ def _candidate_origins(
         if len(origins) >= _MAX_CANDIDATES:
             break  # enough neighbour-adjacent sites; keep recreate cheap
         if q.machine_id in neighbor_ids:
-            for bx, by, bz in occupied_cells(q.cell, machines[q.machine_id].footprint):
+            for bx, by, bz in occupied_cells(q.cell, ctx.machines[q.machine_id].footprint):
                 for dx, dy, dz in _FACE_DELTAS:
                     add((bx + dx, by + dy, bz + dz))
     for _ in range(_LNS_RANDOM_CANDIDATES):
-        origin = _rand_origin(m, region, rng)
+        origin = _rand_origin(m, ctx.region, rng)
         if origin is not None:
             add((origin.x, origin.y, origin.z))
     return origins
-
-
-def _cells_except(
-    placements: list[Placement], machines: dict[str, Machine], exclude: set[int]
-) -> set[Cell]:
-    cells: set[Cell] = set()
-    for k, p in enumerate(placements):
-        if k not in exclude:
-            cells.update(occupied_cells(p.cell, machines[p.machine_id].footprint))
-    return cells
 
 
 def _rand_origin(m: Machine, region: CellBox, rng: random.Random) -> CellCoord | None:
