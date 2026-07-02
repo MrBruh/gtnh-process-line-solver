@@ -140,6 +140,28 @@ def test_power_cable_routes_around_extra_obstacles() -> None:
     assert validate(problem, layout).ok, str(validate(problem, layout))
 
 
+def test_power_docks_on_the_face_toward_the_trunk_not_a_fixed_side() -> None:
+    # The source sits five blocks east of its lone sink, the +z (south) face free on both. Fixed
+    # south-first docking put both terminals on the z=1 row and ran the cable the long way (5); the
+    # router now docks each machine on the face pointing at the other, so the cable runs straight
+    # through the gap between them (3). Routing - not a fixed face order - chose the faces.
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[_src(), _load("m0", 1)],
+        nets=[_pnet("m0")],
+    )
+    placements = [_at("src", 5, 0, 0), _at("m0", 0, 0, 0)]
+    result = route_power(problem, placements)
+    assert result.ok, result.infeasibility
+    route = result.routes[0]
+    faces = {t.machine_id: t.face for t in route.terminals}
+    assert faces["src"] is Facing.WEST  # toward the sink, not the default south (+z)
+    assert faces["m0"] is Facing.EAST  # toward the source
+    assert len(route.segments) == 3  # straight run x=4..1, not the 5-long south detour
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route])
+    assert validate(problem, layout).ok, str(validate(problem, layout))
+
+
 def test_power_single_machine_thickness_matches_its_amperage() -> None:
     # one machine at LV, eut=65, docked 2 blocks out (30 V after loss) -> ceil(65/30)=3 amps -> 4x.
     problem = InputIR(
@@ -153,9 +175,9 @@ def test_power_single_machine_thickness_matches_its_amperage() -> None:
 
 
 def test_power_loss_thickens_a_far_cable_past_its_lossless_size() -> None:
-    # 16 EU/t at LV is 1 amp at the source (16/32) and would stay 1 amp lossless, but 20 blocks
-    # out the delivered voltage is 12 V -> ceil(16/12)=2 amps -> a 2x cable. Loss, not the raw
-    # draw, is what thickened it - the far machine would starve on a 1x run.
+    # 16 EU/t at LV is 1 amp at the source (16/32) and would stay 1 amp lossless, but docked toward
+    # the source the machine is 18 blocks out -> 14 V delivered -> ceil(16/14)=2 amps -> a 2x cable.
+    # Loss, not the raw draw, is what thickened it - the far machine would starve on a 1x run.
     problem = InputIR(
         bounding_region=CellBox(sx=30, sy=4, sz=10),
         machines=[_src(), _load("m0", 16)],

@@ -10,7 +10,7 @@ terminal) are unchanged from the original crude router.
 from __future__ import annotations
 
 import heapq
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 
 from gtnh_solver.ir import CellBox, CellCoord, Facing, InputIR, Machine, Placement, Terminal
 from gtnh_solver.ir.geometry import FACE_DELTAS, Cell, in_region, occupied_cells
@@ -61,6 +61,46 @@ def dock(
     return None
 
 
+def dock_candidates(
+    port_id: str,
+    placement: Placement,
+    machine: Machine,
+    obstacles: set[Cell],
+    docked: set[Cell],
+    region: CellBox,
+) -> list[Terminal]:
+    """Every free cell just outside a usable (non-front) face, one Terminal per face+cell.
+
+    Where :func:`dock` commits to the first free face in ``FACE_ORDER`` (blind to where the route
+    then has to go), this returns *all* the options so a route-aware caller (the power router) can
+    dock on whichever face yields the shortest cable. Deterministic order: ``FACE_ORDER``, then
+    ascending body cell.
+    """
+    body = set(occupied_cells(placement.cell, machine.footprint))
+    terminals: list[Terminal] = []
+    seen: set[Cell] = set()
+    for face in FACE_ORDER:
+        if face is placement.orientation:  # front face carries no I/O
+            continue
+        dx, dy, dz = FACE_DELTAS[face]
+        for bx, by, bz in sorted(body):
+            cand = (bx + dx, by + dy, bz + dz)
+            if cand in body or cand in seen:
+                continue
+            if not in_region(cand, region) or cand in obstacles or cand in docked:
+                continue
+            seen.add(cand)
+            terminals.append(
+                Terminal(
+                    machine_id=placement.machine_id,
+                    port_id=port_id,
+                    face=face,
+                    cell=CellCoord(x=cand[0], y=cand[1], z=cand[2]),
+                )
+            )
+    return terminals
+
+
 def astar(start: Cell, goal: Cell, obstacles: set[Cell], region: CellBox) -> list[Cell] | None:
     """Shortest in-bounds, obstacle-free cell path from ``start`` to ``goal`` (unit hops)."""
     heap: list[tuple[int, int, Cell]] = [(manhattan(start, goal), 0, start)]
@@ -84,6 +124,50 @@ def astar(start: Cell, goal: Cell, obstacles: set[Cell], region: CellBox) -> lis
                 came_from[nxt] = cur
                 heapq.heappush(heap, (ng + manhattan(nxt, goal), ng, nxt))
     return None
+
+
+def astar_multi(
+    starts: Collection[Cell], goals: set[Cell], obstacles: set[Cell], region: CellBox
+) -> list[Cell] | None:
+    """Shortest obstacle-free path from any cell in ``starts`` to any cell in ``goals``.
+
+    Multi-source, multi-goal A* (the heuristic is the Manhattan distance to the nearest goal). The
+    power router uses it to dock a cable on whichever usable face gives the shortest run: ``goals``
+    are all of a machine's free non-front dock cells, so routing - not a fixed face order - picks
+    the terminal. Like :func:`astar`, ``starts`` are seeded at cost 0 even if they lie in
+    ``obstacles`` (a leg begins on the previous leg's end cell, already part of the laid trunk).
+    Returns the path (``path[0] in starts``, ``path[-1] in goals``), or ``None`` if none is
+    reachable. ``goals`` must be non-empty and disjoint from ``starts`` (a zero-length trunk is not
+    a valid cable); the caller guarantees this.
+    """
+    if not goals:
+        return None
+    heap: list[tuple[int, int, Cell]] = [(_nearest_goal(s, goals), 0, s) for s in starts]
+    heapq.heapify(heap)
+    came_from: dict[Cell, Cell] = {}
+    best: dict[Cell, int] = dict.fromkeys(starts, 0)
+    visited: set[Cell] = set()
+    while heap:
+        _, g, cur = heapq.heappop(heap)
+        if cur in goals:
+            return _reconstruct(came_from, cur)
+        if cur in visited:
+            continue
+        visited.add(cur)
+        for dx, dy, dz in NEIGHBORS:
+            nxt = (cur[0] + dx, cur[1] + dy, cur[2] + dz)
+            if not in_region(nxt, region) or nxt in obstacles:
+                continue
+            ng = g + 1
+            if ng < best.get(nxt, _UNREACHABLE):
+                best[nxt] = ng
+                came_from[nxt] = cur
+                heapq.heappush(heap, (ng + _nearest_goal(nxt, goals), ng, nxt))
+    return None
+
+
+def _nearest_goal(cell: Cell, goals: set[Cell]) -> int:
+    return min(manhattan(cell, g) for g in goals)
 
 
 def _reconstruct(came_from: dict[Cell, Cell], cur: Cell) -> list[Cell]:

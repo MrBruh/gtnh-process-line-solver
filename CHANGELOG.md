@@ -205,6 +205,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   21 to 23.
 
 ### Changed
+- **Power cables dock route-aware, on whichever face is nearest the trunk.** The power router
+  (`router/power.py`) used to commit each terminal to the first free non-front face in a fixed
+  order (south first), blind to where the cable then had to run, so a source behind a machine row
+  made the trunk snake around it. It now considers every usable (non-front) face and docks via a
+  multi-goal A* leg on the one that gives the shortest cable (new `_grid.dock_candidates` +
+  `astar_multi`), the source docking toward its first sink. On the sand demo this drops the
+  optimized power run from nine cables to five (matching the constructive baseline); every terminal
+  is still validated (non-front, adjacent, on-route) and the trunk stays a single tree.
 - **Power sizing now models cable voltage loss over distance.** GT cables lose voltage per block,
   so a machine `d` blocks from the source receives `tier_voltage - loss·d`, not the full tier. The
   source stays at the machine's tier and the cable is thickened to compensate: each machine's
