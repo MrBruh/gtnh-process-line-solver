@@ -1,9 +1,10 @@
 """Tests for the shared-amperage power router (router.power).
 
-Headline: a power net is sized to the *summed* amperage flowing through each cable segment -
-the trunk tapers from the source. Plus the never-silently-invalid promise: an over-16x load,
-an unknown tier, or a malformed net is an explicit infeasibility, and the routes it does emit
-validate.
+Headline: a power net is a cable TREE sized to the *summed* amperage flowing through each
+segment - the trunk tapers from the source, branches carry only their own sinks, and a sink
+whose dock candidate is already a trunk cell taps it instead of laying new cable. Plus the
+never-silently-invalid promise: an over-16x load, an unknown tier, or a malformed net is an
+explicit infeasibility, and the routes it does emit validate.
 """
 
 from __future__ import annotations
@@ -72,33 +73,37 @@ def _at(mid: str, x: int, y: int, z: int) -> Placement:
 
 
 def test_power_trunk_sizes_thickness_by_summed_amperage() -> None:
-    # source + two full-tier machines (LV, eut=32). At the source each is 1 amp, but cable loss
-    # (1 EU/block) means m0 is 2 blocks out -> 30 V -> ceil(32/30)=2 amps, and m1 is 4 blocks out
-    # -> 28 V -> 2 amps. Leg source->m0 carries both (4 amps -> 4x); leg m0->m1 carries m1 alone
-    # (2 amps -> 2x). The trunk still tapers from the source, now thickened for loss.
+    # source + two full-tier machines (LV, eut=32) in a row: src(0,0,0), m0(3,0,0), m1(6,0,0).
+    # (At a 2-block spacing m0 would simply tap the source's dock cell - the shared-tap test
+    # below covers that; this spacing keeps a genuinely shared segment.) The source docks east
+    # at (1,0,0), the tree root; m0's leg is the 1-hop (1,0,0)->(2,0,0), so m0 sits 1 block out
+    # -> 31 V -> ceil(32/31)=2 amps. m1's leg extends the tree from (2,0,0) around m0's body,
+    # 5 hops -> depth 6 -> 26 V -> 2 amps. The shared segment (1,0,0)->(2,0,0) carries both
+    # sinks (4 amps -> 4x); the five m1-only segments carry 2 amps -> 2x. The trunk tapers from
+    # the source, thickened for loss.
     problem = InputIR(
         bounding_region=CellBox(sx=10, sy=4, sz=10),
         machines=[_src(), _load("m0", 32), _load("m1", 32)],
         nets=[_pnet("m0", "m1")],
     )
-    placements = [_at("src", 0, 0, 0), _at("m0", 2, 0, 0), _at("m1", 4, 0, 0)]
+    placements = [_at("src", 0, 0, 0), _at("m0", 3, 0, 0), _at("m1", 6, 0, 0)]
     result = route_power(problem, placements)
     assert result.ok
     route = result.routes[0]
     assert route.commodity is _POWER
     assert route.thickness_per_segment is not None
-    assert len(route.thickness_per_segment) == len(route.segments)
-    assert set(route.thickness_per_segment) == {2, 4}  # the 4-amp leg and the 2-amp leg (loss)
+    assert len(route.thickness_per_segment) == len(route.segments) == 6
+    assert set(route.thickness_per_segment) == {2, 4}  # the 4-amp shared segment + the 2-amp rest
     assert max(route.thickness_per_segment) == 4
     layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route])
     assert validate(problem, layout).ok, str(validate(problem, layout))
 
 
 def test_power_trunk_stays_a_tree_when_legs_would_otherwise_overlap() -> None:
-    # Source in the MIDDLE of its two sinks: the m0->m1 leg's shortest path retraces the
-    # src->m0 leg, so routing each leg independently would lay overlapping segments - a tangle
-    # whose per-segment amperage is undefined (the validator rejects it as POWER_ROUTE_NOT_A_TREE).
-    # The router avoids the cells it already laid, so the trunk is a single non-overlapping tree.
+    # Source in the MIDDLE of its two sinks: m0 taps the source's dock cell (it is adjacent to
+    # it), and m1's leg lays fresh cable around the source body without ever re-using a laid
+    # cell - overlapping segments would be a tangle whose per-segment amperage is undefined (the
+    # validator rejects it as POWER_ROUTE_NOT_A_TREE). The trunk must stay a single tree.
     problem = InputIR(
         bounding_region=CellBox(sx=8, sy=4, sz=8),
         machines=[_src(), _load("m0", 32), _load("m1", 32)],
@@ -281,6 +286,19 @@ def test_power_infeasible_when_a_terminal_cannot_dock() -> None:
     assert result.infeasibility.constraint == "face_reachability"
 
 
+def test_power_infeasible_when_a_net_machine_is_unplaced() -> None:
+    # a power net endpoint whose machine never got a placement has no faces to dock on
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[_src(), _load("m0", 32)],
+        nets=[_pnet("m0")],
+    )
+    result = route_power(problem, [_at("src", 0, 0, 0)])  # m0 is missing a placement
+    assert not result.ok
+    assert result.infeasibility is not None
+    assert result.infeasibility.constraint == "face_reachability"
+
+
 def test_power_infeasible_when_no_path_between_terminals() -> None:
     # a reserved wall at x=1 splits the single-layer region; the cable cannot cross
     problem = InputIR(
@@ -293,3 +311,179 @@ def test_power_infeasible_when_no_path_between_terminals() -> None:
     assert not result.ok
     assert result.infeasibility is not None
     assert result.infeasibility.constraint == "routing"
+
+
+def test_power_branched_trunk_sizes_each_branch_to_its_own_sink() -> None:
+    # Source between two sinks on opposite sides: src(3,0,0), m0(0,0,0), m1(6,0,0). The source
+    # docks west at (2,0,0) (toward its first sink); m0's leg is the 1-hop (2,0,0)->(1,0,0), and
+    # m1's leg leaves the SAME root cell the other way (5 hops around the source body), so the
+    # tree BRANCHES at the root. Each branch carries only its own sink: m0 at depth 1 -> 31 V ->
+    # 2 amps, m1 at depth 5 -> 27 V -> 2 amps -> every segment is 2x. A path-trunk suffix sum
+    # would have overcharged the m0 branch with m1's amps too (4 amps -> 4x).
+    problem = InputIR(
+        bounding_region=CellBox(sx=10, sy=4, sz=10),
+        machines=[_src(), _load("m0", 32), _load("m1", 32)],
+        nets=[_pnet("m0", "m1")],
+    )
+    placements = [_at("src", 3, 0, 0), _at("m0", 0, 0, 0), _at("m1", 6, 0, 0)]
+    result = route_power(problem, placements)
+    assert result.ok, result.infeasibility
+    route = result.routes[0]
+    assert route.thickness_per_segment is not None
+    # the m0 branch is laid first, so its lone segment is segments[0] - sized to m0 alone
+    seg0 = route.segments[0]
+    assert (seg0.start.x, seg0.start.y, seg0.start.z) == (2, 0, 0)
+    assert (seg0.end.x, seg0.end.y, seg0.end.z) == (1, 0, 0)
+    assert route.thickness_per_segment[0] == 2  # not 4x: m1's amps do not ride this branch
+    assert set(route.thickness_per_segment) == {2}
+    branches = sum(1 for s in route.segments if (s.start.x, s.start.y, s.start.z) == (2, 0, 0))
+    assert branches == 2  # both legs leave the root cell - a real branch, not a path
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route])
+    assert validate(problem, layout).ok, str(validate(problem, layout))
+
+
+def test_power_sink_taps_the_sources_dock_cell() -> None:
+    # src(0,0,0), m0(2,0,0), m1(4,0,0). The source docks east at (1,0,0); that same cell is m0's
+    # west dock candidate, so m0 TAPS it - terminal on the trunk cell, distance 0, no new cable
+    # (GT: one cable block feeds every adjacent wired face). m1 then extends the trunk with a
+    # 4-hop leg around m0's body (depth 4 -> 28 V -> 2 amps). Trunk total: 5 cells / 4 segments,
+    # each carrying only m1's 2 amps (m0 draws straight from the root and loads no segment). The
+    # old distinct-dock path-trunk needed 2 extra cells just to give m0 its own dock.
+    problem = InputIR(
+        bounding_region=CellBox(sx=10, sy=4, sz=10),
+        machines=[_src(), _load("m0", 32), _load("m1", 32)],
+        nets=[_pnet("m0", "m1")],
+    )
+    placements = [_at("src", 0, 0, 0), _at("m0", 2, 0, 0), _at("m1", 4, 0, 0)]
+    result = route_power(problem, placements)
+    assert result.ok, result.infeasibility
+    route = result.routes[0]
+    cell_of = {t.machine_id: (t.cell.x, t.cell.y, t.cell.z) for t in route.terminals}
+    assert cell_of["m0"] == cell_of["src"] == (1, 0, 0)  # the tap: two terminals, one cable cell
+    cells = {
+        c
+        for s in route.segments
+        for c in ((s.start.x, s.start.y, s.start.z), (s.end.x, s.end.y, s.end.z))
+    }
+    assert len(cells) == 5  # the root + m1's 4-hop leg; no cable spent on m0
+    assert len(route.segments) == 4
+    assert set(route.thickness_per_segment or []) == {2}  # only m1's 2 amps ride the cable
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route])
+    assert validate(problem, layout).ok, str(validate(problem, layout))
+
+
+def test_power_lone_sink_adjacent_to_the_root_still_gets_a_cable() -> None:
+    # The lone sink's west dock candidate IS the source's dock cell (1,0,0), but tapping it
+    # would leave a route with zero segments - invalid (ROUTE_DISCONTINUOUS). The last sink of a
+    # still-segment-less trunk therefore lays a real leg: 2 hops to another of its faces
+    # (depth 2 -> 30 V -> ceil(32/30)=2 amps).
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[_src(), _load("m0", 32)],
+        nets=[_pnet("m0")],
+    )
+    placements = [_at("src", 0, 0, 0), _at("m0", 2, 0, 0)]
+    result = route_power(problem, placements)
+    assert result.ok, result.infeasibility
+    route = result.routes[0]
+    assert len(route.segments) >= 1  # never a zero-segment power route
+    assert len(route.segments) == 2
+    assert set(route.thickness_per_segment or []) == {2}
+    cell_of = {t.machine_id: (t.cell.x, t.cell.y, t.cell.z) for t in route.terminals}
+    assert cell_of["m0"] != cell_of["src"]  # no tap: the sink docked on a fresh cell
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route])
+    assert validate(problem, layout).ok, str(validate(problem, layout))
+
+
+def test_power_cluster_of_three_sinks_needs_at_most_three_cable_cells() -> None:
+    # The sand-layout acceptance shape: a source + 3 sinks packed around a short trunk must not
+    # need more cable than the maintainer's hand-built 3 cells (the path-trunk's distinct docks
+    # forced >= 4). Here the trunk is 2 cells: the root (1,0,0) - which m0 taps - plus one riser
+    # (1,1,0) laid for m1, which m2 then taps. m0 draws at distance 0 (1 amp, loads no segment);
+    # m1 and m2 draw at depth 1 -> 31 V -> 2 amps each, so the lone segment carries 4 -> 4x.
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[_src(), _load("m0", 32), _load("m1", 32), _load("m2", 32)],
+        nets=[_pnet("m0", "m1", "m2")],
+    )
+    placements = [
+        _at("src", 0, 0, 0),
+        _at("m0", 2, 0, 0),
+        _at("m1", 0, 1, 0),
+        _at("m2", 2, 1, 0),
+    ]
+    result = route_power(problem, placements)
+    assert result.ok, result.infeasibility
+    route = result.routes[0]
+    cells = {
+        c
+        for s in route.segments
+        for c in ((s.start.x, s.start.y, s.start.z), (s.end.x, s.end.y, s.end.z))
+    }
+    assert len(cells) <= 3  # the acceptance bar; this cluster actually trunks with 2
+    assert cells == {(1, 0, 0), (1, 1, 0)}
+    assert route.thickness_per_segment == [4]  # m1 + m2 (2 amps each at depth 1) share the riser
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route])
+    assert validate(problem, layout).ok, str(validate(problem, layout))
+
+
+def test_power_tap_picks_the_trunk_cell_nearest_the_source() -> None:
+    # m1 is adjacent to two trunk cells: the root (1,0,0) on its west face, and (2,0,1) - laid
+    # for m0 at depth 2 - on its south face, which comes FIRST in dock-candidate order. The tap
+    # must pick the cell with the smallest tree depth (the root, distance 0), not the first
+    # candidate, or m1 would be sized as if it sat 2 blocks of cable loss out. (0,0,1) is
+    # reserved so the source deterministically docks east at (1,0,0).
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[_src(), _load("m0", 32), _load("m1", 32)],
+        nets=[_pnet("m0", "m1")],
+        reserved_cells=[CellCoord(x=0, y=0, z=1)],
+    )
+    placements = [_at("src", 0, 0, 0), _at("m0", 3, 0, 1), _at("m1", 2, 0, 0)]
+    result = route_power(problem, placements)
+    assert result.ok, result.infeasibility
+    route = result.routes[0]
+    cell_of = {t.machine_id: (t.cell.x, t.cell.y, t.cell.z) for t in route.terminals}
+    assert cell_of["m1"] == (1, 0, 0)  # the root (depth 0), not the deeper (2,0,1) candidate
+    # m0's 2-hop leg (1,0,0)->(1,0,1)->(2,0,1) puts m0 at depth 2 -> 30 V -> 2 amps; m1 taps the
+    # root and rides no segment, so both segments carry m0 alone.
+    assert route.thickness_per_segment == [2, 2]
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route])
+    assert validate(problem, layout).ok, str(validate(problem, layout))
+
+
+def test_power_infeasible_when_the_only_dock_cell_is_the_segmentless_trunk() -> None:
+    # In a 3x1x1 corridor the lone free cell (1,0,0) is both the source's dock and the sink's
+    # only candidate. The sink cannot tap it (a zero-segment route is invalid) and has no other
+    # goal to route to -> an explicit face_reachability infeasibility, never a bogus route.
+    problem = InputIR(
+        bounding_region=CellBox(sx=3, sy=1, sz=1),
+        machines=[_src(), _load("m0", 32)],
+        nets=[_pnet("m0")],
+    )
+    result = route_power(problem, [_at("src", 0, 0, 0), _at("m0", 2, 0, 0)])
+    assert not result.ok
+    assert result.infeasibility is not None
+    assert result.infeasibility.constraint == "face_reachability"
+    assert result.failed_nets == ("power:LV",)
+
+
+def test_power_routing_is_deterministic() -> None:
+    # Same input twice -> identical routes (terminals, segments, thicknesses), even where
+    # several equally-short legs exist: taps, A* seeding, and tie-breaks are all order-stable.
+    problem = InputIR(
+        bounding_region=CellBox(sx=10, sy=4, sz=10),
+        machines=[_src(), _load("m0", 32), _load("m1", 32), _load("m2", 32)],
+        nets=[_pnet("m0", "m1", "m2")],
+    )
+    placements = [
+        _at("src", 0, 0, 0),
+        _at("m0", 2, 0, 0),
+        _at("m1", 4, 0, 0),
+        _at("m2", 4, 0, 2),
+    ]
+    first = route_power(problem, placements)
+    second = route_power(problem, placements)
+    assert first.ok
+    assert second.ok
+    assert first.routes == second.routes

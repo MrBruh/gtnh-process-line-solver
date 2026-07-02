@@ -226,6 +226,18 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   independent auto-output checks stay the gate. This advances lane D (docs/ROADMAP.md): the
   router is the geometry authority, so the optimizer's job shrinks to moving blocks and choosing
   front faces. (`router/`, `solver/`.)
+- **Power trunks grow as trees with shared taps.** The power router chained every net
+  source -> m0 -> m1 -> ... as a path and docked each terminal on its own distinct cell, so a
+  source + N sinks always cost at least N+1 cable cells - geometrically unable to reach the
+  hand-built 3-cable sand trunk. In GT one cable block feeds every adjacent wired machine face,
+  so the trunk is now a tree: a sink whose dock candidate is already a trunk cell of its net
+  taps it (terminal on that cell, no new cable; the cell nearest the source wins), and any other
+  sink extends the tree with a multi-goal A* leg from every trunk cell laid so far. Sizing
+  follows the tree - each machine's cable distance is its terminal's depth, and every segment
+  carries the summed amperage of the sink terminals on its far-from-root side (replacing the
+  per-leg suffix sum, which overcharged one side of a branch) - and the validator already
+  re-derives branched trees and shared terminal cells independently. A source + three clustered
+  sinks now trunk with two cable cells, within the sand target's three. (`router/power.py`.)
 - **Power cables dock route-aware, on whichever face is nearest the trunk.** The power router
   (`router/power.py`) used to commit each terminal to the first free non-front face in a fixed
   order (south first), blind to where the cable then had to run, so a source behind a machine row
