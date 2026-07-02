@@ -216,6 +216,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ir.geometry.front_on_boundary`.
 
 ### Changed
+- **The router now owns the auto-output vs pipe decision.** `route()` decides itself, from the
+  final placements + orientations, which nets GT's free auto-output connection covers (the logic
+  moved from `solver/core.py` to `router/auto.py`, public `assign_auto_outputs`) and lays pipes
+  only for the rest; `RouteResult` gains `auto_connections` so the decision rides the router's
+  output, and the solver's assemble step just composes it (its `skip_nets` plumbing is gone).
+  Behavior is unchanged - same greedy net order, one auto-output per source machine, only
+  1-source-1-sink item/fluid nets are eligible, power/ME never auto-feed - and the validator's
+  independent auto-output checks stay the gate. This advances lane D (docs/ROADMAP.md): the
+  router is the geometry authority, so the optimizer's job shrinks to moving blocks and choosing
+  front faces. (`router/`, `solver/`.)
 - **Power cables dock route-aware, on whichever face is nearest the trunk.** The power router
   (`router/power.py`) used to commit each terminal to the first free non-front face in a fixed
   order (south first), blind to where the cable then had to run, so a source behind a machine row

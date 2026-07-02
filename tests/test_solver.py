@@ -30,7 +30,7 @@ from gtnh_solver.ir import (
     Segment,
 )
 from gtnh_solver.placement import optimize_placement, place
-from gtnh_solver.router import RouteResult
+from gtnh_solver.router import RouteResult, assign_auto_outputs
 from gtnh_solver.solver import core as solver_core
 from gtnh_solver.solver import solve
 from gtnh_solver.validator import validate
@@ -197,7 +197,7 @@ def test_optimizer_reorients_to_enable_auto_output_the_seed_blocks() -> None:
         machines=machines,
         nets=[_net("n0", "m0", "m1"), _net("n1", "m1", "m2"), _net("n2", "m2", "m3")],
     )
-    seed_autos, _ = solver_core._assign_auto_outputs(problem, place(problem).placements)
+    seed_autos, _ = assign_auto_outputs(problem, place(problem).placements)
     assert len(seed_autos) == 0  # the seed orientation blocks every link; reorientation must fix it
     for s in range(8):
         layout = solve(problem, seed=s)

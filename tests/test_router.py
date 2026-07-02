@@ -60,8 +60,12 @@ def _machine(mid: str, ports: list[Port], *, orientation: Facing = Facing.NORTH)
     )
 
 
-def _item_pair(region: CellBox) -> InputIR:
-    a = _machine("a", [Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)])
+def _item_pair(region: CellBox, *, source_orientation: Facing = Facing.NORTH) -> InputIR:
+    a = _machine(
+        "a",
+        [Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)],
+        orientation=source_orientation,
+    )
     b = _machine("b", [Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT)])
     net = Net(
         id="n",
@@ -124,6 +128,7 @@ def test_route_sand_full_slice_validates() -> None:
     pwr = route_power(ir, placements, extra_obstacles=item_cells)
     assert rr.ok
     assert pwr.ok
+    assert rr.auto_connections == ()  # nothing is adjacent, so every item net is piped
     assert all(r.commodity is not Commodity.POWER for r in rr.routes)  # power is not its job
     assert all(r.commodity is Commodity.POWER for r in pwr.routes)
     assert len(rr.routes) + len(pwr.routes) == len(ir.nets)
@@ -143,7 +148,11 @@ def test_route_emits_only_valid_routes_even_when_incomplete() -> None:
     pr = place(ir)
     rr = route(ir, pr.placements)
     layout = LayoutResult(
-        status=LayoutStatus.VALID, seed=0, placements=list(pr.placements), routes=list(rr.routes)
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=list(pr.placements),
+        routes=list(rr.routes),
+        auto_connections=list(rr.auto_connections),
     )
     assert _MALFORMED_ROUTE_CODES.isdisjoint(validate(ir, layout).codes())
     if not rr.ok:
@@ -161,6 +170,25 @@ def test_route_two_machines_ok_and_validates() -> None:
     assert len(result.routes) == 1
     layout = LayoutResult(
         status=LayoutStatus.VALID, seed=0, placements=placements, routes=list(result.routes)
+    )
+    assert validate(problem, layout).ok
+
+
+def test_route_auto_connects_an_adjacent_pair_instead_of_piping() -> None:
+    # The router owns the auto-output vs pipe decision: a and b touch east/west with both fronts
+    # north, so route() assigns GT's free auto-output itself and lays no pipe - the decision rides
+    # RouteResult.auto_connections, and the assembled layout passes the independent gate.
+    problem = _item_pair(CellBox(sx=8, sy=4, sz=8))
+    placements = [_at("a", 1, 0, 1), _at("b", 2, 0, 1)]
+    result = route(problem, placements)
+    assert result.ok
+    assert result.routes == ()
+    assert [ac.net_id for ac in result.auto_connections] == ["n"]
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=placements,
+        auto_connections=list(result.auto_connections),
     )
     assert validate(problem, layout).ok
 
@@ -293,10 +321,17 @@ def test_route_skips_me_toggled_commodity() -> None:
 
 
 def test_route_infeasible_when_a_machine_cannot_dock() -> None:
-    # 2x1x1: the two machines fill the region, leaving no free non-front face to dock.
-    problem = _item_pair(CellBox(sx=2, sy=1, sz=1))
-    result = route(problem, [_at("a", 0, 0, 0), _at("b", 1, 0, 0)])
+    # 2x1x1: the two machines fill the region. The source fronts EAST - straight into the sink -
+    # so the one touching face carries no I/O (auto-output cannot cover the net), and every other
+    # face cell lies outside the region, leaving no free non-front face to dock a pipe terminal.
+    problem = _item_pair(CellBox(sx=2, sy=1, sz=1), source_orientation=Facing.EAST)
+    placements = [
+        Placement(machine_id="a", cell=CellCoord(x=0, y=0, z=0), orientation=Facing.EAST),
+        _at("b", 1, 0, 0),
+    ]
+    result = route(problem, placements)
     assert not result.ok
+    assert result.auto_connections == ()  # the source's front blocks the free connection
     assert result.infeasibility is not None
     assert result.infeasibility.constraint == "face_reachability"
 

@@ -3,11 +3,10 @@
 One *attempt* assembles a layout (docs/ROADMAP.md):
   1. place the machines (simulated annealing over a routing-aware cost, seeded from the
      constructive first-fit solution - so connected machines cluster for auto-output);
-  2. assign **auto-output** connections - a source machine ejecting straight into an adjacent
-     target's input face, no pipe and no cover (GT's free connection; one auto-output per
-     machine, items XOR fluids - docs/DOMAIN.md);
-  3. route the rest: item/fluid pipes for the nets auto-output could NOT cover, and the
-     synthesized power nets as shared-amperage cable trunks (router.power);
+  2. route the item/fluid nets (router.route): the **router** decides from the final geometry
+     which nets GT's free **auto-output** connection covers (router.auto) and lays pipes only
+     for the rest;
+  3. route the synthesized power nets as shared-amperage cable trunks (router.power);
   4. assemble the LayoutResult (or surface the placement/routing/power infeasibility);
   5. **validate the assembled layout against the independent validator** and downgrade a
      VALID result to ``partial_invalid`` if it proves any violation. The validator's logic is
@@ -26,27 +25,17 @@ penalties, no wall-clock), so a given input always yields the same layout.
 ``solve(..., optimize=False)`` is the **fast** path: a single constructive placement with no
 annealing and no feedback loop (near-instant, simpler layout), still validated. The two modes are
 the "optimize or not" choice the planned unified site exposes to the builder.
-
-Auto-output is preferred because it is what a player actually builds for a simple chain: a row
-of adjacent machines feeding each other needs zero pipes. Pipes are only for what is left -
-non-adjacent endpoints, fan-out, or a machine whose single auto-output is already spent.
 """
 
 from __future__ import annotations
 
 from gtnh_solver.ir import (
-    AutoConnection,
-    Commodity,
-    Facing,
     Infeasibility,
     InputIR,
-    IODirection,
     LayoutResult,
     LayoutStatus,
-    Machine,
     Placement,
 )
-from gtnh_solver.ir.geometry import auto_output_faces
 from gtnh_solver.placement import optimize_placement, place
 from gtnh_solver.router import route, route_power
 from gtnh_solver.validator import ValidationReport, validate
@@ -126,14 +115,16 @@ def _solve_fast(problem: InputIR, seed: int) -> LayoutResult:
 def _assemble(
     problem: InputIR, placements: tuple[Placement, ...], seed: int
 ) -> tuple[LayoutResult, tuple[str, ...]]:
-    """Assign auto-output, route the rest, validate; return the layout and the unrouted net ids.
+    """Route, validate, and compose the layout; return it plus the unrouted net ids.
 
-    The unrouted ids are the feedback signal (empty when fully routed). A layout that routes
-    everything yet fails independent validation returns ``partial_invalid`` with *no* failed nets:
-    that is a solver/router bug, not a routability problem, so re-placing would not help.
+    The router owns the auto-output vs pipe decision (router.auto), so its result carries both
+    the auto-connections and the pipes. The unrouted ids are the feedback signal (empty when
+    fully routed). A layout that routes everything yet fails independent validation returns
+    ``partial_invalid`` with *no* failed nets: that is a solver/router bug, not a routability
+    problem, so re-placing would not help.
     """
-    autos, auto_net_ids = _assign_auto_outputs(problem, placements)
-    routing = route(problem, placements, skip_nets=auto_net_ids)  # item/fluid pipes
+    routing = route(problem, placements)  # auto-output where geometry allows + item/fluid pipes
+    autos = list(routing.auto_connections)
     # Power cables route around the item/fluid pipes already laid, so no cell carries two routes
     # (the crude single-channel capacity the validator enforces). docs/ARCHITECTURE.md #7.
     item_cells = {
@@ -193,85 +184,4 @@ def _validation_infeasibility(report: ValidationReport) -> Infeasibility:
             "this indicates a solver/router bug - the placement or routes are geometrically "
             "invalid; report it with the failing input"
         ),
-    )
-
-
-def _assign_auto_outputs(
-    problem: InputIR, placements: tuple[Placement, ...]
-) -> tuple[list[AutoConnection], set[str]]:
-    """Connect each simple 1-source-1-sink net by auto-output where the machines are adjacent.
-
-    Returns the auto-connections plus the set of net ids they cover (so the router skips them).
-    """
-    machines = {m.id: m for m in problem.machines}
-    placement_of: dict[str, Placement] = {}
-    for p in placements:
-        placement_of.setdefault(p.machine_id, p)
-    port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
-
-    spent: set[str] = set()  # source machines that have used their single auto-output face
-    autos: list[AutoConnection] = []
-    covered: set[str] = set()
-    for net in problem.nets:
-        if net.commodity is Commodity.POWER or problem.me_toggles.toggled(net.commodity):
-            continue
-        sources = [
-            e.machine_id
-            for e in net.endpoints
-            if port_dir.get((e.machine_id, e.port_id)) is IODirection.OUTPUT
-        ]
-        sinks = [
-            e.machine_id
-            for e in net.endpoints
-            if port_dir.get((e.machine_id, e.port_id)) is IODirection.INPUT
-        ]
-        if len(sources) != 1 or len(sinks) != 1:
-            continue  # crude: only simple 1->1 nets auto-output; fan-out routes as pipes
-        source, sink = sources[0], sinks[0]
-        if source in spent:
-            continue  # this machine's one auto-output is already used; the rest pipe
-
-        faces = _auto_faces(
-            placement_of.get(source),
-            machines.get(source),
-            placement_of.get(sink),
-            machines.get(sink),
-        )
-        if faces is None:
-            continue
-        source_face, target_face = faces
-        spent.add(source)
-        covered.add(net.id)
-        autos.append(
-            AutoConnection(
-                net_id=net.id,
-                source_machine_id=source,
-                source_face=source_face,
-                target_machine_id=sink,
-                target_face=target_face,
-            )
-        )
-    return autos, covered
-
-
-def _auto_faces(
-    source_p: Placement | None,
-    source_m: Machine | None,
-    target_p: Placement | None,
-    target_m: Machine | None,
-) -> tuple[Facing, Facing] | None:
-    """The (source_face, target_face) if the two machines touch on a usable pair of faces.
-
-    Thin wrapper over the shared ``ir.geometry.auto_output_faces`` (the placement cost rewards the
-    same adjacency, so the geometry lives in one place); guards the unplaced/unknown-machine case.
-    """
-    if source_p is None or source_m is None or target_p is None or target_m is None:
-        return None
-    return auto_output_faces(
-        source_p.cell,
-        source_m.footprint,
-        source_p.orientation,
-        target_p.cell,
-        target_m.footprint,
-        target_p.orientation,
     )
