@@ -60,10 +60,10 @@ doc as intent and reconcile.
 - **dataset/** - the GT **physical** rules (footprints, faces, pipe/wire physical tiers,
   multiblocks), keyed to gtnh-factory-flow's machine IDs. Recipes/throughput/identity come from
   its dataset; you author only the physical half. Still substantial, but smaller than before.
-- **placement/** - simulated annealing over a coarse cell grid; orientation is a placement
-  variable; cost = HPWL + compactness + a flat-build bias + an auto-output reward. *(Phase 2,
-  lane C: LNS, and the cheaper incremental routing/congestion estimate the cost is meant to grow
-  into.)*
+- **placement/** - simulated annealing + LNS ruin-and-recreate over a coarse cell grid;
+  orientation is a placement variable; cost = HPWL + compactness + a flat-build bias + an
+  auto-output reward. *(Phase 2, lane C: SA + LNS are in; the cheaper incremental
+  routing/congestion estimate the cost is meant to grow into is still ahead.)*
 - **router/** - free-form per-commodity A* on the cell grid; single-channel capacity;
   rip-up-and-reroute; ME-toggle skipping; the shared-amperage power primitive. *(Phase 2, lane D:
   the margin→channels-per-edge cap + cell→block realizability, and power optimization beyond

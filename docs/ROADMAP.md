@@ -55,8 +55,9 @@ Layer the designed solver onto the working baseline, adding sophistication only 
 is demonstrably valid-but-bad (too large, unroutable, ugly). This is the recorded design intent
 - the 9 engineering decisions in [`ARCHITECTURE.md`](ARCHITECTURE.md) still stand:
 
-- **placement** - SA/LNS + cheap routing-aware cost + orientation as a search variable
-  (replaces the crude constructive placer).
+- **placement** - SA + LNS ruin-and-recreate + cheap routing-aware cost + orientation as a search
+  variable (replaces the crude constructive placer). *SA and LNS are in; the routing-aware cost is
+  still the HPWL + auto-output proxy, to grow into the incremental congestion estimate.*
 - **router** - rip-up-and-reroute, the **channels-per-edge realizability invariant**,
   cell->block realizability fed back into search, ME-toggle endpoint placement, pluggable
   multi-channel backends.

@@ -96,6 +96,29 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (annealed cluster), and sand stays all-auto-output. LNS + the place<->route feedback loop are
   next (docs/ROADMAP.md lane C).
 
+- **Placement LNS (`placement/search.py`) - large-neighbourhood ruin-and-recreate.** The optimizer
+  gains a large move alongside relocate / swap / reorient: rip out a *related* (net-connected)
+  cluster of machines and greedily re-insert each at the position + orientation that minimises the
+  cost, biased toward cells beside its already-placed net-neighbours. One step reshapes a whole
+  cluster, escaping local optima the single-cell moves plateau in. It is probability-gated inside
+  the same annealing loop, so Metropolis acceptance / cooling / best-so-far and per-seed
+  determinism are unchanged, and every candidate stays validator-clean (recreate validity-checks
+  each insertion and abandons the move if a machine cannot be re-placed). Insertions are ranked by a
+  cheap marginal cost (the machine's own nets + auto pairs + a flat-build bias), not a full recompute,
+  so LNS fits the same budget as the small moves. Finishes the SA + LNS half of ROADMAP lane C.
+  Because the cost is still HPWL-driven, tighter clustering can push a route onto a second layer (the
+  sand demo's power cable now rises one layer, still valid) - the future congestion-aware cost
+  (lane C) is what removes that. (`placement/`.)
+
+- **Solver "optimize or not" toggle (`solve(..., optimize=...)`, `gtnh-solve --fast`).** `solve`
+  gains an `optimize` flag. The default (`True`) runs the annealed placer (SA + LNS) inside the
+  place<->route feedback loop; `False` takes a near-instant single constructive placement, with no
+  annealing and no re-placement. Both validate their output (VALID / explicit partial /
+  infeasibility, never silently invalid) - fast just trades the optimizer's clustering and
+  unrouted-net recovery for speed. `--fast` exposes it on the CLI. This is the user-facing control
+  the planned unified site is built around, and the home for LNS (opt-in behind the optimized
+  path). (`solver/`, `cli/`.)
+
 - **Previewer (`previewer/`) + `gtnh-solve --preview`** - a self-contained, double-clickable 3D
   view of a solved layout. `build_scene(problem, layout)` flattens the layout into a render-ready
   scene (machine boxes coloured by type with the machine name on the front face, rectangular

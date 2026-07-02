@@ -117,8 +117,9 @@ def test_scene_bounds_are_tight_not_the_search_region() -> None:
     region = scene["region"]
     bounds = scene["bounds"]
     span = [bounds["max"][i] - bounds["min"][i] for i in range(3)]
-    assert span[1] == 1  # the sand line is a single flat row, one layer tall
-    assert max(span) <= 6  # tight around the row...
+    assert {m["cell"][1] for m in scene["machines"]} == {0}  # every machine sits on the floor...
+    assert span[1] <= 2  # ...the power cable may rise a single layer to reach around the row
+    assert max(span) <= 6  # still tight around the built structure...
     assert max(span) < max(region["sx"], region["sy"], region["sz"])  # ...not the 10x4x10 region
 
 
