@@ -82,13 +82,12 @@ def test_build_guide_placement_table_has_coords_and_front() -> None:
 
 
 def test_build_guide_power_note_states_feed_spec_as_tier_amps_eut() -> None:
-    # the source must be fed as a wiring spec, not a bare cable thickness (GitHub #15 B2). With
-    # the tree trunk, sand's nearest Forge Hammer taps the source's dock cell (drawing its 1 A
-    # straight off that block), so the thickest segment carries only the other two hammers - 1 A
-    # each at depths 3 and 4 (16 EU/t at 29/28 V) -> 2 A -> 2x. LV is 32 V, so the note reads
-    # 2 A -> up to 64 EU/t (still above the line's 3 x 16 = 48 EU/t total draw).
+    # the source must be fed as a wiring spec, not a bare cable thickness (GitHub #15 B2). On the
+    # fast (constructive) row the trunk runs source dock (5,0,1) -> (1,0,1): the hammers tap or
+    # dock at depths 2/3/4 (16 EU/t at 30/29/28 V -> 1 A each), so the root carries 3 A -> a 4x
+    # cable. LV is 32 V, so the note reads 4 A -> up to 128 EU/t (above the 3 x 16 = 48 EU/t draw).
     guide = _sand_guide()
-    assert "feed LV (32 V), >=2 A -> up to 64 EU/t" in guide
+    assert "feed LV (32 V), >=4 A -> up to 128 EU/t" in guide
 
 
 def test_build_guide_system_io_loads_input_chest_and_collects_output_product() -> None:
@@ -139,9 +138,9 @@ def test_build_guide_system_io_falls_back_without_a_sourcing_net() -> None:
 def test_build_guide_power_connection_lists_per_segment_thickness() -> None:
     guide = _sand_guide()
     assert "lay along:" in guide  # the exact cells to lay the cable
-    # sand's tree trunk: the root segment carries the two non-tapping 1-amp hammers (=2x=) and
-    # tapers to the last hammer alone (=1x=); the third hammer taps the root and lays no cable.
-    assert "=2x=" in guide  # the trunk root segment...
+    # sand's fast-row trunk: the root segments carry all three 1-amp hammers (3 A -> =4x=) and
+    # the run tapers to the farthest hammer alone (=1x=); two hammers tap mid-trunk cells.
+    assert "=4x=" in guide  # the trunk root segment...
     assert "=1x=" in guide  # ...tapering to the far end
 
 
