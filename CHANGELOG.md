@@ -332,6 +332,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
 
 ### Fixed
+- **Power router does failed-first rip-up/reroute, like the item router (GitHub #40).** The power
+  router laid each tier's trunk in problem order and stopped at the first net that could not route,
+  reporting only that one - but capacity accretes obstacles, so a trunk laid for one tier can wedge
+  a later tier's trunk out of a chokepoint: a *false* infeasibility from net order alone, and a
+  weaker feedback-loop signal than the item router already gave for pipes. It now routes a pass
+  and, if any net failed, rips every trunk up and retries with the failed nets first (most-
+  constrained-first), stopping only when a pass is clean or a failed-net set repeats (a genuine
+  infeasibility, not an ordering accident). When routing does stall it reports ALL still-failing
+  nets, not just the first, so the place↔route feedback loop can penalize them all. The bounded-
+  retry loop is now shared with the item router (`core._rip_up_reroute`). (`router/power.py`,
+  `router/core.py`.)
 - **Amperage is sized from fractional machine loads, rounded up per aggregate - not per machine**
   (maintainer-verified in game). GT machines pull whole packets (1 amp = one packet of up to tier
   voltage) into an internal buffer only when it has room, so a 16 EU/t LV machine *averages* 0.5

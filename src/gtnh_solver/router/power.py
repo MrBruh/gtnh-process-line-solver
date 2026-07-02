@@ -63,6 +63,7 @@ from gtnh_solver.ir import (
     IODirection,
     Machine,
     MachineFaceRef,
+    Net,
     Placement,
     Route,
     Segment,
@@ -71,6 +72,7 @@ from gtnh_solver.ir import (
 from gtnh_solver.ir.geometry import Cell
 
 from ._grid import astar_multi, coord, dock_candidates, manhattan, obstacle_cells
+from .core import _rip_up_reroute
 
 #: GT cable thicknesses, smallest first (16x is the hard cap - docs/DOMAIN.md).
 _THICKNESSES = (1, 2, 4, 8, 16)
@@ -81,9 +83,11 @@ _MAX_THICKNESS = _THICKNESSES[-1]
 class PowerRouteResult:
     """Power router output: all power routes, or a partial set plus why it stalled.
 
-    ``failed_nets`` names the power net that stalled (empty when ``ok``), so the solver's
-    place<->route feedback loop can penalize it and re-place (helps a dock/path failure; an
-    amperage/tier failure is not placement-fixable, but the loop's cycle detection stops quickly).
+    ``failed_nets`` lists every power net still unrouted after the failed-first rip-up/reroute
+    retry (empty when ``ok``), in problem order, so the solver's place<->route feedback loop can
+    penalize them all and re-place (helps a dock/path failure; an amperage/tier failure is not
+    placement-fixable, but the loop's cycle detection stops quickly). ``infeasibility`` carries the
+    first one's specific reason, matching the item router's reporting shape.
     """
 
     routes: tuple[Route, ...] = ()
@@ -110,6 +114,47 @@ def route_power(
     power trunks never collide - and since every terminal of a finished net (docked or tapped)
     sits on one of its segment cells, the same set keeps later nets from docking on this trunk.
     Terminals may share cells only *within* one net (a tap on its own trunk).
+
+    Because that accretion is order-dependent - a trunk laid for one tier can wedge a later tier's
+    trunk out of a chokepoint - the tiers are routed with **failed-first rip-up/reroute** (the same
+    bounded retry the item router uses, ``core._rip_up_reroute``): route a pass, and if any net
+    failed, rip every trunk up and retry with the failed nets first, until a pass is clean or the
+    failed-net set repeats (a genuine infeasibility, not a tier-ordering accident). This keeps the
+    solver's feedback loop from getting a false infeasibility on power that it would not get on
+    pipes. When routing genuinely stalls, ALL still-failing nets are reported (#40), not just the
+    first. (The buildguide half of #40 - branching-trunk rendering - is parked; not touched here.)
+    """
+    if problem.me_toggles.toggled(Commodity.POWER):
+        return PowerRouteResult()  # power is on the ME network; nothing to route
+
+    power_nets = [net for net in problem.nets if net.commodity is Commodity.POWER]
+    routes, failures = _rip_up_reroute(
+        power_nets, lambda order: _route_pass(problem, placements, order, extra_obstacles)
+    )
+    if not failures:
+        return PowerRouteResult(tuple(routes))
+
+    # Exhausted: report the first net still failing (in problem order), with its specific reason,
+    # plus every still-failing net so the solver's feedback loop can penalize them all.
+    still_failing = tuple(net.id for net in power_nets if net.id in failures)
+    return PowerRouteResult(tuple(routes), failures[still_failing[0]], still_failing)
+
+
+def _route_pass(
+    problem: InputIR,
+    placements: Sequence[Placement],
+    nets: Sequence[Net],
+    extra_obstacles: Collection[Cell] = (),
+) -> tuple[list[Route], dict[str, Infeasibility]]:
+    """Route ``nets`` once in the given order as shared-amperage trunks, capacity-aware.
+
+    Mirrors ``core._route_pass`` for power: builds the obstacle set fresh (reserved + machine
+    bodies + ``extra_obstacles``), then grows each net's trunk in turn, adding a finished trunk's
+    cells to the obstacles so later tiers route around it. Failures are order-dependent - a
+    malformed net (not one source + >=1 sink), an undockable/unroutable trunk, or an
+    amperage/tier/voltage rejection - so this skips (does not abort on) them and records why per
+    net; the caller (:func:`_rip_up_reroute`) retries with a different order. A failed trunk leaves
+    no trace: ``_route_trunk`` never mutates ``obstacles``, so the retry starts clean.
     """
     machines = {m.id: m for m in problem.machines}
     placement_by_machine: dict[str, Placement] = {}
@@ -118,19 +163,15 @@ def route_power(
     region = problem.bounding_region
     port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
 
-    if problem.me_toggles.toggled(Commodity.POWER):
-        return PowerRouteResult()  # power is on the ME network; nothing to route
-
     obstacles = obstacle_cells(problem, placements, machines) | set(extra_obstacles)
     routes: list[Route] = []
-    for net in problem.nets:
-        if net.commodity is not Commodity.POWER:
-            continue
+    failures: dict[str, Infeasibility] = {}
+    for net in nets:
         sources = [e for e in net.endpoints if port_dir.get(_key(e)) is IODirection.OUTPUT]
         sinks = [e for e in net.endpoints if port_dir.get(_key(e)) is IODirection.INPUT]
         if len(sources) != 1 or not sinks:
-            return PowerRouteResult(tuple(routes), _malformed(net.id), (net.id,))
-
+            failures[net.id] = _malformed(net.id)
+            continue
         built = _route_trunk(
             net.id,
             sources[0],
@@ -141,13 +182,14 @@ def route_power(
             region,
         )
         if isinstance(built, Infeasibility):
-            return PowerRouteResult(tuple(routes), built, (net.id,))
+            failures[net.id] = built
+            continue
         routes.append(built)
         # Capacity: this trunk now owns these cells, so the next tier's trunk routes around it.
         for seg in built.segments:
             obstacles.add((seg.start.x, seg.start.y, seg.start.z))
             obstacles.add((seg.end.x, seg.end.y, seg.end.z))
-    return PowerRouteResult(tuple(routes))
+    return routes, failures
 
 
 def _key(endpoint: MachineFaceRef) -> tuple[str, str]:
