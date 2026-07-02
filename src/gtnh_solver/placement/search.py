@@ -3,12 +3,14 @@
 Starts from the constructive first-fit solution and improves it under a cost that proxies
 buildability: half-perimeter wirelength (HPWL) per item/fluid net pulls connected machines
 together (more auto-output, shorter pipes); an auto-output reward favours orientations whose
-usable (non-front) faces actually let a source eject into its sink; and compactness is two terms
-- the **footprint** (floor area, x-span times z-span) as the driver, so the optimizer stacks
-vertically to shrink the floor, plus a mild total bounding-box **volume** tiebreak so equal
-footprints prefer the shorter build (docs/ROADMAP.md lane C). The auto reward is the only
-orientation-dependent term, so reorient moves carry a real cost signal - without it they were
-free random walk that could finalize an orientation BLOCKING auto-output.
+usable (non-front) faces actually let a source eject into its sink; and compactness is two
+independently weighted terms - the **footprint** (floor area, x-span times z-span, shrunk by
+stacking vertically) and the total bounding-box **volume** (shrunk by staying flat/cubic) -
+whose weights the selectable :data:`Objective` picks, since the two pull opposite ways
+(docs/ROADMAP.md lane C). The default ``footprint`` objective drives the floor area down and
+keeps volume as a mild tiebreak. The auto reward is the only orientation-dependent term, so
+reorient moves carry a real cost signal - without it they were free random walk that could
+finalize an orientation BLOCKING auto-output.
 
 Power nets carry **no base cost term**: cheap center-distance proxies (HPWL, MST) cannot see
 dock faces or shared cable taps, and measurably steer AWAY from low-cable layouts (a source
@@ -47,6 +49,7 @@ from __future__ import annotations
 
 import math
 import random
+from typing import Literal
 
 from gtnh_solver.ir import (
     CellBox,
@@ -75,15 +78,25 @@ _FACE_DELTAS = tuple(FACE_DELTAS.values())
 # Cost weights. Wirelength (item/fluid HPWL) dominates: it drives auto-output and short pipes.
 # The auto-output reward makes orientation matter (the front face carries no I/O, so the wrong
 # orientation BLOCKS the free connection - reorient moves are a no-op on the other terms).
-# Compactness is footprint-first (the maintainer's objective: optimize on a smaller floor area -
-# stacking a layer is free, sprawling is not), with the total bounding-box volume as a mild
-# tiebreak so equal footprints still prefer the smaller box. There is deliberately NO per-layer
-# penalty: height is only paid through the volume tiebreak. Power nets have no weight here (the
-# module docstring says why); their MST term activates only via feedback penalties.
+# Power nets have no weight here (the module docstring says why); their MST term activates only
+# via feedback penalties. There is deliberately NO per-layer penalty: height is only ever paid
+# through the volume term.
 _W_WIRE = 1.0
-_W_FOOTPRINT = 1.0
-_W_VOLUME = 0.02
 _W_AUTO = 4.0
+
+#: The selectable compactness objective. "Compact" is ambiguous and the two metrics pull opposite
+#: ways - stacking a layer shrinks the floor but can grow the enclosing box - so the builder
+#: picks: ``footprint`` = minimum floor area (stack tall; the default, the maintainer's target),
+#: ``volume`` = minimum enclosing box (stay flat/cubic), ``balanced`` = both weighted.
+Objective = Literal["footprint", "volume", "balanced"]
+
+#: (footprint weight, volume weight) per objective. Each pure mode drives one term and keeps the
+#: other as at most a mild tiebreak so equal winners still prefer the smaller build.
+_OBJECTIVE_WEIGHTS: dict[str, tuple[float, float]] = {
+    "footprint": (1.0, 0.02),
+    "volume": (0.0, 1.0),
+    "balanced": (0.5, 0.5),
+}
 
 # Annealing schedule (geometric cooling). Budget scales with machine count, clamped.
 _T0 = 2.0
@@ -104,13 +117,20 @@ _MAX_CANDIDATES = 16  # cap neighbour-adjacent insertion sites so recreate stays
 
 
 def optimize_placement(
-    problem: InputIR, *, seed: int = 0, net_penalties: dict[str, float] | None = None
+    problem: InputIR,
+    *,
+    seed: int = 0,
+    net_penalties: dict[str, float] | None = None,
+    objective: Objective = "footprint",
 ) -> PlacementResult:
     """Anneal the constructive placement toward a lower routing-aware cost (seeded, validated).
 
     ``net_penalties`` (net id -> extra weight) boosts a net's wirelength term so its machines pull
     tighter - the place<->route feedback signal: the solver penalizes the nets the router could
     not lay, so the next placement clusters them (shorter routes, or adjacency that auto-outputs).
+    ``objective`` selects what "compact" means (:data:`Objective`): minimum floor area
+    (``footprint``, the default - stack tall), minimum enclosing box (``volume`` - stay flat), or
+    ``balanced`` (both weighted).
     """
     base = place(problem)
     if not base.ok or len(base.placements) < 2:
@@ -147,10 +167,11 @@ def optimize_placement(
     machine_nets = _machine_nets(problem, wire_nets)
     machine_power = _machine_nets(problem, power_nets)
     machine_auto = _machine_auto(problem, auto_pairs)
+    weights = _OBJECTIVE_WEIGHTS[objective]
     rng = random.Random(seed)
 
     current = list(base.placements)
-    current_cost = _cost(current, machines, wire_nets, power_nets, auto_pairs)
+    current_cost = _cost(current, machines, wire_nets, power_nets, auto_pairs, weights)
     best, best_cost = current, current_cost
     iters = min(_MAX_ITERS, max(_MIN_ITERS, _PER_MACHINE * len(current)))
     temp = _T0
@@ -170,7 +191,7 @@ def optimize_placement(
         else:
             cand = _move(current, machines, region, reserved, rng)
         if cand is not None:
-            cand_cost = _cost(cand, machines, wire_nets, power_nets, auto_pairs)
+            cand_cost = _cost(cand, machines, wire_nets, power_nets, auto_pairs, weights)
             delta = cand_cost - current_cost
             if delta < 0 or rng.random() < math.exp(-delta / temp):
                 current, current_cost = cand, cand_cost
@@ -250,17 +271,20 @@ def _cost(
     wire_nets: list[tuple[list[str], float]],
     power_nets: list[tuple[list[str], float]],
     auto_pairs: list[tuple[str, str]],
+    weights: tuple[float, float],
 ) -> float:
-    """Routing-aware cost: weighted item/fluid HPWL + compactness (footprint-first, volume
-    tiebreak), minus an auto-output reward (the only orientation-dependent term, so reorient
-    moves are not free), plus an MST pull for each feedback-penalized power net.
+    """Routing-aware cost: weighted item/fluid HPWL + compactness per the objective, minus an
+    auto-output reward (the only orientation-dependent term, so reorient moves are not free),
+    plus an MST pull for each feedback-penalized power net.
 
-    Compactness is the floor area (x-span times z-span) as the driver - stacking a layer shrinks
-    it, sprawling grows it - with the full bounding-box volume as a mild tiebreak. ``power_nets``
-    holds only the nets the router failed and the solver penalized: each pays its penalty times
-    the minimum-spanning-tree length over the member centers (a shared-amperage trunk is a tree),
-    pulling the net tight until it routes. Un-penalized power nets cost nothing here - the real
-    cable cost is judged on routed layouts by the solver (module docstring)."""
+    Compactness is two independently weighted terms - ``weights`` is the objective's
+    ``(footprint weight, volume weight)`` pair (:data:`_OBJECTIVE_WEIGHTS`): the floor area
+    (x-span times z-span, shrunk by stacking) and the full bounding-box volume (shrunk by staying
+    flat/cubic). ``power_nets`` holds only the nets the router failed and the solver penalized:
+    each pays its penalty times the minimum-spanning-tree length over the member centers (a
+    shared-amperage trunk is a tree), pulling the net tight until it routes. Un-penalized power
+    nets cost nothing here - the real cable cost is judged on routed layouts by the solver
+    (module docstring)."""
     pos = {p.machine_id: p for p in placements}
     wire = 0.0
     for machine_ids, weight in wire_nets:
@@ -302,7 +326,8 @@ def _cost(
             is not None
         ):
             auto += 1
-    return _W_WIRE * wire + cable + _W_FOOTPRINT * footprint + _W_VOLUME * volume - _W_AUTO * auto
+    w_footprint, w_volume = weights
+    return _W_WIRE * wire + cable + w_footprint * footprint + w_volume * volume - _W_AUTO * auto
 
 
 def _mst_length(centers: list[tuple[float, float, float]]) -> float:

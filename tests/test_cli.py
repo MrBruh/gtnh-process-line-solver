@@ -48,6 +48,19 @@ def test_cli_fast_flag_skips_optimization(capsys: pytest.CaptureFixture[str]) ->
     assert "# Build guide" in capsys.readouterr().out
 
 
+def test_cli_objective_flag_is_accepted(capsys: pytest.CaptureFixture[str]) -> None:
+    # --objective selects what the optimizer treats as compact; with --fast it is accepted but
+    # ignored (constructive placement is floor-first by construction), which keeps this test fast.
+    assert main([_SAND, "--objective", "volume", "--fast"]) == 0
+    assert "# Build guide" in capsys.readouterr().out
+
+
+def test_cli_rejects_an_unknown_objective(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        main([_SAND, "--objective", "tiny"])  # argparse rejects values outside the choices
+    assert "--objective" in capsys.readouterr().err
+
+
 def test_cli_preview_writes_self_contained_html(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

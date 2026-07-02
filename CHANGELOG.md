@@ -230,6 +230,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   maintainer's hand-built 3-cable solution with a smaller footprint (5 vs 6) and volume (10 vs
   12). Acceptance is pinned by a solver test.
 
+- **Selectable compactness objective** - `solve(..., objective="footprint" | "volume" |
+  "balanced")` and `gtnh-solve --objective`. "Compact" is ambiguous and the two metrics pull
+  opposite ways (stacking a layer shrinks the floor but can grow the enclosing box), so the
+  builder picks: `footprint` (default, the maintainer's target) minimizes floor area and stacks
+  tall, `volume` minimizes the enclosing box and stays flat/cubic, `balanced` weighs both. The
+  objective drives both the placement cost's compactness weights and the feedback loop's quality
+  ranking of routed layouts; the fast path ignores it (constructive placement is floor-first by
+  construction). This is the future unified site's second user control, next to optimize-or-not.
+  Sand passes the hand-built compactness + <= 3-cable budget under every objective.
+
 ### Changed
 - **The router now owns the auto-output vs pipe decision.** `route()` decides itself, from the
   final placements + orientations, which nets GT's free auto-output connection covers (the logic

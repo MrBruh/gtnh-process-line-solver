@@ -169,6 +169,19 @@ def test_optimize_is_deterministic_per_seed() -> None:
     )
 
 
+def test_optimize_objective_selects_the_compactness_weights() -> None:
+    # The objective (footprint | volume | balanced) picks the compactness weights: each mode must
+    # yield a complete, validator-clean placement, deterministically per seed. The layout-shape
+    # semantics (stack tall vs stay flat) are asserted end to end on sand in test_solver.
+    problem = _star(5)
+    for objective in ("footprint", "volume", "balanced"):
+        result = optimize_placement(problem, seed=2, objective=objective)
+        again = optimize_placement(problem, seed=2, objective=objective)
+        assert result.ok
+        assert result.placements == again.placements
+        assert _validates(problem, result.placements)
+
+
 def test_lns_scales_and_stays_valid_on_a_larger_star() -> None:
     # A 9-spoke star exercises the LNS ruin-and-recreate move (a hub + its net-neighbours are a
     # natural related cluster): the optimizer must still emit a complete, validator-clean placement
