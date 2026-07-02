@@ -264,9 +264,9 @@ def _powered_star(n_spokes: int = 3) -> InputIR:
 
 
 def test_optimize_keeps_the_power_source_feed_on_the_boundary() -> None:
-    # The power net pulls the source toward the hub cluster, but every move must keep its front
-    # (feed) face flush on a region wall - the hard constraint the validator enforces. Several
-    # seeds so relocate/swap/reorient and the LNS recreate all get exercised against it.
+    # Every move must keep the source's front (feed) face flush on a region wall - the hard
+    # constraint the validator enforces. Several seeds so relocate/swap/reorient and the LNS
+    # recreate all get exercised against it.
     problem = _powered_star()
     machine = next(m for m in problem.machines if m.id == "psrc")
     for seed in range(4):
@@ -277,6 +277,24 @@ def test_optimize_keeps_the_power_source_feed_on_the_boundary() -> None:
             src.cell, machine.footprint, src.orientation, problem.bounding_region
         ), f"seed {seed}: source feed face left the boundary"
         assert _validates(problem, result.placements)
+
+
+def test_power_net_penalty_switches_on_the_mst_pull() -> None:
+    # A power net has no base cost term (real cable cost is judged by the solver on routed
+    # layouts), so only a feedback penalty - the router failed the net - activates its MST pull.
+    # Under a heavy penalty the source must end up hugging its sinks: the trunk the router could
+    # not lay gets the shortest possible tree to try again with.
+    problem = _powered_star()
+    pulled = optimize_placement(problem, seed=1, net_penalties={"power:LV": 50.0})
+    assert pulled.ok
+    pos = {p.machine_id: p.cell for p in pulled.placements}
+    src = pos["psrc"]
+    nearest = min(
+        abs(src.x - pos[f"s{i}"].x) + abs(src.y - pos[f"s{i}"].y) + abs(src.z - pos[f"s{i}"].z)
+        for i in range(3)
+    )
+    assert nearest <= 2, f"penalized power net left the source {nearest} cells from its sinks"
+    assert _validates(problem, pulled.placements)
 
 
 def test_optimize_respects_reserved_and_bounds() -> None:

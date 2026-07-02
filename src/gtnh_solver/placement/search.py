@@ -1,13 +1,23 @@
 """placement.search - Phase 2 simulated-annealing + LNS placement with a routing-aware cost.
 
 Starts from the constructive first-fit solution and improves it under a cost that proxies
-buildability: half-perimeter wirelength (HPWL) per net pulls connected machines together (more
-auto-output, shorter pipes), an auto-output reward favours orientations whose usable (non-front)
-faces actually let a source eject into its sink, plus a mild compactness bias on the total
-bounding-box volume (no separate per-layer term: volume already counts height, so the optimizer
-minimises the whole box, not the layer count). The auto reward is the only orientation-dependent
-term, so reorient moves carry a real cost signal -
-without it they were free random walk that could finalize an orientation BLOCKING auto-output.
+buildability: half-perimeter wirelength (HPWL) per item/fluid net pulls connected machines
+together (more auto-output, shorter pipes); an auto-output reward favours orientations whose
+usable (non-front) faces actually let a source eject into its sink; and compactness is two terms
+- the **footprint** (floor area, x-span times z-span) as the driver, so the optimizer stacks
+vertically to shrink the floor, plus a mild total bounding-box **volume** tiebreak so equal
+footprints prefer the shorter build (docs/ROADMAP.md lane C). The auto reward is the only
+orientation-dependent term, so reorient moves carry a real cost signal - without it they were
+free random walk that could finalize an orientation BLOCKING auto-output.
+
+Power nets carry **no base cost term**: cheap center-distance proxies (HPWL, MST) cannot see
+dock faces or shared cable taps, and measurably steer AWAY from low-cable layouts (a source
+sitting on top of a machine row scores nearer its sinks than one whose dock cell the sinks can
+tap, yet needs more cable). The real per-segment cable cost is judged where it is knowable: the
+solver's feedback loop routes each candidate placement and keeps the best layout by (footprint,
+cable cells, volume). What remains here is the rescue path - a power net the router could NOT
+lay gets a feedback penalty, which switches on a minimum-spanning-tree pull over the net's
+members (a shared-amperage trunk is a tree) until it routes.
 
 The neighbourhood mixes small moves (relocate / swap / reorient; orientation is a search variable)
 with a **large neighbourhood search (LNS) ruin-and-recreate** move: rip out a *related* cluster of
@@ -62,15 +72,17 @@ from .constructive import PlacementResult, _fit, place
 #: The six face-adjacent offsets, for growing LNS insertion candidates around placed neighbours.
 _FACE_DELTAS = tuple(FACE_DELTAS.values())
 
-# Cost weights: wirelength dominates (it drives auto-output + short pipes); an auto-output reward
-# makes orientation matter (the front face carries no I/O, so the wrong orientation BLOCKS the
-# free connection - reorient moves are a no-op on the other terms); a compactness term on the
-# total bounding-box volume breaks ties without overriding routability. There is deliberately NO
-# separate per-layer penalty: the bbox volume already counts the y-extent, so the optimizer trades
-# height against footprint purely by which yields the smaller box - it optimizes total volume, not
-# layer count (docs/ROADMAP.md lane C).
+# Cost weights. Wirelength (item/fluid HPWL) dominates: it drives auto-output and short pipes.
+# The auto-output reward makes orientation matter (the front face carries no I/O, so the wrong
+# orientation BLOCKS the free connection - reorient moves are a no-op on the other terms).
+# Compactness is footprint-first (the maintainer's objective: optimize on a smaller floor area -
+# stacking a layer is free, sprawling is not), with the total bounding-box volume as a mild
+# tiebreak so equal footprints still prefer the smaller box. There is deliberately NO per-layer
+# penalty: height is only paid through the volume tiebreak. Power nets have no weight here (the
+# module docstring says why); their MST term activates only via feedback penalties.
 _W_WIRE = 1.0
-_W_COMPACT = 0.02
+_W_FOOTPRINT = 1.0
+_W_VOLUME = 0.02
 _W_AUTO = 4.0
 
 # Annealing schedule (geometric cooling). Budget scales with machine count, clamped.
@@ -108,15 +120,23 @@ def optimize_placement(
     region = problem.bounding_region
     reserved = {(c.x, c.y, c.z) for c in problem.reserved_cells}
     penalties = net_penalties or {}
-    # Nets that are physically routed (skip ME-toggled): each is (machine ids, wirelength weight),
-    # where a penalized net weighs more so the optimizer shortens it preferentially.
-    nets = [
-        ([e.machine_id for e in n.endpoints], 1.0 + penalties.get(n.id, 0.0))
-        for n in problem.nets
-        if not problem.me_toggles.toggled(n.commodity)
-    ]
+    # Nets that are physically routed (skip ME-toggled): each is (machine ids, weight), where a
+    # penalized net weighs more so the optimizer shortens it preferentially. Item/fluid nets pay
+    # HPWL. Power nets have NO base term (module docstring says why) - one enters the cost, as
+    # an MST trunk-length pull, only once the router fails it and the feedback penalizes it.
+    wire_nets: list[tuple[list[str], float]] = []
+    power_nets: list[tuple[list[str], float]] = []
+    for n in problem.nets:
+        if problem.me_toggles.toggled(n.commodity):
+            continue
+        ids = [e.machine_id for e in n.endpoints]
+        if n.commodity is Commodity.POWER:
+            if penalties.get(n.id):
+                power_nets.append((ids, penalties[n.id]))
+        else:
+            wire_nets.append((ids, 1.0 + penalties.get(n.id, 0.0)))
     # Directed source->sink pairs that COULD auto-output (simple 1->1 item/fluid nets, like the
-    # solver's own rule): the cost rewards each pair the current placement+orientation makes
+    # router's own rule): the cost rewards each pair the current placement+orientation makes
     # face-adjacent, so orientation has a gradient toward enabling the free connection.
     auto_pairs = _auto_candidate_pairs(problem)
     # Which machines share a net (any commodity): the LNS ruin step grows a *related* cluster along
@@ -124,24 +144,33 @@ def optimize_placement(
     adjacency = _net_adjacency(problem)
     # Per-machine views the LNS recreate ranks candidate insertions with, cheaply and without a full
     # cost recompute: the nets each machine is in, and the auto-output pairs it participates in.
-    machine_nets = _machine_nets(problem, nets)
+    machine_nets = _machine_nets(problem, wire_nets)
+    machine_power = _machine_nets(problem, power_nets)
     machine_auto = _machine_auto(problem, auto_pairs)
     rng = random.Random(seed)
 
     current = list(base.placements)
-    current_cost = _cost(current, machines, nets, auto_pairs)
+    current_cost = _cost(current, machines, wire_nets, power_nets, auto_pairs)
     best, best_cost = current, current_cost
     iters = min(_MAX_ITERS, max(_MIN_ITERS, _PER_MACHINE * len(current)))
     temp = _T0
     for _ in range(iters):
         if rng.random() < _P_LNS:
             cand = _ruin_and_recreate(
-                current, machines, region, reserved, adjacency, machine_nets, machine_auto, rng
+                current,
+                machines,
+                region,
+                reserved,
+                adjacency,
+                machine_nets,
+                machine_power,
+                machine_auto,
+                rng,
             )
         else:
             cand = _move(current, machines, region, reserved, rng)
         if cand is not None:
-            cand_cost = _cost(cand, machines, nets, auto_pairs)
+            cand_cost = _cost(cand, machines, wire_nets, power_nets, auto_pairs)
             delta = cand_cost - current_cost
             if delta < 0 or rng.random() < math.exp(-delta / temp):
                 current, current_cost = cand, cand_cost
@@ -191,7 +220,9 @@ def _machine_auto(
 
 def _auto_candidate_pairs(problem: InputIR) -> list[tuple[str, str]]:
     """Directed (source, sink) machine pairs for the simple 1->1 item/fluid nets that can
-    auto-output - the same nets ``solver._assign_auto_outputs`` covers (power/ME never auto-feed).
+    auto-output - the same nets the router's auto-output assignment covers (power/ME never
+    auto-feed). This is the *cheap proxy* of that decision the placement cost keeps so
+    orientation still has a gradient; the router is the authority on the final layout.
     """
     port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
     pairs: list[tuple[str, str]] = []
@@ -216,19 +247,23 @@ def _auto_candidate_pairs(problem: InputIR) -> list[tuple[str, str]]:
 def _cost(
     placements: list[Placement],
     machines: dict[str, Machine],
-    nets: list[tuple[list[str], float]],
+    wire_nets: list[tuple[list[str], float]],
+    power_nets: list[tuple[list[str], float]],
     auto_pairs: list[tuple[str, str]],
 ) -> float:
-    """Routing-aware cost: weighted net HPWL + compactness (bbox volume), minus an auto-output
-    reward (the only orientation-dependent term, so reorient moves are not free).
+    """Routing-aware cost: weighted item/fluid HPWL + compactness (footprint-first, volume
+    tiebreak), minus an auto-output reward (the only orientation-dependent term, so reorient
+    moves are not free), plus an MST pull for each feedback-penalized power net.
 
-    Compactness is the total bounding-box volume, which already accounts for the y-extent, so there
-    is no separate per-layer term - the optimizer minimises the whole box, not the number of layers
-    (docs/ROADMAP.md lane C). Each net's HPWL is scaled by its weight (1.0, or more for a
-    feedback-penalized net)."""
+    Compactness is the floor area (x-span times z-span) as the driver - stacking a layer shrinks
+    it, sprawling grows it - with the full bounding-box volume as a mild tiebreak. ``power_nets``
+    holds only the nets the router failed and the solver penalized: each pays its penalty times
+    the minimum-spanning-tree length over the member centers (a shared-amperage trunk is a tree),
+    pulling the net tight until it routes. Un-penalized power nets cost nothing here - the real
+    cable cost is judged on routed layouts by the solver (module docstring)."""
     pos = {p.machine_id: p for p in placements}
     wire = 0.0
-    for machine_ids, weight in nets:
+    for machine_ids, weight in wire_nets:
         centers = [_center(pos[mid], machines[mid]) for mid in machine_ids if mid in pos]
         if len(centers) < 2:
             continue
@@ -236,13 +271,19 @@ def _cost(
             coords = [c[axis] for c in centers]
             wire += weight * (max(coords) - min(coords))
 
+    cable = 0.0
+    for machine_ids, weight in power_nets:
+        centers = [_center(pos[mid], machines[mid]) for mid in machine_ids if mid in pos]
+        cable += weight * _mst_length(centers)
+
     cells = [
         c for p in placements for c in occupied_cells(p.cell, machines[p.machine_id].footprint)
     ]
     xs = [c[0] for c in cells]
     ys = [c[1] for c in cells]
     zs = [c[2] for c in cells]
-    volume = (max(xs) - min(xs) + 1) * (max(ys) - min(ys) + 1) * (max(zs) - min(zs) + 1)
+    footprint = (max(xs) - min(xs) + 1) * (max(zs) - min(zs) + 1)
+    volume = footprint * (max(ys) - min(ys) + 1)
 
     auto = 0
     for source_id, sink_id in auto_pairs:
@@ -261,7 +302,35 @@ def _cost(
             is not None
         ):
             auto += 1
-    return _W_WIRE * wire + _W_COMPACT * volume - _W_AUTO * auto
+    return _W_WIRE * wire + cable + _W_FOOTPRINT * footprint + _W_VOLUME * volume - _W_AUTO * auto
+
+
+def _mst_length(centers: list[tuple[float, float, float]]) -> float:
+    """Manhattan minimum-spanning-tree length over ``centers`` (Prim, O(n^2); n is a power net's
+    member count, so small). The trunk-length proxy for a shared-amperage power net: the router
+    grows the trunk as a tree, so its cable count scales with the Steiner tree over the members,
+    which the MST approximates from above (within 1.5x for Manhattan metrics)."""
+    n = len(centers)
+    if n < 2:
+        return 0.0
+    dist = [_manhattan(centers[0], c) for c in centers]
+    in_tree = [False] * n
+    in_tree[0] = True
+    total = 0.0
+    for _ in range(n - 1):
+        best_i = min((i for i in range(n) if not in_tree[i]), key=lambda i: dist[i])
+        total += dist[best_i]
+        in_tree[best_i] = True
+        for i in range(n):
+            if not in_tree[i]:
+                d = _manhattan(centers[best_i], centers[i])
+                if d < dist[i]:
+                    dist[i] = d
+    return total
+
+
+def _manhattan(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
+    return abs(a[0] - b[0]) + abs(a[1] - b[1]) + abs(a[2] - b[2])
 
 
 def _center(p: Placement, m: Machine) -> tuple[float, float, float]:
@@ -404,6 +473,7 @@ def _ruin_and_recreate(
     reserved: set[Cell],
     adjacency: dict[str, set[str]],
     machine_nets: dict[str, list[tuple[list[str], float]]],
+    machine_power: dict[str, list[tuple[list[str], float]]],
     machine_auto: dict[str, list[tuple[str, str]]],
     rng: random.Random,
 ) -> list[Placement] | None:
@@ -446,6 +516,7 @@ def _ruin_and_recreate(
             machines,
             adjacency,
             machine_nets,
+            machine_power,
             machine_auto,
             rng,
         )
@@ -503,6 +574,7 @@ def _best_insertion(
     machines: dict[str, Machine],
     adjacency: dict[str, set[str]],
     machine_nets: dict[str, list[tuple[list[str], float]]],
+    machine_power: dict[str, list[tuple[list[str], float]]],
     machine_auto: dict[str, list[tuple[str, str]]],
     rng: random.Random,
 ) -> tuple[CellCoord, Facing] | None:
@@ -536,6 +608,7 @@ def _best_insertion(
                 placed_pos,
                 machines,
                 machine_nets,
+                machine_power,
                 machine_auto,
             )
             if cost < best_cost:
@@ -555,13 +628,16 @@ def _marginal_insertion_cost(
     placed_pos: dict[str, Placement],
     machines: dict[str, Machine],
     machine_nets: dict[str, list[tuple[list[str], float]]],
+    machine_power: dict[str, list[tuple[list[str], float]]],
     machine_auto: dict[str, list[tuple[str, str]]],
 ) -> float:
-    """The cost terms that change with where ``machine_id`` goes: the weighted HPWL of its own nets
-    over their already-placed members (this candidate included), minus the auto-output reward for
-    the pairs the candidate makes face-adjacent. A cheap marginal proxy of ``_cost`` for ranking
-    candidate insertions; the annealing loop's full ``_cost`` still gates acceptance (the
-    bounding-box volume term, which this per-machine view cannot see, included)."""
+    """The cost terms that change with where ``machine_id`` goes: the weighted HPWL of its own
+    item/fluid nets over their already-placed members (this candidate included), plus for each of
+    its feedback-penalized power nets the Manhattan distance to the nearest placed member (the
+    increment Prim would pay to attach this machine to the trunk MST), minus the auto-output
+    reward for the pairs the candidate makes face-adjacent. A cheap marginal proxy of ``_cost``
+    for ranking candidate insertions; the annealing loop's full ``_cost`` still gates acceptance
+    (the footprint/volume terms, which this per-machine view cannot see, included)."""
     cx = origin.x + m.footprint.sx / 2
     cy = origin.y + m.footprint.sy / 2
     cz = origin.z + m.footprint.sz / 2
@@ -576,6 +652,17 @@ def _marginal_insertion_cost(
                 zs.append(oz)
         if len(xs) > 1:
             wire += weight * (max(xs) - min(xs) + max(ys) - min(ys) + max(zs) - min(zs))
+    cable = 0.0
+    for ids, weight in machine_power[machine_id]:
+        attach = min(
+            (
+                _manhattan((cx, cy, cz), _center(placed_pos[mid], machines[mid]))
+                for mid in ids
+                if mid != machine_id and mid in placed_pos
+            ),
+            default=0.0,
+        )
+        cable += weight * attach
     auto = 0
     for src, sink in machine_auto[machine_id]:
         other = sink if src == machine_id else src
@@ -593,7 +680,7 @@ def _marginal_insertion_cost(
             )
         if faces is not None:
             auto += 1
-    return _W_WIRE * wire - _W_AUTO * auto
+    return _W_WIRE * wire + cable - _W_AUTO * auto
 
 
 def _candidate_origins(

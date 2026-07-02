@@ -52,6 +52,33 @@ def test_solve_sand_items_auto_feed_and_power_is_cabled() -> None:
     ]  # only the power trunk is cabled
 
 
+def test_solve_sand_optimized_matches_or_beats_the_hand_built_target() -> None:
+    # The acceptance target (docs/ROADMAP.md lane C): the maintainer hand-builds the sand line in
+    # a 3x2x2 volume with 3 power cables, so the optimizer must find that or better - VALID, the
+    # whole built structure (machines + routes) on a floor area <= 3x2 = 6 cells, and <= 3 power
+    # cable cells. The quality-driven feedback loop is what finds it: it routes every attempt and
+    # keeps the best by (footprint, cable cells, volume) instead of returning the first valid.
+    ir = adapt_file(_SAND)
+    layout = solve(ir)
+    assert layout.status is LayoutStatus.VALID
+    cells = {(p.cell.x, p.cell.y, p.cell.z) for p in layout.placements}
+    power_cells = set()
+    for r in layout.routes:
+        for seg in r.segments:
+            cells.update(
+                {(seg.start.x, seg.start.y, seg.start.z), (seg.end.x, seg.end.y, seg.end.z)}
+            )
+            if r.commodity is Commodity.POWER:
+                power_cells.update(
+                    {(seg.start.x, seg.start.y, seg.start.z), (seg.end.x, seg.end.y, seg.end.z)}
+                )
+    xs = [c[0] for c in cells]
+    zs = [c[2] for c in cells]
+    footprint = (max(xs) - min(xs) + 1) * (max(zs) - min(zs) + 1)
+    assert footprint <= 6, f"structure footprint {footprint} exceeds the hand-built 3x2"
+    assert len(power_cells) <= 3, f"{len(power_cells)} power cable cells exceed the hand-built 3"
+
+
 def test_solve_is_deterministic() -> None:
     ir = adapt_file(_SAND)
     assert solve(ir) == solve(ir)

@@ -215,6 +215,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Machine.is_power_source` (the buildguide's private predicate, promoted) and
   `ir.geometry.front_on_boundary`.
 
+- **The optimizer now finds compact, low-wire layouts (the hand-built sand target).** Two
+  coordinated changes (docs/ROADMAP.md lane C). The placement cost is **footprint-first**: the
+  compactness driver is now the floor area (x-span times z-span, weight 1.0), so stacking a layer
+  is free while sprawling costs, with the bounding-box volume kept as a mild tiebreak; power nets
+  lost their base wirelength term entirely (center-distance proxies cannot see dock faces or
+  shared cable taps and measurably steered AWAY from low-cable layouts) and instead gain an MST
+  trunk-length pull only when feedback-penalized, to rescue a power net the router failed. The
+  real cable cost is judged where it is knowable: the solver's **feedback loop is now
+  quality-driven** - every bounded attempt is fully routed + validated and the best VALID layout
+  by (structure footprint, power cable cells, structure volume) wins, instead of returning the
+  first valid one. Optimized sand now solves to a 5x1x2 stack - the machine row with the source
+  on top and a **3-cell cable trunk** tapped through the hammers' top faces - matching the
+  maintainer's hand-built 3-cable solution with a smaller footprint (5 vs 6) and volume (10 vs
+  12). Acceptance is pinned by a solver test.
+
 ### Changed
 - **The router now owns the auto-output vs pipe decision.** `route()` decides itself, from the
   final placements + orientations, which nets GT's free auto-output connection covers (the logic

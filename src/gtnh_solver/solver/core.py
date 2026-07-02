@@ -14,13 +14,18 @@ One *attempt* assembles a layout (docs/ROADMAP.md):
      our own output is what makes the "never returns a silently-invalid layout" promise true
      end to end (docs/ARCHITECTURE.md #4) - not just an internal `place.ok && route.ok`.
 
-``solve`` wraps that in the **place<->route feedback loop** (docs/ARCHITECTURE.md #1, #6): if an
-attempt leaves nets unrouted, it penalizes exactly those nets (so the next placement pulls their
-machines tighter - shorter routes, or adjacency that auto-outputs) and re-places with the next
-seed. It keeps the best layout seen and returns the first fully-VALID one (anytime: best-so-far),
-stopping early when re-placing cannot help - a non-routing defect, or the same nets failing again
-(feedback not progressing). It is **deterministic** (bounded attempts keyed off ``seed`` + the
-penalties, no wall-clock), so a given input always yields the same layout.
+``solve`` wraps that in the **place<->route feedback loop** (docs/ARCHITECTURE.md #1, #6), which
+is also where layout *quality* is judged: cheap placement-time proxies cannot see dock faces or
+shared cable taps, so the real per-segment cable cost is only knowable on a routed layout. Every
+bounded attempt (a fresh SA seed) is therefore fully routed + validated, and the best VALID
+layout by **(structure footprint, power cable cells, structure volume)** is kept - multi-start
+search over what actually matters, not first-valid-wins. If an attempt leaves nets unrouted, it
+penalizes exactly those nets (so the next placement pulls their machines tighter - shorter
+routes, adjacency that auto-outputs, or an MST pull for a failed power trunk) and re-places with
+the next seed; with no valid layout yet in hand, it stops early when re-placing cannot help (a
+non-routing defect, or the same nets failing again). It is **deterministic** (bounded attempts
+keyed off ``seed`` + the penalties, no wall-clock), so a given input always yields the same
+layout.
 
 ``solve(..., optimize=False)`` is the **fast** path: a single constructive placement with no
 annealing and no feedback loop (near-instant, simpler layout), still validated. The two modes are
@@ -30,12 +35,14 @@ the "optimize or not" choice the planned unified site exposes to the builder.
 from __future__ import annotations
 
 from gtnh_solver.ir import (
+    Commodity,
     Infeasibility,
     InputIR,
     LayoutResult,
     LayoutStatus,
     Placement,
 )
+from gtnh_solver.ir.geometry import occupied_cells
 from gtnh_solver.placement import optimize_placement, place
 from gtnh_solver.router import route, route_power
 from gtnh_solver.validator import ValidationReport, validate
@@ -51,9 +58,10 @@ def solve(problem: InputIR, *, seed: int = 0, optimize: bool = True) -> LayoutRe
 
     ``optimize`` selects how hard to work (the site's "optimize or not" control):
 
-    - ``True`` (default): the annealed placer (SA + LNS) inside the place<->route feedback loop -
-      tighter layouts (more auto-output, shorter routes), at the cost of seconds of CPU. Returns
-      the first fully-VALID layout, else the best partial.
+    - ``True`` (default): the annealed placer (SA + LNS) inside the place<->route feedback loop.
+      Every bounded attempt is fully routed, and the best VALID layout by (structure footprint,
+      power cable cells, structure volume) is returned - tighter, lower-wire layouts at the cost
+      of seconds of CPU. If no attempt is fully valid, the best partial is returned.
     - ``False`` (**fast**): a single constructive first-fit placement, no optimization and no
       feedback loop - near-instant and simple. Its layout is still validated, so it is VALID or an
       explicit partial/infeasibility, never silently invalid; but it will not cluster machines for
@@ -63,7 +71,9 @@ def solve(problem: InputIR, *, seed: int = 0, optimize: bool = True) -> LayoutRe
         return _solve_fast(problem, seed)
     penalties: dict[str, float] = {}
     seen_failed: set[frozenset[str]] = set()
-    best: LayoutResult | None = None
+    best_valid: LayoutResult | None = None
+    best_quality: tuple[int, int, int] | None = None
+    best_partial: LayoutResult | None = None
     best_failures = -1
     for attempt in range(_MAX_FEEDBACK_PASSES):
         attempt_seed = seed + attempt
@@ -78,21 +88,67 @@ def solve(problem: InputIR, *, seed: int = 0, optimize: bool = True) -> LayoutRe
 
         layout, failed_nets = _assemble(problem, placement.placements, attempt_seed)
         if layout.status is LayoutStatus.VALID:
-            return layout  # fully valid - the best possible; stop
-        if best is None or len(failed_nets) < best_failures:
-            best, best_failures = layout, len(failed_nets)  # fewest-unrouted partial so far
+            # Valid, but maybe not the best the remaining seeds can do: rank it on the real,
+            # routed structure and keep exploring (ties keep the earliest attempt).
+            quality = _quality(problem, layout)
+            if best_quality is None or quality < best_quality:
+                best_valid, best_quality = layout, quality
+            continue
+        if best_partial is None or len(failed_nets) < best_failures:
+            best_partial, best_failures = layout, len(failed_nets)  # fewest-unrouted so far
 
-        if not failed_nets:
-            break  # a non-routing defect (independent validation) - re-placing cannot help
-        key = frozenset(failed_nets)
-        if key in seen_failed:
-            break  # the same nets keep failing - the feedback is not making progress
-        seen_failed.add(key)
+        if best_valid is None:
+            # No valid layout in hand: stop early when re-placing cannot possibly help. (Once one
+            # exists the remaining attempts are pure multi-start exploration, so keep going.)
+            if not failed_nets:
+                break  # a non-routing defect (independent validation) - re-placing cannot help
+            key = frozenset(failed_nets)
+            if key in seen_failed:
+                break  # the same nets keep failing - the feedback is not making progress
+            seen_failed.add(key)
         for net_id in failed_nets:
             penalties[net_id] = penalties.get(net_id, 0.0) + _PENALTY_STEP
 
-    assert best is not None  # attempt 0 always either returns or sets best
-    return best
+    if best_valid is not None:
+        return best_valid
+    assert best_partial is not None  # attempt 0 always either returns or sets one of the two
+    return best_partial
+
+
+def _quality(problem: InputIR, layout: LayoutResult) -> tuple[int, int, int]:
+    """Rank a VALID layout for the feedback loop, smaller-lexicographic is better: (structure
+    footprint, power cable cells, structure volume).
+
+    The *structure* is every machine and route cell - what the builder actually erects, so a
+    trunk sprawling outside the machine block counts against the layout. Footprint (floor area)
+    leads: the maintainer optimizes for a smaller area and stacks vertically. Real cable cells
+    come second - only a routed layout knows them (placement-time proxies cannot see dock faces
+    or shared taps) - and the enclosing volume breaks ties toward the smaller box.
+    """
+    machines = {m.id: m for m in problem.machines}
+    cells: set[tuple[int, int, int]] = set()
+    for p in layout.placements:
+        machine = machines.get(p.machine_id)
+        if machine is not None:
+            cells.update(occupied_cells(p.cell, machine.footprint))
+    power_cells: set[tuple[int, int, int]] = set()
+    for r in layout.routes:
+        for seg in r.segments:
+            for cell in (
+                (seg.start.x, seg.start.y, seg.start.z),
+                (seg.end.x, seg.end.y, seg.end.z),
+            ):
+                cells.add(cell)
+                if r.commodity is Commodity.POWER:
+                    power_cells.add(cell)
+    if not cells:
+        return (0, 0, 0)
+    xs = [c[0] for c in cells]
+    ys = [c[1] for c in cells]
+    zs = [c[2] for c in cells]
+    footprint = (max(xs) - min(xs) + 1) * (max(zs) - min(zs) + 1)
+    volume = footprint * (max(ys) - min(ys) + 1)
+    return (footprint, len(power_cells), volume)
 
 
 def _solve_fast(problem: InputIR, seed: int) -> LayoutResult:
