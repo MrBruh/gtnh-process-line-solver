@@ -54,8 +54,9 @@ def build_guide(problem: InputIR, layout: LayoutResult) -> str:
     lines += _header(problem, layout)
     lines += _bom(layout, machines)
     lines += _placement_table(layout, machines)
-    lines += _system_io_section(system_io(problem, layout))
-    lines += _power_note(layout, machines)
+    sysio = system_io(problem, layout)
+    lines += _system_io_section(sysio)
+    lines += _power_note(layout, machines, sysio)
     lines += _connections(layout, machines, nets, port_dir, coord_of)
     lines += _layer_maps(problem, layout, machines)
     return "\n".join(lines) + "\n"
@@ -167,12 +168,16 @@ def _system_io_section(sysio: SystemIO) -> list[str]:
     return lines
 
 
-def _power_note(layout: LayoutResult, machines: dict[str, Machine]) -> list[str]:
+def _power_note(layout: LayoutResult, machines: dict[str, Machine], sysio: SystemIO) -> list[str]:
     """Tell the builder where to feed external power - synthetic sources are not self-powered.
 
-    Each source is stated as a wiring spec: its tier voltage, the amperage to feed (the cable
-    thickness at the trunk root, i.e. the summed amps of its tier), and the EU/t that buys. The
-    per-segment thickness along the trunk is listed under Connections.
+    Each source is stated as a wiring spec: its tier voltage, the amperage to feed, and the EU/t
+    that buys. The amperage comes from the shared ``system_io`` derivation - the tier's machine
+    draws summed at each machine's *delivered* voltage - NOT from cable thickness: a machine
+    tapping the source's own dock cell draws through no segment at all, and a cable tier rounds
+    up (3 A rides a 4x cable), so the thickest segment both under- and over-states what the
+    builder must actually feed. The previewer reads the same numbers, so the two surfaces agree.
+    The per-segment thickness along the trunk is listed under Connections.
     """
     sources = [
         (p, machines[p.machine_id])
@@ -190,29 +195,27 @@ def _power_note(layout: LayoutResult, machines: dict[str, Machine]) -> list[str]
         "",
     ]
     for p, m in sources:
-        root = _root_thickness(layout, p.machine_id)
+        amps = sysio.power_amps_by_tier.get(m.voltage_tier, 0)
         cell = f"({p.cell.x}, {p.cell.y}, {p.cell.z})"
-        if root is None:  # source with no cable (nothing to size against)
-            lines.append(f"  {m.type} at {cell}")
+        if not _has_power_trunk(layout, p.machine_id) or amps <= 0:
+            lines.append(f"  {m.type} at {cell}")  # no cable / no sizeable draw: nothing to spec
             continue
         volts = tier_voltage(m.voltage_tier)
         lines.append(
             f"  {m.type} at {cell}: feed {m.voltage_tier} ({volts} V), "
-            f">={root} A -> up to {volts * root} EU/t"
+            f">={amps} A -> up to {volts * amps} EU/t"
         )
     lines.append("")
     return lines
 
 
-def _root_thickness(layout: LayoutResult, source_machine_id: str) -> int | None:
-    """The thickest cable segment on the trunk this source feeds (its root carries the whole tier)."""
-    best: int | None = None
-    for r in layout.routes:
-        if r.commodity is not Commodity.POWER or not r.thickness_per_segment:
-            continue
-        if any(t.machine_id == source_machine_id for t in r.terminals):
-            best = max(best or 0, max(r.thickness_per_segment))
-    return best
+def _has_power_trunk(layout: LayoutResult, source_machine_id: str) -> bool:
+    """Whether any power route docks on this source (an ME-toggled or unrouted tier has none)."""
+    return any(
+        r.commodity is Commodity.POWER
+        and any(t.machine_id == source_machine_id for t in r.terminals)
+        for r in layout.routes
+    )
 
 
 def _machine_at(

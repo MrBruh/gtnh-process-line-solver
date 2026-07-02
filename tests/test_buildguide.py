@@ -27,7 +27,7 @@ from gtnh_solver.ir import (
     Placement,
     Port,
 )
-from gtnh_solver.router import route_power
+from gtnh_solver.router import route, route_power
 from gtnh_solver.solver import solve
 
 _SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
@@ -84,10 +84,50 @@ def test_build_guide_placement_table_has_coords_and_front() -> None:
 def test_build_guide_power_note_states_feed_spec_as_tier_amps_eut() -> None:
     # the source must be fed as a wiring spec, not a bare cable thickness (GitHub #15 B2). On the
     # fast (constructive) row the trunk runs source dock (5,0,1) -> (1,0,1): the hammers tap or
-    # dock at depths 2/3/4 (16 EU/t at 30/29/28 V -> 1 A each), so the root carries 3 A -> a 4x
-    # cable. LV is 32 V, so the note reads 4 A -> up to 128 EU/t (above the 3 x 16 = 48 EU/t draw).
+    # dock at depths 2/3/4 (16 EU/t at 30/29/28 V -> 1 A each), so the tier draws 3 A - the
+    # system_io number the previewer also shows. LV is 32 V, so the note reads 3 A -> up to
+    # 96 EU/t (the trunk's root CABLE is still 4x, cable tiers round up; that lives under
+    # Connections, not here).
     guide = _sand_guide()
-    assert "feed LV (32 V), >=4 A -> up to 128 EU/t" in guide
+    assert "feed LV (32 V), >=3 A -> up to 96 EU/t" in guide
+
+
+def test_build_guide_power_note_counts_a_sink_tapping_the_source_dock() -> None:
+    # Regression (maintainer-reported): the note used to read the feed amperage off the thickest
+    # cable segment, but a hammer tapping the source's own dock cell draws through NO segment, so
+    # on the optimized sand stack the guide said ">=2 A -> up to 64 EU/t" while the previewer
+    # (system_io) said 3 A / 96 EU/t. Rebuild that exact layout: the machine row on the floor,
+    # the source on top of the buffer, the trunk (3,1,0)->(1,1,0) along the hammers' top faces -
+    # the nearest hammer taps the root at depth 0, the others at depths 1 and 2 (1 A each).
+    ir = adapt_file(_SAND)
+    hammers = [m for m in ir.machines if m.type == "Forge Hammer"]
+    source = next(m for m in ir.machines if m.is_power_source)
+    storage = next(m for m in ir.machines if m.type == "Super Chest" and ":" not in m.id)
+    out_buffer = next(m for m in ir.machines if m.id.startswith("output-buffer:"))
+
+    def at(m: Machine, x: int, y: int, z: int) -> Placement:
+        return Placement(machine_id=m.id, cell=CellCoord(x=x, y=y, z=z), orientation=Facing.NORTH)
+
+    placements = [
+        at(storage, 0, 0, 0),
+        *(at(h, 1 + i, 0, 0) for i, h in enumerate(hammers)),
+        at(out_buffer, 4, 0, 0),
+        at(source, 4, 1, 0),  # front north on the z=0 boundary (the reserved feed face)
+    ]
+    rr = route(ir, placements)  # the item chain is adjacent: all auto-output, no pipe cells
+    pw = route_power(ir, placements)
+    assert rr.ok
+    assert pw.ok
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=placements,
+        routes=[*rr.routes, *pw.routes],
+        auto_connections=list(rr.auto_connections),
+    )
+    guide = build_guide(ir, layout)
+    assert "feed LV (32 V), >=3 A -> up to 96 EU/t" in guide
+    assert ">=2 A" not in guide  # the thickest-segment understatement is gone
 
 
 def test_build_guide_system_io_loads_input_chest_and_collects_output_product() -> None:

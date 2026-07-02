@@ -332,6 +332,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
 
 ### Fixed
+- **Build guide power note agrees with the previewer (and reality).** The note read the feed
+  amperage off the trunk's thickest cable segment, which both understates a trunk whose sink taps
+  the source's own dock cell (its amps flow through no segment - on the optimized sand stack the
+  guide said `>=2 A -> up to 64 EU/t` while the previewer said 3 A / 96 EU/t) and overstates when
+  amps round up to a cable tier (the fast sand row printed 4 A for a 3 A draw). Both surfaces now
+  read the same shared `system_io` numbers: the tier's machine draws summed at each machine's
+  delivered voltage. Per-segment cable thickness still lives under Connections. (`buildguide/`.)
 - **Validator requires a consumer on routed nets (GitHub #8).** The gate enforced the
   OUTPUT->INPUT port direction on the auto-connection path but not on the routed-pipe path, so a
   routed net with no consumer (every endpoint an OUTPUT producer) passed - the golden "valid"
