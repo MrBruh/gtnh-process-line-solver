@@ -41,6 +41,13 @@ def test_cli_seed_is_accepted(capsys: pytest.CaptureFixture[str]) -> None:
     assert "# Build guide" in capsys.readouterr().out
 
 
+def test_cli_fast_flag_skips_optimization(capsys: pytest.CaptureFixture[str]) -> None:
+    # --fast runs the constructive (no-optimize) path; sand is simple enough to stay fully valid
+    code = main([_SAND, "--fast"])
+    assert code == 0
+    assert "# Build guide" in capsys.readouterr().out
+
+
 def test_cli_preview_writes_self_contained_html(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

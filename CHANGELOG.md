@@ -110,6 +110,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   sand demo's power cable now rises one layer, still valid) - the future congestion-aware cost
   (lane C) is what removes that. (`placement/`.)
 
+- **Solver "optimize or not" toggle (`solve(..., optimize=...)`, `gtnh-solve --fast`).** `solve`
+  gains an `optimize` flag. The default (`True`) runs the annealed placer (SA + LNS) inside the
+  place<->route feedback loop; `False` takes a near-instant single constructive placement, with no
+  annealing and no re-placement. Both validate their output (VALID / explicit partial /
+  infeasibility, never silently invalid) - fast just trades the optimizer's clustering and
+  unrouted-net recovery for speed. `--fast` exposes it on the CLI. This is the user-facing control
+  the planned unified site is built around, and the home for LNS (opt-in behind the optimized
+  path). (`solver/`, `cli/`.)
+
 - **Previewer (`previewer/`) + `gtnh-solve --preview`** - a self-contained, double-clickable 3D
   view of a solved layout. `build_scene(problem, layout)` flattens the layout into a render-ready
   scene (machine boxes coloured by type with the machine name on the front face, rectangular

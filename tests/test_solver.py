@@ -57,6 +57,48 @@ def test_solve_is_deterministic() -> None:
     assert solve(ir) == solve(ir)
 
 
+def test_fast_mode_uses_constructive_placement() -> None:
+    # optimize=False skips SA/LNS and the feedback loop: it places with the constructive first-fit
+    # placer and still validates. Sand is simple enough that the fast layout is fully valid.
+    ir = adapt_file(_SAND)
+    layout = solve(ir, optimize=False)
+    assert layout.status is LayoutStatus.VALID
+    assert validate(ir, layout).ok
+    assert layout.placements == list(place(ir).placements)  # exactly the constructive placement
+
+
+def test_fast_mode_is_deterministic() -> None:
+    ir = adapt_file(_SAND)
+    assert solve(ir, optimize=False) == solve(ir, optimize=False)
+
+
+def test_fast_mode_passes_through_infeasibility() -> None:
+    # two 1x1x1 machines into a 1x1x1 region: constructive placement cannot fit them, and fast mode
+    # surfaces that as an explicit infeasibility rather than a silent failure.
+    problem = InputIR(
+        bounding_region=CellBox(sx=1, sy=1, sz=1),
+        machines=[_producer("m0"), _consumer("m1")],
+        nets=[],
+    )
+    layout = solve(problem, optimize=False)
+    assert layout.status is LayoutStatus.INFEASIBLE
+    assert layout.infeasibility is not None
+
+
+def test_optimize_recovers_a_congested_line_fast_mode_leaves_partial() -> None:
+    # A tight single-layer fan-out that the constructive placement cannot route in one shot. The
+    # optimizer's SA/LNS + place<->route feedback loop recovers a VALID layout; fast mode, with no
+    # re-placement, leaves it non-VALID. This is the tradeoff the "optimize or not" control exposes.
+    edges = [("m0", "m2"), ("m0", "m3"), ("m1", "m3"), ("m1", "m4"), ("m2", "m5"), ("m4", "m5")]
+    problem = InputIR(
+        bounding_region=CellBox(sx=7, sy=1, sz=7),
+        machines=[_io_machine(f"m{i}") for i in range(6)],
+        nets=[_edge(f"e{k}", a, b) for k, (a, b) in enumerate(edges)],
+    )
+    assert solve(problem, optimize=True).status is LayoutStatus.VALID
+    assert solve(problem, optimize=False).status is not LayoutStatus.VALID
+
+
 def test_solve_returns_valid_or_explicit_infeasibility() -> None:
     ir = adapt_file(_NITROBENZENE)
     layout = solve(ir)

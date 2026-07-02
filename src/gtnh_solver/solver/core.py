@@ -23,6 +23,10 @@ stopping early when re-placing cannot help - a non-routing defect, or the same n
 (feedback not progressing). It is **deterministic** (bounded attempts keyed off ``seed`` + the
 penalties, no wall-clock), so a given input always yields the same layout.
 
+``solve(..., optimize=False)`` is the **fast** path: a single constructive placement with no
+annealing and no feedback loop (near-instant, simpler layout), still validated. The two modes are
+the "optimize or not" choice the planned unified site exposes to the builder.
+
 Auto-output is preferred because it is what a player actually builds for a simple chain: a row
 of adjacent machines feeding each other needs zero pipes. Pipes are only for what is left -
 non-adjacent endpoints, fan-out, or a machine whose single auto-output is already spent.
@@ -43,7 +47,7 @@ from gtnh_solver.ir import (
     Placement,
 )
 from gtnh_solver.ir.geometry import auto_output_faces
-from gtnh_solver.placement import optimize_placement
+from gtnh_solver.placement import optimize_placement, place
 from gtnh_solver.router import route, route_power
 from gtnh_solver.validator import ValidationReport, validate
 
@@ -53,9 +57,21 @@ _MAX_FEEDBACK_PASSES = 6
 _PENALTY_STEP = 2.0
 
 
-def solve(problem: InputIR, *, seed: int = 0) -> LayoutResult:
-    """Produce a layout via the place<->route feedback loop; return the first VALID one, else the
-    best partial. Deterministic for a given ``problem`` + ``seed``."""
+def solve(problem: InputIR, *, seed: int = 0, optimize: bool = True) -> LayoutResult:
+    """Produce a layout for ``problem``; deterministic for a given ``problem`` + ``seed``.
+
+    ``optimize`` selects how hard to work (the site's "optimize or not" control):
+
+    - ``True`` (default): the annealed placer (SA + LNS) inside the place<->route feedback loop -
+      tighter layouts (more auto-output, shorter routes), at the cost of seconds of CPU. Returns
+      the first fully-VALID layout, else the best partial.
+    - ``False`` (**fast**): a single constructive first-fit placement, no optimization and no
+      feedback loop - near-instant and simple. Its layout is still validated, so it is VALID or an
+      explicit partial/infeasibility, never silently invalid; but it will not cluster machines for
+      auto-output or re-place to rescue an unroutable net the way the optimizer can.
+    """
+    if not optimize:
+        return _solve_fast(problem, seed)
     penalties: dict[str, float] = {}
     seen_failed: set[frozenset[str]] = set()
     best: LayoutResult | None = None
@@ -88,6 +104,23 @@ def solve(problem: InputIR, *, seed: int = 0) -> LayoutResult:
 
     assert best is not None  # attempt 0 always either returns or sets best
     return best
+
+
+def _solve_fast(problem: InputIR, seed: int) -> LayoutResult:
+    """One deterministic attempt over the constructive placement - the fast (no-optimize) path.
+
+    Constructive placement is seed-independent, so there is no annealing to run and no point re-
+    placing (the feedback loop would just get the same layout back); a single assemble+validate is
+    the whole job. The result is validated like any other, so it is VALID, an explicit
+    partial_invalid, or an explicit infeasibility.
+    """
+    placement = place(problem)
+    if not placement.ok:
+        return LayoutResult(
+            status=LayoutStatus.INFEASIBLE, seed=seed, infeasibility=placement.infeasibility
+        )
+    layout, _ = _assemble(problem, placement.placements, seed)
+    return layout
 
 
 def _assemble(
