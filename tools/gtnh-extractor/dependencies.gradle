@@ -1,0 +1,40 @@
+/*
+ * Dependencies for the GTNH structure-dataset extractor.
+ *
+ * Only two mods are pinned here by hand: GT5-Unofficial (every multiblock controller we
+ * care about is merged into it) and StructureLib (the framework those controllers build
+ * their structures with). Both versions are taken verbatim from the DreamAssemblerXXL
+ * pack manifest for the current stable pack release and are also recorded, alongside the
+ * pack version, in `gtnh.lock.json` at the repo root. GitHub tags on the two mod repos
+ * match these versions.
+ *
+ * Everything else (IndustrialCraft2, NotEnoughItems, NotEnoughIds, GTNHLib, ModularUI,
+ * waila, AE2, ...) is a *hard* runtime dependency of GT5-Unofficial and resolves
+ * transitively: GT5U's published Nexus POM lists each with `<classifier>dev</classifier>`
+ * and `compile` scope, so pulling GT5U puts its whole hard-dependency set on both the
+ * compile and `runServer` runtime classpaths. That keeps the manually pinned surface tiny
+ * (the two mods the manifest tracks) while still booting a fully-populated dev server.
+ *
+ * StructureLib is listed explicitly even though GT5U already pulls it transitively: it is
+ * a manifest-tracked pin, its types are part of the extractor's intended API surface (see
+ * README.md), and pinning it guards against GT5U's transitive version drifting away from
+ * the pack.
+ *
+ * To bump versions: rewrite the two coordinates below and `gtnh.lock.json` from a newer
+ * manifest (this is what the lane-4 CI job automates). The `:dev` classifier selects the
+ * deobfuscated dev-workspace jar the Forge 1.7.10 dev environment needs.
+ *
+ * Configuration reference (from the ExampleMod1.7.10 template):
+ *  - implementation("g:n:v:c"): on this mod's compile + runtime classpath, not published.
+ *  - compileOnly / runtimeOnlyNonPublishable / api / ...: see the template docs if the
+ *    dump loop (lane 2) needs a narrower scope for a future dependency.
+ */
+dependencies {
+    // GT5-Unofficial - the single source of truth for GTNH multiblocks (LGPL, GTNewHorizons).
+    // Pinned from DreamAssemblerXXL manifest 2.8.4. Pulls its hard deps transitively (see above).
+    implementation("com.github.GTNewHorizons:GT5-Unofficial:5.09.51.482:dev")
+
+    // StructureLib - the multiblock structure framework (LGPL, GTNewHorizons).
+    // Pinned from DreamAssemblerXXL manifest 2.8.4; matches GT5U's transitive requirement.
+    implementation("com.github.GTNewHorizons:StructureLib:1.4.23:dev")
+}

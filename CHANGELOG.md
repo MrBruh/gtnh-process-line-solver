@@ -7,6 +7,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Dataset extractor scaffold (`tools/gtnh-extractor/`, the repo's only Java)** - lane 1 of
+  the automated multiblock-dataset pipeline (GitHub #44). A standalone GTNH
+  `ExampleMod1.7.10`-based Gradle tool whose `DumperMod` (`@Mod` entrypoint) hooks
+  `FMLServerStartedEvent`, runs an empty dump body, and calls `FMLCommonHandler.exitJava`
+  (0 on success, nonzero on failure) so `./gradlew runServer` boots a headless dedicated
+  1.7.10 server with GT5-Unofficial + StructureLib and exits as a pass/fail gate. GT5U and
+  StructureLib are pinned in `dependencies.gradle` from the current stable pack manifest
+  (2.8.4) and mirrored in the new repo-root `gtnh.lock.json`; the rest of GT5U's hard deps
+  resolve transitively from its Nexus POM. The Python solver gains no dependency on the tool
+  (it will read only the JSON the tool emits; the dump loop itself is lane 2). `NOTICE` now
+  credits the two LGPL mods.
 - Project scaffold: docs, package skeleton, CI, license.
 - Design and architecture documentation ported from the office-hours design doc
   and the engineering review (see `docs/`).
