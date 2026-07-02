@@ -35,6 +35,10 @@ Machine
   orientation_options: [Facing]     # solver picks one (front-face direction); >= 1
                                     # one instance per Machine; `count` was dropped in v1 -
                                     # multi-instance groups need instance-aware routing (Phase 2)
+  eut: float                        # EU/t this machine draws; with voltage_tier it sets the
+                                    #  amperage it pulls on a shared cable (dataset.amperage).
+                                    #  0 for an unpowered block or a power source. Added in
+                                    #  InputIR v1 (additive); load-bearing for the power path.
 
 FaceSpec     { ports: [Port] }      # catalog of required I/O; the physical face is a solver choice
 Port
@@ -88,7 +92,7 @@ Route
   segments: [Segment]                    # cell-path; lowered to blocks only at export
   thickness_per_segment: [int] | null    # power only (else null); 1/2/4/8/16, summed amperage
 Terminal    { machine_id, port_id, face: Facing, cell: CellCoord }  # non-front face; cell just outside
-Segment     { start: CellCoord, end: CellCoord, channel: int }   # channel < per-edge cap; >= 0
+Segment     { start: CellCoord, end: CellCoord, channel: int }   # >= 0 only; the per-edge channel cap is Phase 2, not yet enforced
 AutoConnection { net_id, source_machine_id, source_face: Facing, target_machine_id, target_face: Facing }
 Infeasibility { constraint: str, detail: str, suggested_relaxation: str | null }
 ```
@@ -109,8 +113,9 @@ result carries no infeasibility; `infeasible`/`partial_invalid` must carry one.
 - `Machine.faces` distinguishes the front face (no I/O) from the five usable faces; required
   output faces are HARD constraints in placement/validation.
 - Power routes carry per-segment `thickness`; the validator checks summed amperage ≤ tier cap.
-- `me_toggles` removes a commodity from physical routing; the solver places ME endpoints
-  instead (no `Route` for that commodity).
+- `me_toggles` removes a commodity from physical routing (no `Route` for that commodity today - a
+  toggled commodity is simply skipped everywhere). Placing the ME endpoint that replaces it on a
+  machine face is Phase 2.
 
 ## Versioning
 

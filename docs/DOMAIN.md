@@ -71,11 +71,28 @@ where load **sums** along shared segments (Steiner-tree-like):
   face flush on the region boundary (validator-enforced), internal cables use the other five
   faces, and the builder runs power in through the wall the front touches.
 
+## Boundary storages (the adapter closes the line)
+
+A plan export names recipes and flows but not the containers at the line's edge, so the adapter
+synthesizes them - the same line-closing move as the per-tier power source above:
+
+- **Inputs** map to a boundary **Super Chest** (items) / **Super Tank** (fluids) the builder
+  fills; nothing in the line feeds it, so it only *sources*.
+- **Outputs** are closed the same way: for every machine OUTPUT port that no net consumes, the
+  adapter adds a **Super Chest/Tank plus a net** wired to it at the port's recorded rate, so the
+  finished product is collected instead of exiting into thin air (the sand line auto-outputs its
+  sand straight into this collection chest, still zero pipes). Such a storage only *sinks*.
+
+These boundary storages are unpowered blocks that accept I/O covers on their faces (so covers ride
+storage faces, never pipes); `system_io` surfaces the only-*source* ones as the line's inputs and
+the only-*sink* ones as its outputs.
+
 ## ME networks (AE2)
 
 Each commodity (items, fluids, power) can be **toggled to ME** individually. A toggled
-commodity is removed from physical routing; the solver instead places the appropriate ME
-endpoint (interface / bus / P2P) on a machine face. v1 does not model ME channel limits.
+commodity is removed from physical routing: today it is simply **skipped everywhere** (no route,
+no terminal, no placement/cost term). Placing the appropriate ME endpoint (interface / bus / P2P)
+on a machine face in its stead is **planned** (Phase 2); v1 does not model ME channel limits.
 Default is to route all three physically.
 
 ## Multiblocks
