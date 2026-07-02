@@ -10,9 +10,13 @@ correctness. The strategy works around this with three layers:
 
 1. **Independent validator.** The validator shares rule *data* with the router but has
    separately-written checking *logic*, so it can catch router bugs (a shared code path
-   couldn't). It checks geometric validity (no overlaps, within bounds, pinned I/O honored)
-   and rule validity (throughput/tier caps, one-fluid-per-line, summed amperage ≤ thickness,
-   required-face reachability, ME-toggled commodities excluded + endpoint-placed).
+   couldn't). Present today: geometric + structural validity (no overlaps, within bounds,
+   pinned I/O honored, unit-step contiguous routes, single-channel capacity, terminal /
+   required-I/O-face reachability, ME-toggled commodities excluded from routing) and the
+   shared-amperage **power** rules (summed amperage <= cable thickness, single-source cable
+   tree, voltage-drop over distance). Deferred to the dataset lane: throughput/tier caps,
+   one-fluid-per-line, the dataset-specific half of face rules, and ME-endpoint *placement*
+   (a toggled commodity is only skipped today, not yet endpoint-placed).
 
 2. **Property tests (hypothesis).** The safety net against the worst failure class. For any
    generated input graph, the solver must return **a valid layout OR an explicit
@@ -40,8 +44,8 @@ during the Assignment - v1's only contact with actual GT behavior.
 - **solver** - the place→route→retry loop converges or gives up with a report; anytime budget
   returns best-valid-so-far.
 - **validator** - geometric + rule checks; partial-invalid layouts reported, never passed.
-- **cli** - parse a project, solve, emit previewer JSON + build guide, honor ME flags, surface
-  infeasibility.
+- **cli** - parse an export, solve, print the build guide (and, with `--preview`, write the 3D
+  preview HTML), honor `--fast` / `--seed` / `--objective`, surface infeasibility via exit code.
 
 ## Edge cases that must have tests
 
