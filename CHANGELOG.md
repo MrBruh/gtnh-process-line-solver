@@ -332,6 +332,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
 
 ### Fixed
+- **User-facing output surfaces are hardened against bad input and bad paths (GitHub #39).** The
+  previewer inlined the scene JSON into its `<script>` block unescaped, so a machine type or
+  resource id containing `</script>` (plan JSON is external input) could close the tag and break or
+  inject into the page; the inline JSON now escapes `</` to `<\/` (JSON-transparent, the scene still
+  round-trips). The CLI's `-o`/`--preview` writes raised an uncaught `OSError` on an unwritable path,
+  dumping a raw traceback instead of honoring the documented 0/1/2 exit-code contract; both writes
+  now report `error: could not write <path>: <reason>` to stderr and exit 2. (`previewer/`, `cli`.)
 - **Amperage is sized from fractional machine loads, rounded up per aggregate - not per machine**
   (maintainer-verified in game). GT machines pull whole packets (1 amp = one packet of up to tier
   voltage) into an internal buffer only when it has room, so a 16 EU/t LV machine *averages* 0.5
