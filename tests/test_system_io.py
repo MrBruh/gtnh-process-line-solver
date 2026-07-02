@@ -76,7 +76,9 @@ def test_sand_output_is_collected_by_a_synthesized_buffer() -> None:
 def test_sand_power_totals_eut_and_sums_amps_by_tier() -> None:
     io = _sand_io()
     assert io.power_total == pytest.approx(48.0)  # 3 Forge Hammers x 16 EU/t
-    assert io.power_amps_by_tier == {"LV": 3}  # each draws ceil(16 / 32) = 1 A on the LV cable
+    # Each hammer loads ~0.53 A at its delivered voltage (depths 2/3/4: 16/30 + 16/29 + 16/28
+    # = 1.66); the tier rounds up ONCE to 2 A - not the 3 A per-machine rounding would charge.
+    assert io.power_amps_by_tier == {"LV": 2}
 
 
 def test_falls_back_without_a_sourcing_net_and_on_unprefixed_ids() -> None:

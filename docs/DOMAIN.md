@@ -46,16 +46,23 @@ where load **sums** along shared segments (Steiner-tree-like):
 
 - **Voltage tier** of a cable segment follows the **machine voltage tier** it serves (cable
   rated ≥ that voltage).
+- **Machines draw fractional amps on average.** A machine pulls whole packets (1 amp = one packet
+  of up to tier voltage) into an internal buffer only when it has room, so a 16 EU/t LV machine
+  takes a 32-EU packet every other tick - an **average of 0.5 amps**, not a whole amp. Its load on
+  the net is `eut / delivered_voltage`, un-rounded; loads **sum** along shared segments and only
+  the aggregate rounds up to whole amps (per segment for cable thickness, per tier for the source
+  feed). Rounding per machine would overstate the draw - three 16 EU/t hammers run on a 2 A LV
+  feed, not 3 A (confirmed in game).
 - **Voltage loss over distance.** A cable loses voltage per block travelled, so a machine `d`
   blocks from the source receives `tier_voltage - loss·d`, not the full tier voltage. The solver
   keeps the source at the machine's tier and *thickens the cable to compensate*: a machine's
-  amperage is sized at its **delivered** voltage (`ceil(eut / (tier_voltage - loss·d))`), so a
-  machine farther from the source draws **more** amps for the same `eut`. A run so long that the
+  load is sized at its **delivered** voltage (`eut / (tier_voltage - loss·d)`), so a machine
+  farther from the source loads the net **more** for the same `eut`. A run so long that the
   delivered voltage reaches 0 cannot be powered at that tier and is reported infeasible. Loss is a
   flat **1 EU/block for every tier** for now (a simplifying assumption; per-material cable loss is
   Phase 2 dataset work).
-- **Thickness** (1x / 2x / 4x / 8x / 16x, **16x max**) is sized to the **summed amperage**
-  through that segment.
+- **Thickness** (1x / 2x / 4x / 8x / 16x, **16x max**) is sized to the **summed load** through
+  that segment, rounded up to whole amps.
 - A segment needing **> 16x** must split into **parallel runs** or move to a **higher voltage
   tier** (more power per amp).
 - **The synthesized source is fed from outside.** A plan export has no power node, so the

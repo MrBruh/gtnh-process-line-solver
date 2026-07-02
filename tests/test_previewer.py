@@ -150,11 +150,12 @@ def test_scene_reports_system_io() -> None:
         {"resource": "minecraft:sand", "rate": pytest.approx(0.1), "unit": "items"}
     ]
     # the power feed per tier: the FULL LV tier voltage (32, not the hammers' 16 EU/t draw) x the
-    # amps to supply - what a GT source is fed. ``total`` is that feed (32 V x 3 A = 96 EU/t), so it
-    # matches the breakdown, not the machines' lower actual draw.
+    # amps to supply - what a GT source is fed. The hammers' fractional loads (~0.53 A each at
+    # their delivered voltages) sum to 1.66 and round up once to 2 A, so ``total`` is that feed
+    # (32 V x 2 A = 64 EU/t) and matches the breakdown, not the machines' lower actual draw.
     assert io["power"] == {
-        "total": pytest.approx(96),
-        "byTier": {"LV": {"volts": 32, "amps": 3}},
+        "total": pytest.approx(64),
+        "byTier": {"LV": {"volts": 32, "amps": 2}},
     }
 
 

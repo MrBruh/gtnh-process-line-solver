@@ -332,6 +332,19 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
 
 ### Fixed
+- **Amperage is sized from fractional machine loads, rounded up per aggregate - not per machine**
+  (maintainer-verified in game). GT machines pull whole packets (1 amp = one packet of up to tier
+  voltage) into an internal buffer only when it has room, so a 16 EU/t LV machine *averages* 0.5
+  amps - but `dataset.amperage` ceiled every machine to whole amps and the callers summed the
+  ceilings, overstating every aggregate: the optimized sand line's feed spec read 3 A / 96 EU/t
+  when 2 A / 64 EU/t runs it in game, and cables could come out a tier thicker than needed.
+  `amperage` is replaced by `amp_load` (the un-rounded `eut / delivered_voltage`, same
+  unknown-tier / unpowerable errors) plus `whole_amps` (the ceil, with epsilon slack for float
+  dust), and the rounding moves to where packets are actually quantized: per cable segment in the
+  router and validator, per tier in `system_io` (so the guide and previewer both now say
+  2 A / 64 EU/t for sand; this supersedes the interim 3 A number from the drift fix below). Cable
+  loss still raises far machines' loads; the 16x cap and unpowerable checks are unchanged.
+  (`dataset/`, `router/power.py`, `validator/`, `system_io`.)
 - **Build guide power note agrees with the previewer (and reality).** The note read the feed
   amperage off the trunk's thickest cable segment, which both understates a trunk whose sink taps
   the source's own dock cell (its amps flow through no segment - on the optimized sand stack the

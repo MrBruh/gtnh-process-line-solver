@@ -84,21 +84,21 @@ def test_build_guide_placement_table_has_coords_and_front() -> None:
 def test_build_guide_power_note_states_feed_spec_as_tier_amps_eut() -> None:
     # the source must be fed as a wiring spec, not a bare cable thickness (GitHub #15 B2). On the
     # fast (constructive) row the trunk runs source dock (5,0,1) -> (1,0,1): the hammers tap or
-    # dock at depths 2/3/4 (16 EU/t at 30/29/28 V -> 1 A each), so the tier draws 3 A - the
-    # system_io number the previewer also shows. LV is 32 V, so the note reads 3 A -> up to
-    # 96 EU/t (the trunk's root CABLE is still 4x, cable tiers round up; that lives under
-    # Connections, not here).
+    # dock at depths 2/3/4, fractional loads 16/30 + 16/29 + 16/28 = 1.66 A, rounded up once to
+    # 2 A - the system_io number the previewer also shows (machines buffer packets, so rounding
+    # per machine would overstate the feed). LV is 32 V, so the note reads 2 A -> up to 64 EU/t.
     guide = _sand_guide()
-    assert "feed LV (32 V), >=3 A -> up to 96 EU/t" in guide
+    assert "feed LV (32 V), >=2 A -> up to 64 EU/t" in guide
 
 
 def test_build_guide_power_note_counts_a_sink_tapping_the_source_dock() -> None:
-    # Regression (maintainer-reported): the note used to read the feed amperage off the thickest
-    # cable segment, but a hammer tapping the source's own dock cell draws through NO segment, so
-    # on the optimized sand stack the guide said ">=2 A -> up to 64 EU/t" while the previewer
-    # (system_io) said 3 A / 96 EU/t. Rebuild that exact layout: the machine row on the floor,
-    # the source on top of the buffer, the trunk (3,1,0)->(1,1,0) along the hammers' top faces -
-    # the nearest hammer taps the root at depth 0, the others at depths 1 and 2 (1 A each).
+    # Regression (maintainer-reported, twice): the note must count a hammer that taps the
+    # source's own dock cell (it draws through NO cable segment, so the old thickest-segment
+    # proxy missed it entirely), and the feed must round the summed FRACTIONAL loads up once
+    # (per-machine whole amps overstated 2 A as 3 A; 2 A runs the line in game). Rebuild the
+    # exact reported layout: the machine row on the floor, the source on top of the buffer, the
+    # trunk (3,1,0)->(1,1,0) along the hammers' top faces - the nearest hammer taps the root at
+    # depth 0, the others at depths 1 and 2: 16/32 + 16/31 + 16/30 = 1.55 A -> 2 A -> 64 EU/t.
     ir = adapt_file(_SAND)
     hammers = [m for m in ir.machines if m.type == "Forge Hammer"]
     source = next(m for m in ir.machines if m.is_power_source)
@@ -126,8 +126,8 @@ def test_build_guide_power_note_counts_a_sink_tapping_the_source_dock() -> None:
         auto_connections=list(rr.auto_connections),
     )
     guide = build_guide(ir, layout)
-    assert "feed LV (32 V), >=3 A -> up to 96 EU/t" in guide
-    assert ">=2 A" not in guide  # the thickest-segment understatement is gone
+    assert "feed LV (32 V), >=2 A -> up to 64 EU/t" in guide
+    assert ">=3 A" not in guide  # per-machine amp rounding no longer inflates the feed
 
 
 def test_build_guide_system_io_loads_input_chest_and_collects_output_product() -> None:
@@ -178,9 +178,10 @@ def test_build_guide_system_io_falls_back_without_a_sourcing_net() -> None:
 def test_build_guide_power_connection_lists_per_segment_thickness() -> None:
     guide = _sand_guide()
     assert "lay along:" in guide  # the exact cells to lay the cable
-    # sand's fast-row trunk: the root segments carry all three 1-amp hammers (3 A -> =4x=) and
-    # the run tapers to the farthest hammer alone (=1x=); two hammers tap mid-trunk cells.
-    assert "=4x=" in guide  # the trunk root segment...
+    # sand's fast-row trunk: the root segments carry all three hammers' fractional loads (1.66 A
+    # -> a 2x cable) and the run tapers to the farthest hammer alone (0.57 A -> =1x=); two
+    # hammers tap mid-trunk cells.
+    assert "=2x=" in guide  # the trunk root segment...
     assert "=1x=" in guide  # ...tapering to the far end
 
 

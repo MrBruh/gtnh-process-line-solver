@@ -9,22 +9,25 @@ ASCII (one tier; the trunk is a TREE rooted at the source's dock cell)::
 
                      m2 (taps [C]: terminal on the trunk cell, no new cable)
                       |
-    source ===4x=== [C] ==2x== m1(2A)
+    source ===4x=== [C] ==2x== m1(1.5A)
                       |
                      2x
                       |
-                    m0(2A)
+                    m0(1.5A)
 
-    Each segment carries the summed amperage of the sink terminals on its far-from-root side:
-    both branch legs carry only their own sink's 2A (the old path-trunk's suffix sum would have
-    overcharged one of them), and m2 draws straight from the shared cell [C], loading no segment.
+    Each segment carries the summed load of the sink terminals on its far-from-root side, rounded
+    up to whole amps per segment: both branch legs carry only their own sink's 1.5A (a 2x cable),
+    while the root carries 3A summed BEFORE rounding (the old path-trunk's suffix sum would have
+    overcharged a branch); m2 draws straight from the shared cell [C], loading no segment.
 
 **Cable loss:** GT cables lose voltage over distance, so a machine whose terminal sits ``d``
 cable-blocks from the source (its cell's depth in the tree) receives ``tier_voltage - d`` volts
 (docs/DOMAIN.md). The source stays at its tier and the cable is thickened to compensate: a
-machine's amperage is sized at its *delivered* voltage (``ceil(eut / (tier_voltage - d))``), so
-farther machines cost more amps for the same ``eut``. A run so long that the delivered voltage
-reaches 0 cannot be powered at this tier and is rejected.
+machine's load is sized at its *delivered* voltage (``eut / (tier_voltage - d)``, fractional -
+machines buffer packets and average below a whole amp, see ``dataset.amp_load``), so farther
+machines load the net more for the same ``eut``; only each segment's summed load rounds up to
+whole amps. A run so long that the delivered voltage reaches 0 cannot be powered at this tier and
+is rejected.
 
 Each machine docks **route-aware**: rather than committing a terminal on a fixed face, the router
 considers every usable (non-front) face and, via multi-goal A*, docks on whichever one yields the
@@ -51,7 +54,7 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 
-from gtnh_solver.dataset import UnknownTierError, UnpowerableError, amperage
+from gtnh_solver.dataset import UnknownTierError, UnpowerableError, amp_load, whole_amps
 from gtnh_solver.ir import (
     CellBox,
     Commodity,
@@ -172,8 +175,8 @@ def _route_trunk(
     - chooses the face. One exception keeps the route well-formed: a route with no segments fails
     validation, so the last sink never taps a still-segment-less trunk - it lays a real leg.
 
-    Every trunk cell's **depth** is its cable-block distance from the source; amperage is then
-    sized at each sink's *delivered* voltage, so cable loss thickens the run (``_size_trunk``).
+    Every trunk cell's **depth** is its cable-block distance from the source; each sink's load is
+    then sized at its *delivered* voltage, so cable loss thickens the run (``_size_trunk``).
     Laid cells stay blocked for the legs that follow (a leg may *attach* at a trunk cell but never
     cross one), so the trunk is always a single tree the validator can root at the source. A
     machine with no free non-front dock face is a ``face_reachability`` infeasibility; one no leg
@@ -256,24 +259,26 @@ def _size_trunk(
     sink_cells: Sequence[Cell],
     loads: Sequence[tuple[float, str]],
 ) -> tuple[list[Segment], list[int]] | Infeasibility:
-    """Size each segment to the summed amperage of the sink terminals on its far-from-root side.
+    """Size each segment to the summed load of the sink terminals on its far-from-root side.
 
     ``loads[i]`` / ``sink_cells[i]`` are sink ``m_i``'s ``(eut, tier)`` and its terminal cell; its
     cable-block distance from the source is that cell's tree ``depth`` (a tap of the root is
-    distance 0). Amperage is sized at each machine's delivered voltage
-    (``ceil(eut / (tier_voltage - distance))``), so cable loss thickens the run instead of
-    under-powering the far machines. Each segment then carries the total draw of the sink
-    terminals in the subtree hanging off its child end - the rooted-tree sum that defines a
-    shared-amperage trunk. Sinks sharing one cell add up; a sink tapping the root loads no segment
-    (it draws straight from the source's own cable block). Segments are emitted leg by leg in laid
-    order, the thickness list aligned 1:1 - the validator re-derives all of this independently. A
-    run whose delivered voltage reaches 0 (:class:`UnpowerableError`) or a segment whose summed
-    load exceeds 16x is rejected, not silently certified.
+    distance 0). Each sink's load is *fractional*, sized at its delivered voltage
+    (``eut / (tier_voltage - distance)``, ``dataset.amp_load`` - machines buffer packets and
+    average below a whole amp), so cable loss thickens the run instead of under-powering the far
+    machines. Each segment then carries the total load of the sink terminals in the subtree
+    hanging off its child end - the rooted-tree sum that defines a shared-amperage trunk -
+    rounded up to whole amps only per segment (``whole_amps``): rounding per machine would
+    overstate the draw. Sinks sharing one cell add up; a sink tapping the root loads no segment
+    (it draws straight from the source's own cable block). Segments are emitted leg by leg in
+    laid order, the thickness list aligned 1:1 - the validator re-derives all of this
+    independently. A run whose delivered voltage reaches 0 (:class:`UnpowerableError`) or a
+    segment whose summed load exceeds 16x is rejected, not silently certified.
     """
-    amp_at: dict[Cell, int] = {}
+    amp_at: dict[Cell, float] = {}
     for (eut, tier), cell in zip(loads, sink_cells, strict=True):
         try:
-            amp_at[cell] = amp_at.get(cell, 0) + amperage(eut, tier, distance=depth[cell])
+            amp_at[cell] = amp_at.get(cell, 0.0) + amp_load(eut, tier, distance=depth[cell])
         except UnknownTierError:
             return Infeasibility(
                 constraint="voltage_tier",
@@ -294,23 +299,25 @@ def _size_trunk(
     subtree = dict(amp_at)
     for path in reversed(legs):
         for parent, child in reversed(list(pairwise(path))):
-            subtree[parent] = subtree.get(parent, 0) + subtree.get(child, 0)
+            subtree[parent] = subtree.get(parent, 0.0) + subtree.get(child, 0.0)
 
     segments: list[Segment] = []
     thickness: list[int] = []
     for path in legs:
         for parent, child in pairwise(path):
-            load = subtree.get(child, 0)  # everything on the segment's far-from-root side
-            if load > _MAX_THICKNESS:
+            # Everything on the segment's far-from-root side, rounded to the whole packets
+            # (amps) the cable must actually be rated for.
+            amps = whole_amps(subtree.get(child, 0.0))
+            if amps > _MAX_THICKNESS:
                 return Infeasibility(
                     constraint="amperage",
-                    detail=f"power net {net_id!r}: a cable segment must carry {load} amps, over "
+                    detail=f"power net {net_id!r}: a cable segment must carry {amps} amps, over "
                     "the 16x cable cap",
                     suggested_relaxation="split into parallel runs or use a higher voltage tier "
                     "(more power per amp) - Phase 2 multi-source optimization",
                 )
             segments.append(Segment(start=coord(parent), end=coord(child), channel=0))
-            thickness.append(_cable_thickness(load))
+            thickness.append(_cable_thickness(amps))
     return segments, thickness
 
 

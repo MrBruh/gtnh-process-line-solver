@@ -10,9 +10,10 @@ the two surfaces drift. This module is the single source, pure over the ``InputI
 - **outputs**: the product the line makes - normally a boundary storage that only *sinks* (a
   synthesized collection buffer, #16), or, as a fallback, a machine OUTPUT port no net consumes.
 - **power**: the summed ``eut`` the placed machines draw, plus the amperage per voltage tier the
-  source must supply - summed at each machine's *delivered* voltage, so cable loss over distance is
-  reflected in what the builder feeds (docs/DOMAIN.md - a shared-amperage net's draw is what the
-  source must supply).
+  source must supply - each machine's *fractional* load at its delivered voltage (cable loss over
+  distance included), summed per tier and rounded up to whole amps only then (docs/DOMAIN.md - a
+  shared-amperage net's aggregate draw is what the source must supply; machines buffer packets,
+  so per-machine whole amps would overstate it).
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 
-from gtnh_solver.dataset import UnknownTierError, UnpowerableError, amperage
+from gtnh_solver.dataset import UnknownTierError, UnpowerableError, amp_load, whole_amps
 from gtnh_solver.ir import Commodity, InputIR, IODirection, LayoutResult, Net, Port, Route, Segment
 
 #: Per-commodity rate unit stem, no time suffix. The previewer appends ``/t`` or ``/s`` for its
@@ -48,8 +49,10 @@ class BoundaryFlow:
 class SystemIO:
     """The whole boundary: inputs to load, outputs to collect, the total EU/t draw, and the summed
     **amperage** per voltage tier (what an external source must supply, docs/DOMAIN.md - the tier
-    already implies the voltage, so amps is the useful per-tier number). Amperage is summed at each
-    machine's delivered voltage, so it accounts for the extra amps cable loss over distance costs."""
+    already implies the voltage, so amps is the useful per-tier number). Each machine's fractional
+    load (``eut`` over its delivered voltage, so cable loss over distance is included) is summed
+    per tier and only the total rounds up to whole amps - machines buffer packets, so rounding per
+    machine would overstate what the builder must feed (confirmed in game)."""
 
     inputs: list[BoundaryFlow]
     outputs: list[BoundaryFlow]
@@ -136,22 +139,25 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
             )
 
     # Cable-block distance from the source to each powered machine (its depth in the routed power
-    # tree), so amperage is summed at the loss-reduced *delivered* voltage the builder must actually
-    # feed - not the lossless ideal. Machines with no cable (ME power, or an unrouted net) fall back
-    # to distance 0. The validator re-derives this distance independently for its amperage check.
+    # tree), so each load is sized at the loss-reduced *delivered* voltage the builder must
+    # actually feed - not the lossless ideal. Loads stay fractional per machine and round up to
+    # whole amps only per tier (dataset.amp_load / whole_amps). Machines with no cable (ME power,
+    # or an unrouted net) fall back to distance 0. The validator re-derives this distance
+    # independently for its amperage check.
     power_distance = _power_distances(layout.routes, port_dir)
     power_total = 0.0
-    power_amps_by_tier: dict[str, int] = {}
+    load_by_tier: dict[str, float] = {}
     for machine in problem.machines:
         if machine.eut <= 0 or machine.id not in coord_of:
             continue  # unpowered blocks / sources draw nothing; describe only placed machines
         tier = machine.voltage_tier
         power_total += machine.eut
         try:
-            amps = amperage(machine.eut, tier, distance=power_distance.get(machine.id, 0))
+            load = amp_load(machine.eut, tier, distance=power_distance.get(machine.id, 0))
         except (UnknownTierError, UnpowerableError):
             continue  # an off-ladder tier or a run loss has killed: nothing sizeable to report
-        power_amps_by_tier[tier] = power_amps_by_tier.get(tier, 0) + amps
+        load_by_tier[tier] = load_by_tier.get(tier, 0.0) + load
+    power_amps_by_tier = {tier: whole_amps(load) for tier, load in load_by_tier.items()}
 
     return SystemIO(
         inputs=inputs,

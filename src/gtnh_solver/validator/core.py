@@ -26,11 +26,12 @@ What is checked now (needs only the IR):
   power - per-segment cable thickness is present and well-formed (1/2/4/8/16, aligned); the route
   has exactly one source terminal and its cables form a single tree rooted there (neither is
   certifiable otherwise, so both are rejected, not skipped); AND independently re-derived: rooting
-  that cable tree at the source terminal, each machine's amperage is recomputed at its *delivered*
-  voltage (tier voltage minus 1 per cable block of distance from the source - GT cable loss), every
-  segment carries the summed amperage of the machines downstream of it and its cable must be at
-  least that thick (which also rejects a load over the 16x cap), and a run whose loss drops the
-  delivered voltage to <= 0 is rejected as unpowerable at its tier. A power source's front face
+  that cable tree at the source terminal, each machine's fractional amp load is recomputed at its
+  *delivered* voltage (tier voltage minus 1 per cable block of distance from the source - GT cable
+  loss), every segment carries the summed load of the machines downstream of it rounded up to
+  whole amps per segment (machines buffer packets, so per-machine rounding would overstate), its
+  cable must be at least that thick (which also rejects a load over the 16x cap), and a run whose
+  loss drops the delivered voltage to <= 0 is rejected as unpowerable at its tier. A power source's front face
   is its reserved external-feed face and must lie flush on the region boundary (power enters
   from outside the structure; the front-face rule already keeps internal cables off it).
 
@@ -44,7 +45,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from gtnh_solver.dataset import UnknownTierError, UnpowerableError, amperage
+from gtnh_solver.dataset import UnknownTierError, UnpowerableError, amp_load, whole_amps
 from gtnh_solver.ir import (
     AutoConnection,
     Commodity,
@@ -542,15 +543,16 @@ def _check_auto_net(
 def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
     """Independently re-derive each power cable's load and check the thickness can carry it.
 
-    The router sizes thickness to the summed amperage; this recomputes that amperage from
-    geometry + machine euts - rooting the route's cable tree at the source terminal, re-deriving
-    each machine's cable-block distance from the source (its depth in that tree), sizing its
-    amperage at the loss-reduced *delivered* voltage that distance implies, and summing the draw of
-    every machine downstream of each segment - and flags any segment whose cable is thinner than its
-    load. A load over 16x has no legal thickness, so this also catches the over-cap case the router
-    is supposed to reject; a distance so long that loss drops the delivered voltage to <= 0 is
-    flagged as unpowerable. Written independently of the router, so a sizing bug is caught, not
-    certified.
+    The router sizes thickness to the summed load; this recomputes that load from geometry +
+    machine euts - rooting the route's cable tree at the source terminal, re-deriving each
+    machine's cable-block distance from the source (its depth in that tree), sizing its
+    *fractional* amp load at the loss-reduced delivered voltage that distance implies, summing
+    the draw of every machine downstream of each segment, and rounding each segment's total up to
+    whole amps (per-machine rounding would overstate - machines buffer packets) - and flags any
+    segment whose cable is thinner than that. A load over 16x has no legal thickness, so this
+    also catches the over-cap case the router is supposed to reject; a distance so long that loss
+    drops the delivered voltage to <= 0 is flagged as unpowerable. Written independently of the
+    router, so a sizing bug is caught, not certified.
     """
     machines = {m.id: m for m in problem.machines}
     port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
@@ -594,10 +596,12 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
             continue
         order, parent, depth, edges = rooted
 
-        # Each machine's amperage at its *delivered* voltage: its cable-block distance from the
-        # source is its depth in the rooted tree, and cable loss lowers the voltage (and so raises
-        # the amps) accordingly. Re-derived from geometry, independent of the router's numbers.
-        amp_at: dict[Cell, int] = defaultdict(int)
+        # Each machine's fractional amp load at its *delivered* voltage: its cable-block distance
+        # from the source is its depth in the rooted tree, and cable loss lowers the voltage (and
+        # so raises the load) accordingly. Loads stay fractional per machine (packets amortize
+        # through the machine buffer - dataset.amp_load) and round up to whole amps only per
+        # segment below. Re-derived from geometry, independent of the router's numbers.
+        amp_at: dict[Cell, float] = defaultdict(float)
         uncheckable = False
         for t in r.terminals:
             if port_dir.get((t.machine_id, t.port_id)) is not IODirection.INPUT:
@@ -610,7 +614,7 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
             if distance is None:
                 continue  # a terminal not on the cable tree draws no load through it (as before)
             try:
-                draw = amperage(machine.eut, machine.voltage_tier, distance=distance)
+                draw = amp_load(machine.eut, machine.voltage_tier, distance=distance)
             except UnknownTierError:
                 out.append(
                     Violation(
@@ -636,8 +640,9 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
         if uncheckable:
             continue
 
-        required = _subtree_loads(order, parent, depth, edges, amp_at)
-        for seg_idx, (req, thick) in enumerate(zip(required, tps, strict=True)):
+        loads = _subtree_loads(order, parent, depth, edges, amp_at)
+        for seg_idx, (load, thick) in enumerate(zip(loads, tps, strict=True)):
+            req = whole_amps(load)  # a cable is rated in whole packets; round the summed load up
             if thick < req:
                 out.append(
                     Violation(
@@ -695,13 +700,13 @@ def _subtree_loads(
     parent: dict[Cell, Cell | None],
     depth: dict[Cell, int],
     edges: list[tuple[Cell, Cell]],
-    amp_at: dict[Cell, int],
-) -> list[int]:
-    """Per-segment summed amperage over a rooted cable tree: each segment carries the total draw of
-    the machine terminals in the subtree on its far (leaf) side. ``depth`` orients each edge (the
-    deeper endpoint is the child). One load per segment, aligned 1:1 with ``edges`` (and so with the
-    route's segments)."""
-    subtree: dict[Cell, int] = {c: amp_at.get(c, 0) for c in order}
+    amp_at: dict[Cell, float],
+) -> list[float]:
+    """Per-segment summed (fractional) amp load over a rooted cable tree: each segment carries the
+    total draw of the machine terminals in the subtree on its far (leaf) side. ``depth`` orients
+    each edge (the deeper endpoint is the child). One load per segment, aligned 1:1 with ``edges``
+    (and so with the route's segments); the caller rounds each up to whole amps."""
+    subtree: dict[Cell, float] = {c: amp_at.get(c, 0.0) for c in order}
     for cur in reversed(order):  # leaves first
         p = parent[cur]
         if p is not None:
