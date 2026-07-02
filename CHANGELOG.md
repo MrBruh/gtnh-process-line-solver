@@ -213,6 +213,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `astar_multi`), the source docking toward its first sink. On the sand demo this drops the
   optimized power run from nine cables to five (matching the constructive baseline); every terminal
   is still validated (non-front, adjacent, on-route) and the trunk stays a single tree.
+- **Optimized placement minimises total volume, with no separate per-layer penalty.** The
+  routing-aware cost (`placement/search.py`) dropped its `layer count` term (and the matching
+  flat-build bias in the LNS recreate ranking): the bounding-box **volume** term already accounts
+  for height, so the optimizer now trades layers against footprint purely by which yields the
+  smaller box. Only the optimized (SA/LNS) path uses this cost; the fast constructive path is
+  unaffected.
 - **Power sizing now models cable voltage loss over distance.** GT cables lose voltage per block,
   so a machine `d` blocks from the source receives `tier_voltage - loss·d`, not the full tier. The
   source stays at the machine's tier and the cable is thickened to compensate: each machine's

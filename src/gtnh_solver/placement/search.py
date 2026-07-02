@@ -3,8 +3,10 @@
 Starts from the constructive first-fit solution and improves it under a cost that proxies
 buildability: half-perimeter wirelength (HPWL) per net pulls connected machines together (more
 auto-output, shorter pipes), an auto-output reward favours orientations whose usable (non-front)
-faces actually let a source eject into its sink, plus a mild compactness + flat-build bias. The
-auto reward is the only orientation-dependent term, so reorient moves carry a real cost signal -
+faces actually let a source eject into its sink, plus a mild compactness bias on the total
+bounding-box volume (no separate per-layer term: volume already counts height, so the optimizer
+minimises the whole box, not the layer count). The auto reward is the only orientation-dependent
+term, so reorient moves carry a real cost signal -
 without it they were free random walk that could finalize an orientation BLOCKING auto-output.
 
 The neighbourhood mixes small moves (relocate / swap / reorient; orientation is a search variable)
@@ -58,11 +60,13 @@ _FACE_DELTAS = tuple(FACE_DELTAS.values())
 
 # Cost weights: wirelength dominates (it drives auto-output + short pipes); an auto-output reward
 # makes orientation matter (the front face carries no I/O, so the wrong orientation BLOCKS the
-# free connection - reorient moves are a no-op on the other terms); compactness and a flat-build
-# bias break ties without overriding routability.
+# free connection - reorient moves are a no-op on the other terms); a compactness term on the
+# total bounding-box volume breaks ties without overriding routability. There is deliberately NO
+# separate per-layer penalty: the bbox volume already counts the y-extent, so the optimizer trades
+# height against footprint purely by which yields the smaller box - it optimizes total volume, not
+# layer count (docs/ROADMAP.md lane C).
 _W_WIRE = 1.0
 _W_COMPACT = 0.02
-_W_LAYERS = 1.0
 _W_AUTO = 4.0
 
 # Annealing schedule (geometric cooling). Budget scales with machine count, clamped.
@@ -211,10 +215,13 @@ def _cost(
     nets: list[tuple[list[str], float]],
     auto_pairs: list[tuple[str, str]],
 ) -> float:
-    """Routing-aware cost: weighted net HPWL + compactness (bbox volume) + layer count, minus an
-    auto-output reward (the only orientation-dependent term, so reorient moves are not free).
+    """Routing-aware cost: weighted net HPWL + compactness (bbox volume), minus an auto-output
+    reward (the only orientation-dependent term, so reorient moves are not free).
 
-    Each net's HPWL is scaled by its weight (1.0, or more for a feedback-penalized net)."""
+    Compactness is the total bounding-box volume, which already accounts for the y-extent, so there
+    is no separate per-layer term - the optimizer minimises the whole box, not the number of layers
+    (docs/ROADMAP.md lane C). Each net's HPWL is scaled by its weight (1.0, or more for a
+    feedback-penalized net)."""
     pos = {p.machine_id: p for p in placements}
     wire = 0.0
     for machine_ids, weight in nets:
@@ -232,7 +239,6 @@ def _cost(
     ys = [c[1] for c in cells]
     zs = [c[2] for c in cells]
     volume = (max(xs) - min(xs) + 1) * (max(ys) - min(ys) + 1) * (max(zs) - min(zs) + 1)
-    layers = len(set(ys))
 
     auto = 0
     for source_id, sink_id in auto_pairs:
@@ -251,7 +257,7 @@ def _cost(
             is not None
         ):
             auto += 1
-    return _W_WIRE * wire + _W_COMPACT * volume + _W_LAYERS * layers - _W_AUTO * auto
+    return _W_WIRE * wire + _W_COMPACT * volume - _W_AUTO * auto
 
 
 def _center(p: Placement, m: Machine) -> tuple[float, float, float]:
@@ -509,9 +515,9 @@ def _marginal_insertion_cost(
 ) -> float:
     """The cost terms that change with where ``machine_id`` goes: the weighted HPWL of its own nets
     over their already-placed members (this candidate included), minus the auto-output reward for
-    the pairs the candidate makes face-adjacent, plus a mild flat-build bias toward lower layers. A
-    cheap marginal proxy of ``_cost`` for ranking candidate insertions; the annealing loop's full
-    ``_cost`` still gates acceptance (compactness/layer totals included)."""
+    the pairs the candidate makes face-adjacent. A cheap marginal proxy of ``_cost`` for ranking
+    candidate insertions; the annealing loop's full ``_cost`` still gates acceptance (the
+    bounding-box volume term, which this per-machine view cannot see, included)."""
     cx = origin.x + m.footprint.sx / 2
     cy = origin.y + m.footprint.sy / 2
     cz = origin.z + m.footprint.sz / 2
@@ -543,7 +549,7 @@ def _marginal_insertion_cost(
             )
         if faces is not None:
             auto += 1
-    return _W_WIRE * wire - _W_AUTO * auto + _W_LAYERS * cy
+    return _W_WIRE * wire - _W_AUTO * auto
 
 
 def _candidate_origins(
