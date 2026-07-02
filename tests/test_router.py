@@ -15,7 +15,6 @@ from gtnh_solver.ir import (
     CellBox,
     CellCoord,
     Commodity,
-    FaceSpec,
     Facing,
     InputIR,
     IODirection,
@@ -34,6 +33,7 @@ from gtnh_solver.router import route, route_power
 from gtnh_solver.router.core import _route_pass
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
+from tests._helpers import at, machine
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 _SAND = _EXAMPLES / "gtnh-sand.json"
@@ -50,23 +50,13 @@ _MALFORMED_ROUTE_CODES = {
 }
 
 
-def _machine(mid: str, ports: list[Port], *, orientation: Facing = Facing.NORTH) -> Machine:
-    return Machine(
-        id=mid,
-        type="t",
-        voltage_tier="LV",
-        orientation_options=[orientation],
-        faces=FaceSpec(ports=ports),
-    )
-
-
 def _item_pair(region: CellBox, *, source_orientation: Facing = Facing.NORTH) -> InputIR:
-    a = _machine(
+    a = machine(
         "a",
         [Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)],
         orientation=source_orientation,
     )
-    b = _machine("b", [Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT)])
+    b = machine("b", [Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT)])
     net = Net(
         id="n",
         commodity=Commodity.ITEM,
@@ -78,10 +68,6 @@ def _item_pair(region: CellBox, *, source_orientation: Facing = Facing.NORTH) ->
         ],
     )
     return InputIR(bounding_region=region, machines=[a, b], nets=[net])
-
-
-def _at(mid: str, x: int, y: int, z: int) -> Placement:
-    return Placement(machine_id=mid, cell=CellCoord(x=x, y=y, z=z), orientation=Facing.NORTH)
 
 
 def _route_cells(route: Route) -> set[tuple[int, int, int]]:
@@ -164,7 +150,7 @@ def test_route_emits_only_valid_routes_even_when_incomplete() -> None:
 
 def test_route_two_machines_ok_and_validates() -> None:
     problem = _item_pair(CellBox(sx=8, sy=4, sz=8))
-    placements = [_at("a", 1, 0, 1), _at("b", 3, 0, 1)]
+    placements = [at("a", 1, 0, 1), at("b", 3, 0, 1)]
     result = route(problem, placements)
     assert result.ok
     assert len(result.routes) == 1
@@ -179,7 +165,7 @@ def test_route_auto_connects_an_adjacent_pair_instead_of_piping() -> None:
     # north, so route() assigns GT's free auto-output itself and lays no pipe - the decision rides
     # RouteResult.auto_connections, and the assembled layout passes the independent gate.
     problem = _item_pair(CellBox(sx=8, sy=4, sz=8))
-    placements = [_at("a", 1, 0, 1), _at("b", 2, 0, 1)]
+    placements = [at("a", 1, 0, 1), at("b", 2, 0, 1)]
     result = route(problem, placements)
     assert result.ok
     assert result.routes == ()
@@ -198,7 +184,7 @@ def test_route_two_crossing_nets_do_not_share_a_cell() -> None:
     # first net's cells become obstacles for the second - so they never share a cell (which would
     # be unbuildable single-channel). Routed independently they overlap at the crossing.
     def m(mid: str, port: str, direction: IODirection) -> Machine:
-        return _machine(mid, [Port(id=port, commodity=Commodity.ITEM, direction=direction)])
+        return machine(mid, [Port(id=port, commodity=Commodity.ITEM, direction=direction)])
 
     problem = InputIR(
         bounding_region=CellBox(sx=7, sy=4, sz=7),
@@ -231,7 +217,7 @@ def test_route_two_crossing_nets_do_not_share_a_cell() -> None:
             ),
         ],
     )
-    placements = [_at("a", 0, 0, 3), _at("b", 6, 0, 3), _at("c", 3, 0, 1), _at("d", 3, 0, 5)]
+    placements = [at("a", 0, 0, 3), at("b", 6, 0, 3), at("c", 3, 0, 1), at("d", 3, 0, 5)]
     result = route(problem, placements)
     assert result.ok
     assert len(result.routes) == 2
@@ -250,7 +236,7 @@ def test_rip_up_reroute_fixes_an_ordering_induced_failure() -> None:
     # In problem order net1 grabs gap x=1 first and wedges net2 out; rip-up/reroute reorders net2
     # first and net1 detours - so capacity-aware routing is not hostage to net order.
     def m(mid: str, direction: IODirection) -> Machine:
-        return _machine(mid, [Port(id="p", commodity=Commodity.ITEM, direction=direction)])
+        return machine(mid, [Port(id="p", commodity=Commodity.ITEM, direction=direction)])
 
     reserved = [CellCoord(x=x, y=0, z=3) for x in range(7) if x not in (1, 5)] + [
         CellCoord(x=2, y=0, z=z) for z in range(3)
@@ -287,7 +273,7 @@ def test_rip_up_reroute_fixes_an_ordering_induced_failure() -> None:
         ],
         reserved_cells=reserved,
     )
-    placements = [_at("a", 3, 0, 0), _at("b", 0, 0, 5), _at("c", 0, 0, 0), _at("d", 0, 0, 4)]
+    placements = [at("a", 3, 0, 0), at("b", 0, 0, 5), at("c", 0, 0, 0), at("d", 0, 0, 4)]
 
     # One greedy pass in problem order wedges net2 out (net1 took the pocket's only exit)...
     _, failures = _route_pass(problem, placements, problem.nets)
@@ -305,7 +291,7 @@ def test_rip_up_reroute_fixes_an_ordering_induced_failure() -> None:
 
 def test_route_terminals_avoid_the_front_face() -> None:
     problem = _item_pair(CellBox(sx=8, sy=4, sz=8))
-    result = route(problem, [_at("a", 1, 0, 1), _at("b", 3, 0, 1)])
+    result = route(problem, [at("a", 1, 0, 1), at("b", 3, 0, 1)])
     faces = [t.face for r in result.routes for t in r.terminals]
     assert faces  # there are terminals
     assert all(face is not Facing.NORTH for face in faces)  # north is the front (orientation)
@@ -315,7 +301,7 @@ def test_route_skips_me_toggled_commodity() -> None:
     problem = _item_pair(CellBox(sx=8, sy=4, sz=8)).model_copy(
         update={"me_toggles": METoggles(items=True)}
     )
-    result = route(problem, [_at("a", 1, 0, 1), _at("b", 3, 0, 1)])
+    result = route(problem, [at("a", 1, 0, 1), at("b", 3, 0, 1)])
     assert result.ok
     assert result.routes == ()  # the item net is ME-toggled, not physically routed
 
@@ -327,7 +313,7 @@ def test_route_infeasible_when_a_machine_cannot_dock() -> None:
     problem = _item_pair(CellBox(sx=2, sy=1, sz=1), source_orientation=Facing.EAST)
     placements = [
         Placement(machine_id="a", cell=CellCoord(x=0, y=0, z=0), orientation=Facing.EAST),
-        _at("b", 1, 0, 0),
+        at("b", 1, 0, 0),
     ]
     result = route(problem, placements)
     assert not result.ok
@@ -347,7 +333,7 @@ def test_route_infeasible_when_no_path_between_terminals() -> None:
             ]
         }
     )
-    result = route(problem, [_at("a", 0, 0, 0), _at("b", 2, 0, 0)])
+    result = route(problem, [at("a", 0, 0, 0), at("b", 2, 0, 0)])
     assert not result.ok
     assert result.infeasibility is not None
     assert result.infeasibility.constraint == "routing"
@@ -363,8 +349,8 @@ def test_route_infeasible_when_endpoint_has_no_placement() -> None:
 
 def test_route_skips_power_commodity() -> None:
     # The generic router no longer routes power - that is router.power's job (router.power).
-    a = _machine("a", [Port(id="pa", commodity=Commodity.POWER, direction=IODirection.OUTPUT)])
-    b = _machine("b", [Port(id="pb", commodity=Commodity.POWER, direction=IODirection.INPUT)])
+    a = machine("a", [Port(id="pa", commodity=Commodity.POWER, direction=IODirection.OUTPUT)])
+    b = machine("b", [Port(id="pb", commodity=Commodity.POWER, direction=IODirection.INPUT)])
     net = Net(
         id="p",
         commodity=Commodity.POWER,
@@ -375,6 +361,6 @@ def test_route_skips_power_commodity() -> None:
         ],
     )
     problem = InputIR(bounding_region=CellBox(sx=8, sy=4, sz=8), machines=[a, b], nets=[net])
-    result = route(problem, [_at("a", 1, 0, 1), _at("b", 3, 0, 1)])
+    result = route(problem, [at("a", 1, 0, 1), at("b", 3, 0, 1)])
     assert result.ok
     assert result.routes == ()  # the power net is left for the power router

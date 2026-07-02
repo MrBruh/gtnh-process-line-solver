@@ -23,27 +23,19 @@ from gtnh_solver.ir import (
     MachineFaceRef,
     METoggles,
     Net,
-    Placement,
     Port,
 )
 from gtnh_solver.router import route_power
 from gtnh_solver.router.power import _route_pass
 from gtnh_solver.validator import validate
+from tests._helpers import at, power_source
 
 _POWER = Commodity.POWER
 
 
 def _src(mid: str = "src") -> Machine:
-    return Machine(
-        id=mid,
-        type="Power Source (LV)",
-        voltage_tier="LV",
-        eut=0.0,
-        orientation_options=[Facing.NORTH],
-        faces=FaceSpec(
-            ports=[Port(id="power:out", commodity=_POWER, direction=IODirection.OUTPUT)]
-        ),
-    )
+    # The shared LV power source; kept as a one-liner alias so the many call sites stay readable.
+    return power_source(mid)
 
 
 def _load(mid: str, eut: float, *, tier: str = "LV") -> Machine:
@@ -83,10 +75,6 @@ def _tier_net(net_id: str, source: str, sink: str) -> Net:
     )
 
 
-def _at(mid: str, x: int, y: int, z: int) -> Placement:
-    return Placement(machine_id=mid, cell=CellCoord(x=x, y=y, z=z), orientation=Facing.NORTH)
-
-
 def test_power_trunk_sizes_thickness_by_summed_amperage() -> None:
     # source + two full-tier machines (LV, eut=32) in a row: src(0,0,0), m0(3,0,0), m1(6,0,0).
     # (At a 2-block spacing m0 would simply tap the source's dock cell - the shared-tap test
@@ -101,7 +89,7 @@ def test_power_trunk_sizes_thickness_by_summed_amperage() -> None:
         machines=[_src(), _load("m0", 32), _load("m1", 32)],
         nets=[_pnet("m0", "m1")],
     )
-    placements = [_at("src", 0, 0, 0), _at("m0", 3, 0, 0), _at("m1", 6, 0, 0)]
+    placements = [at("src", 0, 0, 0), at("m0", 3, 0, 0), at("m1", 6, 0, 0)]
     result = route_power(problem, placements)
     assert result.ok
     route = result.routes[0]
@@ -124,7 +112,7 @@ def test_power_trunk_stays_a_tree_when_legs_would_otherwise_overlap() -> None:
         machines=[_src(), _load("m0", 32), _load("m1", 32)],
         nets=[_pnet("m0", "m1")],
     )
-    placements = [_at("src", 2, 0, 0), _at("m0", 0, 0, 0), _at("m1", 4, 0, 0)]
+    placements = [at("src", 2, 0, 0), at("m0", 0, 0, 0), at("m1", 4, 0, 0)]
     result = route_power(problem, placements)
     assert result.ok, result.infeasibility
     route = result.routes[0]
@@ -147,7 +135,7 @@ def test_power_cable_routes_around_extra_obstacles() -> None:
         machines=[_src(), _load("m0", 32)],
         nets=[_pnet("m0")],
     )
-    placements = [_at("src", 0, 0, 0), _at("m0", 2, 0, 0)]
+    placements = [at("src", 0, 0, 0), at("m0", 2, 0, 0)]
     blocked = {(1, 0, 1)}  # the cell the straight src->m0 cable would otherwise use
     result = route_power(problem, placements, extra_obstacles=blocked)
     assert result.ok, result.infeasibility
@@ -170,7 +158,7 @@ def test_power_docks_on_the_face_toward_the_trunk_not_a_fixed_side() -> None:
         machines=[_src(), _load("m0", 1)],
         nets=[_pnet("m0")],
     )
-    placements = [_at("src", 5, 0, 0), _at("m0", 0, 0, 0)]
+    placements = [at("src", 5, 0, 0), at("m0", 0, 0, 0)]
     result = route_power(problem, placements)
     assert result.ok, result.infeasibility
     route = result.routes[0]
@@ -189,7 +177,7 @@ def test_power_single_machine_thickness_matches_its_amperage() -> None:
         machines=[_src(), _load("m0", 65)],
         nets=[_pnet("m0")],
     )
-    result = route_power(problem, [_at("src", 0, 0, 0), _at("m0", 2, 0, 0)])
+    result = route_power(problem, [at("src", 0, 0, 0), at("m0", 2, 0, 0)])
     assert result.ok
     assert set(result.routes[0].thickness_per_segment or []) == {4}  # ceil(65/30)=3 -> 4x
 
@@ -203,7 +191,7 @@ def test_power_loss_thickens_a_far_cable_past_its_lossless_size() -> None:
         machines=[_src(), _load("m0", 16)],
         nets=[_pnet("m0")],
     )
-    placements = [_at("src", 0, 0, 0), _at("m0", 20, 0, 0)]
+    placements = [at("src", 0, 0, 0), at("m0", 20, 0, 0)]
     result = route_power(problem, placements)
     assert result.ok, result.infeasibility
     route = result.routes[0]
@@ -220,7 +208,7 @@ def test_power_rejects_a_run_too_long_to_keep_voltage() -> None:
         machines=[_src(), _load("m0", 32)],
         nets=[_pnet("m0")],
     )
-    result = route_power(problem, [_at("src", 0, 0, 0), _at("m0", 35, 0, 0)])
+    result = route_power(problem, [at("src", 0, 0, 0), at("m0", 35, 0, 0)])
     assert not result.ok
     assert result.infeasibility is not None
     assert result.infeasibility.constraint == "voltage_drop"
@@ -234,7 +222,7 @@ def test_power_rejects_over_16x_amperage() -> None:
         machines=[_src(), _load("m0", 544)],
         nets=[_pnet("m0")],
     )
-    result = route_power(problem, [_at("src", 0, 0, 0), _at("m0", 2, 0, 0)])
+    result = route_power(problem, [at("src", 0, 0, 0), at("m0", 2, 0, 0)])
     assert not result.ok
     assert result.infeasibility is not None
     assert result.infeasibility.constraint == "amperage"
@@ -246,7 +234,7 @@ def test_power_unknown_tier_is_infeasible() -> None:
         machines=[_src(), _load("m0", 32, tier="NOPE")],
         nets=[_pnet("m0")],
     )
-    result = route_power(problem, [_at("src", 0, 0, 0), _at("m0", 2, 0, 0)])
+    result = route_power(problem, [at("src", 0, 0, 0), at("m0", 2, 0, 0)])
     assert not result.ok
     assert result.infeasibility is not None
     assert result.infeasibility.constraint == "voltage_tier"
@@ -269,7 +257,7 @@ def test_power_net_without_a_source_is_infeasible() -> None:
             )
         ],
     )
-    result = route_power(problem, [_at("m0", 0, 0, 0), _at("m1", 2, 0, 0)])
+    result = route_power(problem, [at("m0", 0, 0, 0), at("m1", 2, 0, 0)])
     assert not result.ok
     assert result.infeasibility is not None
     assert result.infeasibility.constraint == "power_net"
@@ -283,7 +271,7 @@ def test_power_me_toggled_is_skipped() -> None:
         nets=[_pnet("m0")],
         me_toggles=METoggles(power=True),
     )
-    result = route_power(problem, [_at("src", 0, 0, 0), _at("m0", 2, 0, 0)])
+    result = route_power(problem, [at("src", 0, 0, 0), at("m0", 2, 0, 0)])
     assert result.ok
     assert result.routes == ()  # power is on the ME network; nothing is cabled
 
@@ -295,7 +283,7 @@ def test_power_infeasible_when_a_terminal_cannot_dock() -> None:
         machines=[_src(), _load("m0", 32)],
         nets=[_pnet("m0")],
     )
-    result = route_power(problem, [_at("src", 0, 0, 0), _at("m0", 1, 0, 0)])
+    result = route_power(problem, [at("src", 0, 0, 0), at("m0", 1, 0, 0)])
     assert not result.ok
     assert result.infeasibility is not None
     assert result.infeasibility.constraint == "face_reachability"
@@ -308,7 +296,7 @@ def test_power_infeasible_when_a_net_machine_is_unplaced() -> None:
         machines=[_src(), _load("m0", 32)],
         nets=[_pnet("m0")],
     )
-    result = route_power(problem, [_at("src", 0, 0, 0)])  # m0 is missing a placement
+    result = route_power(problem, [at("src", 0, 0, 0)])  # m0 is missing a placement
     assert not result.ok
     assert result.infeasibility is not None
     assert result.infeasibility.constraint == "face_reachability"
@@ -322,7 +310,7 @@ def test_power_infeasible_when_no_path_between_terminals() -> None:
         nets=[_pnet("m0")],
         reserved_cells=[CellCoord(x=1, y=0, z=z) for z in range(3)],
     )
-    result = route_power(problem, [_at("src", 0, 0, 0), _at("m0", 2, 0, 0)])
+    result = route_power(problem, [at("src", 0, 0, 0), at("m0", 2, 0, 0)])
     assert not result.ok
     assert result.infeasibility is not None
     assert result.infeasibility.constraint == "routing"
@@ -340,16 +328,22 @@ def test_power_branched_trunk_sizes_each_branch_to_its_own_sink() -> None:
         machines=[_src(), _load("m0", 32), _load("m1", 32)],
         nets=[_pnet("m0", "m1")],
     )
-    placements = [_at("src", 3, 0, 0), _at("m0", 0, 0, 0), _at("m1", 6, 0, 0)]
+    placements = [at("src", 3, 0, 0), at("m0", 0, 0, 0), at("m1", 6, 0, 0)]
     result = route_power(problem, placements)
     assert result.ok, result.infeasibility
     route = result.routes[0]
     assert route.thickness_per_segment is not None
-    # the m0 branch is laid first, so its lone segment is segments[0] - sized to m0 alone
-    seg0 = route.segments[0]
-    assert (seg0.start.x, seg0.start.y, seg0.start.z) == (2, 0, 0)
-    assert (seg0.end.x, seg0.end.y, seg0.end.z) == (1, 0, 0)
-    assert route.thickness_per_segment[0] == 2  # not 4x: m1's amps do not ride this branch
+    # Select the m0 branch by its cells - the root (2,0,0) -> (1,0,0) leg - not by lay order: the
+    # contract is that each branch is sized to its own sink, not which one is emitted first.
+    thickness_by_edge = {
+        frozenset(
+            {(s.start.x, s.start.y, s.start.z), (s.end.x, s.end.y, s.end.z)}
+        ): route.thickness_per_segment[i]
+        for i, s in enumerate(route.segments)
+    }
+    m0_branch = frozenset({(2, 0, 0), (1, 0, 0)})
+    assert m0_branch in thickness_by_edge  # the m0 branch exists as its own single-hop leg
+    assert thickness_by_edge[m0_branch] == 2  # not 4x: m1's amps do not ride this branch
     assert set(route.thickness_per_segment) == {2}
     branches = sum(1 for s in route.segments if (s.start.x, s.start.y, s.start.z) == (2, 0, 0))
     assert branches == 2  # both legs leave the root cell - a real branch, not a path
@@ -369,7 +363,7 @@ def test_power_sink_taps_the_sources_dock_cell() -> None:
         machines=[_src(), _load("m0", 32), _load("m1", 32)],
         nets=[_pnet("m0", "m1")],
     )
-    placements = [_at("src", 0, 0, 0), _at("m0", 2, 0, 0), _at("m1", 4, 0, 0)]
+    placements = [at("src", 0, 0, 0), at("m0", 2, 0, 0), at("m1", 4, 0, 0)]
     result = route_power(problem, placements)
     assert result.ok, result.infeasibility
     route = result.routes[0]
@@ -397,7 +391,7 @@ def test_power_lone_sink_adjacent_to_the_root_still_gets_a_cable() -> None:
         machines=[_src(), _load("m0", 32)],
         nets=[_pnet("m0")],
     )
-    placements = [_at("src", 0, 0, 0), _at("m0", 2, 0, 0)]
+    placements = [at("src", 0, 0, 0), at("m0", 2, 0, 0)]
     result = route_power(problem, placements)
     assert result.ok, result.infeasibility
     route = result.routes[0]
@@ -422,10 +416,10 @@ def test_power_cluster_of_three_sinks_needs_at_most_three_cable_cells() -> None:
         nets=[_pnet("m0", "m1", "m2")],
     )
     placements = [
-        _at("src", 0, 0, 0),
-        _at("m0", 2, 0, 0),
-        _at("m1", 0, 1, 0),
-        _at("m2", 2, 1, 0),
+        at("src", 0, 0, 0),
+        at("m0", 2, 0, 0),
+        at("m1", 0, 1, 0),
+        at("m2", 2, 1, 0),
     ]
     result = route_power(problem, placements)
     assert result.ok, result.infeasibility
@@ -454,7 +448,7 @@ def test_power_tap_picks_the_trunk_cell_nearest_the_source() -> None:
         nets=[_pnet("m0", "m1")],
         reserved_cells=[CellCoord(x=0, y=0, z=1)],
     )
-    placements = [_at("src", 0, 0, 0), _at("m0", 3, 0, 1), _at("m1", 2, 0, 0)]
+    placements = [at("src", 0, 0, 0), at("m0", 3, 0, 1), at("m1", 2, 0, 0)]
     result = route_power(problem, placements)
     assert result.ok, result.infeasibility
     route = result.routes[0]
@@ -476,7 +470,7 @@ def test_power_infeasible_when_the_only_dock_cell_is_the_segmentless_trunk() -> 
         machines=[_src(), _load("m0", 32)],
         nets=[_pnet("m0")],
     )
-    result = route_power(problem, [_at("src", 0, 0, 0), _at("m0", 2, 0, 0)])
+    result = route_power(problem, [at("src", 0, 0, 0), at("m0", 2, 0, 0)])
     assert not result.ok
     assert result.infeasibility is not None
     assert result.infeasibility.constraint == "face_reachability"
@@ -492,10 +486,10 @@ def test_power_routing_is_deterministic() -> None:
         nets=[_pnet("m0", "m1", "m2")],
     )
     placements = [
-        _at("src", 0, 0, 0),
-        _at("m0", 2, 0, 0),
-        _at("m1", 4, 0, 0),
-        _at("m2", 4, 0, 2),
+        at("src", 0, 0, 0),
+        at("m0", 2, 0, 0),
+        at("m1", 4, 0, 0),
+        at("m2", 4, 0, 2),
     ]
     first = route_power(problem, placements)
     second = route_power(problem, placements)
@@ -521,7 +515,7 @@ def test_power_rip_up_reroute_fixes_a_tier_ordering_wedge() -> None:
         nets=[_tier_net("power:T1", "s1", "k1"), _tier_net("power:T2", "s2", "k2")],
         reserved_cells=reserved,
     )
-    placements = [_at("s1", 3, 0, 0), _at("k1", 0, 0, 5), _at("s2", 0, 0, 0), _at("k2", 0, 0, 4)]
+    placements = [at("s1", 3, 0, 0), at("k1", 0, 0, 5), at("s2", 0, 0, 0), at("k2", 0, 0, 4)]
 
     # One greedy pass in problem order wedges T2 out (T1's trunk took the pocket's only exit)...
     _, failures = _route_pass(problem, placements, list(problem.nets))
@@ -549,7 +543,7 @@ def test_power_reports_every_still_failing_net_not_just_the_first() -> None:
         machines=[_src("sa"), _load("ka", 544), _src("sb"), _load("kb", 544)],
         nets=[_tier_net("power:A", "sa", "ka"), _tier_net("power:B", "sb", "kb")],
     )
-    placements = [_at("sa", 0, 0, 0), _at("ka", 2, 0, 0), _at("sb", 0, 0, 2), _at("kb", 2, 0, 2)]
+    placements = [at("sa", 0, 0, 0), at("ka", 2, 0, 0), at("sb", 0, 0, 2), at("kb", 2, 0, 2)]
     result = route_power(problem, placements)
     assert not result.ok
     assert result.failed_nets == ("power:A", "power:B")  # ALL failing nets, in problem order
