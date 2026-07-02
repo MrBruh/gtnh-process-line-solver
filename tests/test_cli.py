@@ -112,6 +112,31 @@ def test_cli_malformed_export_returns_2(tmp_path: Path, capsys: pytest.CaptureFi
     assert "could not load" in capsys.readouterr().err
 
 
+def test_cli_unwritable_output_returns_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # an unwritable output path (parent dir missing -> OSError) is reported and exits 2 per the
+    # documented 0/1/2 contract, not dumped as a raw traceback (GitHub #39)
+    target = tmp_path / "missing-dir" / "guide.txt"
+    code = main([_SAND, "-o", str(target)])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "could not write" in err
+    assert str(target) in err
+
+
+def test_cli_unwritable_preview_returns_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # same guard on the --preview write path
+    target = tmp_path / "missing-dir" / "view.html"
+    code = main([_SAND, "--preview", str(target)])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "could not write" in err
+    assert str(target) in err
+
+
 def test_cli_version_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exc:
         main(["--version"])

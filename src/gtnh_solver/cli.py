@@ -73,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    # `export` is nargs="?" with this manual check (not argparse `required`) so main([]) can be
+    # unit-tested for the exit-2 path without argparse raising SystemExit.
     if args.export is None:
         print("error: an export path is required (try 'gtnh-solve --help')", file=sys.stderr)
         return 2
@@ -87,13 +89,21 @@ def main(argv: list[str] | None = None) -> int:
     guide = build_guide(problem, layout)
 
     if args.output:
-        Path(args.output).write_text(guide, encoding="utf-8")
+        try:
+            Path(args.output).write_text(guide, encoding="utf-8")
+        except OSError as exc:
+            print(f"error: could not write {args.output}: {exc}", file=sys.stderr)
+            return 2
         print(f"wrote build guide to {args.output}", file=sys.stderr)
     elif not args.preview:
         print(guide, end="")  # default to stdout, unless the user asked only for the visual preview
 
     if args.preview:
-        write_preview(problem, layout, args.preview)
+        try:
+            write_preview(problem, layout, args.preview)
+        except OSError as exc:
+            print(f"error: could not write {args.preview}: {exc}", file=sys.stderr)
+            return 2
         print(f"wrote preview to {args.preview}", file=sys.stderr)
 
     if layout.status is LayoutStatus.VALID:
