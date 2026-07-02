@@ -194,14 +194,14 @@ def _edge(nid: str, src: str, dst: str) -> Net:
 
 
 def test_feedback_loop_recovers_a_layout_a_single_attempt_leaves_partial() -> None:
-    # A tight single-layer graph where the seed-0 placement strands one net (e2) - the router
+    # A tight single-layer fan-out graph where the seed-0 placement strands a net - the router
     # cannot lay its pipe in the congested layout, so one assembly attempt is partial_invalid.
     # The place<->route feedback loop penalizes the failed net and re-places (next seed), and that
     # placement routes cleanly: solve() returns VALID where a single attempt did not.
-    edges = [("m3", "m2"), ("m0", "m3"), ("m0", "m4"), ("m1", "m4")]
+    edges = [("m0", "m2"), ("m0", "m3"), ("m1", "m3"), ("m1", "m4"), ("m2", "m5"), ("m4", "m5")]
     problem = InputIR(
         bounding_region=CellBox(sx=7, sy=1, sz=7),
-        machines=[_io_machine(f"m{i}") for i in range(5)],
+        machines=[_io_machine(f"m{i}") for i in range(6)],
         nets=[_edge(f"e{k}", a, b) for k, (a, b) in enumerate(edges)],
     )
     seed0 = optimize_placement(problem, seed=0)

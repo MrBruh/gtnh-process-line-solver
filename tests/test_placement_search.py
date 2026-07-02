@@ -145,17 +145,18 @@ def test_optimize_output_is_validator_clean() -> None:
 
 
 def test_net_penalty_pulls_the_penalized_net_tighter() -> None:
-    # A 5-spoke star: the hub can't sit adjacent to every spoke, so by default some spoke net is
-    # non-minimal. Penalizing one net (the place<->route feedback signal for an unrouted net) makes
-    # the optimizer pull that spoke adjacent to the hub - its wirelength strictly shrinks.
-    problem = _star(5, region=CellBox(sx=5, sy=1, sz=5))
-    base = optimize_placement(problem, seed=0)
+    # A 6-spoke star: a hub can seat only 4 spokes at distance 1, so some spoke nets must stay
+    # non-minimal. Heavily penalizing one net (the place<->route feedback signal for an unrouted
+    # net) spends the scarce adjacency on it: the penalized net ends up at least as tight as every
+    # other, and strictly tighter than the loosest - the unavoidable slack fell on an un-penalized
+    # net, not the penalized one.
+    problem = _star(6, region=CellBox(sx=5, sy=1, sz=5))
     penalized = optimize_placement(problem, seed=0, net_penalties={"n0": 50.0})
-    assert base.ok
     assert penalized.ok
-    assert _net_hpwl(problem, penalized.placements, "n0") < _net_hpwl(
-        problem, base.placements, "n0"
-    )
+    n0 = _net_hpwl(problem, penalized.placements, "n0")
+    others = [_net_hpwl(problem, penalized.placements, f"n{i}") for i in range(1, 6)]
+    assert n0 <= min(others)  # the penalized net is at least as tight as every un-penalized one
+    assert n0 < max(others)  # and strictly tighter than the loosest: the slack fell elsewhere
 
 
 def test_optimize_is_deterministic_per_seed() -> None:
@@ -164,6 +165,42 @@ def test_optimize_is_deterministic_per_seed() -> None:
         optimize_placement(problem, seed=7).placements
         == optimize_placement(problem, seed=7).placements
     )
+
+
+def test_lns_scales_and_stays_valid_on_a_larger_star() -> None:
+    # A 9-spoke star exercises the LNS ruin-and-recreate move (a hub + its net-neighbours are a
+    # natural related cluster): the optimizer must still emit a complete, validator-clean placement
+    # and beat the first-fit row.
+    problem = _star(9, region=CellBox(sx=7, sy=2, sz=7))
+    crude = place(problem)
+    optimized = optimize_placement(problem, seed=0)
+    assert optimized.ok
+    assert len(optimized.placements) == len(problem.machines)
+    assert _validates(problem, optimized.placements)
+    assert _total_hpwl(problem, optimized.placements) < _total_hpwl(problem, crude.placements)
+
+
+def test_lns_handles_netless_machines_via_random_ruin() -> None:
+    # With no nets the adjacency is empty, so LNS ruin cannot grow a related cluster and pads it
+    # with a random selection; recreate (no net-neighbours to bias toward) still yields a complete,
+    # validator-clean placement rather than crashing or dropping a machine.
+    machines = [_hub(f"m{i}") for i in range(4)]
+    problem = InputIR(bounding_region=CellBox(sx=6, sy=1, sz=6), machines=machines, nets=[])
+    result = optimize_placement(problem, seed=2)
+    assert result.ok
+    assert len(result.placements) == 4
+    assert _validates(problem, result.placements)
+
+
+def test_lns_fills_a_tight_region_using_the_first_fit_fallback() -> None:
+    # A region with exactly enough cells for the machines: after a ruin, a machine's freed origin
+    # can be retaken by an earlier re-insert and no neighbour cell is free, so recreate must fall
+    # back to a first-fit scan for any open slot. The result stays complete and validator-clean.
+    problem = _star(3, region=CellBox(sx=2, sy=1, sz=2))  # 4 machines, 4 cells: fully packed
+    result = optimize_placement(problem, seed=0)
+    assert result.ok
+    assert len(result.placements) == 4
+    assert _validates(problem, result.placements)
 
 
 def test_optimize_respects_reserved_and_bounds() -> None:
