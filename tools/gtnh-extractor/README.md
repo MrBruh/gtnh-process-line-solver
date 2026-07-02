@@ -43,6 +43,14 @@ of GT5-Unofficial and resolves transitively from its Nexus POM (each entry is pu
 with `classifier=dev` and `compile` scope), so pulling GT5U populates the whole dev server
 without listing them here. See the comments in `dependencies.gradle`.
 
+One transitive branch is excluded: GT5U's POM lists `ThaumicTinkerer` (a Thaumcraft
+integration addon) as a `compile` dependency *without* excluding its own transitives, and
+that subtree resolves to `com.github.GTNewHorizons:CodeChickenLib:1.3.0`, which is not
+published on the Nexus (the whole coordinate 404s). A plain transitive pull of GT5U
+therefore fails at `:compileJava`. Thaumcraft integration is not needed to enumerate or
+build multiblocks, so `dependencies.gradle` drops that one optional subtree; every other
+GT5U hard dependency still resolves and loads on the dev server.
+
 To bump: rewrite the two coordinates in `dependencies.gradle` and the entry in
 `gtnh.lock.json` from a newer manifest. Lane 4 (issue #47) automates this in CI.
 
@@ -72,11 +80,20 @@ Forge/FML symbols the scaffold uses today:
 
 Prerequisites:
 
-- A JDK to bootstrap the Gradle wrapper. The Gradle daemon auto-provisions JDK 25 (see
-  `gradle/gradle-daemon-jvm.properties` and `.java-version`); the Forge/Minecraft compile
-  toolchain is provisioned by the GTNH buildscript itself.
+- **A full JDK 25 installed locally.** The Gradle daemon runs on Java 25 (pinned by
+  `gradle/gradle-daemon-jvm.properties`). Its auto-provision is unreliable: on Windows the
+  template's pinned foojay URL resolves to a *JRE* (no `javac`/`javadoc`/`jar`), which
+  Gradle rejects with "doesn't satisfy the specification", so the daemon fails to start.
+  Install a real JDK 25 (e.g. Temurin) into a standard location and Gradle auto-detects it
+  and skips the broken download. Verified working: Temurin `jdk-25` under the user Adoptium
+  install dir.
+- **Leave toolchain auto-download enabled** (the default). The `gtnhconvention` plugin
+  compiles its injected interfaces with an **Azul Zulu JDK 17** and the 1.7.10 mod with a
+  **Java 8** toolchain; both download from foojay on first build. Do *not* pass
+  `-Dorg.gradle.java.installations.auto-download=false`, or those toolchains fail to
+  resolve. (Pre-installing a Temurin JDK 8 locally also satisfies the mod toolchain.)
 - Network access to the GTNH Nexus (`https://nexus.gtnewhorizons.com/repository/public/`).
-  The first run downloads Gradle, the toolchain, Forge, and the mod jars (multi-GB, slow);
+  The first run downloads Gradle, the toolchains, Forge, and the mod jars (multi-GB, slow);
   cached runs take minutes.
 
 Commands (run from `tools/gtnh-extractor/`):
@@ -95,16 +112,25 @@ Commands (run from `tools/gtnh-extractor/`):
 
 Headless notes for CI (lane 4 wires these up; they are not committed here):
 
-- The Minecraft EULA must be accepted: the first `runServer` writes `run/eula.txt` with
-  `eula=false` and stops. Set `eula=true` before the gating run.
-- Pass `--args='nogui'` (or rely on the buildscript's server run config) so a dedicated
-  server does not try to open the AWT server GUI on a headless runner.
+- `runServer` prompts on **stdin** for online-mode and Minecraft EULA acceptance. With no
+  stdin attached (a background or CI run) the prompts read EOF and the task fails with
+  "Minecraft EULA not accepted". Feed the answers in:
 
-Because a full Forge 1.7.10 dev workspace is multi-GB and needs a specific JDK and long
-first build, the boot was **not** executed in the environment that scaffolded this tool.
-The static wiring (buildscript, pinned deps reachable on the Nexus, JSON/gradle/Java
-syntax) was verified; the `runServer` boot-and-exit is verified by running the commands
-above (and, from lane 4 onward, by CI).
+  ```sh
+  printf 'n\ny\n' | ./gradlew runServer
+  ```
+
+  The first `n` keeps the server offline (no Mojang auth); the `y` accepts the EULA. RFG
+  writes `run/server/eula.txt` and the server `server.properties` from those answers.
+- No `nogui` arg is needed: the GTNH server run config is already headless (it does not open
+  the AWT server GUI).
+
+The `runServer` boot-and-exit has been **verified end to end**: the dedicated server starts
+with GT5U + StructureLib + their hard dependencies loaded, `DumperMod` fires on
+`FMLServerStartedEvent`, logs its scaffold-OK line, and calls `exitJava(0)`, yielding
+`BUILD SUCCESSFUL`. On a fresh machine the wall-clock is dominated by the one-time Minecraft
+decompile and the multi-GB dependency/toolchain download; once cached, a boot is about a
+minute. From lane 4 onward CI runs this as the gating check.
 
 ## Licensing
 
