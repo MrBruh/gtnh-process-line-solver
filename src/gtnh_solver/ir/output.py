@@ -12,15 +12,19 @@ from __future__ import annotations
 
 from pydantic import ConfigDict, Field, model_validator
 
+from gtnh_solver.dataset import CABLE_THICKNESSES
+
 from ._base import StrictModel
 from .enums import Commodity, Facing, LayoutStatus
-from .geometry import CellCoord
+from .geometry import Cell, CellCoord
 
 #: Bump on any breaking change to the output contract; record it in ``ir/__init__.py``.
 LAYOUT_RESULT_VERSION = 0
 
-#: Allowed GT cable thicknesses (1x/2x/4x/8x/16x, 16x max - docs/DOMAIN.md).
-_THICKNESSES = frozenset({1, 2, 4, 8, 16})
+#: Allowed GT cable thicknesses as a membership set (1x/2x/4x/8x/16x, 16x max - docs/DOMAIN.md).
+#: The ladder itself lives in ``dataset`` (rule data); this is the frozenset the contract validates
+#: a power route's per-segment thickness against.
+_THICKNESSES = frozenset(CABLE_THICKNESSES)
 
 
 class Placement(StrictModel):
@@ -62,6 +66,15 @@ class Route(StrictModel):
     terminals: list[Terminal] = Field(default_factory=list)
     segments: list[Segment] = Field(default_factory=list)
     thickness_per_segment: list[int] | None = None  # power only; 1/2/4/8/16 per segment
+
+    def cells(self) -> set[Cell]:
+        """Every grid cell this route's segments touch (both endpoints of each hop). The
+        obstacle/occupancy set the routers, solver, and build guide each rebuilt by hand."""
+        out: set[Cell] = set()
+        for seg in self.segments:
+            out.add(seg.start.as_tuple())
+            out.add(seg.end.as_tuple())
+        return out
 
     @model_validator(mode="after")
     def _check(self) -> Route:

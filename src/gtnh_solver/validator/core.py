@@ -50,7 +50,12 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 
-from gtnh_solver.dataset import CABLE_LOSS_PER_BLOCK, UnknownTierError, tier_voltage
+from gtnh_solver.dataset import (
+    CABLE_LOSS_PER_BLOCK,
+    CABLE_THICKNESSES,
+    UnknownTierError,
+    tier_voltage,
+)
 from gtnh_solver.dataset.voltage import _AMP_EPSILON
 from gtnh_solver.ir import (
     AutoConnection,
@@ -59,9 +64,9 @@ from gtnh_solver.ir import (
     IODirection,
     LayoutResult,
     Net,
-    Placement,
     Segment,
 )
+from gtnh_solver.ir.nets import placement_index, port_direction_map
 
 from ._geometry import (
     FACE_DELTAS,
@@ -186,7 +191,7 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
     region = problem.bounding_region
     reserved = {(c.x, c.y, c.z) for c in problem.reserved_cells}
     machines = {m.id: m for m in problem.machines}
-    port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
+    port_dir = port_direction_map(problem)
     port_commodity = {(m.id, p.id): p.commodity for m in problem.machines for p in m.faces.ports}
     body_cells: set[Cell] = set()
     for pl in layout.placements:
@@ -281,7 +286,7 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
             if (
                 tps is None
                 or len(tps) != len(r.segments)
-                or any(t not in (1, 2, 4, 8, 16) for t in tps)
+                or any(t not in CABLE_THICKNESSES for t in tps)
             ):
                 out.append(
                     Violation(
@@ -355,9 +360,7 @@ def _check_routed_net_endpoints(
 
 def _check_terminals(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
     machines = {m.id: m for m in problem.machines}
-    placement_by_machine: dict[str, Placement] = {}
-    for pl in layout.placements:
-        placement_by_machine.setdefault(pl.machine_id, pl)
+    placement_by_machine = placement_index(layout.placements)
     nets = {n.id: n for n in problem.nets}
 
     for r in layout.routes:
@@ -443,10 +446,8 @@ def _check_terminals(problem: InputIR, layout: LayoutResult, out: list[Violation
 def _check_auto_connections(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
     machines = {m.id: m for m in problem.machines}
     nets = {n.id: n for n in problem.nets}
-    port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
-    placement_of: dict[str, Placement] = {}
-    for pl in layout.placements:
-        placement_of.setdefault(pl.machine_id, pl)
+    port_dir = port_direction_map(problem)
+    placement_of = placement_index(layout.placements)
     source_uses: dict[str, int] = defaultdict(int)
 
     for ac in layout.auto_connections:
@@ -569,7 +570,7 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
     not certified by a gate that shares it (docs/ARCHITECTURE.md #4).
     """
     machines = {m.id: m for m in problem.machines}
-    port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
+    port_dir = port_direction_map(problem)
     for r in layout.routes:
         if r.commodity is not Commodity.POWER:
             continue

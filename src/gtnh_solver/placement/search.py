@@ -58,23 +58,23 @@ from gtnh_solver.ir import (
     Commodity,
     Facing,
     InputIR,
-    IODirection,
     Machine,
     Placement,
 )
 from gtnh_solver.ir.geometry import (
-    FACE_DELTAS,
+    FACE_OFFSETS,
     Cell,
     auto_output_faces,
     front_on_boundary,
     in_region,
     occupied_cells,
 )
+from gtnh_solver.ir.nets import net_sources_sinks, port_direction_map
 
 from .constructive import PlacementResult, _fit, place
 
 #: The six face-adjacent offsets, for growing LNS insertion candidates around placed neighbours.
-_FACE_DELTAS = tuple(FACE_DELTAS.values())
+_FACE_DELTAS = FACE_OFFSETS
 
 # Cost weights. Wirelength (item/fluid HPWL) dominates: it drives auto-output and short pipes.
 # The auto-output reward makes orientation matter (the front face carries no I/O, so the wrong
@@ -308,23 +308,14 @@ def _auto_candidate_pairs(problem: InputIR) -> list[tuple[str, str]]:
     auto-feed). This is the *cheap proxy* of that decision the placement cost keeps so
     orientation still has a gradient; the router is the authority on the final layout.
     """
-    port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
+    port_dir = port_direction_map(problem)
     pairs: list[tuple[str, str]] = []
     for net in problem.nets:
         if net.commodity is Commodity.POWER or problem.me_toggles.toggled(net.commodity):
             continue
-        sources = [
-            e.machine_id
-            for e in net.endpoints
-            if port_dir.get((e.machine_id, e.port_id)) is IODirection.OUTPUT
-        ]
-        sinks = [
-            e.machine_id
-            for e in net.endpoints
-            if port_dir.get((e.machine_id, e.port_id)) is IODirection.INPUT
-        ]
+        sources, sinks = net_sources_sinks(net, port_dir)
         if len(sources) == 1 and len(sinks) == 1:
-            pairs.append((sources[0], sinks[0]))
+            pairs.append((sources[0].machine_id, sinks[0].machine_id))
     return pairs
 
 

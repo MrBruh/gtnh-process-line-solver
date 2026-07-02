@@ -54,13 +54,19 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 
-from gtnh_solver.dataset import UnknownTierError, UnpowerableError, amp_load, whole_amps
+from gtnh_solver.dataset import (
+    CABLE_THICKNESSES,
+    MAX_CABLE_THICKNESS,
+    UnknownTierError,
+    UnpowerableError,
+    amp_load,
+    whole_amps,
+)
 from gtnh_solver.ir import (
     CellBox,
     Commodity,
     Infeasibility,
     InputIR,
-    IODirection,
     Machine,
     MachineFaceRef,
     Net,
@@ -70,13 +76,10 @@ from gtnh_solver.ir import (
     Terminal,
 )
 from gtnh_solver.ir.geometry import Cell
+from gtnh_solver.ir.nets import net_sources_sinks, placement_index, port_direction_map
 
 from ._grid import astar_multi, coord, dock_candidates, manhattan, obstacle_cells
 from .core import _rip_up_reroute
-
-#: GT cable thicknesses, smallest first (16x is the hard cap - docs/DOMAIN.md).
-_THICKNESSES = (1, 2, 4, 8, 16)
-_MAX_THICKNESS = _THICKNESSES[-1]
 
 
 @dataclass(frozen=True)
@@ -132,12 +135,16 @@ def route_power(
         power_nets, lambda order: _route_pass(problem, placements, order, extra_obstacles)
     )
     if not failures:
-        return PowerRouteResult(tuple(routes))
+        return PowerRouteResult(routes=tuple(routes))
 
     # Exhausted: report the first net still failing (in problem order), with its specific reason,
     # plus every still-failing net so the solver's feedback loop can penalize them all.
     still_failing = tuple(net.id for net in power_nets if net.id in failures)
-    return PowerRouteResult(tuple(routes), failures[still_failing[0]], still_failing)
+    return PowerRouteResult(
+        routes=tuple(routes),
+        infeasibility=failures[still_failing[0]],
+        failed_nets=still_failing,
+    )
 
 
 def _route_pass(
@@ -157,18 +164,15 @@ def _route_pass(
     no trace: ``_route_trunk`` never mutates ``obstacles``, so the retry starts clean.
     """
     machines = {m.id: m for m in problem.machines}
-    placement_by_machine: dict[str, Placement] = {}
-    for placement in placements:
-        placement_by_machine.setdefault(placement.machine_id, placement)  # one placement/machine
+    placement_by_machine = placement_index(placements)
     region = problem.bounding_region
-    port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
+    port_dir = port_direction_map(problem)
 
     obstacles = obstacle_cells(problem, placements, machines) | set(extra_obstacles)
     routes: list[Route] = []
     failures: dict[str, Infeasibility] = {}
     for net in nets:
-        sources = [e for e in net.endpoints if port_dir.get(_key(e)) is IODirection.OUTPUT]
-        sinks = [e for e in net.endpoints if port_dir.get(_key(e)) is IODirection.INPUT]
+        sources, sinks = net_sources_sinks(net, port_dir)
         if len(sources) != 1 or not sinks:
             failures[net.id] = _malformed(net.id)
             continue
@@ -186,14 +190,8 @@ def _route_pass(
             continue
         routes.append(built)
         # Capacity: this trunk now owns these cells, so the next tier's trunk routes around it.
-        for seg in built.segments:
-            obstacles.add((seg.start.x, seg.start.y, seg.start.z))
-            obstacles.add((seg.end.x, seg.end.y, seg.end.z))
+        obstacles.update(built.cells())
     return routes, failures
-
-
-def _key(endpoint: MachineFaceRef) -> tuple[str, str]:
-    return (endpoint.machine_id, endpoint.port_id)
 
 
 def _route_trunk(
@@ -350,7 +348,7 @@ def _size_trunk(
             # Everything on the segment's far-from-root side, rounded to the whole packets
             # (amps) the cable must actually be rated for.
             amps = whole_amps(subtree.get(child, 0.0))
-            if amps > _MAX_THICKNESS:
+            if amps > MAX_CABLE_THICKNESS:
                 return Infeasibility(
                     constraint="amperage",
                     detail=f"power net {net_id!r}: a cable segment must carry {amps} amps, over "
@@ -373,15 +371,15 @@ def _nearest(candidates: Sequence[Terminal], targets: Sequence[Terminal]) -> Ter
 
 
 def _cell(terminal: Terminal) -> Cell:
-    return (terminal.cell.x, terminal.cell.y, terminal.cell.z)
+    return terminal.cell.as_tuple()
 
 
 def _cable_thickness(load: int) -> int:
     """Smallest cable thickness (1/2/4/8/16) that carries ``load`` amps (>=1 even for 0)."""
-    for t in _THICKNESSES:
+    for t in CABLE_THICKNESSES:
         if load <= t:
             return t
-    return _MAX_THICKNESS  # the caller already rejected load > 16
+    return MAX_CABLE_THICKNESS  # the caller already rejected load > 16
 
 
 def _malformed(net_id: str) -> Infeasibility:

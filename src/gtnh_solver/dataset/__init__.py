@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from .voltage import (
     CABLE_LOSS_PER_BLOCK,
+    CABLE_THICKNESSES,
+    MAX_CABLE_THICKNESS,
     VOLTAGE_BY_TIER,
     UnknownTierError,
     UnpowerableError,
@@ -27,6 +29,8 @@ from .voltage import (
 
 __all__ = [
     "CABLE_LOSS_PER_BLOCK",
+    "CABLE_THICKNESSES",
+    "MAX_CABLE_THICKNESS",
     "VOLTAGE_BY_TIER",
     "UnknownTierError",
     "UnpowerableError",
