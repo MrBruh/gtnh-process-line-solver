@@ -25,13 +25,17 @@ What is checked now (needs only the IR):
   auto-output, and a machine has at most one auto-output face.
   power - per-segment cable thickness is present and well-formed (1/2/4/8/16, aligned); the route
   has exactly one source terminal and its cables form a single tree rooted there (neither is
-  certifiable otherwise, so both are rejected, not skipped); AND independently re-derived: rooting
-  that cable tree at the source terminal, each machine's fractional amp load is recomputed at its
-  *delivered* voltage (tier voltage minus 1 per cable block of distance from the source - GT cable
-  loss), every segment carries the summed load of the machines downstream of it rounded up to
-  whole amps per segment (machines buffer packets, so per-machine rounding would overstate), its
-  cable must be at least that thick (which also rejects a load over the 16x cap), and a run whose
-  loss drops the delivered voltage to <= 0 is rejected as unpowerable at its tier. A power source's front face
+  certifiable otherwise, so both are rejected, not skipped); AND independently re-derived on the
+  validator's OWN amperage arithmetic (it imports only the shared rule DATA - the voltage ladder,
+  the per-block cable loss, and the rounding epsilon - never the router's ``amp_load`` /
+  ``whole_amps`` sizing helpers, so a bug in those is caught here, not certified by a check that
+  shares them): rooting that cable tree at the source terminal, each machine's fractional amp load
+  is recomputed at its *delivered* voltage (tier voltage minus 1 per cable block of distance from
+  the source - GT cable loss), every segment carries the summed load of the machines downstream of
+  it rounded up to whole amps per segment (machines buffer packets, so per-machine rounding would
+  overstate), its cable must be at least that thick (which also rejects a load over the 16x cap),
+  and a run whose loss drops the delivered voltage to <= 0 is rejected as unpowerable at its tier;
+  an off-ladder (unknown) tier cannot be verified and is reported as such. A power source's front face
   is its reserved external-feed face and must lie flush on the region boundary (power enters
   from outside the structure; the front-face rule already keeps internal cables off it).
 
@@ -43,9 +47,11 @@ What is deferred to the dataset lane (rule data not available yet) - TODO:
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 
-from gtnh_solver.dataset import UnknownTierError, UnpowerableError, amp_load, whole_amps
+from gtnh_solver.dataset import CABLE_LOSS_PER_BLOCK, UnknownTierError, tier_voltage
+from gtnh_solver.dataset.voltage import _AMP_EPSILON
 from gtnh_solver.ir import (
     AutoConnection,
     Commodity,
@@ -551,8 +557,16 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
     whole amps (per-machine rounding would overstate - machines buffer packets) - and flags any
     segment whose cable is thinner than that. A load over 16x has no legal thickness, so this
     also catches the over-cap case the router is supposed to reject; a distance so long that loss
-    drops the delivered voltage to <= 0 is flagged as unpowerable. Written independently of the
-    router, so a sizing bug is caught, not certified.
+    drops the delivered voltage to <= 0 is flagged as unpowerable, and an off-ladder tier as
+    unverifiable (``POWER_TIER_UNKNOWN``).
+
+    Crucially the arithmetic is the validator's OWN (:func:`_required_amps` below, and the inline
+    ``eut / (tier_voltage - loss * distance)`` per machine): it shares only the rule DATA with the
+    router - the voltage ladder (``tier_voltage``), ``CABLE_LOSS_PER_BLOCK``, and the ``_AMP_EPSILON``
+    rounding slack - and never calls ``dataset.amp_load`` / ``whole_amps`` (the helpers the router
+    sizes with). Sharing the data keeps the rounding *policy* identical, so the two agree on every
+    valid layout; computing it on a separate code path means a bug in those helpers is caught here,
+    not certified by a gate that shares it (docs/ARCHITECTURE.md #4).
     """
     machines = {m.id: m for m in problem.machines}
     port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
@@ -596,11 +610,13 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
             continue
         order, parent, depth, edges = rooted
 
-        # Each machine's fractional amp load at its *delivered* voltage: its cable-block distance
-        # from the source is its depth in the rooted tree, and cable loss lowers the voltage (and
-        # so raises the load) accordingly. Loads stay fractional per machine (packets amortize
-        # through the machine buffer - dataset.amp_load) and round up to whole amps only per
-        # segment below. Re-derived from geometry, independent of the router's numbers.
+        # Each machine's fractional amp load at its *delivered* voltage, on the validator's OWN
+        # arithmetic (not dataset.amp_load): its cable-block distance from the source is its depth
+        # in the rooted tree, and cable loss lowers the voltage (and so raises the load)
+        # accordingly - the inline ``eut / (tier_voltage - loss * distance)`` mirrors the router's
+        # formula while sharing only the rule DATA (tier_voltage, CABLE_LOSS_PER_BLOCK). Loads stay
+        # fractional per machine (packets amortize through the machine buffer) and round up to whole
+        # amps only per segment below. Re-derived from geometry, independent of the router's numbers.
         amp_at: dict[Cell, float] = defaultdict(float)
         uncheckable = False
         for t in r.terminals:
@@ -613,19 +629,22 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
             distance = depth.get(cell)
             if distance is None:
                 continue  # a terminal not on the cable tree draws no load through it (as before)
+            if machine.eut <= 0:
+                continue  # a source / unpowered block draws nothing (matches dataset.amp_load)
             try:
-                draw = amp_load(machine.eut, machine.voltage_tier, distance=distance)
+                tier_v = tier_voltage(machine.voltage_tier)
             except UnknownTierError:
                 out.append(
                     Violation(
-                        ViolationCode.POWER_THICKNESS_INSUFFICIENT,
+                        ViolationCode.POWER_TIER_UNKNOWN,
                         f"power route for net {r.net_id!r} serves machine {t.machine_id!r} of "
                         f"unknown tier {machine.voltage_tier!r}; its amperage cannot be verified",
                     )
                 )
                 uncheckable = True
                 break
-            except UnpowerableError:
+            volts = tier_v - CABLE_LOSS_PER_BLOCK * distance  # voltage delivered after cable loss
+            if volts <= 0:
                 out.append(
                     Violation(
                         ViolationCode.POWER_VOLTAGE_DROP_EXCESSIVE,
@@ -636,13 +655,14 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
                 )
                 uncheckable = True
                 break
-            amp_at[cell] += draw
+            amp_at[cell] += machine.eut / volts
         if uncheckable:
             continue
 
         loads = _subtree_loads(order, parent, depth, edges, amp_at)
         for seg_idx, (load, thick) in enumerate(zip(loads, tps, strict=True)):
-            req = whole_amps(load)  # a cable is rated in whole packets; round the summed load up
+            # a cable is rated in whole packets, so round the summed load up to whole amps
+            req = _required_amps(load)
             if thick < req:
                 out.append(
                     Violation(
@@ -712,6 +732,18 @@ def _subtree_loads(
         if p is not None:
             subtree[p] += subtree[cur]
     return [subtree[a if depth[a] > depth[b] else b] for a, b in edges]
+
+
+def _required_amps(load: float) -> int:
+    """Whole amps a summed fractional ``load`` needs - the validator's OWN ceil, computed
+    independently of the router's ``dataset.whole_amps``.
+
+    Shares only the ``_AMP_EPSILON`` slack constant (the rounding *policy*, so float dust from
+    summing exact fractions never tips an integer total to the next whole amp), not the helper -
+    keeping the two rounding-identical on valid layouts while deriving the value on a separate code
+    path, so a bug in the router's sizing is caught here, not certified (docs/ARCHITECTURE.md #4).
+    """
+    return max(0, math.ceil(load - _AMP_EPSILON))
 
 
 def _check_route_capacity(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:

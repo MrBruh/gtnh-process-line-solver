@@ -789,11 +789,15 @@ def test_power_load_over_16x_has_no_sufficient_cable() -> None:
 
 
 def test_power_unknown_tier_cannot_be_amperage_verified() -> None:
-    # the validator can't compute amperage for an off-ladder tier, so it declines to certify
+    # An off-ladder tier is unverifiable (not undersized): the validator can't compute amperage for
+    # it, so it declines to certify under the dedicated POWER_TIER_UNKNOWN code - not the
+    # thickness-insufficient one, whose meaning is "cable thinner than the summed amps".
     problem, layout = _power_trunk()
     weird = problem.machines[1].model_copy(update={"voltage_tier": "NOPE"})
     problem = problem.model_copy(update={"machines": [problem.machines[0], weird]})
-    assert ViolationCode.POWER_THICKNESS_INSUFFICIENT in validate(problem, layout).codes()
+    codes = validate(problem, layout).codes()
+    assert ViolationCode.POWER_TIER_UNKNOWN in codes, codes
+    assert ViolationCode.POWER_THICKNESS_INSUFFICIENT not in codes, codes
 
 
 def test_power_route_with_a_cycle_is_rejected_not_skipped() -> None:
@@ -893,6 +897,126 @@ def test_power_run_too_long_for_its_tier_is_flagged_as_voltage_drop() -> None:
         routes=[route],
     )
     assert ViolationCode.POWER_VOLTAGE_DROP_EXCESSIVE in validate(problem, layout).codes()
+
+
+def _power_summed_trunk() -> tuple[InputIR, LayoutResult]:
+    """A source feeding TWO sinks on a shared trunk, so the root segment carries their summed load.
+
+    src -> mA (1 block out, 31 V) -> mB (2 blocks out, 30 V), all LV. mA draws 62/31 = 2.0 A and mB
+    48/30 = 1.6 A, so the root segment (both downstream) needs ceil(2.0 + 1.6) = 4 A -> 4x, while
+    the far segment (mB only) needs ceil(1.6) = 2 A -> 2x. The validator must SUM the two loads
+    itself to get 4x - a single-sink fixture never exercises that aggregation - so this pins the
+    independent summation, not just a per-machine number.
+    """
+    problem = InputIR(
+        bounding_region=CellBox(sx=4, sy=4, sz=4),
+        machines=[
+            Machine(
+                id="src",
+                type="Power Source (LV)",
+                voltage_tier="LV",
+                eut=0.0,
+                orientation_options=[Facing.NORTH],
+                faces=FaceSpec(
+                    ports=[Port(id="po", commodity=Commodity.POWER, direction=IODirection.OUTPUT)]
+                ),
+            ),
+            Machine(
+                id="mA",
+                type="M",
+                voltage_tier="LV",
+                eut=62.0,  # 1 block out (31 V): 62 / 31 = 2.0 A exactly
+                orientation_options=[Facing.NORTH],
+                faces=FaceSpec(
+                    ports=[Port(id="pi", commodity=Commodity.POWER, direction=IODirection.INPUT)]
+                ),
+            ),
+            Machine(
+                id="mB",
+                type="M",
+                voltage_tier="LV",
+                eut=48.0,  # 2 blocks out (30 V): 48 / 30 = 1.6 A
+                orientation_options=[Facing.NORTH],
+                faces=FaceSpec(
+                    ports=[Port(id="pi", commodity=Commodity.POWER, direction=IODirection.INPUT)]
+                ),
+            ),
+        ],
+        nets=[
+            Net(
+                id="pw",
+                commodity=Commodity.POWER,
+                throughput=110.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="src", port_id="po"),
+                    MachineFaceRef(machine_id="mA", port_id="pi"),
+                    MachineFaceRef(machine_id="mB", port_id="pi"),
+                ],
+            )
+        ],
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id="src", cell=_coord(0, 0, 0), orientation=Facing.NORTH),
+            Placement(machine_id="mA", cell=_coord(1, 0, 0), orientation=Facing.NORTH),
+            Placement(machine_id="mB", cell=_coord(2, 0, 0), orientation=Facing.NORTH),
+        ],
+        routes=[
+            Route(
+                net_id="pw",
+                commodity=Commodity.POWER,
+                terminals=[
+                    Terminal(
+                        machine_id="src", port_id="po", face=Facing.SOUTH, cell=_coord(0, 0, 1)
+                    ),
+                    Terminal(
+                        machine_id="mA", port_id="pi", face=Facing.SOUTH, cell=_coord(1, 0, 1)
+                    ),
+                    Terminal(
+                        machine_id="mB", port_id="pi", face=Facing.SOUTH, cell=_coord(2, 0, 1)
+                    ),
+                ],
+                segments=[
+                    Segment(start=_coord(0, 0, 1), end=_coord(1, 0, 1), channel=0),  # both sinks
+                    Segment(start=_coord(1, 0, 1), end=_coord(2, 0, 1), channel=0),  # mB only
+                ],
+                thickness_per_segment=[4, 2],
+            )
+        ],
+    )
+    return problem, layout
+
+
+def test_valid_summed_amperage_trunk_passes() -> None:
+    # The validator, deriving amperage on its own code path (no dataset.amp_load / whole_amps),
+    # must agree the correctly-sized [4x, 2x] trunk is valid - the shared rule DATA (voltage ladder,
+    # loss, rounding epsilon) keeps its rounding identical to the router's on a valid layout.
+    assert validate(*_power_summed_trunk()).ok, str(validate(*_power_summed_trunk()))
+
+
+def test_power_segment_one_step_too_thin_for_summed_load_is_flagged() -> None:
+    # Independence proof: the root segment carries 3.6 A (4x). Re-cable it one ladder step thinner
+    # (4x -> 2x), a mistake a buggy router could make; the validator has no router number to lean on,
+    # so it must SUM the two machines' loads itself to know 2x is short - and it does.
+    problem, layout = _power_summed_trunk()
+    thin = layout.routes[0].model_copy(update={"thickness_per_segment": [2, 2]})  # seg 0 too thin
+    layout = layout.model_copy(update={"routes": [thin]})
+    codes = validate(problem, layout).codes()
+    assert ViolationCode.POWER_THICKNESS_INSUFFICIENT in codes, codes
+
+
+def test_zero_draw_power_sink_loads_no_amps() -> None:
+    # A power sink drawing 0 EU/t loads nothing on the trunk (like dataset.amp_load, the validator
+    # short-circuits eut <= 0 BEFORE reading its tier/voltage): the tier is never resolved, so even
+    # an off-ladder tier here is not flagged - the two agree on a zero-draw machine. The 0-amp trunk
+    # is valid at any thickness.
+    problem, layout = _power_trunk()
+    quiet = problem.machines[1].model_copy(update={"eut": 0.0, "voltage_tier": "NOPE"})
+    problem = problem.model_copy(update={"machines": [problem.machines[0], quiet]})
+    report = validate(problem, layout)
+    assert report.ok, str(report)
 
 
 # --------------------------------------------------------------- auto-output connections

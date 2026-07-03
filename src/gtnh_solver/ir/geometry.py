@@ -54,7 +54,11 @@ def occupied_cells(origin: CellCoord, footprint: CellBox) -> Iterator[Cell]:
     - ``origin`` is the **minimum corner**; the box occupies
       ``[x, x+sx) x [y, y+sy) x [z, z+sz)``.
     - Orientation-driven rotation of non-cubic footprints is a TODO tied to the dataset
-      (1x1x1 machines, the common case, are unaffected).
+      (1x1x1 machines, the common case, are unaffected). Because this primitive is shared by
+      placement, the router AND the validator (its independent safety net), a rotated multi-cell
+      machine would be mis-modeled *identically* on both sides - so when rotation lands the
+      validator must get its own rotation-aware expansion (or this primitive must be oracle-tested)
+      or the gate will share the solver's blind spot instead of catching it.
     """
     for dx in range(footprint.sx):
         for dy in range(footprint.sy):

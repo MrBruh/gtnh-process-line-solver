@@ -340,6 +340,18 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
 
 ### Fixed
+- **Validator derives power amperage independently of the router (GitHub #36).** The validator is
+  meant to be a second, differently-written implementation so a bug in the router's power math is
+  caught, not certified (docs/ARCHITECTURE.md #4) - but its amperage re-check still called the same
+  `dataset.amp_load` / `whole_amps` helpers the router sizes cables with, so a bug in the loss
+  formula or the ceil-with-epsilon rounding would have been blessed by both sides. It now inlines
+  its own arithmetic (`eut / (tier_voltage - loss * distance)` per machine, summed per segment,
+  `ceil` with the shared epsilon), importing only the rule DATA (the voltage ladder,
+  `CABLE_LOSS_PER_BLOCK`, `_AMP_EPSILON`) so the rounding policy stays identical and the two still
+  agree on every valid layout, while a sizing bug is now caught on a separate code path. Separately,
+  an unknown/off-ladder voltage tier was reported as `power_thickness_insufficient` (whose meaning
+  is "cable thinner than the summed amps") - a wrong signal for a route that is merely unverifiable;
+  it now gets its own additive `power_tier_unknown` violation code. (`validator/`.)
 - **User-facing output surfaces are hardened against bad input and bad paths (GitHub #39).** The
   previewer inlined the scene JSON into its `<script>` block unescaped, so a machine type or
   resource id containing `</script>` (plan JSON is external input) could close the tag and break or
