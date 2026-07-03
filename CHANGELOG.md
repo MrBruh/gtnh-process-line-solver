@@ -316,6 +316,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Sand passes the hand-built compactness + <= 3-cable budget under every objective.
 
 ### Changed
+- **The test gate runs in a quarter of the time (GitHub #74).** Profiling showed ~3/4 of every
+  CI test leg was coverage tracer overhead, not test work (the solver's hot loops execute
+  millions of traced line events). The suite now runs parallel by default (`pytest-xdist`,
+  `-n auto` in addopts - the local gate drops ~155s to ~60s), CI gates coverage on ONE matrix
+  leg instead of every leg, and that leg uses coverage's `sys.monitoring` core
+  (`COVERAGE_CORE=sysmon`, branch-capable on 3.14+). No test dropped; the 90% gate and the
+  required `test` status check are unchanged.
 - **CI tests Python 3.14; packaging metadata reflects real support.** The test matrix now runs
   the floor and the latest release only (`3.10` + `3.14`; a floor break or a new-release break
   is what a leg catches, and the 3.11-3.13 intermediates cannot fail while both ends pass), and
