@@ -3,7 +3,9 @@
 ``render_html`` injects ``build_scene``'s dict (as JSON) into a static template: one double-
 clickable ``.html`` that pulls three.js from a CDN and draws the layout. The camera orbits AND
 pans (right-drag / arrow keys), and a layer-by-layer slider isolates each y-level. Machines are
-solid boxes with their name on the front face (placeholder until real textures); routes (cables and
+solid boxes skinned with their real GT casing texture where ``scene.textures`` supplies one (the
+six per-face icons ride ``machine.texture``; missing icons fall back to the flat type colour), with
+the machine name on the front face; routes (cables and
 pipes) are drawn GT-style, a small cube at each cell centre with a uniform arm out to the block edge
 for every connection (an adjacent route cell or a docked machine face), power sized by cable
 thickness; auto-output is a small arrow on each source-machine face perpendicular to the ejecting
@@ -184,7 +186,8 @@ function wrap(ctx, words, maxW) {
   return lines;
 }
 
-// Name drawn onto the machine's front face (placeholder until real block textures exist).
+// Name drawn onto the machine's front face - kept even when the box is textured, so the five other
+// faces show the GT casing texture while the front stays the readable identity label.
 function frontFace(text, bg, size, normal) {
   const W = 256, H = 256, pad = 20;
   const cnv = document.createElement('canvas');
@@ -212,6 +215,41 @@ function frontFace(text, bg, size, normal) {
   return { plane, axis };
 }
 
+// Real GT block textures are embedded per icon in SCENE.textures (data: URIs). A machine box is
+// skinned by mapping its six per-face icon names (three.js material order) to nearest-filtered
+// textures, so GT's pixel art stays crisp instead of getting blurred by the default mipmap filter.
+// A missing icon, or a machine with no SCENE.texture at all, falls back to the flat colour box -
+// the placeholder path is always available (graceful degradation).
+const TEXTURES = SCENE.textures || {};
+const _texCache = {};
+function faceTexture(name) {
+  if (!name) return null;
+  if (name in _texCache) return _texCache[name];
+  const uri = TEXTURES[name];
+  if (!uri) { _texCache[name] = null; return null; }
+  const tex = new THREE.TextureLoader().load(uri);
+  tex.magFilter = THREE.NearestFilter;    // crisp pixel art, no bilinear smear
+  tex.minFilter = THREE.NearestFilter;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  _texCache[name] = tex;
+  return tex;
+}
+function flatMaterial(m) {
+  const mm = new THREE.MeshStandardMaterial({ color: m.color, roughness: 0.6, metalness: 0.1 });
+  if (m.role === 'source') { mm.emissive = new THREE.Color(m.color); mm.emissiveIntensity = 0.45; }
+  return mm;
+}
+function machineMaterials(m) {
+  if (!m.texture) return flatMaterial(m);   // placeholder box
+  return m.texture.map((name) => {           // one material per BoxGeometry face
+    const tex = faceTexture(name);
+    if (!tex) return flatMaterial(m);        // untextured face keeps the type colour
+    const mm = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.75, metalness: 0.05 });
+    if (m.role === 'source') { mm.emissive = new THREE.Color(m.color); mm.emissiveIntensity = 0.25; }
+    return mm;
+  });
+}
+
 const centerById = {}, sizeById = {};
 for (const m of SCENE.machines) {
   const [sx, sy, sz] = m.size;
@@ -221,9 +259,7 @@ for (const m of SCENE.machines) {
   const minY = m.cell[1], maxY = m.cell[1] + sy - 1;
 
   const geo = new THREE.BoxGeometry(sx * 0.92, sy * 0.92, sz * 0.92);
-  const mat = new THREE.MeshStandardMaterial({ color: m.color, roughness: 0.6, metalness: 0.1 });
-  if (m.role === 'source') { mat.emissive = new THREE.Color(m.color); mat.emissiveIntensity = 0.45; }
-  const box = new THREE.Mesh(geo, mat);
+  const box = new THREE.Mesh(geo, machineMaterials(m));
   box.position.copy(pos);
   track(box, minY, maxY);
   const edges = new THREE.LineSegments(

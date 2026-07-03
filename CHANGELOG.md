@@ -7,6 +7,23 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Previewer machine textures (`previewer/`, lane 7, GitHub #50).** The 3D previewer now skins each
+  machine box with its real GregTech casing texture instead of a flat colour, so a layout reads like
+  the structure it builds. The resolution chain is pure and fully unit-tested: a machine's `type`
+  (display name) resolves to its `data/multiblocks/<...>.json` doc, then to a representative block
+  (the controller's own block when the texture manifest resolves it, else the dominant *resolvable*
+  casing block the primary variant places - e.g. the Electric Blast Furnace's heat-proof casing),
+  then to the manifest's per-side iconset names, and finally to a `data:image/png;base64,` URI on the
+  box's six `BoxGeometry` materials (GT side index -> three.js face slot), rendered with
+  nearest-neighbour filtering so the pixel art stays crisp; the machine name stays on the front face.
+  PNGs are LGPL and never committed: the pinned GT5-Unofficial jar is fetched once from the GTNH
+  Nexus into a per-user cache **outside the repo tree** and only the referenced `iconsets/*.png` are
+  extracted and embedded in the emitted HTML (a thin, network-only shim in `previewer/jar.py`,
+  injected so the test suite never fetches). Resolution degrades gracefully - a machine with no
+  committed doc, an all-gapped block, or unfetched bytes simply keeps its colour placeholder, and a
+  scene of undocumented machines triggers no jar fetch - so a preview always renders. `gtnh-solve
+  --preview` logs a per-machine-type textured-vs-placeholder summary. `NOTICE` records the
+  fetched-not-vendored texture handling.
 - **Extractor channel handling and identity-substitution tables (`tools/gtnh-extractor/`, lane 3,
   GitHub #46).** `StructureDumper` now fills the per-controller `substitutions` object. After the
   trigger-stack sweep it probes each GT channel (`GTStructureChannels.values()`, skipping the
