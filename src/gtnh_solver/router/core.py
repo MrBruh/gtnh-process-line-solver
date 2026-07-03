@@ -77,6 +77,13 @@ from .auto import assign_auto_outputs
 #: salvage step then keeps a maximal collision-free subset and fails the rest explicitly.
 _MAX_ROUNDS = 32
 
+#: Rounds the over-used cell set must stay *identical* before we test whether the remaining
+#: contention is irreducible (:func:`_congestion_is_irreducible`). A stable set means history
+#: bumps have stopped moving anyone; a couple of rounds' margin keeps a mid-oscillation blip
+#: from triggering the (cheap) probe. Genuine congestion stabilizes from round 1, so this only
+#: delays the early-out by a handful of rounds while never firing during productive rerouting.
+_STALL_ROUNDS = 3
+
 #: Price a net pays per *other* net currently using a cell (the PathFinder present-sharing
 #: term). At 2.0, one contested cell is worth a 2-cell detour - strong enough that ties break
 #: away from sharing immediately, weak enough that a long detour is not taken prematurely.
@@ -164,8 +171,15 @@ def _negotiate(
     ordering accident): a maximal collision-free subset (in problem order) is kept and every
     other net fails with a ``congestion`` infeasibility the solver's feedback loop can penalize.
 
+    Genuine congestion need not wait out the whole budget. When the over-used set stops
+    changing for ``_STALL_ROUNDS`` (history has stopped moving anyone), the same salvage runs
+    early - but only once :func:`_congestion_is_irreducible` has *proven* no further round could
+    help. That proof, never a count heuristic, is what preserves the order-robustness guarantee:
+    an escapable contention is left to resolve, so it is never misreported as congestion.
+
     Deterministic: nets are processed in the given order, the priced A* breaks ties on cost
-    then cell, and prices are pure functions of the round state.
+    then cell, and prices are pure functions of the round state, and the early-out is gated on a
+    proof with no dependence on iteration order.
     """
     machines = {m.id: m for m in problem.machines}
     placement_by_machine = placement_index(placements)
@@ -207,6 +221,8 @@ def _negotiate(
     cells_by_net: dict[str, set[Cell]] = {}
     segments_by_net: dict[str, list[Segment]] = {}
     converged = False
+    prev_overused: frozenset[Cell] | None = None
+    stall = 0
     for _ in range(_MAX_ROUNDS):
         hard_failed: list[Net] = []
         for net in active:
@@ -238,6 +254,27 @@ def _negotiate(
         overused = [cell for cell, users in usage.items() if users > 1]
         if not overused:
             converged = True
+            break
+        # Genuine congestion stabilizes into a fixed contested set that history cannot move.
+        # Once that set has repeated for _STALL_ROUNDS, prove whether it is irreducible; if so,
+        # bail to the salvage path now instead of grinding the rest of the round budget for the
+        # identical result. The proof (never a heuristic on the count) is what keeps an escapable
+        # - and therefore resolvable - contention from being misreported as congestion.
+        overused_key = frozenset(overused)
+        if overused_key == prev_overused:
+            stall += 1
+        else:
+            stall, prev_overused = 0, overused_key
+        if stall == _STALL_ROUNDS and _congestion_is_irreducible(
+            overused,
+            active,
+            cells_by_net,
+            hard,
+            all_terms,
+            term_cells_by_net,
+            terminals_by_net,
+            region,
+        ):
             break
         for cell in overused:
             history[cell] = history.get(cell, 0.0) + _HISTORY_STEP
@@ -291,6 +328,50 @@ def _lay_legs(
             segments.append(Segment(start=coord(c0), end=coord(c1), channel=0))
         cells.update(path)
     return segments, cells
+
+
+def _congestion_is_irreducible(
+    overused: Sequence[Cell],
+    active: Sequence[Net],
+    cells_by_net: dict[str, set[Cell]],
+    hard: set[Cell],
+    all_terms: set[Cell],
+    term_cells_by_net: dict[str, set[Cell]],
+    terminals_by_net: dict[str, list[Terminal]],
+    region: CellBox,
+) -> bool:
+    """Would no further negotiation round reduce the overlap? True only when *proven* so.
+
+    A cell is *unavoidable* for a net when the net cannot route between its terminals with that
+    one cell blocked (its own hard obstacles + foreign docks + the cell), ignoring every other
+    net - a purely geometric fact prices cannot change, since prices only discourage. When some
+    over-used cell is unavoidable for two or more of the nets on it, those nets must share it in
+    *every* routing, so it stays over-used no matter how many more rounds run. When that holds for
+    every over-used cell, the whole residual overlap is permanent: the salvage subset is already
+    final and grinding the rest of the round budget reproduces the identical result, so the caller
+    may bail now.
+
+    The moment one over-used cell still has a net that could detour off it, this returns False -
+    another round of history could price that net away, so the contention is resolvable and must
+    not be reported as congestion. Conservative by construction: it answers True only on proof, so
+    the early-out can never turn a routable problem into a false infeasibility. It proves a lone
+    bottleneck (or narrow corridor), not capacity spread across several parallel openings - those
+    have no single unavoidable cell and are left to the round budget, still correctly. Pure A* on
+    fixed obstacle sets, so the verdict does not depend on iteration order.
+    """
+    for cell in overused:
+        forced = 0
+        for net in active:
+            if cell not in cells_by_net.get(net.id, frozenset()):
+                continue  # not a user of this cell, so not what keeps it over-used
+            blocked = hard | (all_terms - term_cells_by_net[net.id]) | {cell}
+            if _lay_legs(terminals_by_net[net.id], blocked, {}, region) is None:
+                forced += 1
+                if forced >= 2:
+                    break
+        if forced < 2:
+            return False  # this cell is escapable for a net on it - keep negotiating
+    return True
 
 
 def _no_dock(net_id: str, machine_id: str) -> Infeasibility:

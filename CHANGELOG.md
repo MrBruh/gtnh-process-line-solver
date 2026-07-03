@@ -305,9 +305,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   contested), and all nets re-route round by round until no cell is shared - so an
   ordering-induced false infeasibility cannot happen, and what remains contested after the round
   budget is reported per net as an explicit `congestion` infeasibility (a maximal collision-free
-  subset is still emitted for the feedback loop). Power trunks keep the failed-first
-  rip-up/reroute (trees grown by multi-goal A* do not decompose into per-cell pricing).
-  (`router/core.py`, `router/_grid.py`.)
+  subset is still emitted for the feedback loop). Once the contested set stops changing, a
+  geometric proof (a bottleneck cell that two nets both cannot route around) ends the negotiation
+  early instead of grinding the whole round budget, so a genuine single-bottleneck congestion is
+  rejected in a few rounds rather than 32; the proof only ever bails on a demonstrated collision,
+  so a resolvable contention is never misreported. Power trunks keep the
+  failed-first rip-up/reroute (trees grown by multi-goal A* do not decompose into per-cell
+  pricing). (`router/core.py`, `router/_grid.py`.)
 - **CI tests Python 3.14; packaging metadata reflects real support.** The test matrix now runs
   the floor and the latest release only (`3.10` + `3.14`; a floor break or a new-release break
   is what a leg catches, and the 3.11-3.13 intermediates cannot fail while both ends pass), and
