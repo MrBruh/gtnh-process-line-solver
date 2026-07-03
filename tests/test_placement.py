@@ -17,31 +17,17 @@ from hypothesis import strategies as st
 from gtnh_solver.ir import (
     CellBox,
     CellCoord,
-    Commodity,
-    FaceSpec,
     Facing,
     InputIR,
-    IODirection,
     LayoutResult,
     LayoutStatus,
     Machine,
     Placement,
-    Port,
 )
 from gtnh_solver.ir.geometry import front_on_boundary, in_region
 from gtnh_solver.placement import place
 from gtnh_solver.validator import validate
-from gtnh_solver.validator.report import ViolationCode
-
-_PLACEMENT_CODES = {
-    ViolationCode.MACHINE_OVERLAP,
-    ViolationCode.MACHINE_OUT_OF_BOUNDS,
-    ViolationCode.MACHINE_ON_RESERVED,
-    ViolationCode.BAD_ORIENTATION,
-    ViolationCode.PLACEMENT_COUNT_MISMATCH,
-    ViolationCode.UNKNOWN_MACHINE,
-    ViolationCode.POWER_FEED_NOT_ON_BOUNDARY,
-}
+from tests._helpers import PLACEMENT_CODES, power_source
 
 
 def _machine(
@@ -140,18 +126,15 @@ def test_empty_problem_is_ok() -> None:
 
 
 def _source(mid: str = "src", *, orientations: list[Facing] | None = None) -> Machine:
-    """A power source: a machine with a power OUTPUT port (the adapter's synthesized shape)."""
-    return Machine(
-        id=mid,
-        type="Power Source (LV)",
-        voltage_tier="LV",
-        orientation_options=(
+    """A power source (the adapter's synthesized shape), delegating the boilerplate to the shared
+    ``power_source`` builder. Defaults to all four horizontal fronts so first-fit can reorient the
+    reserved feed face onto the boundary."""
+    return power_source(
+        mid,
+        orientations=(
             orientations
             if orientations is not None
             else [Facing.NORTH, Facing.SOUTH, Facing.EAST, Facing.WEST]
-        ),
-        faces=FaceSpec(
-            ports=[Port(id="po", commodity=Commodity.POWER, direction=IODirection.OUTPUT)]
         ),
     )
 
@@ -222,6 +205,6 @@ def test_place_yields_valid_layout_or_explicit_infeasibility(
 
     if result.ok:
         assert len(result.placements) == n
-        assert _PLACEMENT_CODES.isdisjoint(validate(problem, _as_layout(result.placements)).codes())
+        assert PLACEMENT_CODES.isdisjoint(validate(problem, _as_layout(result.placements)).codes())
     else:
         assert result.infeasibility is not None

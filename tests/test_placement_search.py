@@ -27,17 +27,7 @@ from gtnh_solver.ir.geometry import front_on_boundary, occupied_cells
 from gtnh_solver.placement import optimize_placement, place
 from gtnh_solver.placement.search import _apply_occupied_delta
 from gtnh_solver.validator import validate
-from gtnh_solver.validator.report import ViolationCode
-
-_PLACEMENT_CODES = {
-    ViolationCode.MACHINE_OVERLAP,
-    ViolationCode.MACHINE_OUT_OF_BOUNDS,
-    ViolationCode.MACHINE_ON_RESERVED,
-    ViolationCode.BAD_ORIENTATION,
-    ViolationCode.PLACEMENT_COUNT_MISMATCH,
-    ViolationCode.UNKNOWN_MACHINE,
-    ViolationCode.POWER_FEED_NOT_ON_BOUNDARY,
-}
+from tests._helpers import PLACEMENT_CODES, at, power_source
 
 
 def _hub(mid: str) -> Machine:
@@ -129,7 +119,7 @@ def _net_hpwl(problem: InputIR, placements: tuple[Placement, ...], net_id: str) 
 
 def _validates(problem: InputIR, placements: tuple[Placement, ...]) -> bool:
     layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=list(placements))
-    return _PLACEMENT_CODES.isdisjoint(validate(problem, layout).codes())
+    return PLACEMENT_CODES.isdisjoint(validate(problem, layout).codes())
 
 
 def test_optimize_improves_wirelength_over_first_fit() -> None:
@@ -237,14 +227,10 @@ def _powered_star(n_spokes: int = 3) -> InputIR:
         )
         for i in range(n_spokes)
     ]
-    source = Machine(
-        id="psrc",
-        type="Power Source (LV)",
-        voltage_tier="LV",
-        orientation_options=[Facing.NORTH, Facing.SOUTH, Facing.EAST, Facing.WEST],
-        faces=FaceSpec(
-            ports=[Port(id="po", commodity=Commodity.POWER, direction=IODirection.OUTPUT)]
-        ),
+    source = power_source(
+        "psrc",
+        orientations=[Facing.NORTH, Facing.SOUTH, Facing.EAST, Facing.WEST],
+        port_id="po",  # the power net below wires this exact port id
     )
     nets = [
         Net(
@@ -349,18 +335,18 @@ def test_apply_occupied_delta_survives_lns_reordering_with_multiblock_footprints
     )
     machines = {m.id: m for m in (_hub("a"), wide, _spoke("c"))}
 
-    def at(mid: str, x: int) -> Placement:
-        return Placement(machine_id=mid, cell=CellCoord(x=x, y=0, z=0), orientation=Facing.NORTH)
+    def on_row(mid: str, x: int) -> Placement:
+        return at(mid, x, 0, 0)
 
     def rebuild(placements: list[Placement]) -> set[tuple[int, int, int]]:
         return {
             c for p in placements for c in occupied_cells(p.cell, machines[p.machine_id].footprint)
         }
 
-    before = [at("a", 0), at("wide", 2), at("c", 5)]
+    before = [on_row("a", 0), on_row("wide", 2), on_row("c", 5)]
     # LNS ruined + reinserted the wide machine: kept a and c keep their cells but shift to the
     # front of the list, and the wide machine lands at the tail with a new origin.
-    after = [before[0], before[2], at("wide", 7)]
+    after = [before[0], before[2], on_row("wide", 7)]
     occupied = rebuild(before)
     _apply_occupied_delta(occupied, before, after, machines)
     assert occupied == rebuild(after)

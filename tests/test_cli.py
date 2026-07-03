@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from gtnh_solver import __version__
 from gtnh_solver.cli import main
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
@@ -142,3 +143,10 @@ def test_cli_version_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
         main(["--version"])
     assert exc.value.code == 0
     assert "gtnh-solve" in capsys.readouterr().out
+
+
+def test_package_exposes_a_nonempty_version_string() -> None:
+    # The package exports a version; the CLI's --version reports it. (Folded in from the retired
+    # tests/test_smoke.py scaffolding.)
+    assert isinstance(__version__, str)
+    assert __version__

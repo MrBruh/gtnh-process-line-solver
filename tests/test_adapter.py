@@ -23,27 +23,24 @@ from gtnh_solver.adapter import (
     load_plan,
     to_input_ir,
 )
-from gtnh_solver.ir import Commodity, IODirection, LayoutResult, LayoutStatus
+from gtnh_solver.ir import Commodity, InputIR, IODirection, LayoutResult, LayoutStatus, Net
 from gtnh_solver.placement import place
 from gtnh_solver.validator import validate
-from gtnh_solver.validator.report import ViolationCode
+from tests._helpers import PLACEMENT_CODES
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 _SAND = _EXAMPLES / "gtnh-sand.json"
 _NITROBENZENE = _EXAMPLES / "gtnh-nitrobenzene.json"
 
-_PLACEMENT_CODES = {
-    ViolationCode.MACHINE_OVERLAP,
-    ViolationCode.MACHINE_OUT_OF_BOUNDS,
-    ViolationCode.MACHINE_ON_RESERVED,
-    ViolationCode.BAD_ORIENTATION,
-    ViolationCode.PLACEMENT_COUNT_MISMATCH,
-    ViolationCode.UNKNOWN_MACHINE,
-}
-
 
 def _resource(kind: str, rid: str, amount: float = 1.0) -> Resource:
     return Resource(kind=kind, id=rid, amount=amount)
+
+
+def _net_for_edge(ir: InputIR, edge_id: str = "e") -> Net:
+    # The adapter contract is a net *per edge* (net.id == edge.id), deterministic but not pinned to
+    # emit position - so select the net by its edge id, not by ``nets[0]``.
+    return next(n for n in ir.nets if n.id == edge_id)
 
 
 # ----------------------------------------------------------------- real fixtures
@@ -76,7 +73,7 @@ def test_adapt_sand_end_to_end_places_and_validates() -> None:
     result = place(ir)
     assert result.ok
     layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=list(result.placements))
-    assert _PLACEMENT_CODES.isdisjoint(validate(ir, layout).codes())
+    assert PLACEMENT_CODES.isdisjoint(validate(ir, layout).codes())
 
 
 def test_throughput_is_positive_for_sand_material_nets() -> None:
@@ -140,7 +137,7 @@ def test_storage_sink_routes_with_throughput_from_producer() -> None:
     )
     ir = to_input_ir(plan)
     assert len(ir.machines) == 2
-    assert ir.nets[0].throughput == 0.5  # 2 amount * 1 parallel * 1 count / 4 ticks
+    assert _net_for_edge(ir).throughput == 0.5  # 2 amount * 1 parallel * 1 count / 4 ticks
 
 
 def test_throughput_falls_back_to_consumer_demand() -> None:
@@ -156,7 +153,7 @@ def test_throughput_falls_back_to_consumer_demand() -> None:
         storages=[Storage(id="s", kind="item", resource_id="R")],
         edges=[Edge(id="e", source="s", target="n", resource_kind="item", resource_id="R")],
     )
-    assert to_input_ir(plan).nets[0].throughput == 1.5  # 3 / 2
+    assert _net_for_edge(to_input_ir(plan)).throughput == 1.5  # 3 / 2
 
 
 def test_synthesizes_one_power_source_and_net_per_tier() -> None:
@@ -257,7 +254,7 @@ def test_storage_to_storage_edge_has_zero_throughput() -> None:
         ],
         edges=[Edge(id="e", source="a", target="b", resource_kind="item", resource_id="R")],
     )
-    assert to_input_ir(plan).nets[0].throughput == 0.0
+    assert _net_for_edge(to_input_ir(plan)).throughput == 0.0
 
 
 def test_zero_duration_recipe_yields_zero_rate() -> None:
@@ -272,4 +269,4 @@ def test_zero_duration_recipe_yields_zero_rate() -> None:
         storages=[Storage(id="s", kind="item", resource_id="R")],
         edges=[Edge(id="e", source="n", target="s", resource_kind="item", resource_id="R")],
     )
-    assert to_input_ir(plan).nets[0].throughput == 0.0
+    assert _net_for_edge(to_input_ir(plan)).throughput == 0.0
