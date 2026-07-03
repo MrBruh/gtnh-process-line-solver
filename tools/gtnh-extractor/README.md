@@ -36,8 +36,9 @@ schema-v1 dataset:
 Output: one `<datasetOut>/multiblocks/<name>.json` per controller plus a `_meta.json` run
 summary, both validating against `src/gtnh_solver/dataset/schema.py`. **What is still out of
 scope here:** channel handling / identity-substitution tables (lane 3, issue #46 - the
-`substitutions` object stays empty) and texture mapping (lane 6). No game logic beyond raw
-coordinate collection lives in this tool by design; all interpretation is the Python adapter's.
+`substitutions` object stays empty). Texture mapping (lane 6, issue #49) lands alongside it as a
+separate `TextureDumper` pass (see "Texture manifest" below). No game logic beyond raw coordinate
+collection lives in this tool by design; all interpretation is the Python adapter's.
 
 ## Pinned versions
 
@@ -94,7 +95,60 @@ dumps its geometry from the block pass.
 
 Note the framework package is `com.gtnewhorizon.structurelib` (singular). `ISurvivalConstructable`
 is deliberately **not** used: the dump drives the creative `construct(...)` path, not survival
-autoplace. Textures (`Textures.BlockIcons` reflection) are lane 6, not here.
+autoplace. Texture reflection (`Textures.BlockIcons`) is lane 6, in `TextureDumper` (see below).
+
+## Texture manifest (lane 6, issue #49)
+
+`TextureDumper` emits `data/textures/manifest.json`: a block-to-icon map so the previewer can skin a
+multiblock shell. It is a **separate pass** gated by `-PtextureOut`; PNGs are never committed (LGPL),
+only the icon **name** and the asset **path inside the mod jar**, which the previewer fetches from
+the GTNH Nexus jar at preview time.
+
+**Option A (implemented): server-side icon reflection.** In 1.7.10 `Block.getIcon(side, meta)`
+returns an `IIcon` that is only populated by client-side texture registration, so on a dedicated
+server it is normally `null` - and the register itself
+(`net.minecraft.client.renderer.texture.IIconRegister`) is a `@SideOnly(CLIENT)` class FML's
+`SideTransformer` **refuses to load on the server** (`invalid side SERVER`), even in the dev
+workspace, so we cannot register icons the client way at all. But GT wires every casing texture
+through a `Textures.BlockIcons` enum constant whose name **is** the PNG filename: every constant's
+`run()` registers `"gregtech:iconsets/" + name()`, with the PNG at
+`assets/gregtech/textures/blocks/iconsets/<NAME>.png` (the constant's own `getTextureFile()` is
+unusable here - it dereferences the client-only `TextureMap` class the `SideTransformer` blocks). So
+the pass skips the register entirely: it **reflectively sets each constant's
+package-private `mIcon` field** (of the server-safe `net.minecraft.util.IIcon` type) to a `NamedIcon`
+carrying the name, then invokes each block's own `getIcon(side, meta)` **reflectively**
+(via `MethodHandles.findVirtual`, no compile-time reference to the possibly client-only method). When
+the block's per-meta wiring references the icon constant directly, `getIcon` hands back our
+`NamedIcon` and we read the name; no client, no icon register, and no reimplementing the per-family
+switch.
+
+**What Option A can and cannot name (the documented gap).** A meta resolves when its `getIcon`
+references the constant **directly** - `invokevirtual` on the concrete `Textures$BlockIcons` enum,
+whose `getIcon()` is *not* side-stripped - e.g. the Electric Blast Furnace's heat-proof machine
+casing (`gt.blockcasings` meta 11 -> `MACHINE_HEATPROOFCASING`). A meta does **not** resolve when
+`getIcon` reaches its sprite through the `IIconContainer` *interface* (a shared `MACHINECASINGS_*`
+array, or a switch result typed as `IIconContainer`): `IIconContainer.getIcon()` is itself
+`@SideOnly(CLIENT)`, so FML strips it from the interface on the server and the `invokeinterface`
+throws `NoSuchMethodError`. The heating coils (`gt.blockcasings5`) hit exactly this. Those metas, plus
+families with no server-side `getIcon` override (GT's newer client-only `ITexture` render path) and
+the composite tile-entity `gt.blockmachines` controller hulls, are recorded in the manifest's `gaps`
+with the reason - never invented - pointing at **Option B (fallback, not implemented): a client-mode
+`runClient` dump under `xvfb-run`** whose main-menu tick handler reads
+`getIcon(side, meta).getIconName()` for the gap blocks. Textures only feed the previewer, so this lane
+can slip a pack version without blocking the solver; hence the separate `update-textures.yml`
+workflow. (In the verified 2.8.4 boot: 9 casing blocks / 150 `(block,meta,side)` assignments resolved,
+28 families/metas recorded as Option-B gaps.)
+
+Extra GT5U / Minecraft API surface this pass touches (all server-safe: `IIconRegister` and the
+client-only render path are deliberately avoided):
+
+| Symbol | Package | Used for |
+| ------ | ------- | -------- |
+| `Textures.BlockIcons` (enum + `mIcon` field, reflected) | `gregtech.api.enums` | Enumerate every casing icon constant; inject a `NamedIcon` into its `mIcon` so `getIcon` returns a named icon on the server. The constant's `name()` gives the iconset name (`gregtech:iconsets/NAME`) + jar path. |
+| `IHasIndexedTexture` | `gregtech.api.interfaces` | Filter the block registry to the indexed-texture (casing/coil) families. |
+| `IIcon` | `net.minecraft.util` | The name-carrying `NamedIcon` injected as `mIcon` (a server-safe type, unlike the client-only `IIconRegister`). |
+| `Block.getIcon(int, int)` (reflected) | `net.minecraft.block` | The block's own per-meta/side icon lookup, invoked reflectively so there is no compile-time client dependency. |
+| `GameData.getBlockRegistry()` | `cpw.mods.fml.common.registry` | Iterate every registered block and get its `modid:name`. |
 
 Forge/FML symbols the scaffold uses today:
 

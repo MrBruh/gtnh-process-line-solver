@@ -80,11 +80,28 @@ public class DumperMod {
      * silently produces an empty dataset fails CI rather than committing it.
      */
     private void dump() throws Exception {
-        File datasetOut = resolveDatasetOut();
         String packVersion = System.getProperty("gtnhextractor.packVersion", "unknown-dev");
         String extractorSha = resolveExtractorSha();
         Map<String, String> modVersions = collectModVersions();
 
+        // Lane 6 (issue #49): the texture manifest is a separate pass gated by -PtextureOut. It runs
+        // headlessly with no structure build (it only reflects GT's icon wiring off the block
+        // registry), so when only -PtextureOut is set the correctness-critical structure dump is
+        // skipped and the texture workflow boots fast and stays decoupled from it.
+        File textureOut = resolveOut("gtnhextractor.textureOut");
+        if (textureOut != null) {
+            LOG.info("gtnh-extractor: dumping texture manifest to {}", textureOut.getAbsolutePath());
+            int icons = new TextureDumper().run(textureOut, packVersion, modVersions, extractorSha);
+            if (icons == 0) {
+                throw new IllegalStateException("texture pass resolved no icons; the casing families changed");
+            }
+            LOG.info("gtnh-extractor: texture manifest complete ({} icon assignments).", icons);
+        }
+        if (textureOut != null && resolveOut("gtnhextractor.datasetOut") == null) {
+            return; // texture-only run: skip the structure dump entirely
+        }
+
+        File datasetOut = resolveDatasetOut();
         World world = MinecraftServer.getServer().worldServers[0];
         LOG.info(
             "gtnh-extractor: dumping multiblocks to {} (pack {}, extractor {})",
@@ -102,6 +119,16 @@ public class DumperMod {
             written,
             dumper.errors()
                 .count());
+    }
+
+    /** Resolve an output-directory system property to a {@link File}, or {@code null} if unset/blank. */
+    private File resolveOut(String propKey) {
+        String configured = System.getProperty(propKey);
+        if (configured != null && !configured.trim()
+            .isEmpty()) {
+            return new File(configured);
+        }
+        return null;
     }
 
     /** {@code -PdatasetOut} is forwarded as a system property by the build; default to an in-tree dir. */
@@ -125,9 +152,22 @@ public class DumperMod {
             .isEmpty() ? sha : "unknown";
     }
 
-    /** The versions of the two manifest-tracked mods this dump was built from, for {@code _meta.json}. */
+    /**
+     * The versions of the two manifest-tracked mods this dump was built from, for {@code _meta.json}.
+     * Prefers the pinned versions passed by the workflow via {@code -PmodVersions} (read from the
+     * repo-root {@code gtnh.lock.json}); the runtime Forge container is only the dev fallback,
+     * because GT5-Unofficial's container self-reports the uninformative "MC1710" rather than its
+     * artifact version.
+     */
     private Map<String, String> collectModVersions() {
         Map<String, String> versions = new LinkedHashMap<>();
+        String pinned = System.getProperty("gtnhextractor.modVersions", "");
+        for (String pair : pinned.split(",")) {
+            int eq = pair.indexOf('=');
+            if (eq > 0) {
+                versions.put(pair.substring(0, eq).trim(), pair.substring(eq + 1).trim());
+            }
+        }
         putModVersion(versions, "GT5-Unofficial", "gregtech");
         putModVersion(versions, "StructureLib", "structurelib");
         return versions;
@@ -138,7 +178,7 @@ public class DumperMod {
             .getIndexedModList()
             .get(modId);
         if (container != null) {
-            versions.put(label, container.getVersion());
+            versions.putIfAbsent(label, container.getVersion());
         }
     }
 }
