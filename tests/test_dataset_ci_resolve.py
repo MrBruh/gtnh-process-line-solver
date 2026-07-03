@@ -291,3 +291,15 @@ def test_cli_write_lock(tmp_path: Path) -> None:
     assert rv.load_lock(out) == rv.LockState(
         "2.8.4", {"GT5-Unofficial": "5.09.51.482", "StructureLib": "1.4.23"}
     )
+
+
+def test_repo_root_lock_file_parses_with_the_resolvers_schema() -> None:
+    # Integration guard (found the hard way): lane 1 (#58) and this lane were developed in
+    # parallel, and the extractor scaffold shipped a repo-root gtnh.lock.json in an ad-hoc
+    # shape the resolver rejected - the workflow's first real run would have died at resolve.
+    # Pin that the REAL lock at the repo root always parses with the resolver's reader and
+    # tracks the mods the workflow diffs.
+    lock = rv.load_lock(Path(__file__).parents[1] / "gtnh.lock.json")
+    assert lock.pack_version
+    for mod in rv.DEFAULT_TRACKED:
+        assert lock.mods.get(mod), f"repo-root lock is missing tracked mod {mod!r}"
