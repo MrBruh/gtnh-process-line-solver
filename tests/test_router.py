@@ -31,7 +31,6 @@ from gtnh_solver.ir import (
 )
 from gtnh_solver.placement import place
 from gtnh_solver.router import route, route_power
-from gtnh_solver.router.core import _route_pass
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
 
@@ -243,12 +242,14 @@ def test_route_two_crossing_nets_do_not_share_a_cell() -> None:
     assert ViolationCode.ROUTE_CELL_COLLISION not in report.codes()
 
 
-def test_rip_up_reroute_fixes_an_ordering_induced_failure() -> None:
+def test_negotiation_routes_an_ordering_hostile_pocket() -> None:
     # A wall at z=3 with two gaps (x=1 and x=5); x=2 is walled for z<3, making a top-left pocket
     # (x=0..1, z=0..2) whose only exit down is gap x=1. net2 (c in the pocket -> d below) can ONLY
     # cross via gap x=1; net1 (a top-right -> b below) prefers gap x=1 but can detour to gap x=5.
-    # In problem order net1 grabs gap x=1 first and wedges net2 out; rip-up/reroute reorders net2
-    # first and net1 detours - so capacity-aware routing is not hostage to net order.
+    # Sequentially laid in problem order, net1 grabbed the pocket's only exit and wedged net2 out
+    # (the failure that used to need failed-first reordering); negotiation instead prices the
+    # contested gap cells up until net1's detour via x=5 is the cheaper argument - and the result
+    # cannot depend on net order at all (asserted below by flipping it).
     def m(mid: str, direction: IODirection) -> Machine:
         return _machine(mid, [Port(id="p", commodity=Commodity.ITEM, direction=direction)])
 
@@ -289,18 +290,84 @@ def test_rip_up_reroute_fixes_an_ordering_induced_failure() -> None:
     )
     placements = [_at("a", 3, 0, 0), _at("b", 0, 0, 5), _at("c", 0, 0, 0), _at("d", 0, 0, 4)]
 
-    # One greedy pass in problem order wedges net2 out (net1 took the pocket's only exit)...
-    _, failures = _route_pass(problem, placements, problem.nets)
-    assert failures, "expected the problem-order pass to fail a net"
-    # ...but rip-up/reroute reorders (failed net first) and routes both, collision-free.
     result = route(problem, placements)
     assert result.ok, result.infeasibility
     assert len(result.routes) == 2
+    assert _route_cells(result.routes[0]).isdisjoint(_route_cells(result.routes[1]))
     layout = LayoutResult(
         status=LayoutStatus.VALID, seed=0, placements=placements, routes=list(result.routes)
     )
     report = validate(problem, layout)
     assert report.ok, str(report)
+    # Order-robust: the reversed net order routes just as cleanly (with sequential laying, one of
+    # the two orders wedged; negotiation gives neither order a first-grab advantage).
+    flipped = problem.model_copy(update={"nets": list(reversed(problem.nets))})
+    result2 = route(flipped, placements)
+    assert result2.ok, result2.infeasibility
+    assert len(result2.routes) == 2
+
+
+def test_negotiation_is_deterministic() -> None:
+    # Same input twice -> identical routes (terminals, segments, order). Prices are pure
+    # functions of the round state and the priced A* breaks ties on cost then cell, so the
+    # negotiation has no hidden nondeterminism for the feedback loop to trip over.
+    ir_path = _SAND
+    from gtnh_solver.adapter import adapt_file
+
+    problem = adapt_file(ir_path)
+    placements = place(problem).placements
+    assert route(problem, list(placements)) == route(problem, list(placements))
+
+
+def test_negotiation_reports_genuine_congestion_explicitly() -> None:
+    # Two nets MUST cross the same single-cell gap: region 5x1x3 with column x=2 walled except
+    # (2, 0, 1). Both nets' every path runs (1,0,1)->(2,0,1)->(3,0,1), so no pricing can pull
+    # them apart - negotiation exhausts its rounds, keeps a maximal collision-free subset (net1,
+    # first in problem order), and fails net2 with an explicit congestion infeasibility (never a
+    # silently-overlapping layout).
+    def m(mid: str, direction: IODirection) -> Machine:
+        return _machine(mid, [Port(id="p", commodity=Commodity.ITEM, direction=direction)])
+
+    problem = InputIR(
+        bounding_region=CellBox(sx=5, sy=1, sz=3),
+        machines=[
+            m("a", IODirection.OUTPUT),
+            m("b", IODirection.INPUT),
+            m("c", IODirection.OUTPUT),
+            m("d", IODirection.INPUT),
+        ],
+        nets=[
+            Net(
+                id="n1",
+                commodity=Commodity.ITEM,
+                fluid_or_item="x",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="a", port_id="p"),
+                    MachineFaceRef(machine_id="b", port_id="p"),
+                ],
+            ),
+            Net(
+                id="n2",
+                commodity=Commodity.ITEM,
+                fluid_or_item="y",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="c", port_id="p"),
+                    MachineFaceRef(machine_id="d", port_id="p"),
+                ],
+            ),
+        ],
+        reserved_cells=[CellCoord(x=2, y=0, z=0), CellCoord(x=2, y=0, z=2)],
+    )
+    placements = [_at("a", 0, 0, 0), _at("b", 4, 0, 0), _at("c", 0, 0, 2), _at("d", 4, 0, 2)]
+    result = route(problem, placements)
+    assert not result.ok
+    assert result.infeasibility is not None
+    assert result.infeasibility.constraint == "congestion"
+    assert result.failed_nets == ("n2",)  # net1 salvaged (problem order), net2 reported
+    assert len(result.routes) == 1  # the salvaged subset is still emitted, collision-free
+    assert result.routes[0].net_id == "n1"
 
 
 def test_route_terminals_avoid_the_front_face() -> None:

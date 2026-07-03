@@ -50,7 +50,7 @@ delivered voltage, and the per-segment amperage, so a sizing bug here is caught,
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 
@@ -79,7 +79,12 @@ from gtnh_solver.ir.geometry import Cell
 from gtnh_solver.ir.nets import net_sources_sinks, placement_index, port_direction_map
 
 from ._grid import astar_multi, coord, dock_candidates, manhattan, obstacle_cells
-from .core import _rip_up_reroute
+
+#: Backstop on rip-up/reroute passes (cycle detection on the failed-net set usually stops
+#: first). The item/fluid router moved on to negotiated congestion (core, GitHub #7); power
+#: trunks are trees grown with multi-goal A*, which does not decompose into the per-cell
+#: pricing PathFinder wants, so per-tier trunks keep the failed-first reorder retry.
+_MAX_PASSES = 16
 
 
 @dataclass(frozen=True)
@@ -145,6 +150,46 @@ def route_power(
         infeasibility=failures[still_failing[0]],
         failed_nets=still_failing,
     )
+
+
+def _rip_up_reroute(
+    nets: Sequence[Net],
+    route_pass: Callable[[Sequence[Net]], tuple[list[Route], dict[str, Infeasibility]]],
+) -> tuple[list[Route], dict[str, Infeasibility]]:
+    """Failed-first rip-up/reroute with a bounded retry + cycle detection.
+
+    Capacity-aware trunk laying (one route per cell) is order-dependent: a trunk that grabs a
+    scarce cell can wedge a later tier's trunk out, so a single greedy pass can fail on ordering
+    alone. This routes a pass in the current order via ``route_pass``; if any net failed, it rips
+    everything up and retries with the failed nets moved to the front (most-constrained-first). A
+    failed-net set already seen means reordering is cycling rather than progressing, so it stops -
+    what is left is a genuine infeasibility, not an ordering accident. ``_MAX_PASSES`` is a hard
+    backstop. (The item/fluid router used to share this loop; it now negotiates congestion
+    per cell instead - see ``router.core``.)
+
+    ``route_pass`` routes exactly the nets it is handed, in order, skipping (not aborting on)
+    failures and returning ``(routes, {net_id: why})``. Returns the last pass's routes and its
+    failures (empty failures == every net routed); the caller shapes the ``Infeasibility`` from
+    the still-failing set.
+    """
+    order = list(nets)
+    seen_failed: set[frozenset[str]] = set()
+    routes: list[Route] = []
+    failures: dict[str, Infeasibility] = {}
+    for _ in range(_MAX_PASSES):
+        routes, failures = route_pass(order)
+        if not failures:
+            return routes, failures
+        key = frozenset(failures)
+        if key in seen_failed:
+            break  # this failed-net set already came up - reordering is cycling, not progressing
+        seen_failed.add(key)
+        # Rip everything up; give the nets that failed first pick next pass (most-constrained-first).
+        failed_ids = set(failures)
+        order = [n for n in nets if n.id in failed_ids] + [
+            n for n in nets if n.id not in failed_ids
+        ]
+    return routes, failures
 
 
 def _route_pass(
