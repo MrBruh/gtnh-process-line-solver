@@ -27,6 +27,7 @@ from gtnh_solver.ir import (
     Port,
 )
 from gtnh_solver.router import route_power
+from gtnh_solver.router.power import _route_pass
 from gtnh_solver.validator import validate
 
 _POWER = Commodity.POWER
@@ -64,6 +65,20 @@ def _pnet(*machine_ids: str, source: str = "src") -> Net:
         endpoints=[
             MachineFaceRef(machine_id=source, port_id="power:out"),
             *(MachineFaceRef(machine_id=m, port_id="power:in") for m in machine_ids),
+        ],
+    )
+
+
+def _tier_net(net_id: str, source: str, sink: str) -> Net:
+    # A distinct per-tier power net (one source + one sink) - unlike ``_pnet`` this takes an
+    # explicit id and source, so several tiers can coexist in one problem.
+    return Net(
+        id=net_id,
+        commodity=_POWER,
+        throughput=1.0,
+        endpoints=[
+            MachineFaceRef(machine_id=source, port_id="power:out"),
+            MachineFaceRef(machine_id=sink, port_id="power:in"),
         ],
     )
 
@@ -487,3 +502,56 @@ def test_power_routing_is_deterministic() -> None:
     assert first.ok
     assert second.ok
     assert first.routes == second.routes
+
+
+def test_power_rip_up_reroute_fixes_a_tier_ordering_wedge() -> None:
+    # The power analogue of the item router's rip-up/reroute test (test_router.py): a wall at z=3
+    # with two gaps (x=1 and x=5), plus x=2 walled for z<3, makes a top-left pocket (x=0..1,
+    # z=0..2) whose only exit down is gap x=1. Tier T2 (source s2 in the pocket -> sink k2 below)
+    # can ONLY leave through gap x=1; tier T1 (source s1 top-right -> sink k1 below) prefers gap
+    # x=1 but can detour to gap x=5. In problem order T1's trunk routes first, grabs gap x=1 and
+    # wedges T2 out - a false infeasibility from tier order alone. Failed-first rip-up/reroute
+    # reorders T2 first and T1 detours, so cross-tier power routing is not hostage to net order.
+    reserved = [CellCoord(x=x, y=0, z=3) for x in range(7) if x not in (1, 5)] + [
+        CellCoord(x=2, y=0, z=z) for z in range(3)
+    ]
+    problem = InputIR(
+        bounding_region=CellBox(sx=7, sy=1, sz=6),
+        machines=[_src("s1"), _load("k1", 1), _src("s2"), _load("k2", 1)],
+        nets=[_tier_net("power:T1", "s1", "k1"), _tier_net("power:T2", "s2", "k2")],
+        reserved_cells=reserved,
+    )
+    placements = [_at("s1", 3, 0, 0), _at("k1", 0, 0, 5), _at("s2", 0, 0, 0), _at("k2", 0, 0, 4)]
+
+    # One greedy pass in problem order wedges T2 out (T1's trunk took the pocket's only exit)...
+    _, failures = _route_pass(problem, placements, list(problem.nets))
+    assert failures, "expected the problem-order pass to fail a tier"
+    assert "power:T2" in failures
+    # ...but failed-first rip-up/reroute reorders (failed tier first) and routes both, cleanly.
+    result = route_power(problem, placements)
+    assert result.ok, result.infeasibility
+    assert len(result.routes) == 2
+    layout = LayoutResult(
+        status=LayoutStatus.VALID, seed=0, placements=placements, routes=list(result.routes)
+    )
+    assert validate(problem, layout).ok, str(validate(problem, layout))
+    # Same seed -> same result: the retry reorder is deterministic, no unseeded randomness.
+    assert route_power(problem, placements).routes == result.routes
+
+
+def test_power_reports_every_still_failing_net_not_just_the_first() -> None:
+    # Two independent tiers that both genuinely fail (each sink draws 17 amps at LV, eut > 16*32 =
+    # 512, over the 16x cap) - no reorder can rescue them. The router must report BOTH still-
+    # failing nets (parity with the item router), so the solver's feedback loop can penalize them
+    # all, with the first one's specific reason carried on ``infeasibility``.
+    problem = InputIR(
+        bounding_region=CellBox(sx=12, sy=1, sz=4),
+        machines=[_src("sa"), _load("ka", 544), _src("sb"), _load("kb", 544)],
+        nets=[_tier_net("power:A", "sa", "ka"), _tier_net("power:B", "sb", "kb")],
+    )
+    placements = [_at("sa", 0, 0, 0), _at("ka", 2, 0, 0), _at("sb", 0, 0, 2), _at("kb", 2, 0, 2)]
+    result = route_power(problem, placements)
+    assert not result.ok
+    assert result.failed_nets == ("power:A", "power:B")  # ALL failing nets, in problem order
+    assert result.infeasibility is not None
+    assert result.infeasibility.constraint == "amperage"  # the first one's specific reason

@@ -340,6 +340,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
 
 ### Fixed
+- **Power router does failed-first rip-up/reroute, like the item router (GitHub #40).** The power
+  router laid each tier's trunk in problem order and stopped at the first net that could not route,
+  reporting only that one - but capacity accretes obstacles, so a trunk laid for one tier can wedge
+  a later tier's trunk out of a chokepoint: a *false* infeasibility from net order alone, and a
+  weaker feedback-loop signal than the item router already gave for pipes. It now routes a pass
+  and, if any net failed, rips every trunk up and retries with the failed nets first (most-
+  constrained-first), stopping only when a pass is clean or a failed-net set repeats (a genuine
+  infeasibility, not an ordering accident). When routing does stall it reports ALL still-failing
+  nets, not just the first, so the place↔route feedback loop can penalize them all. The bounded-
+  retry loop is now shared with the item router (`core._rip_up_reroute`). (`router/power.py`,
+  `router/core.py`.)
 - **Validator derives power amperage independently of the router (GitHub #36).** The validator is
   meant to be a second, differently-written implementation so a bug in the router's power math is
   caught, not certified (docs/ARCHITECTURE.md #4) - but its amperage re-check still called the same

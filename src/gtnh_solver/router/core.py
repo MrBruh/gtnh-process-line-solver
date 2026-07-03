@@ -40,7 +40,7 @@ adjacent to its machine and lies on the route, and re-checks every auto-connecti
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 
@@ -64,6 +64,8 @@ from ._grid import astar, coord, dock, obstacle_cells
 from .auto import assign_auto_outputs
 
 #: Backstop on rip-up/reroute passes (cycle detection on the failed-net set usually stops first).
+#: Shared by the item/fluid router here and the power router (``router.power``) via
+#: :func:`_rip_up_reroute`, so both routers retry the same bounded number of times.
 _MAX_PASSES = 16
 
 
@@ -113,14 +115,43 @@ def route(problem: InputIR, placements: Sequence[Placement]) -> RouteResult:
     if not nets:
         return RouteResult(auto_connections=auto_connections)
 
+    routes, failures = _rip_up_reroute(nets, lambda order: _route_pass(problem, placements, order))
+    if not failures:
+        return RouteResult(tuple(routes), auto_connections=auto_connections)
+
+    # Exhausted: report the first net still failing (in original order), with its specific reason,
+    # plus every still-failing net so the solver's feedback loop can penalize them all.
+    still_failing = tuple(net.id for net in nets if net.id in failures)
+    return RouteResult(tuple(routes), failures[still_failing[0]], still_failing, auto_connections)
+
+
+def _rip_up_reroute(
+    nets: Sequence[Net],
+    route_pass: Callable[[Sequence[Net]], tuple[list[Route], dict[str, Infeasibility]]],
+) -> tuple[list[Route], dict[str, Infeasibility]]:
+    """Failed-first rip-up/reroute with a bounded retry + cycle detection, shared by both routers.
+
+    Capacity-aware routing (one route per cell) is order-dependent: a net that grabs a scarce cell
+    can wedge a later net out, so a single greedy pass can fail on ordering alone. This routes a
+    pass in the current order via ``route_pass``; if any net failed, it rips everything up and
+    retries with the failed nets moved to the front (most-constrained-first). A failed-net set
+    already seen means reordering is cycling rather than progressing, so it stops - what is left is
+    a genuine infeasibility, not an ordering accident. ``_MAX_PASSES`` is a hard backstop.
+
+    ``route_pass`` routes exactly the nets it is handed, in order, skipping (not aborting on)
+    failures and returning ``(routes, {net_id: why})``. The item/fluid router (:func:`route`) and
+    the power router (``router.power``) supply their own pass; both get identical retry semantics.
+    Returns the last pass's routes and its failures (empty failures == every net routed); the
+    caller shapes the ``Infeasibility`` from the still-failing set.
+    """
     order = list(nets)
     seen_failed: set[frozenset[str]] = set()
     routes: list[Route] = []
     failures: dict[str, Infeasibility] = {}
     for _ in range(_MAX_PASSES):
-        routes, failures = _route_pass(problem, placements, order)
+        routes, failures = route_pass(order)
         if not failures:
-            return RouteResult(tuple(routes), auto_connections=auto_connections)
+            return routes, failures
         key = frozenset(failures)
         if key in seen_failed:
             break  # this failed-net set already came up - reordering is cycling, not progressing
@@ -130,11 +161,7 @@ def route(problem: InputIR, placements: Sequence[Placement]) -> RouteResult:
         order = [n for n in nets if n.id in failed_ids] + [
             n for n in nets if n.id not in failed_ids
         ]
-
-    # Exhausted: report the first net still failing (in original order), with its specific reason,
-    # plus every still-failing net so the solver's feedback loop can penalize them all.
-    still_failing = tuple(net.id for net in nets if net.id in failures)
-    return RouteResult(tuple(routes), failures[still_failing[0]], still_failing, auto_connections)
+    return routes, failures
 
 
 def _route_pass(
