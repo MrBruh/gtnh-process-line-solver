@@ -241,8 +241,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Sand passes the hand-built compactness + <= 3-cable budget under every objective.
 
 ### Changed
-- **CI tests Python 3.14; packaging metadata reflects real support.** The test matrix adds
-  `3.14` (floor through latest), and the package gains per-version trove classifiers
+- **CI tests Python 3.14; packaging metadata reflects real support.** The test matrix now runs
+  the floor and the latest release only (`3.10` + `3.14`; a floor break or a new-release break
+  is what a leg catches, and the 3.11-3.13 intermediates cannot fail while both ends pass), and
+  the package gains per-version trove classifiers
   (`Programming Language :: Python :: 3.10` through `3.14`) and moves from
   `Development Status :: 1 - Planning` to `3 - Alpha`. Internal CI/build polish along with it:
   pip caching, least-privilege `permissions`, cancel-superseded-runs `concurrency`, a
@@ -342,13 +344,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   sizes (1x/2x/4x/8x/12x/16x) but the dataset only knew five, so any segment or feed summing to
   9 through 12 amps was sized a whole rung thick (16x). The router now picks 12x for that band,
   the output contract and validator accept it, and the docs spell the full ladder.
-- **User-facing output surfaces are hardened against bad input and bad paths (GitHub #39).** The
-  previewer inlined the scene JSON into its `<script>` block unescaped, so a machine type or
-  resource id containing `</script>` (plan JSON is external input) could close the tag and break or
-  inject into the page; the inline JSON now escapes `</` to `<\/` (JSON-transparent, the scene still
-  round-trips). The CLI's `-o`/`--preview` writes raised an uncaught `OSError` on an unwritable path,
-  dumping a raw traceback instead of honoring the documented 0/1/2 exit-code contract; both writes
-  now report `error: could not write <path>: <reason>` to stderr and exit 2. (`previewer/`, `cli`.)
+- **Power router does failed-first rip-up/reroute, like the item router (GitHub #40).** The power
+  router laid each tier's trunk in problem order and stopped at the first net that could not route,
+  reporting only that one - but capacity accretes obstacles, so a trunk laid for one tier can wedge
+  a later tier's trunk out of a chokepoint: a *false* infeasibility from net order alone, and a
+  weaker feedback-loop signal than the item router already gave for pipes. It now routes a pass
+  and, if any net failed, rips every trunk up and retries with the failed nets first (most-
+  constrained-first), stopping only when a pass is clean or a failed-net set repeats (a genuine
+  infeasibility, not an ordering accident). When routing does stall it reports ALL still-failing
+  nets, not just the first, so the place↔route feedback loop can penalize them all. The bounded-
+  retry loop is now shared with the item router (`core._rip_up_reroute`). (`router/power.py`,
+  `router/core.py`.)
 - **Validator derives power amperage independently of the router (GitHub #36).** The validator is
   meant to be a second, differently-written implementation so a bug in the router's power math is
   caught, not certified (docs/ARCHITECTURE.md #4) - but its amperage re-check still called the same
@@ -361,17 +367,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   an unknown/off-ladder voltage tier was reported as `power_thickness_insufficient` (whose meaning
   is "cable thinner than the summed amps") - a wrong signal for a route that is merely unverifiable;
   it now gets its own additive `power_tier_unknown` violation code. (`validator/`.)
-- **Power router does failed-first rip-up/reroute, like the item router (GitHub #40).** The power
-  router laid each tier's trunk in problem order and stopped at the first net that could not route,
-  reporting only that one - but capacity accretes obstacles, so a trunk laid for one tier can wedge
-  a later tier's trunk out of a chokepoint: a *false* infeasibility from net order alone, and a
-  weaker feedback-loop signal than the item router already gave for pipes. It now routes a pass
-  and, if any net failed, rips every trunk up and retries with the failed nets first (most-
-  constrained-first), stopping only when a pass is clean or a failed-net set repeats (a genuine
-  infeasibility, not an ordering accident). When routing does stall it reports ALL still-failing
-  nets, not just the first, so the place↔route feedback loop can penalize them all. The bounded-
-  retry loop is now shared with the item router (`core._rip_up_reroute`). (`router/power.py`,
-  `router/core.py`.)
+- **User-facing output surfaces are hardened against bad input and bad paths (GitHub #39).** The
+  previewer inlined the scene JSON into its `<script>` block unescaped, so a machine type or
+  resource id containing `</script>` (plan JSON is external input) could close the tag and break or
+  inject into the page; the inline JSON now escapes `</` to `<\/` (JSON-transparent, the scene still
+  round-trips). The CLI's `-o`/`--preview` writes raised an uncaught `OSError` on an unwritable path,
+  dumping a raw traceback instead of honoring the documented 0/1/2 exit-code contract; both writes
+  now report `error: could not write <path>: <reason>` to stderr and exit 2. (`previewer/`, `cli`.)
 - **Amperage is sized from fractional machine loads, rounded up per aggregate - not per machine**
   (maintainer-verified in game). GT machines pull whole packets (1 amp = one packet of up to tier
   voltage) into an internal buffer only when it has room, so a 16 EU/t LV machine *averages* 0.5

@@ -23,8 +23,9 @@ from gtnh_solver.ir import (
     Placement,
     Port,
 )
-from gtnh_solver.ir.geometry import front_on_boundary
+from gtnh_solver.ir.geometry import front_on_boundary, occupied_cells
 from gtnh_solver.placement import optimize_placement, place
+from gtnh_solver.placement.search import _apply_occupied_delta
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
 
@@ -332,3 +333,34 @@ def test_optimize_passes_through_infeasibility() -> None:
     result = optimize_placement(problem, seed=0)
     assert not result.ok
     assert result.infeasibility is not None
+
+
+def test_apply_occupied_delta_survives_lns_reordering_with_multiblock_footprints() -> None:
+    # Regression: an accepted LNS move returns the placement list REORDERED (kept machines
+    # first, reinserted ones appended), so the delta must diff by machine id. An index-paired
+    # diff vacates a machine that never moved and expands the wrong machine's footprint at the
+    # new cell - invisible while every footprint is 1x1x1, silently wrong once multiblocks land.
+    wide = Machine(
+        id="wide",
+        type="wide",
+        footprint=CellBox(sx=2, sy=1, sz=1),
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+    )
+    machines = {m.id: m for m in (_hub("a"), wide, _spoke("c"))}
+
+    def at(mid: str, x: int) -> Placement:
+        return Placement(machine_id=mid, cell=CellCoord(x=x, y=0, z=0), orientation=Facing.NORTH)
+
+    def rebuild(placements: list[Placement]) -> set[tuple[int, int, int]]:
+        return {
+            c for p in placements for c in occupied_cells(p.cell, machines[p.machine_id].footprint)
+        }
+
+    before = [at("a", 0), at("wide", 2), at("c", 5)]
+    # LNS ruined + reinserted the wide machine: kept a and c keep their cells but shift to the
+    # front of the list, and the wide machine lands at the tail with a new origin.
+    after = [before[0], before[2], at("wide", 7)]
+    occupied = rebuild(before)
+    _apply_occupied_delta(occupied, before, after, machines)
+    assert occupied == rebuild(after)
