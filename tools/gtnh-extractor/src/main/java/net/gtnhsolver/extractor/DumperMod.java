@@ -165,7 +165,11 @@ public class DumperMod {
         for (String pair : pinned.split(",")) {
             int eq = pair.indexOf('=');
             if (eq > 0) {
-                versions.put(pair.substring(0, eq).trim(), pair.substring(eq + 1).trim());
+                versions.put(
+                    pair.substring(0, eq)
+                        .trim(),
+                    pair.substring(eq + 1)
+                        .trim());
             }
         }
         putModVersion(versions, "GT5-Unofficial", "gregtech");

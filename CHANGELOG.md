@@ -7,6 +7,26 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Extractor channel handling and identity-substitution tables (`tools/gtnh-extractor/`, lane 3,
+  GitHub #46).** `StructureDumper` now fills the per-controller `substitutions` object. After the
+  trigger-stack sweep it probes each GT channel (`GTStructureChannels.values()`, skipping the
+  always-applied `gt_no_hatch`) against the default build: holding the stack size at 1 it sets one
+  channel at a time and diffs the placed blocks. Because an unset StructureLib channel reads the
+  trigger's stack size, the existing stack sweep already varies every channel, so shape-changing
+  channels (a distillation tower's `height`, a structure's `length`) are already recorded as size
+  variants and the probe skips them; a channel that only swaps a tiered block (coil, glass, pipe
+  casing) keeps the same shape and is recorded once as `substitutions[channel]` = the default tier
+  plus every distinct higher tier `{channel_value, block, meta}`, rather than exploding into one
+  variant per tier. The default-placed block is always included, which is what lets the Python
+  adapter match the tiered blocks in the primary variant. Heating coils are a special case: the
+  classic furnaces (Electric Blast Furnace, Multi Smelter, ...) place a bare `ofCoil` whose tier is
+  read from the trigger's stack size rather than the `coil` channel, so the coil table is built by a
+  separate stack-size sweep that identifies coil blocks by the GT `IHeatingCoil` interface (which
+  also covers the channel-bound mega furnaces). New hard caps bound the per-channel value sweep and
+  the total substitution entries; a controller that overflows them lands on the `_meta.json` failure
+  list instead of emitting a runaway table. The Electric Blast Furnace stays one 3x3x4 shape variant
+  and now carries a populated `coil` substitution table (14 tiers), so the adapter counts 2 coil
+  layers.
 - **Texture manifest extraction (`tools/gtnh-extractor/`, lane 6, GitHub #49).** A new
   `TextureDumper` texture pass and a **separate** `update-textures.yml` workflow map GT casing/coil
   blocks to their icons for the previewer, keeping LGPL PNGs out of this Apache-2.0 repo. It uses
