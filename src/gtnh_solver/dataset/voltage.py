@@ -1,15 +1,22 @@
-"""GT:NH voltage tiers, cable loss, and the per-machine amperage they imply.
+"""GT:NH voltage tiers, cable loss, and the per-machine amp load they imply.
 
 A machine draws ``eut`` EU/t at its voltage tier. GT cables **lose voltage over distance** - a
 packet drops ``CABLE_LOSS_PER_BLOCK`` EU per cable block it travels - so a machine ``d`` blocks
 from the source receives ``tier_voltage - d`` volts, not the full tier voltage (docs/DOMAIN.md).
-On a shared-amperage cable the *amperage* it pulls is ``ceil(eut / delivered_voltage)``: because
-loss lowers the arriving voltage, a machine farther from the source draws **more** amps for the
-same ``eut`` (the source stays at tier and the cable is thickened to compensate). Those amperages
-**sum** along shared cable segments to set the cable thickness (docs/DOMAIN.md, the shared-amperage
-net). This module is the thin slice of the Phase 2 dataset lane that power sizing needs now: the
+
+A machine's draw on a shared-amperage cable is **fractional on average**: GT machines pull whole
+packets (1 amp = one packet of up to tier voltage) into an internal buffer only when it has room,
+so a 16 EU/t LV machine takes a 32-EU packet every other tick - an average of 0.5 amps, not a
+whole amp. Its ``amp_load`` is therefore ``eut / delivered_voltage`` un-rounded: loss lowers the
+arriving voltage, so a machine farther from the source draws proportionally more (the source
+stays at tier and the cable is thickened to compensate). Loads **sum** along shared cable
+segments, and only the aggregate is rounded up to whole amps (``whole_amps``) - per segment for
+cable thickness, per tier for the source feed. Rounding per machine instead would overstate the
+draw (three 0.5-amp hammers need 2 amps, not 3 - confirmed in game, docs/DOMAIN.md).
+
+This module is the thin slice of the Phase 2 dataset lane that power sizing needs now: the
 canonical GT:NH voltage ladder (EU/t, each tier 4x the last from ULV=8), the cable loss, and the
-amperage helper. Real footprints/faces/throughput caps remain Phase 2 (docs/ROADMAP.md).
+amp-load helpers. Real footprints/faces/throughput caps remain Phase 2 (docs/ROADMAP.md).
 """
 
 from __future__ import annotations
@@ -73,23 +80,40 @@ def delivered_voltage(tier: str, distance: int = 0) -> int:
     return tier_voltage(tier) - CABLE_LOSS_PER_BLOCK * distance
 
 
-def amperage(eut: float, tier: str, distance: int = 0) -> int:
-    """Amps a machine drawing ``eut`` pulls at ``tier``, ``distance`` cable-blocks from the source.
+#: Slack for float dust when fractional amp loads are summed: a true integer total (e.g. two
+#: exact half-amp machines) must not tick over to the next whole amp through rounding error.
+_AMP_EPSILON = 1e-9
 
-    ``ceil(eut / delivered_voltage(tier, distance))`` - so a machine running at exactly its
-    delivered voltage is 1 amp, and a draw above it is the proportional number of amps. Because
-    cable loss lowers the delivered voltage, the same ``eut`` costs *more* amps the farther the
-    machine sits from the source (docs/DOMAIN.md); ``distance=0`` is the at-source (lossless) draw.
-    Zero iff ``eut <= 0`` (an unpowered block, or a power *source*, draws nothing). Raises
-    :class:`UnknownTierError` for an unknown tier and :class:`UnpowerableError` when loss has
-    dropped the delivered voltage to <= 0 (the run is too long to power at this tier).
+
+def amp_load(eut: float, tier: str, distance: int = 0) -> float:
+    """Average amps a machine drawing ``eut`` pulls at ``tier``, ``distance`` blocks from the
+    source: ``eut / delivered_voltage(tier, distance)``, un-rounded.
+
+    Fractional on purpose - a machine buffers whole packets but *averages* a fraction of an amp
+    (module docstring), and only the summed load of a shared segment or a source feed is rounded
+    up to whole amps (:func:`whole_amps`). Because cable loss lowers the delivered voltage, the
+    same ``eut`` loads the net *more* the farther the machine sits from the source
+    (docs/DOMAIN.md); ``distance=0`` is the at-source (lossless) load. Zero iff ``eut <= 0`` (an
+    unpowered block, or a power *source*, draws nothing). Raises :class:`UnknownTierError` for an
+    unknown tier and :class:`UnpowerableError` when loss has dropped the delivered voltage to
+    <= 0 (the run is too long to power at this tier).
     """
     if eut <= 0:
-        return 0
+        return 0.0
     volts = delivered_voltage(tier, distance)
     if volts <= 0:
         raise UnpowerableError(
             f"{tier} voltage does not survive {distance} blocks of cable loss "
             f"({tier_voltage(tier)} - {CABLE_LOSS_PER_BLOCK * distance} <= 0)"
         )
-    return math.ceil(eut / volts)
+    return eut / volts
+
+
+def whole_amps(load: float) -> int:
+    """The whole amps a summed fractional ``load`` needs: ``ceil``, with epsilon slack so float
+    dust from summing (e.g. many ``x/31`` terms) never rounds an exact integer total upward.
+
+    This is where the packet quantization lives: individual machines average fractional amps
+    (:func:`amp_load`), but a cable segment is rated - and a source feeds - in whole packets.
+    """
+    return max(0, math.ceil(load - _AMP_EPSILON))

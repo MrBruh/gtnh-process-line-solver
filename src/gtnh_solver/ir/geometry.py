@@ -23,6 +23,11 @@ class CellCoord(FrozenModel):
     y: int
     z: int
 
+    def as_tuple(self) -> Cell:
+        """This coord as a bare ``(x, y, z)`` :data:`Cell` tuple - the lightweight form the hot
+        grid loops (routing, validation, the build guide) key sets and dicts on."""
+        return (self.x, self.y, self.z)
+
 
 class CellBox(FrozenModel):
     """An axis-aligned box measured in cells, given by its size (each dimension >= 1).
@@ -54,7 +59,11 @@ def occupied_cells(origin: CellCoord, footprint: CellBox) -> Iterator[Cell]:
     - ``origin`` is the **minimum corner**; the box occupies
       ``[x, x+sx) x [y, y+sy) x [z, z+sz)``.
     - Orientation-driven rotation of non-cubic footprints is a TODO tied to the dataset
-      (1x1x1 machines, the common case, are unaffected).
+      (1x1x1 machines, the common case, are unaffected). Because this primitive is shared by
+      placement, the router AND the validator (its independent safety net), a rotated multi-cell
+      machine would be mis-modeled *identically* on both sides - so when rotation lands the
+      validator must get its own rotation-aware expansion (or this primitive must be oracle-tested)
+      or the gate will share the solver's blind spot instead of catching it.
     """
     for dx in range(footprint.sx):
         for dy in range(footprint.sy):
@@ -83,6 +92,11 @@ FACE_DELTAS: dict[Facing, Cell] = {
     Facing.DOWN: (0, -1, 0),
 }
 
+#: The six unit face-offsets as a bare tuple (``FACE_DELTAS`` values, in face order), for grid
+#: neighbour scans that don't need the ``Facing`` key. One source for the router's A* neighbours
+#: (``_grid.NEIGHBORS``) and placement's LNS insertion offsets, which both re-derived it.
+FACE_OFFSETS: tuple[Cell, ...] = tuple(FACE_DELTAS.values())
+
 #: The face on the far side of a block from a given face (shared by solver + validator for
 #: auto-output adjacency: a source's auto-output face meets the target's opposite input face).
 OPPOSITE_FACE: dict[Facing, Facing] = {
@@ -93,6 +107,30 @@ OPPOSITE_FACE: dict[Facing, Facing] = {
     Facing.UP: Facing.DOWN,
     Facing.DOWN: Facing.UP,
 }
+
+
+def front_on_boundary(
+    origin: CellCoord, footprint: CellBox, front: Facing, region: CellBox
+) -> bool:
+    """Whether a placed box's front-face plane lies flush on the bounding-region boundary.
+
+    True iff stepping the front-face plane one cell in ``front``'s direction leaves the region -
+    the face is up against a region wall (or its floor/ceiling), with no in-region cell in front
+    of it. Placement uses this to pin a power source's reserved feed face on the boundary (the
+    external power feed enters from outside the structure - docs/DOMAIN.md); the validator
+    re-derives the same predicate independently from the occupied cells.
+    """
+    if front is Facing.NORTH:
+        return origin.z == 0
+    if front is Facing.SOUTH:
+        return origin.z + footprint.sz == region.sz
+    if front is Facing.WEST:
+        return origin.x == 0
+    if front is Facing.EAST:
+        return origin.x + footprint.sx == region.sx
+    if front is Facing.DOWN:
+        return origin.y == 0
+    return origin.y + footprint.sy == region.sy  # UP
 
 
 def auto_output_faces(

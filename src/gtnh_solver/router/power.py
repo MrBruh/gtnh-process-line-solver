@@ -5,67 +5,92 @@ the amperage **sums** along the shared segments toward the source (docs/DOMAIN.m
 turns each per-tier power net (one source endpoint + that tier's machine endpoints, synthesized
 by the adapter) into a trunk and sizes every segment to the amperage flowing through it.
 
-ASCII (one tier, a path-trunk; thickness sized to the summed downstream amperage)::
+ASCII (one tier; the trunk is a TREE rooted at the source's dock cell)::
 
-    source ===4x=== m0(1A) ==2x== m1(1A) ==1x== m2(1A)
-           |<- 3A ->|<-- 2A --->|<-- 1A -->|
+                     m2 (taps [C]: terminal on the trunk cell, no new cable)
+                      |
+    source ===4x=== [C] ==2x== m1(1.5A)
+                      |
+                     2x
+                      |
+                    m0(1.5A)
 
-**Cable loss:** GT cables lose voltage over distance, so a machine ``d`` blocks down the trunk
-receives ``tier_voltage - d`` volts (docs/DOMAIN.md). The source stays at its tier and the cable
-is thickened to compensate: a machine's amperage is sized at its *delivered* voltage
-(``ceil(eut / (tier_voltage - d))``), so farther machines cost more amps for the same ``eut``. A
-run so long that the delivered voltage reaches 0 cannot be powered at this tier and is rejected.
+    Each segment carries the summed load of the sink terminals on its far-from-root side, rounded
+    up to whole amps per segment: both branch legs carry only their own sink's 1.5A (a 2x cable),
+    while the root carries 3A summed BEFORE rounding (the old path-trunk's suffix sum would have
+    overcharged a branch); m2 draws straight from the shared cell [C], loading no segment.
+
+**Cable loss:** GT cables lose voltage over distance, so a machine whose terminal sits ``d``
+cable-blocks from the source (its cell's depth in the tree) receives ``tier_voltage - d`` volts
+(docs/DOMAIN.md). The source stays at its tier and the cable is thickened to compensate: a
+machine's load is sized at its *delivered* voltage (``eut / (tier_voltage - d)``, fractional -
+machines buffer packets and average below a whole amp, see ``dataset.amp_load``), so farther
+machines load the net more for the same ``eut``; only each segment's summed load rounds up to
+whole amps. A run so long that the delivered voltage reaches 0 cannot be powered at this tier and
+is rejected.
 
 Each machine docks **route-aware**: rather than committing a terminal on a fixed face, the router
 considers every usable (non-front) face and, via multi-goal A*, docks on whichever one yields the
 shortest cable to the trunk (``_grid.dock_candidates`` + ``astar_multi``). A cable connects to any
 face but the front, so pinning one face up front just made the trunk snake around the machine.
 
-Crude on purpose (correctness-first, the handoff sequencing): **one source per tier**, the trunk
-is a path through the machines in endpoint order (a multi-goal A* leg per machine over the shared
-``_grid``, each leg avoiding the cells already laid so the legs never overlap and the trunk stays a
-tree), and a leg needing **> 16x** (or a run too long to keep any voltage) is rejected (Phase 2
-adds multi-source / parallel-run / voltage-upgrade optimization). The validator independently
-re-derives each machine's distance, delivered voltage, and the per-segment amperage, so a sizing
-bug here is caught, not certified.
+**The trunk is a tree with shared taps.** In GT one cable block feeds every machine face wired to
+it, so terminals of one net may share cells: a sink with a dock candidate that is already a trunk
+cell TAPS it (its terminal lands on that cell, no new cable), and any other sink extends the tree
+with a multi-goal A* leg from *all* trunk cells laid so far. Laid cells stay blocked for later
+legs (a leg may attach at a trunk cell but never cross one), so the trunk is always a single tree
+the validator can root at the source.
+
+Crude on purpose (correctness-first, the handoff sequencing): **one source per tier**, sinks are
+taken in net-endpoint order (no sink-order optimization), and a segment needing **> 16x** (or a
+run too long to keep any voltage) is rejected (Phase 2 adds multi-source / parallel-run /
+voltage-upgrade optimization). The validator independently re-derives each machine's distance,
+delivered voltage, and the per-segment amperage, so a sizing bug here is caught, not certified.
 """
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 
-from gtnh_solver.dataset import UnknownTierError, UnpowerableError, amperage
+from gtnh_solver.dataset import (
+    CABLE_THICKNESSES,
+    MAX_CABLE_THICKNESS,
+    UnknownTierError,
+    UnpowerableError,
+    amp_load,
+    whole_amps,
+)
 from gtnh_solver.ir import (
     CellBox,
     Commodity,
     Infeasibility,
     InputIR,
-    IODirection,
     Machine,
     MachineFaceRef,
+    Net,
     Placement,
     Route,
     Segment,
     Terminal,
 )
 from gtnh_solver.ir.geometry import Cell
+from gtnh_solver.ir.nets import net_sources_sinks, placement_index, port_direction_map
 
 from ._grid import astar_multi, coord, dock_candidates, manhattan, obstacle_cells
-
-#: GT cable thicknesses, smallest first (16x is the hard cap - docs/DOMAIN.md).
-_THICKNESSES = (1, 2, 4, 8, 16)
-_MAX_THICKNESS = _THICKNESSES[-1]
+from .core import _rip_up_reroute
 
 
 @dataclass(frozen=True)
 class PowerRouteResult:
     """Power router output: all power routes, or a partial set plus why it stalled.
 
-    ``failed_nets`` names the power net that stalled (empty when ``ok``), so the solver's
-    place<->route feedback loop can penalize it and re-place (helps a dock/path failure; an
-    amperage/tier failure is not placement-fixable, but the loop's cycle detection stops quickly).
+    ``failed_nets`` lists every power net still unrouted after the failed-first rip-up/reroute
+    retry (empty when ``ok``), in problem order, so the solver's place<->route feedback loop can
+    penalize them all and re-place (helps a dock/path failure; an amperage/tier failure is not
+    placement-fixable, but the loop's cycle detection stops quickly). ``infeasibility`` carries the
+    first one's specific reason, matching the item router's reporting shape.
     """
 
     routes: tuple[Route, ...] = ()
@@ -89,29 +114,68 @@ def route_power(
     ``extra_obstacles`` are cells already taken by other routes (the item/fluid pipes the solver
     laid first), so power cables never share a cell with them - the crude single-channel capacity.
     Each tier's trunk is likewise added to the obstacle set before the next tier routes, so two
-    power trunks never collide either.
-    """
-    machines = {m.id: m for m in problem.machines}
-    placement_by_machine: dict[str, Placement] = {}
-    for placement in placements:
-        placement_by_machine.setdefault(placement.machine_id, placement)  # one placement/machine
-    region = problem.bounding_region
-    port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
+    power trunks never collide - and since every terminal of a finished net (docked or tapped)
+    sits on one of its segment cells, the same set keeps later nets from docking on this trunk.
+    Terminals may share cells only *within* one net (a tap on its own trunk).
 
+    Because that accretion is order-dependent - a trunk laid for one tier can wedge a later tier's
+    trunk out of a chokepoint - the tiers are routed with **failed-first rip-up/reroute** (the same
+    bounded retry the item router uses, ``core._rip_up_reroute``): route a pass, and if any net
+    failed, rip every trunk up and retry with the failed nets first, until a pass is clean or the
+    failed-net set repeats (a genuine infeasibility, not a tier-ordering accident). This keeps the
+    solver's feedback loop from getting a false infeasibility on power that it would not get on
+    pipes. When routing genuinely stalls, ALL still-failing nets are reported (#40), not just the
+    first. (The buildguide half of #40 - branching-trunk rendering - is parked; not touched here.)
+    """
     if problem.me_toggles.toggled(Commodity.POWER):
         return PowerRouteResult()  # power is on the ME network; nothing to route
 
-    obstacles = obstacle_cells(problem, placements, machines) | set(extra_obstacles)
-    docked: set[Cell] = set()
-    routes: list[Route] = []
-    for net in problem.nets:
-        if net.commodity is not Commodity.POWER:
-            continue
-        sources = [e for e in net.endpoints if port_dir.get(_key(e)) is IODirection.OUTPUT]
-        sinks = [e for e in net.endpoints if port_dir.get(_key(e)) is IODirection.INPUT]
-        if len(sources) != 1 or not sinks:
-            return PowerRouteResult(tuple(routes), _malformed(net.id), (net.id,))
+    power_nets = [net for net in problem.nets if net.commodity is Commodity.POWER]
+    routes, failures = _rip_up_reroute(
+        power_nets, lambda order: _route_pass(problem, placements, order, extra_obstacles)
+    )
+    if not failures:
+        return PowerRouteResult(routes=tuple(routes))
 
+    # Exhausted: report the first net still failing (in problem order), with its specific reason,
+    # plus every still-failing net so the solver's feedback loop can penalize them all.
+    still_failing = tuple(net.id for net in power_nets if net.id in failures)
+    return PowerRouteResult(
+        routes=tuple(routes),
+        infeasibility=failures[still_failing[0]],
+        failed_nets=still_failing,
+    )
+
+
+def _route_pass(
+    problem: InputIR,
+    placements: Sequence[Placement],
+    nets: Sequence[Net],
+    extra_obstacles: Collection[Cell] = (),
+) -> tuple[list[Route], dict[str, Infeasibility]]:
+    """Route ``nets`` once in the given order as shared-amperage trunks, capacity-aware.
+
+    Mirrors ``core._route_pass`` for power: builds the obstacle set fresh (reserved + machine
+    bodies + ``extra_obstacles``), then grows each net's trunk in turn, adding a finished trunk's
+    cells to the obstacles so later tiers route around it. Failures are order-dependent - a
+    malformed net (not one source + >=1 sink), an undockable/unroutable trunk, or an
+    amperage/tier/voltage rejection - so this skips (does not abort on) them and records why per
+    net; the caller (:func:`_rip_up_reroute`) retries with a different order. A failed trunk leaves
+    no trace: ``_route_trunk`` never mutates ``obstacles``, so the retry starts clean.
+    """
+    machines = {m.id: m for m in problem.machines}
+    placement_by_machine = placement_index(placements)
+    region = problem.bounding_region
+    port_dir = port_direction_map(problem)
+
+    obstacles = obstacle_cells(problem, placements, machines) | set(extra_obstacles)
+    routes: list[Route] = []
+    failures: dict[str, Infeasibility] = {}
+    for net in nets:
+        sources, sinks = net_sources_sinks(net, port_dir)
+        if len(sources) != 1 or not sinks:
+            failures[net.id] = _malformed(net.id)
+            continue
         built = _route_trunk(
             net.id,
             sources[0],
@@ -119,21 +183,15 @@ def route_power(
             placement_by_machine,
             machines,
             obstacles,
-            docked,
             region,
         )
         if isinstance(built, Infeasibility):
-            return PowerRouteResult(tuple(routes), built, (net.id,))
+            failures[net.id] = built
+            continue
         routes.append(built)
         # Capacity: this trunk now owns these cells, so the next tier's trunk routes around it.
-        for seg in built.segments:
-            obstacles.add((seg.start.x, seg.start.y, seg.start.z))
-            obstacles.add((seg.end.x, seg.end.y, seg.end.z))
-    return PowerRouteResult(tuple(routes))
-
-
-def _key(endpoint: MachineFaceRef) -> tuple[str, str]:
-    return (endpoint.machine_id, endpoint.port_id)
+        obstacles.update(built.cells())
+    return routes, failures
 
 
 def _route_trunk(
@@ -143,20 +201,24 @@ def _route_trunk(
     placement_by_machine: dict[str, Placement],
     machines: dict[str, Machine],
     obstacles: set[Cell],
-    docked: set[Cell],
     region: CellBox,
 ) -> Route | Infeasibility:
-    """Dock every machine route-aware and chain source->m0->m1->... into a shared-amperage trunk.
+    """Dock every machine route-aware and grow the net's shared-amperage cable tree.
 
-    Each machine docks on whichever usable (non-front) face gives the shortest cable: the source
-    toward its first sink, then each sink via a multi-goal A* leg from the running trunk end to any
-    of that sink's free dock cells (``dock_candidates`` + ``astar_multi``). The cell the leg reaches
-    is the terminal, so routing - not a fixed face order - chooses the face. Leg lengths accumulate
-    into each machine's cable-block **distance** from the source; amperage is then sized at the
-    machine's *delivered* voltage, so cable loss thickens the run (``_size_trunk``).
+    The source docks on whichever usable (non-front) face is nearest its first sink; its cell is
+    the tree root (depth 0). Each sink, in net-endpoint order, then either **taps** the trunk - if
+    one of its dock candidates is already a trunk cell, its terminal lands on that cell and no new
+    cable is laid (GT: one cable block feeds every adjacent wired face; the shallowest such cell
+    wins, candidate order breaking ties) - or **extends** the tree with a multi-goal A* leg from
+    all trunk cells laid so far to any of its free dock cells (``dock_candidates`` +
+    ``astar_multi``). The cell a leg reaches is the terminal, so routing - not a fixed face order
+    - chooses the face. One exception keeps the route well-formed: a route with no segments fails
+    validation, so the last sink never taps a still-segment-less trunk - it lays a real leg.
 
-    Each laid leg's cells are blocked for the legs that follow, so two legs never share a cell: the
-    trunk stays a simple non-self-crossing path (a tree the validator can root at the source). A
+    Every trunk cell's **depth** is its cable-block distance from the source; each sink's load is
+    then sized at its *delivered* voltage, so cable loss thickens the run (``_size_trunk``).
+    Laid cells stay blocked for the legs that follow (a leg may *attach* at a trunk cell but never
+    cross one), so the trunk is always a single tree the validator can root at the source. A
     machine with no free non-front dock face is a ``face_reachability`` infeasibility; one no leg
     can reach is ``routing``; an unpowerable / over-16x run is rejected on sizing - never certified.
     """
@@ -167,26 +229,39 @@ def _route_trunk(
         machine = machines.get(ep.machine_id)
         if placement is None or machine is None:
             return _no_dock(net_id)
-        cand = dock_candidates(ep.port_id, placement, machine, obstacles, docked, region)
+        # No extra docked-cell exclusion: this net's terminals may share trunk cells (taps), and
+        # a finished net's trunk - every one of its terminals sits on a segment cell - is already
+        # in ``obstacles`` by the time the next net docks.
+        cand = dock_candidates(ep.port_id, placement, machine, obstacles, set(), region)
         if not cand:
             return _no_dock(net_id)
         candidates.append(cand)
 
-    # Dock the source on the face nearest its first sink, then reserve that cell so no sink reuses it.
+    # Dock the source on the face nearest its first sink; its cell roots the tree at depth 0.
     source_terminal = _nearest(candidates[0], candidates[1])
-    docked.add(_cell(source_terminal))
+    root = _cell(source_terminal)
 
     terminals: list[Terminal] = [source_terminal]
     legs: list[list[Cell]] = []
-    distances: list[int] = []  # distances[i] = cable-blocks from the source to sink m_i
-    blocked = set(obstacles)  # grows with each laid leg to keep the trunk a non-overlapping path
-    distance = 0
-    prev = _cell(source_terminal)
-    for cand in candidates[1:]:
-        goals = {_cell(t) for t in cand} - docked - blocked
+    depth: dict[Cell, int] = {root: 0}  # trunk cell -> cable-block distance from the source
+    trunk: list[Cell] = [root]  # every trunk cell in laid order (deterministic A* seeding)
+    sink_cells: list[Cell] = []  # sink_cells[i] = sink m_i's terminal cell
+    blocked = obstacles | {root}  # grows with the trunk so legs never cross it
+
+    for i, cand in enumerate(candidates[1:]):
+        # A tap lays no cable and a zero-segment route fails validation (ROUTE_DISCONTINUOUS),
+        # so the last sink must extend a trunk that has no segments yet.
+        may_tap = bool(legs) or i < len(sinks) - 1
+        taps = [t for t in cand if _cell(t) in depth] if may_tap else []
+        if taps:
+            tapped = min(taps, key=lambda t: depth[_cell(t)])  # shallowest; min() keeps cand order
+            terminals.append(tapped)
+            sink_cells.append(_cell(tapped))
+            continue
+        goals = {_cell(t) for t in cand} - blocked  # blocked already covers the laid trunk
         if not goals:
             return _no_dock(net_id)  # every usable face is taken by the trunk already laid
-        path = astar_multi([prev], goals, blocked, region)
+        path = astar_multi(trunk, goals, blocked, region)
         if path is None:
             return Infeasibility(
                 constraint="routing",
@@ -194,17 +269,17 @@ def _route_trunk(
                 f"{cand[0].machine_id!r}",
                 suggested_relaxation="enlarge the bounding region or reduce obstacles",
             )
-        end = path[-1]
-        terminals.append(next(t for t in cand if _cell(t) == end))
-        docked.add(end)
-        distance += len(path) - 1  # cable-block hops added by this leg (endpoints shared, no +1)
-        distances.append(distance)
+        for prev, cell in pairwise(path):  # path[0] is a trunk cell; the rest are new
+            depth[cell] = depth[prev] + 1
+            trunk.append(cell)
         blocked.update(path)  # later legs must avoid these cells so the graph stays a tree
         legs.append(path)
-        prev = end
+        end = path[-1]
+        terminals.append(next(t for t in cand if _cell(t) == end))
+        sink_cells.append(end)
 
     loads = [(machines[e.machine_id].eut, machines[e.machine_id].voltage_tier) for e in sinks]
-    sized = _size_trunk(net_id, legs, distances, loads)
+    sized = _size_trunk(net_id, legs, depth, sink_cells, loads)
     if isinstance(sized, Infeasibility):
         return sized
     segments, thickness = sized
@@ -220,23 +295,30 @@ def _route_trunk(
 def _size_trunk(
     net_id: str,
     legs: Sequence[Sequence[Cell]],
-    distances: Sequence[int],
+    depth: Mapping[Cell, int],
+    sink_cells: Sequence[Cell],
     loads: Sequence[tuple[float, str]],
 ) -> tuple[list[Segment], list[int]] | Infeasibility:
-    """Size each leg to the summed downstream amperage at the delivered (loss-reduced) voltage.
+    """Size each segment to the summed load of the sink terminals on its far-from-root side.
 
-    ``loads[i]`` / ``distances[i]`` are sink ``m_i``'s ``(eut, tier)`` and its cable-block distance
-    from the source. Amperage is sized at each machine's delivered voltage
-    (``ceil(eut / (tier_voltage - distance))``), so cable loss thickens the run instead of
-    under-powering the far machines. Leg ``i`` carries every machine from ``m_i`` onward, so its
-    load is ``sum(amps[i:])`` - the suffix sum that defines a shared-amperage trunk. A run whose
-    delivered voltage reaches 0 (:class:`UnpowerableError`) or whose summed load exceeds 16x is
-    rejected, not silently certified.
+    ``loads[i]`` / ``sink_cells[i]`` are sink ``m_i``'s ``(eut, tier)`` and its terminal cell; its
+    cable-block distance from the source is that cell's tree ``depth`` (a tap of the root is
+    distance 0). Each sink's load is *fractional*, sized at its delivered voltage
+    (``eut / (tier_voltage - distance)``, ``dataset.amp_load`` - machines buffer packets and
+    average below a whole amp), so cable loss thickens the run instead of under-powering the far
+    machines. Each segment then carries the total load of the sink terminals in the subtree
+    hanging off its child end - the rooted-tree sum that defines a shared-amperage trunk -
+    rounded up to whole amps only per segment (``whole_amps``): rounding per machine would
+    overstate the draw. Sinks sharing one cell add up; a sink tapping the root loads no segment
+    (it draws straight from the source's own cable block). Segments are emitted leg by leg in
+    laid order, the thickness list aligned 1:1 - the validator re-derives all of this
+    independently. A run whose delivered voltage reaches 0 (:class:`UnpowerableError`) or a
+    segment whose summed load exceeds 16x is rejected, not silently certified.
     """
-    amps: list[int] = []
-    for (eut, tier), dist in zip(loads, distances, strict=True):
+    amp_at: dict[Cell, float] = {}
+    for (eut, tier), cell in zip(loads, sink_cells, strict=True):
         try:
-            amps.append(amperage(eut, tier, distance=dist))
+            amp_at[cell] = amp_at.get(cell, 0.0) + amp_load(eut, tier, distance=depth[cell])
         except UnknownTierError:
             return Infeasibility(
                 constraint="voltage_tier",
@@ -251,22 +333,31 @@ def _size_trunk(
                 "higher voltage tier - Phase 2 multi-source optimization",
             )
 
+    # Subtree sums, leaves first: every leg is laid parent-before-child and only attaches to
+    # cells laid before it, so walking the legs in reverse (each leg child-end first) folds every
+    # cell's total into its parent exactly once.
+    subtree = dict(amp_at)
+    for path in reversed(legs):
+        for parent, child in reversed(list(pairwise(path))):
+            subtree[parent] = subtree.get(parent, 0.0) + subtree.get(child, 0.0)
+
     segments: list[Segment] = []
     thickness: list[int] = []
-    for i, path in enumerate(legs):
-        leg_load = sum(amps[i:])  # machines m_i.. are downstream of this leg
-        if leg_load > _MAX_THICKNESS:
-            return Infeasibility(
-                constraint="amperage",
-                detail=f"power net {net_id!r}: a cable segment must carry {leg_load} amps, over the "
-                "16x cable cap",
-                suggested_relaxation="split into parallel runs or use a higher voltage tier "
-                "(more power per amp) - Phase 2 multi-source optimization",
-            )
-        thick = _cable_thickness(leg_load)
-        for c0, c1 in pairwise(path):
-            segments.append(Segment(start=coord(c0), end=coord(c1), channel=0))
-            thickness.append(thick)
+    for path in legs:
+        for parent, child in pairwise(path):
+            # Everything on the segment's far-from-root side, rounded to the whole packets
+            # (amps) the cable must actually be rated for.
+            amps = whole_amps(subtree.get(child, 0.0))
+            if amps > MAX_CABLE_THICKNESS:
+                return Infeasibility(
+                    constraint="amperage",
+                    detail=f"power net {net_id!r}: a cable segment must carry {amps} amps, over "
+                    "the 16x cable cap",
+                    suggested_relaxation="split into parallel runs or use a higher voltage tier "
+                    "(more power per amp) - Phase 2 multi-source optimization",
+                )
+            segments.append(Segment(start=coord(parent), end=coord(child), channel=0))
+            thickness.append(_cable_thickness(amps))
     return segments, thickness
 
 
@@ -280,15 +371,15 @@ def _nearest(candidates: Sequence[Terminal], targets: Sequence[Terminal]) -> Ter
 
 
 def _cell(terminal: Terminal) -> Cell:
-    return (terminal.cell.x, terminal.cell.y, terminal.cell.z)
+    return terminal.cell.as_tuple()
 
 
 def _cable_thickness(load: int) -> int:
-    """Smallest cable thickness (1/2/4/8/16) that carries ``load`` amps (>=1 even for 0)."""
-    for t in _THICKNESSES:
+    """Smallest cable thickness (1/2/4/8/12/16) that carries ``load`` amps (>=1 even for 0)."""
+    for t in CABLE_THICKNESSES:
         if load <= t:
             return t
-    return _MAX_THICKNESS  # the caller already rejected load > 16
+    return MAX_CABLE_THICKNESS  # the caller already rejected load > 16
 
 
 def _malformed(net_id: str) -> Infeasibility:

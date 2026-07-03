@@ -6,6 +6,7 @@ plus an empty-layout case and a power-route case for the fallback branches.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from gtnh_solver.adapter import adapt_file
@@ -26,15 +27,17 @@ from gtnh_solver.ir import (
     Placement,
     Port,
 )
-from gtnh_solver.router import route_power
+from gtnh_solver.router import route, route_power
 from gtnh_solver.solver import solve
 
 _SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
 
 
 def _sand_guide() -> str:
+    # The fast (constructive) solve: deterministic layout coordinates that the exact-cell
+    # assertions below can rely on; guide rendering does not care which placer produced them.
     ir = adapt_file(_SAND)
-    return build_guide(ir, solve(ir))
+    return build_guide(ir, solve(ir, optimize=False))
 
 
 def test_build_guide_sand_has_all_sections() -> None:
@@ -72,15 +75,59 @@ def test_build_guide_is_deterministic() -> None:
 def test_build_guide_placement_table_has_coords_and_front() -> None:
     guide = _sand_guide()
     assert "## Placement" in guide
-    assert "at (0, 0, 0)" in guide  # exact build coordinate per machine
-    assert "front north" in guide  # ...and which way the front (no-I/O) face points
+    # An exact build coordinate and a front facing per machine (the specific cells/facings are
+    # the optimizer's business - the guide just has to state them).
+    assert re.search(r"at \(\d+, \d+, \d+\)", guide)
+    assert re.search(r"front (north|south|east|west)", guide)
 
 
 def test_build_guide_power_note_states_feed_spec_as_tier_amps_eut() -> None:
-    # the source must be fed as a wiring spec, not a bare cable thickness (GitHub #15 B2): the sand
-    # trunk roots at 4x, the source is LV (32 V), so 4 A buys up to 32*4 = 128 EU/t.
+    # the source must be fed as a wiring spec, not a bare cable thickness (GitHub #15 B2). On the
+    # fast (constructive) row the trunk runs source dock (5,0,1) -> (1,0,1): the hammers tap or
+    # dock at depths 2/3/4, fractional loads 16/30 + 16/29 + 16/28 = 1.66 A, rounded up once to
+    # 2 A - the system_io number the previewer also shows (machines buffer packets, so rounding
+    # per machine would overstate the feed). LV is 32 V, so the note reads 2 A -> up to 64 EU/t.
     guide = _sand_guide()
-    assert "feed LV (32 V), >=4 A -> up to 128 EU/t" in guide
+    assert "feed LV (32 V), >=2 A -> up to 64 EU/t" in guide
+
+
+def test_build_guide_power_note_counts_a_sink_tapping_the_source_dock() -> None:
+    # Regression (maintainer-reported, twice): the note must count a hammer that taps the
+    # source's own dock cell (it draws through NO cable segment, so the old thickest-segment
+    # proxy missed it entirely), and the feed must round the summed FRACTIONAL loads up once
+    # (per-machine whole amps overstated 2 A as 3 A; 2 A runs the line in game). Rebuild the
+    # exact reported layout: the machine row on the floor, the source on top of the buffer, the
+    # trunk (3,1,0)->(1,1,0) along the hammers' top faces - the nearest hammer taps the root at
+    # depth 0, the others at depths 1 and 2: 16/32 + 16/31 + 16/30 = 1.55 A -> 2 A -> 64 EU/t.
+    ir = adapt_file(_SAND)
+    hammers = [m for m in ir.machines if m.type == "Forge Hammer"]
+    source = next(m for m in ir.machines if m.is_power_source)
+    storage = next(m for m in ir.machines if m.type == "Super Chest" and ":" not in m.id)
+    out_buffer = next(m for m in ir.machines if m.id.startswith("output-buffer:"))
+
+    def at(m: Machine, x: int, y: int, z: int) -> Placement:
+        return Placement(machine_id=m.id, cell=CellCoord(x=x, y=y, z=z), orientation=Facing.NORTH)
+
+    placements = [
+        at(storage, 0, 0, 0),
+        *(at(h, 1 + i, 0, 0) for i, h in enumerate(hammers)),
+        at(out_buffer, 4, 0, 0),
+        at(source, 4, 1, 0),  # front north on the z=0 boundary (the reserved feed face)
+    ]
+    rr = route(ir, placements)  # the item chain is adjacent: all auto-output, no pipe cells
+    pw = route_power(ir, placements)
+    assert rr.ok
+    assert pw.ok
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=placements,
+        routes=[*rr.routes, *pw.routes],
+        auto_connections=list(rr.auto_connections),
+    )
+    guide = build_guide(ir, layout)
+    assert "feed LV (32 V), >=2 A -> up to 64 EU/t" in guide
+    assert ">=3 A" not in guide  # per-machine amp rounding no longer inflates the feed
 
 
 def test_build_guide_system_io_loads_input_chest_and_collects_output_product() -> None:
@@ -131,7 +178,10 @@ def test_build_guide_system_io_falls_back_without_a_sourcing_net() -> None:
 def test_build_guide_power_connection_lists_per_segment_thickness() -> None:
     guide = _sand_guide()
     assert "lay along:" in guide  # the exact cells to lay the cable
-    assert "=4x=" in guide  # the trunk root segment...
+    # sand's fast-row trunk: the root segments carry all three hammers' fractional loads (1.66 A
+    # -> a 2x cable) and the run tapers to the farthest hammer alone (0.57 A -> =1x=); two
+    # hammers tap mid-trunk cells.
+    assert "=2x=" in guide  # the trunk root segment...
     assert "=1x=" in guide  # ...tapering to the far end
 
 

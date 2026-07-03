@@ -72,7 +72,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const SCENE = __SCENE_JSON__;
-const COMMODITY = { item: '#3cb44b', fluid: '#4363d8', power: '#ffd000' };
+const COMMODITY = Object.fromEntries(SCENE.routeLegend.map((e) => [e.commodity, e.color]));
+// ^ route colours read from the scene (SCENE.routeLegend), one source - not a 2nd hard-coded copy.
 const FACE_NORMAL = { north: [0,0,-1], south: [0,0,1], east: [1,0,0], west: [-1,0,0],
                       up: [0,1,0], down: [0,-1,0] };
 
@@ -374,4 +375,8 @@ animate();
 
 def render_html(scene: dict[str, Any]) -> str:
     """Return a self-contained viewer page with ``scene`` (from ``build_scene``) inlined."""
-    return _TEMPLATE.replace(_SCENE_TOKEN, json.dumps(scene))
+    # Plan JSON is external input: escape ``</`` so a machine type or resource id containing
+    # ``</script>`` cannot close this inline <script> and break (or inject into) the page. The
+    # JS parser reads ``<\/script>`` back as the identical string.
+    payload = json.dumps(scene).replace("</", "<\\/")
+    return _TEMPLATE.replace(_SCENE_TOKEN, payload)
