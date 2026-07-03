@@ -4,11 +4,11 @@
   "provenance": {
     "pack_version": "2.8.4",
     "mod_versions": {
-      "GT5-Unofficial": "MC1710",
+      "GT5-Unofficial": "5.09.51.482",
       "StructureLib": "1.4.23"
     },
-    "generated_at": "2026-07-03T20:24:34.539Z",
-    "extractor_sha": "f0df8ad04ad5376487722a70a6af642a894730fe",
+    "generated_at": "2026-07-03T21:05:19.828Z",
+    "extractor_sha": "af572c8f4b15c4abf3afbdee7e085edf58f96487",
     "note": "Icon names reflected server-side from GT Textures.BlockIcons (Option A). PNGs are NOT committed (LGPL); fetch them from the GT5-Unofficial jar on the GTNH Nexus at build/preview time using the paths in `icons`.",
     "coverage": {
       "blocks": 9,

@@ -152,9 +152,22 @@ public class DumperMod {
             .isEmpty() ? sha : "unknown";
     }
 
-    /** The versions of the two manifest-tracked mods this dump was built from, for {@code _meta.json}. */
+    /**
+     * The versions of the two manifest-tracked mods this dump was built from, for {@code _meta.json}.
+     * Prefers the pinned versions passed by the workflow via {@code -PmodVersions} (read from the
+     * repo-root {@code gtnh.lock.json}); the runtime Forge container is only the dev fallback,
+     * because GT5-Unofficial's container self-reports the uninformative "MC1710" rather than its
+     * artifact version.
+     */
     private Map<String, String> collectModVersions() {
         Map<String, String> versions = new LinkedHashMap<>();
+        String pinned = System.getProperty("gtnhextractor.modVersions", "");
+        for (String pair : pinned.split(",")) {
+            int eq = pair.indexOf('=');
+            if (eq > 0) {
+                versions.put(pair.substring(0, eq).trim(), pair.substring(eq + 1).trim());
+            }
+        }
         putModVersion(versions, "GT5-Unofficial", "gregtech");
         putModVersion(versions, "StructureLib", "structurelib");
         return versions;
@@ -165,7 +178,7 @@ public class DumperMod {
             .getIndexedModList()
             .get(modId);
         if (container != null) {
-            versions.put(label, container.getVersion());
+            versions.putIfAbsent(label, container.getVersion());
         }
     }
 }

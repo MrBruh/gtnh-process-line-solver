@@ -73,8 +73,10 @@ jobs:
         id: lock
         run: |
           version="$(python -c 'import json;print(json.load(open("gtnh.lock.json"))["pack_version"])')"
-          echo "Pinned pack: ${version}"
+          mods="$(python -c 'import json;print(",".join(k+"="+v for k,v in json.load(open("gtnh.lock.json"))["mods"].items()))')"
+          echo "Pinned pack: ${version} (${mods})"
           echo "pack_version=${version}" >> "$GITHUB_OUTPUT"
+          echo "mod_versions=${mods}" >> "$GITHUB_OUTPUT"
 
       - name: Cache Forge/RFG workspace
         uses: actions/cache@v4
@@ -97,6 +99,7 @@ jobs:
           printf 'n\ny\n' | ./gradlew --no-daemon runServer \
             "-PtextureOut=${TEXTURE_OUT}" \
             "-PpackVersion=${{ steps.lock.outputs.pack_version }}" \
+            "-PmodVersions=${{ steps.lock.outputs.mod_versions }}" \
             "-PextractorSha=${GITHUB_SHA}"
 
       # --- Install the emitted manifest and sanity-check it ---------------------------------------
