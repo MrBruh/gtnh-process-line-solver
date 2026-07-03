@@ -7,6 +7,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Automated dataset-update CI (`.github/workflows/update-dataset.yml`, lane 4)** - a
+  weekly + manual workflow that tracks the latest *stable* GTNH pack: it resolves the pack
+  version from the DreamAssemblerXXL manifests, diffs the pinned mod versions against
+  `gtnh.lock.json` (exiting green with no PR when unchanged), and on a change bumps the
+  extractor pins, runs the headless Forge dump, installs the dataset, re-locks, runs the
+  full test suite, and opens a reviewable PR whose summary surfaces the controller-count
+  delta, added/removed/changed multiblocks, and the extractor failure list. Never
+  auto-merges. Backed by a typed, tested CI helper (`tools/dataset_ci/`) and a dataset-diff
+  review checklist (`.github/PULL_REQUEST_TEMPLATE/dataset-update.md`).
 - **Dataset extractor scaffold (`tools/gtnh-extractor/`, the repo's only Java)** - lane 1 of
   the automated multiblock-dataset pipeline (GitHub #44). A standalone GTNH
   `ExampleMod1.7.10`-based Gradle tool whose `DumperMod` (`@Mod` entrypoint) hooks

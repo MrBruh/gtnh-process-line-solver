@@ -86,12 +86,18 @@ docstring-code-format = true  # keep ASCII diagrams / code in docstrings tidy
 
 [tool.mypy]
 python_version = "3.10"
-packages = ["gtnh_solver"]
+# gtnh_solver is the shipped package; dataset_ci is the CI-only dataset-update helper under
+# tools/ (not part of the wheel). mypy_path lets `dataset_ci` resolve without installation.
+packages = ["gtnh_solver", "dataset_ci"]
+mypy_path = ["tools"]
 plugins = ["pydantic.mypy"]  # the IR is Pydantic v2; the plugin type-checks models
 strict = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# tools/ holds the un-installed CI helper package (dataset_ci); put it on the import path so
+# its tests can import it just like the editable-installed gtnh_solver.
+pythonpath = ["tools"]
 addopts = "--cov=gtnh_solver --cov-report=term-missing"
 
 [tool.coverage.run]
