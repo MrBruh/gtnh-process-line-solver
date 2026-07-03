@@ -10,7 +10,7 @@ terminal) are unchanged from the original crude router.
 from __future__ import annotations
 
 import heapq
-from collections.abc import Collection, Iterator, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 
 from gtnh_solver.ir import CellBox, CellCoord, Facing, InputIR, Machine, Placement, Terminal
 from gtnh_solver.ir.geometry import FACE_DELTAS, FACE_OFFSETS, Cell, in_region, occupied_cells
@@ -101,11 +101,25 @@ def dock_candidates(
     return list(_dock_faces(port_id, placement, machine, obstacles, docked, region))
 
 
-def astar(start: Cell, goal: Cell, obstacles: set[Cell], region: CellBox) -> list[Cell] | None:
-    """Shortest in-bounds, obstacle-free cell path from ``start`` to ``goal`` (unit hops)."""
-    heap: list[tuple[int, int, Cell]] = [(manhattan(start, goal), 0, start)]
+def astar(
+    start: Cell,
+    goal: Cell,
+    obstacles: set[Cell],
+    region: CellBox,
+    cell_cost: Mapping[Cell, float] | None = None,
+) -> list[Cell] | None:
+    """Cheapest in-bounds, obstacle-free cell path from ``start`` to ``goal``.
+
+    Each hop costs 1 plus the entered cell's ``cell_cost`` (0 where absent), so with no
+    ``cell_cost`` this is the plain shortest path. The negotiated-congestion router prices
+    contested cells through it: a priced cell is *discouraged*, never blocked - only
+    ``obstacles`` are hard. Manhattan distance stays an admissible heuristic because every
+    extra cost is non-negative on top of the unit base.
+    """
+    prices: Mapping[Cell, float] = cell_cost if cell_cost is not None else {}
+    heap: list[tuple[float, float, Cell]] = [(float(manhattan(start, goal)), 0.0, start)]
     came_from: dict[Cell, Cell] = {}
-    best: dict[Cell, int] = {start: 0}
+    best: dict[Cell, float] = {start: 0.0}
     visited: set[Cell] = set()
     while heap:
         _, g, cur = heapq.heappop(heap)
@@ -118,7 +132,7 @@ def astar(start: Cell, goal: Cell, obstacles: set[Cell], region: CellBox) -> lis
             nxt = (cur[0] + dx, cur[1] + dy, cur[2] + dz)
             if not in_region(nxt, region) or nxt in obstacles:
                 continue
-            ng = g + 1
+            ng = g + 1 + prices.get(nxt, 0.0)
             if ng < best.get(nxt, _UNREACHABLE):
                 best[nxt] = ng
                 came_from[nxt] = cur

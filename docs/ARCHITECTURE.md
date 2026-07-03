@@ -69,8 +69,9 @@ doc as intent and reconcile.
   it. *(Phase 2, lane C: SA + LNS are in; the cheaper incremental routing/congestion estimate the
   cost is meant to grow into is still ahead.)*
 - **router/** - free-form per-commodity A* on the **full-3D** cell grid (all six faces are
-  neighbours); single-channel capacity; rip-up-and-reroute; ME-toggle skipping; the
-  shared-amperage power primitive. It owns the **auto-output vs pipe** decision (`router/auto.py`,
+  neighbours); single-channel capacity; **negotiated-congestion routing** for item/fluid nets
+  (priced A*, PathFinder-style; power trunks keep failed-first rip-up/reroute); ME-toggle
+  skipping; the shared-amperage power primitive. It owns the **auto-output vs pipe** decision (`router/auto.py`,
   `assign_auto_outputs`): adjacent 1-source-1-sink item/fluid nets take GT's free auto-output,
   only the rest are piped. *(Phase 2, lane D: the margin→channels-per-edge cap + cell→block
   realizability, and power optimization beyond size-or-reject.)*

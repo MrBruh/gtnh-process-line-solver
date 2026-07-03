@@ -336,6 +336,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Sand passes the hand-built compactness + <= 3-cable budget under every objective.
 
 ### Changed
+- **The item/fluid router negotiates congestion instead of retrying orders (GitHub #7).** Laying
+  nets sequentially (each net's cells hard-blocking the next) made the result hostage to net
+  order; the failed-first reorder retry only reduced that. The router now runs the FPGA
+  PathFinder scheme: every net routes independently with priced A* (a contested cell costs a
+  present-sharing penalty per other user plus a history penalty that grows every round it stays
+  contested), and all nets re-route round by round until no cell is shared - so an
+  ordering-induced false infeasibility cannot happen, and what remains contested after the round
+  budget is reported per net as an explicit `congestion` infeasibility (a maximal collision-free
+  subset is still emitted for the feedback loop). Once the contested set stops changing, a
+  geometric proof (a bottleneck cell that two nets both cannot route around) ends the negotiation
+  early instead of grinding the whole round budget, so a genuine single-bottleneck congestion is
+  rejected in a few rounds rather than 32; the proof only ever bails on a demonstrated collision,
+  so a resolvable contention is never misreported. Power trunks keep the
+  failed-first rip-up/reroute (trees grown by multi-goal A* do not decompose into per-cell
+  pricing). (`router/core.py`, `router/_grid.py`.)
 - **The test gate runs in a quarter of the time (GitHub #74).** Profiling showed ~3/4 of every
   CI test leg was coverage tracer overhead, not test work (the solver's hot loops execute
   millions of traced line events). The suite now runs parallel by default (`pytest-xdist`,
