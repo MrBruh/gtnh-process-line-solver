@@ -21,7 +21,7 @@ from .geometry import Cell, CellCoord
 #: Bump on any breaking change to the output contract; record it in ``ir/__init__.py``.
 LAYOUT_RESULT_VERSION = 0
 
-#: Allowed GT cable thicknesses as a membership set (1x/2x/4x/8x/16x, 16x max - docs/DOMAIN.md).
+#: Allowed GT cable thicknesses as a membership set (1x/2x/4x/8x/12x/16x, 16x max - docs/DOMAIN.md).
 #: The ladder itself lives in ``dataset`` (rule data); this is the frozenset the contract validates
 #: a power route's per-segment thickness against.
 _THICKNESSES = frozenset(CABLE_THICKNESSES)
@@ -65,7 +65,7 @@ class Route(StrictModel):
     commodity: Commodity
     terminals: list[Terminal] = Field(default_factory=list)
     segments: list[Segment] = Field(default_factory=list)
-    thickness_per_segment: list[int] | None = None  # power only; 1/2/4/8/16 per segment
+    thickness_per_segment: list[int] | None = None  # power only; 1/2/4/8/12/16 per segment
 
     def cells(self) -> set[Cell]:
         """Every grid cell this route's segments touch (both endpoints of each hop). The
@@ -85,7 +85,7 @@ class Route(StrictModel):
                 raise ValueError("thickness_per_segment must align 1:1 with segments")
             bad = [t for t in self.thickness_per_segment if t not in _THICKNESSES]
             if bad:
-                raise ValueError(f"cable thickness must be one of 1/2/4/8/16, got {bad}")
+                raise ValueError(f"cable thickness must be one of 1/2/4/8/12/16, got {bad}")
         elif self.thickness_per_segment is not None:
             raise ValueError("thickness_per_segment is only valid on power routes")
         return self

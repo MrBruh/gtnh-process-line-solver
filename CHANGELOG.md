@@ -338,6 +338,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
 
 ### Fixed
+- **The cable-thickness ladder gains GT's 12x rung** (maintainer-reported). GT ships six cable
+  sizes (1x/2x/4x/8x/12x/16x) but the dataset only knew five, so any segment or feed summing to
+  9 through 12 amps was sized a whole rung thick (16x). The router now picks 12x for that band,
+  the output contract and validator accept it, and the docs spell the full ladder.
 - **User-facing output surfaces are hardened against bad input and bad paths (GitHub #39).** The
   previewer inlined the scene JSON into its `<script>` block unescaped, so a machine type or
   resource id containing `</script>` (plan JSON is external input) could close the tag and break or

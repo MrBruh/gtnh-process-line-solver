@@ -23,7 +23,7 @@ What is checked now (needs only the IR):
   auto-output - every auto-connection joins its net's real OUTPUT->INPUT endpoint machines
   (resolved by port direction) on adjacent usable faces; power/ME commodities cannot
   auto-output, and a machine has at most one auto-output face.
-  power - per-segment cable thickness is present and well-formed (1/2/4/8/16, aligned); the route
+  power - per-segment cable thickness is present and well-formed (1/2/4/8/12/16, aligned); the route
   has exactly one source terminal and its cables form a single tree rooted there (neither is
   certifiable otherwise, so both are rejected, not skipped); AND independently re-derived on the
   validator's OWN amperage arithmetic (it imports only the shared rule DATA - the voltage ladder,

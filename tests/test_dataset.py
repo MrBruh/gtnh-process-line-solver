@@ -8,6 +8,8 @@ import pytest
 
 from gtnh_solver.dataset import (
     CABLE_LOSS_PER_BLOCK,
+    CABLE_THICKNESSES,
+    MAX_CABLE_THICKNESS,
     VOLTAGE_BY_TIER,
     UnknownTierError,
     UnpowerableError,
@@ -16,6 +18,14 @@ from gtnh_solver.dataset import (
     tier_voltage,
     whole_amps,
 )
+
+
+def test_cable_thickness_ladder_is_the_six_gt_sizes() -> None:
+    # 1x/2x/4x/8x/12x/16x - GT ships a 12x rung between 8x and 16x (once missing here, which
+    # over-thickened every 9..12-amp segment to 16x). Ascending order is load-bearing: the router
+    # picks the first rung that carries the load.
+    assert CABLE_THICKNESSES == (1, 2, 4, 8, 12, 16)
+    assert MAX_CABLE_THICKNESS == 16
 
 
 def test_voltage_ladder_starts_at_ulv_8_and_quadruples() -> None:
