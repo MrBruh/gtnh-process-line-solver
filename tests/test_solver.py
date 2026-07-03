@@ -19,6 +19,7 @@ from gtnh_solver.ir import (
     Commodity,
     FaceSpec,
     Facing,
+    Infeasibility,
     InputIR,
     IODirection,
     LayoutResult,
@@ -35,6 +36,7 @@ from gtnh_solver.router import RouteResult, assign_auto_outputs
 from gtnh_solver.solver import core as solver_core
 from gtnh_solver.solver import solve
 from gtnh_solver.validator import validate
+from tests._helpers import consumer, net, producer
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 _SAND = _EXAMPLES / "gtnh-sand.json"
@@ -134,7 +136,7 @@ def test_fast_mode_passes_through_infeasibility() -> None:
     # surfaces that as an explicit infeasibility rather than a silent failure.
     problem = InputIR(
         bounding_region=CellBox(sx=1, sy=1, sz=1),
-        machines=[_producer("m0"), _consumer("m1")],
+        machines=[producer("m0"), consumer("m1")],
         nets=[],
     )
     layout = solve(problem, optimize=False)
@@ -174,43 +176,6 @@ def test_solve_infeasible_when_machines_do_not_fit() -> None:
     assert layout.infeasibility is not None
 
 
-def _producer(mid: str) -> Machine:
-    return Machine(
-        id=mid,
-        type="t",
-        voltage_tier="LV",
-        orientation_options=[Facing.NORTH],
-        faces=FaceSpec(
-            ports=[Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)]
-        ),
-    )
-
-
-def _consumer(mid: str) -> Machine:
-    return Machine(
-        id=mid,
-        type="t",
-        voltage_tier="LV",
-        orientation_options=[Facing.NORTH],
-        faces=FaceSpec(
-            ports=[Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT)]
-        ),
-    )
-
-
-def _net(nid: str, src: str, dst: str) -> Net:
-    return Net(
-        id=nid,
-        commodity=Commodity.ITEM,
-        fluid_or_item="x",
-        throughput=1.0,
-        endpoints=[
-            MachineFaceRef(machine_id=src, port_id="out"),
-            MachineFaceRef(machine_id=dst, port_id="in"),
-        ],
-    )
-
-
 # EAST-first orientation: the constructive seed faces every machine's front down the +x chain
 # axis, blocking the east/west auto-output - so only reorientation can recover the free connection.
 _EAST_FIRST = [Facing.EAST, Facing.NORTH, Facing.SOUTH, Facing.WEST]
@@ -244,15 +209,15 @@ def test_optimizer_reorients_to_enable_auto_output_the_seed_blocks() -> None:
     # orientation-blind cost made reorient a free random walk (delta 0, never strictly better), so
     # `best` stayed frozen on the seed orientation and auto-output never recovered (stuck at 0).
     machines = [
-        _east_first(_producer("m0")),
+        _east_first(producer("m0")),
         _relay("m1"),
         _relay("m2"),
-        _east_first(_consumer("m3")),
+        _east_first(consumer("m3")),
     ]
     problem = InputIR(
         bounding_region=CellBox(sx=12, sy=4, sz=12),
         machines=machines,
-        nets=[_net("n0", "m0", "m1"), _net("n1", "m1", "m2"), _net("n2", "m2", "m3")],
+        nets=[net("n0", "m0", "m1"), net("n1", "m1", "m2"), net("n2", "m2", "m3")],
     )
     seed_autos, _ = assign_auto_outputs(problem, place(problem).placements)
     assert len(seed_autos) == 0  # the seed orientation blocks every link; reorientation must fix it
@@ -319,8 +284,8 @@ def test_solve_fork_auto_outputs_one_and_pipes_the_other() -> None:
     # m1 feeds both m2 and m3; its single auto-output covers one, the other is piped.
     problem = InputIR(
         bounding_region=CellBox(sx=8, sy=4, sz=8),
-        machines=[_producer("m1"), _consumer("m2"), _consumer("m3")],
-        nets=[_net("n1", "m1", "m2"), _net("n2", "m1", "m3")],
+        machines=[producer("m1"), consumer("m2"), consumer("m3")],
+        nets=[net("n1", "m1", "m2"), net("n2", "m1", "m3")],
     )
     layout = solve(problem)
     assert layout.status is LayoutStatus.VALID
@@ -376,3 +341,42 @@ def test_solve_downgrades_when_assembled_layout_fails_validation(
     assert layout.infeasibility is not None
     assert layout.infeasibility.constraint == "validation"
     assert validate(problem, layout).ok is False  # the bad route is preserved, not silently dropped
+
+
+def test_solve_gives_up_when_the_same_net_fails_every_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The give-up path of the never-silently-invalid promise. The machines place fine, but the
+    # router is rigged to fail the SAME net on every attempt. The feedback loop must notice the
+    # failed-net set repeating (re-placing is making no progress), STOP instead of spinning the
+    # whole multi-start grid, and return an explicit non-VALID layout that carries the
+    # infeasibility - never a silently-invalid result.
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[producer("m0"), consumer("m1")],
+        nets=[net("n", "m0", "m1")],
+    )
+    stuck = Infeasibility(constraint="routing", detail="rigged: net n never routes")
+
+    def always_fails_the_same_net(prob: InputIR, placements: object) -> RouteResult:
+        return RouteResult(infeasibility=stuck, failed_nets=("n",))
+
+    monkeypatch.setattr(solver_core, "route", always_fails_the_same_net)
+
+    attempts = 0
+    real_optimize = solver_core.optimize_placement
+
+    def counting_optimize(*args: object, **kwargs: object) -> object:
+        nonlocal attempts
+        attempts += 1
+        return real_optimize(*args, **kwargs)
+
+    monkeypatch.setattr(solver_core, "optimize_placement", counting_optimize)
+
+    layout = solve(problem)
+    assert layout.status is LayoutStatus.PARTIAL_INVALID  # not VALID, and not a spin
+    assert layout.infeasibility is not None
+    assert layout.infeasibility.constraint == "routing"  # the router's reason is surfaced...
+    assert validate(problem, layout).ok is False  # ...and the stalled net is never certified valid
+    # It broke on the second attempt's repeated failed-net set, not after exhausting the full grid.
+    assert 1 < attempts < solver_core._MAX_FEEDBACK_PASSES
