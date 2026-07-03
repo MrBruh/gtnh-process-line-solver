@@ -7,6 +7,24 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Multiblock physical dataset - schema v1 + Python adapter (`dataset/`, GitHub #48).** The
+  first slice of the automated dataset-extraction pipeline (`DATASET_EXTRACTION_PLAN.md`): the
+  path from an extractor's raw JSON to the solver's physical rules. `dataset/schema.py` is a typed,
+  `extra="forbid"` Pydantic loader for schema v1 (`MultiblockDoc` + `_meta.json` `DatasetMeta`,
+  per plan section 4.2: `schema`, `controller`, `variants[blocks/hints/bbox]`, `substitutions`,
+  `failures`), the cross-language contract for the future Java extractor (issue #45), with a
+  derived JSON Schema (`multiblock_json_schema()`) for non-Python consumers so it cannot drift.
+  `dataset/multiblocks.py` is the adapter that does **all interpretation in Python** (plan design
+  principle 3): it derives each machine's footprint bounding box, hint-derived I/O faces, and
+  coil-tier count from the raw facts into an IR-shaped `MachinePhysical`, and `load_physical_dataset`
+  keys a whole dump by display name. Because the real extractor is not built yet, illustrative
+  hand-authored fixtures ship under `data/multiblocks/` (Electric Blast Furnace, Vacuum Freezer)
+  marked as such in a README, so the adapter and golden tests run today. Golden tests pin the
+  ground truths (EBF is 3x3x4 with two coil layers and hatch-layer hints; Vacuum Freezer is 3x3x3)
+  plus schema validation (every file validates, `_meta.json` failure list under a lenient
+  threshold). Wired **opt-in** into the gtnh-factory-flow adapter: `to_input_ir(plan, physical=...)`
+  stamps a known machine's real footprint on the `InputIR`, while the default path stays single-block
+  so the solver runs with or without a dump. No IR contract change (additive keyword-only argument).
 - **Automated dataset-update CI (`.github/workflows/update-dataset.yml`, lane 4)** - a
   weekly + manual workflow that tracks the latest *stable* GTNH pack: it resolves the pack
   version from the DreamAssemblerXXL manifests, diffs the pinned mod versions against

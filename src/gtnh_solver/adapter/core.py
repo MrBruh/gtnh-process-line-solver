@@ -16,8 +16,10 @@ Mapping (see docs/ARCHITECTURE.md, docs/IR.md):
 - ``power``   -> synthesized, not in the export: a source machine + shared-amperage net per
                 voltage tier feed the powered machines (``power`` submodule, docs/DOMAIN.md).
 
-Crude-on-purpose for Phase 1 (docs/ROADMAP.md): single-block 1x1x1 footprints and default
-orientations for every machine (real footprints/faces come from the dataset lane), and
+Footprints: single-block 1x1x1 by default, or a machine's real multiblock footprint when an
+optional physical dataset (``dataset.load_physical_dataset``) is passed and knows the type - see
+``to_input_ir(plan, physical=...)``. Still crude-on-purpose for Phase 1 (docs/ROADMAP.md): default
+orientations for every machine (hint-derived face constraints stay on the dataset record), and
 **multi-instance nodes (``machineCount > 1``) are rejected** rather than mapped - a net endpoint
 cannot address one instance of a group until routing is instance-aware (InputIR v1 dropped
 ``Machine.count``; see ``ir/__init__.py``, docs/ROADMAP.md). The InputIR's own
@@ -30,6 +32,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from gtnh_solver.dataset import PhysicalDataset
 from gtnh_solver.ir import (
     CellBox,
     Commodity,
@@ -66,13 +69,37 @@ def load_plan(path: str | Path) -> Plan:
     return Plan.model_validate(data)
 
 
-def adapt_file(path: str | Path) -> InputIR:
-    """Load an exported plan file and map it to the solver's ``InputIR``."""
-    return to_input_ir(load_plan(path))
+def adapt_file(path: str | Path, *, physical: PhysicalDataset | None = None) -> InputIR:
+    """Load an exported plan file and map it to the solver's ``InputIR``.
+
+    ``physical`` is an optional multiblock dataset (``dataset.load_physical_dataset``); when given,
+    a node whose machine type it knows gets that machine's real footprint (see :func:`to_input_ir`).
+    """
+    return to_input_ir(load_plan(path), physical=physical)
 
 
-def to_input_ir(plan: Plan) -> InputIR:
-    """Map a typed :class:`Plan` to an ``InputIR`` (referential integrity enforced on build)."""
+def _footprint_for(machine_type: str, physical: PhysicalDataset | None) -> CellBox:
+    """The footprint for a machine type: the dataset's real one if known, else the 1x1x1 default.
+
+    Opt-in by design - with no dataset every machine stays single-block (the Phase 1 behaviour), so
+    the solver runs whether or not a ``data/multiblocks/`` dump is present. Orientation handling of
+    non-cubic footprints is a placement TODO (``ir/geometry.occupied_cells``); the current dataset
+    machines have square (NxN) bases, so their bbox is rotation-invariant.
+    """
+    if physical is not None:
+        record = physical.get(machine_type)
+        if record is not None:
+            return record.footprint
+    return _DEFAULT_FOOTPRINT
+
+
+def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> InputIR:
+    """Map a typed :class:`Plan` to an ``InputIR`` (referential integrity enforced on build).
+
+    When ``physical`` is supplied, each node's machine footprint comes from that dataset if it knows
+    the machine type; otherwise (and for boundary storages/buffers, which are never in the dataset)
+    the crude 1x1x1 default stands.
+    """
     recipes = {r.id: r for r in plan.recipes}
     nodes_by_id = {n.id: n for n in plan.nodes}
     storage_ids = {s.id for s in plan.storages}
@@ -92,7 +119,7 @@ def to_input_ir(plan: Plan) -> InputIR:
             Machine(
                 id=node.id,
                 type=recipe.machine_type,
-                footprint=_DEFAULT_FOOTPRINT,
+                footprint=_footprint_for(recipe.machine_type, physical),
                 faces=FaceSpec(ports=_recipe_ports(recipe, node)),
                 voltage_tier=node.overclock_tier,
                 orientation_options=_DEFAULT_ORIENTATIONS,
