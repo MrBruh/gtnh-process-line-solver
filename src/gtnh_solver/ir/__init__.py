@@ -2,7 +2,11 @@
 
 ``InputIR`` (the problem) and ``LayoutResult`` (the solution, consumed by previewer,
 build guide, and later export). Full spec: docs/IR.md. Implemented as Pydantic v2 models,
-split across submodules and re-exported here as the package's public surface:
+split across submodules. The models + versions are re-exported here as the package's public
+surface, but the low-level cell-grid *helpers* in ``geometry`` (``FACE_DELTAS``,
+``occupied_cells``, ``in_region``, ...) are **not** - consumers deep-import those from
+``ir.geometry`` directly, a convention applied consistently across the placement, router, and
+validator lanes. Only the value types (``CellCoord``, ``CellBox``) surface here. The submodules:
 
 - ``enums``      - Commodity, IODirection, Facing, LayoutStatus
 - ``geometry``   - CellCoord, CellBox (integer cell-grid value types)

@@ -242,7 +242,73 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   by Super Chest at (x, y, z) (~0.1 items/t)`. Sand grows from 5 machines to 6, nitrobenzene from
   21 to 23.
 
+- **Power sources reserve a boundary feed face.** A synthesized power source is fed by the builder
+  from outside the structure, but nothing said *where* - it was placed like any machine, so the
+  optimizer could bury it mid-region with no face left for the external feed. Its **front face is
+  now the reserved feed entry**: constructive and SA/LNS placement pin that face flush on the
+  region boundary (every move preserves it; a problem with no such slot is an explicit
+  `power_feed` infeasibility), and the validator enforces the same rule independently (new
+  `POWER_FEED_NOT_ON_BOUNDARY`). Internal cables keep using the other five faces - the existing
+  front-face rule already keeps them off the feed face. New shared helpers:
+  `Machine.is_power_source` (the buildguide's private predicate, promoted) and
+  `ir.geometry.front_on_boundary`.
+
+- **The optimizer now finds compact, low-wire layouts (the hand-built sand target).** Two
+  coordinated changes (docs/ROADMAP.md lane C). The placement cost is **footprint-first**: the
+  compactness driver is now the floor area (x-span times z-span, weight 1.0), so stacking a layer
+  is free while sprawling costs, with the bounding-box volume kept as a mild tiebreak; power nets
+  lost their base wirelength term entirely (center-distance proxies cannot see dock faces or
+  shared cable taps and measurably steered AWAY from low-cable layouts) and instead gain an MST
+  trunk-length pull only when feedback-penalized, to rescue a power net the router failed. The
+  real cable cost is judged where it is knowable: the solver's **feedback loop is now
+  quality-driven** - every bounded attempt is fully routed + validated and the best VALID layout
+  by (structure footprint, power cable cells, structure volume) wins, instead of returning the
+  first valid one. Optimized sand now solves to a 5x1x2 stack - the machine row with the source
+  on top and a **3-cell cable trunk** tapped through the hammers' top faces - matching the
+  maintainer's hand-built 3-cable solution with a smaller footprint (5 vs 6) and volume (10 vs
+  12). Acceptance is pinned by a solver test.
+
+- **Selectable compactness objective** - `solve(..., objective="footprint" | "volume" |
+  "balanced")` and `gtnh-solve --objective`. "Compact" is ambiguous and the two metrics pull
+  opposite ways (stacking a layer shrinks the floor but can grow the enclosing box), so the
+  builder picks: `footprint` (default, the maintainer's target) minimizes floor area and stacks
+  tall, `volume` minimizes the enclosing box and stays flat/cubic, `balanced` weighs both. The
+  objective drives both the placement cost's compactness weights and the feedback loop's quality
+  ranking of routed layouts; the fast path ignores it (constructive placement is floor-first by
+  construction). This is the future unified site's second user control, next to optimize-or-not.
+  Sand passes the hand-built compactness + <= 3-cable budget under every objective.
+
 ### Changed
+- **CI tests Python 3.14; packaging metadata reflects real support.** The test matrix now runs
+  the floor and the latest release only (`3.10` + `3.14`; a floor break or a new-release break
+  is what a leg catches, and the 3.11-3.13 intermediates cannot fail while both ends pass), and
+  the package gains per-version trove classifiers
+  (`Programming Language :: Python :: 3.10` through `3.14`) and moves from
+  `Development Status :: 1 - Planning` to `3 - Alpha`. Internal CI/build polish along with it:
+  pip caching, least-privilege `permissions`, cancel-superseded-runs `concurrency`, a
+  `hatchling>=1.26` build pin, and a Dependabot config (GitHub Actions + pip, weekly).
+- **The router now owns the auto-output vs pipe decision.** `route()` decides itself, from the
+  final placements + orientations, which nets GT's free auto-output connection covers (the logic
+  moved from `solver/core.py` to `router/auto.py`, public `assign_auto_outputs`) and lays pipes
+  only for the rest; `RouteResult` gains `auto_connections` so the decision rides the router's
+  output, and the solver's assemble step just composes it (its `skip_nets` plumbing is gone).
+  Behavior is unchanged - same greedy net order, one auto-output per source machine, only
+  1-source-1-sink item/fluid nets are eligible, power/ME never auto-feed - and the validator's
+  independent auto-output checks stay the gate. This advances lane D (docs/ROADMAP.md): the
+  router is the geometry authority, so the optimizer's job shrinks to moving blocks and choosing
+  front faces. (`router/`, `solver/`.)
+- **Power trunks grow as trees with shared taps.** The power router chained every net
+  source -> m0 -> m1 -> ... as a path and docked each terminal on its own distinct cell, so a
+  source + N sinks always cost at least N+1 cable cells - geometrically unable to reach the
+  hand-built 3-cable sand trunk. In GT one cable block feeds every adjacent wired machine face,
+  so the trunk is now a tree: a sink whose dock candidate is already a trunk cell of its net
+  taps it (terminal on that cell, no new cable; the cell nearest the source wins), and any other
+  sink extends the tree with a multi-goal A* leg from every trunk cell laid so far. Sizing
+  follows the tree - each machine's cable distance is its terminal's depth, and every segment
+  carries the summed amperage of the sink terminals on its far-from-root side (replacing the
+  per-leg suffix sum, which overcharged one side of a branch) - and the validator already
+  re-derives branched trees and shared terminal cells independently. A source + three clustered
+  sinks now trunk with two cable cells, within the sand target's three. (`router/power.py`.)
 - **Power cables dock route-aware, on whichever face is nearest the trunk.** The power router
   (`router/power.py`) used to commit each terminal to the first free non-front face in a fixed
   order (south first), blind to where the cable then had to run, so a source behind a machine row
@@ -312,6 +378,60 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
 
 ### Fixed
+- **The cable-thickness ladder gains GT's 12x rung** (maintainer-reported). GT ships six cable
+  sizes (1x/2x/4x/8x/12x/16x) but the dataset only knew five, so any segment or feed summing to
+  9 through 12 amps was sized a whole rung thick (16x). The router now picks 12x for that band,
+  the output contract and validator accept it, and the docs spell the full ladder.
+- **Power router does failed-first rip-up/reroute, like the item router (GitHub #40).** The power
+  router laid each tier's trunk in problem order and stopped at the first net that could not route,
+  reporting only that one - but capacity accretes obstacles, so a trunk laid for one tier can wedge
+  a later tier's trunk out of a chokepoint: a *false* infeasibility from net order alone, and a
+  weaker feedback-loop signal than the item router already gave for pipes. It now routes a pass
+  and, if any net failed, rips every trunk up and retries with the failed nets first (most-
+  constrained-first), stopping only when a pass is clean or a failed-net set repeats (a genuine
+  infeasibility, not an ordering accident). When routing does stall it reports ALL still-failing
+  nets, not just the first, so the place↔route feedback loop can penalize them all. The bounded-
+  retry loop is now shared with the item router (`core._rip_up_reroute`). (`router/power.py`,
+  `router/core.py`.)
+- **Validator derives power amperage independently of the router (GitHub #36).** The validator is
+  meant to be a second, differently-written implementation so a bug in the router's power math is
+  caught, not certified (docs/ARCHITECTURE.md #4) - but its amperage re-check still called the same
+  `dataset.amp_load` / `whole_amps` helpers the router sizes cables with, so a bug in the loss
+  formula or the ceil-with-epsilon rounding would have been blessed by both sides. It now inlines
+  its own arithmetic (`eut / (tier_voltage - loss * distance)` per machine, summed per segment,
+  `ceil` with the shared epsilon), importing only the rule DATA (the voltage ladder,
+  `CABLE_LOSS_PER_BLOCK`, `_AMP_EPSILON`) so the rounding policy stays identical and the two still
+  agree on every valid layout, while a sizing bug is now caught on a separate code path. Separately,
+  an unknown/off-ladder voltage tier was reported as `power_thickness_insufficient` (whose meaning
+  is "cable thinner than the summed amps") - a wrong signal for a route that is merely unverifiable;
+  it now gets its own additive `power_tier_unknown` violation code. (`validator/`.)
+- **User-facing output surfaces are hardened against bad input and bad paths (GitHub #39).** The
+  previewer inlined the scene JSON into its `<script>` block unescaped, so a machine type or
+  resource id containing `</script>` (plan JSON is external input) could close the tag and break or
+  inject into the page; the inline JSON now escapes `</` to `<\/` (JSON-transparent, the scene still
+  round-trips). The CLI's `-o`/`--preview` writes raised an uncaught `OSError` on an unwritable path,
+  dumping a raw traceback instead of honoring the documented 0/1/2 exit-code contract; both writes
+  now report `error: could not write <path>: <reason>` to stderr and exit 2. (`previewer/`, `cli`.)
+- **Amperage is sized from fractional machine loads, rounded up per aggregate - not per machine**
+  (maintainer-verified in game). GT machines pull whole packets (1 amp = one packet of up to tier
+  voltage) into an internal buffer only when it has room, so a 16 EU/t LV machine *averages* 0.5
+  amps - but `dataset.amperage` ceiled every machine to whole amps and the callers summed the
+  ceilings, overstating every aggregate: the optimized sand line's feed spec read 3 A / 96 EU/t
+  when 2 A / 64 EU/t runs it in game, and cables could come out a tier thicker than needed.
+  `amperage` is replaced by `amp_load` (the un-rounded `eut / delivered_voltage`, same
+  unknown-tier / unpowerable errors) plus `whole_amps` (the ceil, with epsilon slack for float
+  dust), and the rounding moves to where packets are actually quantized: per cable segment in the
+  router and validator, per tier in `system_io` (so the guide and previewer both now say
+  2 A / 64 EU/t for sand; this supersedes the interim 3 A number from the drift fix below). Cable
+  loss still raises far machines' loads; the 16x cap and unpowerable checks are unchanged.
+  (`dataset/`, `router/power.py`, `validator/`, `system_io`.)
+- **Build guide power note agrees with the previewer (and reality).** The note read the feed
+  amperage off the trunk's thickest cable segment, which both understates a trunk whose sink taps
+  the source's own dock cell (its amps flow through no segment - on the optimized sand stack the
+  guide said `>=2 A -> up to 64 EU/t` while the previewer said 3 A / 96 EU/t) and overstates when
+  amps round up to a cable tier (the fast sand row printed 4 A for a 3 A draw). Both surfaces now
+  read the same shared `system_io` numbers: the tier's machine draws summed at each machine's
+  delivered voltage. Per-segment cable thickness still lives under Connections. (`buildguide/`.)
 - **Validator requires a consumer on routed nets (GitHub #8).** The gate enforced the
   OUTPUT->INPUT port direction on the auto-connection path but not on the routed-pipe path, so a
   routed net with no consumer (every endpoint an OUTPUT producer) passed - the golden "valid"

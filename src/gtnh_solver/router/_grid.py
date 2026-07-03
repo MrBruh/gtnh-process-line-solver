@@ -10,15 +10,15 @@ terminal) are unchanged from the original crude router.
 from __future__ import annotations
 
 import heapq
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Iterator, Sequence
 
 from gtnh_solver.ir import CellBox, CellCoord, Facing, InputIR, Machine, Placement, Terminal
-from gtnh_solver.ir.geometry import FACE_DELTAS, Cell, in_region, occupied_cells
+from gtnh_solver.ir.geometry import FACE_DELTAS, FACE_OFFSETS, Cell, in_region, occupied_cells
 
 # Order to try non-front faces (south first -> docks into the open +z row). The front face
 # (== placement orientation) is skipped at runtime.
 FACE_ORDER = (Facing.SOUTH, Facing.NORTH, Facing.EAST, Facing.WEST, Facing.UP, Facing.DOWN)
-NEIGHBORS = tuple(FACE_DELTAS.values())
+NEIGHBORS = FACE_OFFSETS  # the six face-adjacent unit steps A* expands into
 _UNREACHABLE = 1 << 30
 
 
@@ -34,6 +34,43 @@ def obstacle_cells(
     return obstacles
 
 
+def _dock_faces(
+    port_id: str,
+    placement: Placement,
+    machine: Machine,
+    obstacles: set[Cell],
+    docked: set[Cell],
+    region: CellBox,
+) -> Iterator[Terminal]:
+    """Free cells just outside the machine's usable (non-front) faces, one Terminal per face+cell.
+
+    The single scan behind both :func:`dock` and :func:`dock_candidates`: it walks ``FACE_ORDER``
+    (front face skipped) and, within each, ascending body cell, yielding a Terminal for every free,
+    in-region, unclaimed cell - deduping a cell already yielded from an earlier face. ``dock`` takes
+    the first yield; ``dock_candidates`` takes them all. The first cell yielded is exactly ``dock``'s
+    old first free cell (the dedup only affects later faces), so neither result changes.
+    """
+    body = set(occupied_cells(placement.cell, machine.footprint))
+    seen: set[Cell] = set()
+    for face in FACE_ORDER:
+        if face is placement.orientation:  # front face carries no I/O
+            continue
+        dx, dy, dz = FACE_DELTAS[face]
+        for bx, by, bz in sorted(body):
+            cand = (bx + dx, by + dy, bz + dz)
+            if cand in body or cand in seen:
+                continue
+            if not in_region(cand, region) or cand in obstacles or cand in docked:
+                continue
+            seen.add(cand)
+            yield Terminal(
+                machine_id=placement.machine_id,
+                port_id=port_id,
+                face=face,
+                cell=CellCoord(x=cand[0], y=cand[1], z=cand[2]),
+            )
+
+
 def dock(
     port_id: str,
     placement: Placement,
@@ -43,22 +80,7 @@ def dock(
     region: CellBox,
 ) -> Terminal | None:
     """First free cell just outside a usable (non-front) face of the machine, as a Terminal."""
-    body = set(occupied_cells(placement.cell, machine.footprint))
-    for face in FACE_ORDER:
-        if face is placement.orientation:  # front face carries no I/O
-            continue
-        dx, dy, dz = FACE_DELTAS[face]
-        for bx, by, bz in sorted(body):
-            cand = (bx + dx, by + dy, bz + dz)
-            if cand in body or not in_region(cand, region) or cand in obstacles or cand in docked:
-                continue
-            return Terminal(
-                machine_id=placement.machine_id,
-                port_id=port_id,
-                face=face,
-                cell=CellCoord(x=cand[0], y=cand[1], z=cand[2]),
-            )
-    return None
+    return next(_dock_faces(port_id, placement, machine, obstacles, docked, region), None)
 
 
 def dock_candidates(
@@ -76,29 +98,7 @@ def dock_candidates(
     dock on whichever face yields the shortest cable. Deterministic order: ``FACE_ORDER``, then
     ascending body cell.
     """
-    body = set(occupied_cells(placement.cell, machine.footprint))
-    terminals: list[Terminal] = []
-    seen: set[Cell] = set()
-    for face in FACE_ORDER:
-        if face is placement.orientation:  # front face carries no I/O
-            continue
-        dx, dy, dz = FACE_DELTAS[face]
-        for bx, by, bz in sorted(body):
-            cand = (bx + dx, by + dy, bz + dz)
-            if cand in body or cand in seen:
-                continue
-            if not in_region(cand, region) or cand in obstacles or cand in docked:
-                continue
-            seen.add(cand)
-            terminals.append(
-                Terminal(
-                    machine_id=placement.machine_id,
-                    port_id=port_id,
-                    face=face,
-                    cell=CellCoord(x=cand[0], y=cand[1], z=cand[2]),
-                )
-            )
-    return terminals
+    return list(_dock_faces(port_id, placement, machine, obstacles, docked, region))
 
 
 def astar(start: Cell, goal: Cell, obstacles: set[Cell], region: CellBox) -> list[Cell] | None:

@@ -10,9 +10,10 @@ the two surfaces drift. This module is the single source, pure over the ``InputI
 - **outputs**: the product the line makes - normally a boundary storage that only *sinks* (a
   synthesized collection buffer, #16), or, as a fallback, a machine OUTPUT port no net consumes.
 - **power**: the summed ``eut`` the placed machines draw, plus the amperage per voltage tier the
-  source must supply - summed at each machine's *delivered* voltage, so cable loss over distance is
-  reflected in what the builder feeds (docs/DOMAIN.md - a shared-amperage net's draw is what the
-  source must supply).
+  source must supply - each machine's *fractional* load at its delivered voltage (cable loss over
+  distance included), summed per tier and rounded up to whole amps only then (docs/DOMAIN.md - a
+  shared-amperage net's aggregate draw is what the source must supply; machines buffer packets,
+  so per-machine whole amps would overstate it).
 """
 
 from __future__ import annotations
@@ -20,8 +21,9 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 
-from gtnh_solver.dataset import UnknownTierError, UnpowerableError, amperage
+from gtnh_solver.dataset import UnknownTierError, UnpowerableError, amp_load, whole_amps
 from gtnh_solver.ir import Commodity, InputIR, IODirection, LayoutResult, Net, Port, Route, Segment
+from gtnh_solver.ir.nets import port_direction_map
 
 #: Per-commodity rate unit stem, no time suffix. The previewer appends ``/t`` or ``/s`` for its
 #: tick-vs-second toggle; the text guide uses ``RATE_UNIT`` below.
@@ -48,8 +50,10 @@ class BoundaryFlow:
 class SystemIO:
     """The whole boundary: inputs to load, outputs to collect, the total EU/t draw, and the summed
     **amperage** per voltage tier (what an external source must supply, docs/DOMAIN.md - the tier
-    already implies the voltage, so amps is the useful per-tier number). Amperage is summed at each
-    machine's delivered voltage, so it accounts for the extra amps cable loss over distance costs."""
+    already implies the voltage, so amps is the useful per-tier number). Each machine's fractional
+    load (``eut`` over its delivered voltage, so cable loss over distance is included) is summed
+    per tier and only the total rounds up to whole amps - machines buffer packets, so rounding per
+    machine would overstate what the builder must feed (confirmed in game)."""
 
     inputs: list[BoundaryFlow]
     outputs: list[BoundaryFlow]
@@ -70,7 +74,7 @@ def port_resource(port: Port) -> str:
 
 def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
     """Derive the boundary I/O + summed power of ``layout`` (only machines it actually placed)."""
-    port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
+    port_dir = port_direction_map(problem)
     coord_of = {pl.machine_id: pl.cell for pl in layout.placements}
 
     # The net each output port sources / each input port sinks (keyed by machine+port). A source's
@@ -92,7 +96,7 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
         cell = coord_of.get(machine.id)
         if cell is None:  # only describe machines the layout actually placed
             continue
-        cell_t = (cell.x, cell.y, cell.z)
+        cell_t = cell.as_tuple()
         out_ports = [p for p in machine.faces.ports if p.direction is IODirection.OUTPUT]
         dirs = {p.direction for p in machine.faces.ports}
         only_sources = IODirection.INPUT not in dirs and IODirection.OUTPUT in dirs
@@ -136,22 +140,25 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
             )
 
     # Cable-block distance from the source to each powered machine (its depth in the routed power
-    # tree), so amperage is summed at the loss-reduced *delivered* voltage the builder must actually
-    # feed - not the lossless ideal. Machines with no cable (ME power, or an unrouted net) fall back
-    # to distance 0. The validator re-derives this distance independently for its amperage check.
+    # tree), so each load is sized at the loss-reduced *delivered* voltage the builder must
+    # actually feed - not the lossless ideal. Loads stay fractional per machine and round up to
+    # whole amps only per tier (dataset.amp_load / whole_amps). Machines with no cable (ME power,
+    # or an unrouted net) fall back to distance 0. The validator re-derives this distance
+    # independently for its amperage check.
     power_distance = _power_distances(layout.routes, port_dir)
     power_total = 0.0
-    power_amps_by_tier: dict[str, int] = {}
+    load_by_tier: dict[str, float] = {}
     for machine in problem.machines:
         if machine.eut <= 0 or machine.id not in coord_of:
             continue  # unpowered blocks / sources draw nothing; describe only placed machines
         tier = machine.voltage_tier
         power_total += machine.eut
         try:
-            amps = amperage(machine.eut, tier, distance=power_distance.get(machine.id, 0))
+            load = amp_load(machine.eut, tier, distance=power_distance.get(machine.id, 0))
         except (UnknownTierError, UnpowerableError):
             continue  # an off-ladder tier or a run loss has killed: nothing sizeable to report
-        power_amps_by_tier[tier] = power_amps_by_tier.get(tier, 0) + amps
+        load_by_tier[tier] = load_by_tier.get(tier, 0.0) + load
+    power_amps_by_tier = {tier: whole_amps(load) for tier, load in load_by_tier.items()}
 
     return SystemIO(
         inputs=inputs,
@@ -174,7 +181,7 @@ def _power_distances(
         if r.commodity is not Commodity.POWER:
             continue
         sources = [
-            (t.cell.x, t.cell.y, t.cell.z)
+            t.cell.as_tuple()
             for t in r.terminals
             if port_dir.get((t.machine_id, t.port_id)) is IODirection.OUTPUT
         ]
@@ -185,7 +192,7 @@ def _power_distances(
             continue  # not a single tree; the validator flags it, we just skip the summary
         for t in r.terminals:
             if port_dir.get((t.machine_id, t.port_id)) is IODirection.INPUT:
-                d = depth.get((t.cell.x, t.cell.y, t.cell.z))
+                d = depth.get(t.cell.as_tuple())
                 if d is not None:
                     distances[t.machine_id] = d
     return distances
@@ -200,8 +207,8 @@ def _cable_depth(
     nodes: set[tuple[int, int, int]] = set()
     edges = 0
     for seg in segments:
-        a = (seg.start.x, seg.start.y, seg.start.z)
-        b = (seg.end.x, seg.end.y, seg.end.z)
+        a = seg.start.as_tuple()
+        b = seg.end.as_tuple()
         adj[a].add(b)
         adj[b].add(a)
         nodes.add(a)

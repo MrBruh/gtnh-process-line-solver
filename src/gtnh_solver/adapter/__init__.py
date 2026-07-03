@@ -11,7 +11,8 @@ omits - a source + shared-amperage net per voltage tier (``power`` submodule).
 
 from __future__ import annotations
 
-from .core import AdapterError, adapt_file, load_plan, to_input_ir
+from ._errors import AdapterError
+from .core import adapt_file, load_plan, to_input_ir
 from .plan import Edge, Node, Plan, Recipe, Resource, Storage
 
 __all__ = [

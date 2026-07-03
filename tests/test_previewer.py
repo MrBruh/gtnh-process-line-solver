@@ -32,8 +32,10 @@ _SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
 
 
 def _sand_scene() -> dict:
+    # The fast (constructive) solve: deterministic layout coordinates that the exact-cell
+    # assertions below can rely on; scene building does not care which placer produced them.
     ir = adapt_file(_SAND)
-    return build_scene(ir, solve(ir))
+    return build_scene(ir, solve(ir, optimize=False))
 
 
 def test_scene_has_machines_region_and_legend() -> None:
@@ -56,7 +58,7 @@ def test_scene_power_route_carries_thickness() -> None:
     thicknesses = [seg["thickness"] for r in power for seg in r["segments"]]
     assert thicknesses  # the trunk has segments
     assert all(isinstance(t, int) for t in thicknesses)
-    assert set(thicknesses) <= {1, 2, 4, 8, 16}
+    assert set(thicknesses) <= {1, 2, 4, 8, 12, 16}
 
 
 def test_scene_items_auto_feed_so_no_item_pipes() -> None:
@@ -148,11 +150,12 @@ def test_scene_reports_system_io() -> None:
         {"resource": "minecraft:sand", "rate": pytest.approx(0.1), "unit": "items"}
     ]
     # the power feed per tier: the FULL LV tier voltage (32, not the hammers' 16 EU/t draw) x the
-    # amps to supply - what a GT source is fed. ``total`` is that feed (32 V x 3 A = 96 EU/t), so it
-    # matches the breakdown, not the machines' lower actual draw.
+    # amps to supply - what a GT source is fed. The hammers' fractional loads (~0.53 A each at
+    # their delivered voltages) sum to 1.66 and round up once to 2 A, so ``total`` is that feed
+    # (32 V x 2 A = 64 EU/t) and matches the breakdown, not the machines' lower actual draw.
     assert io["power"] == {
-        "total": pytest.approx(96),
-        "byTier": {"LV": {"volts": 32, "amps": 3}},
+        "total": pytest.approx(64),
+        "byTier": {"LV": {"volts": 32, "amps": 2}},
     }
 
 
@@ -217,6 +220,24 @@ def test_render_html_grid_aligns_to_cell_boundaries() -> None:
 def test_render_html_inlines_the_exact_scene() -> None:
     scene = _sand_scene()
     assert json.dumps(scene) in render_html(scene)  # embedded verbatim - no file:// fetch needed
+
+
+def _inlined_scene_json(html: str) -> str:
+    # pull just the inlined `const SCENE = <json>;` payload back out of the rendered page, so an
+    # assertion can look at the data without tripping over the template's own literal </script>
+    after = html.split("const SCENE = ", 1)[1]
+    return after.split("const COMMODITY", 1)[0].rstrip().rstrip(";").rstrip()
+
+
+def test_render_html_escapes_closing_script_in_inline_json() -> None:
+    # Plan JSON is external input (GitHub #39): a machine type or resource id containing "</script>"
+    # must not be able to close the inline <script> and break (or inject into) the page.
+    scene = _sand_scene()
+    scene["machines"][0]["type"] = "</script><script>alert(1)</script>"
+    payload = _inlined_scene_json(render_html(scene))
+    assert "</script>" not in payload  # the raw closing tag never reaches the page as data...
+    assert "<\\/script>" in payload  # ...it is escaped to <\/script>
+    assert json.loads(payload) == scene  # ...and json still round-trips (\/ is a valid escape)
 
 
 def test_write_preview_writes_an_html_file(tmp_path: Path) -> None:

@@ -17,14 +17,18 @@ from hypothesis import strategies as st
 from gtnh_solver.ir import (
     CellBox,
     CellCoord,
+    Commodity,
+    FaceSpec,
     Facing,
     InputIR,
+    IODirection,
     LayoutResult,
     LayoutStatus,
     Machine,
     Placement,
+    Port,
 )
-from gtnh_solver.ir.geometry import in_region
+from gtnh_solver.ir.geometry import front_on_boundary, in_region
 from gtnh_solver.placement import place
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
@@ -36,6 +40,7 @@ _PLACEMENT_CODES = {
     ViolationCode.BAD_ORIENTATION,
     ViolationCode.PLACEMENT_COUNT_MISMATCH,
     ViolationCode.UNKNOWN_MACHINE,
+    ViolationCode.POWER_FEED_NOT_ON_BOUNDARY,
 }
 
 
@@ -132,6 +137,66 @@ def test_empty_problem_is_ok() -> None:
     result = place(_problem([]))
     assert result.ok
     assert result.placements == ()
+
+
+def _source(mid: str = "src", *, orientations: list[Facing] | None = None) -> Machine:
+    """A power source: a machine with a power OUTPUT port (the adapter's synthesized shape)."""
+    return Machine(
+        id=mid,
+        type="Power Source (LV)",
+        voltage_tier="LV",
+        orientation_options=(
+            orientations
+            if orientations is not None
+            else [Facing.NORTH, Facing.SOUTH, Facing.EAST, Facing.WEST]
+        ),
+        faces=FaceSpec(
+            ports=[Port(id="po", commodity=Commodity.POWER, direction=IODirection.OUTPUT)]
+        ),
+    )
+
+
+def test_power_source_feed_face_lands_on_the_boundary() -> None:
+    # The source's front face is its reserved external-feed face: wherever first-fit seats it,
+    # that face must end up flush on a region wall (validator-enforced).
+    problem = _problem([_machine("a"), _machine("b"), _source()])
+    result = place(problem)
+    assert result.ok
+    src = next(p for p in result.placements if p.machine_id == "src")
+    machine = next(m for m in problem.machines if m.id == "src")
+    assert front_on_boundary(src.cell, machine.footprint, src.orientation, problem.bounding_region)
+    assert validate(problem, _as_layout(result.placements)).ok
+
+
+def test_power_source_reorients_to_reach_the_boundary() -> None:
+    # From the corner slot first-fit finds, the source's first listed orientation (south, an
+    # interior-facing front there) cannot host the feed; the placer must pick the orientation
+    # that puts the feed face on the wall, not blindly take the first legal one.
+    problem = _problem([_source(orientations=[Facing.SOUTH, Facing.NORTH])])
+    result = place(problem)
+    assert result.ok
+    assert result.placements[0].orientation is Facing.NORTH
+
+
+def test_power_source_without_a_boundary_slot_is_power_feed_infeasible() -> None:
+    # A 3x1x3 region with everything but the center reserved: the source fits only at the
+    # center, where no horizontal front can touch the boundary - an explicit power_feed
+    # infeasibility, never a silently-buried source.
+    ring = [CellCoord(x=x, y=0, z=z) for x in range(3) for z in range(3) if (x, z) != (1, 1)]
+    problem = _problem([_source()], region=CellBox(sx=3, sy=1, sz=3), reserved=ring)
+    result = place(problem)
+    assert not result.ok
+    assert result.infeasibility is not None
+    assert result.infeasibility.constraint == "power_feed"
+
+
+def test_non_source_machine_may_sit_mid_region() -> None:
+    # The feed rule is source-specific: an ordinary machine takes the interior slot fine.
+    ring = [CellCoord(x=x, y=0, z=z) for x in range(3) for z in range(3) if (x, z) != (1, 1)]
+    problem = _problem([_machine("a")], region=CellBox(sx=3, sy=1, sz=3), reserved=ring)
+    result = place(problem)
+    assert result.ok
+    assert result.placements[0].cell == CellCoord(x=1, y=0, z=1)
 
 
 @given(

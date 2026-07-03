@@ -46,24 +46,53 @@ where load **sums** along shared segments (Steiner-tree-like):
 
 - **Voltage tier** of a cable segment follows the **machine voltage tier** it serves (cable
   rated ≥ that voltage).
+- **Machines draw fractional amps on average.** A machine pulls whole packets (1 amp = one packet
+  of up to tier voltage) into an internal buffer only when it has room, so a 16 EU/t LV machine
+  takes a 32-EU packet every other tick - an **average of 0.5 amps**, not a whole amp. Its load on
+  the net is `eut / delivered_voltage`, un-rounded; loads **sum** along shared segments and only
+  the aggregate rounds up to whole amps (per segment for cable thickness, per tier for the source
+  feed). Rounding per machine would overstate the draw - three 16 EU/t hammers run on a 2 A LV
+  feed, not 3 A (confirmed in game).
 - **Voltage loss over distance.** A cable loses voltage per block travelled, so a machine `d`
   blocks from the source receives `tier_voltage - loss·d`, not the full tier voltage. The solver
   keeps the source at the machine's tier and *thickens the cable to compensate*: a machine's
-  amperage is sized at its **delivered** voltage (`ceil(eut / (tier_voltage - loss·d))`), so a
-  machine farther from the source draws **more** amps for the same `eut`. A run so long that the
+  load is sized at its **delivered** voltage (`eut / (tier_voltage - loss·d)`), so a machine
+  farther from the source loads the net **more** for the same `eut`. A run so long that the
   delivered voltage reaches 0 cannot be powered at that tier and is reported infeasible. Loss is a
   flat **1 EU/block for every tier** for now (a simplifying assumption; per-material cable loss is
   Phase 2 dataset work).
-- **Thickness** (1x / 2x / 4x / 8x / 16x, **16x max**) is sized to the **summed amperage**
-  through that segment.
+- **Thickness** (1x / 2x / 4x / 8x / 12x / 16x, **16x max**) is sized to the **summed load** through
+  that segment, rounded up to whole amps.
 - A segment needing **> 16x** must split into **parallel runs** or move to a **higher voltage
   tier** (more power per amp).
+- **The synthesized source is fed from outside.** A plan export has no power node, so the
+  adapter invents one source per voltage tier; *how* it is powered is left to the builder. The
+  layout reserves **the source's front face as the external feed entry**: placement pins that
+  face flush on the region boundary (validator-enforced), internal cables use the other five
+  faces, and the builder runs power in through the wall the front touches.
+
+## Boundary storages (the adapter closes the line)
+
+A plan export names recipes and flows but not the containers at the line's edge, so the adapter
+synthesizes them - the same line-closing move as the per-tier power source above:
+
+- **Inputs** map to a boundary **Super Chest** (items) / **Super Tank** (fluids) the builder
+  fills; nothing in the line feeds it, so it only *sources*.
+- **Outputs** are closed the same way: for every machine OUTPUT port that no net consumes, the
+  adapter adds a **Super Chest/Tank plus a net** wired to it at the port's recorded rate, so the
+  finished product is collected instead of exiting into thin air (the sand line auto-outputs its
+  sand straight into this collection chest, still zero pipes). Such a storage only *sinks*.
+
+These boundary storages are unpowered blocks that accept I/O covers on their faces (so covers ride
+storage faces, never pipes); `system_io` surfaces the only-*source* ones as the line's inputs and
+the only-*sink* ones as its outputs.
 
 ## ME networks (AE2)
 
 Each commodity (items, fluids, power) can be **toggled to ME** individually. A toggled
-commodity is removed from physical routing; the solver instead places the appropriate ME
-endpoint (interface / bus / P2P) on a machine face. v1 does not model ME channel limits.
+commodity is removed from physical routing: today it is simply **skipped everywhere** (no route,
+no terminal, no placement/cost term). Placing the appropriate ME endpoint (interface / bus / P2P)
+on a machine face in its stead is **planned** (Phase 2); v1 does not model ME channel limits.
 Default is to route all three physically.
 
 ## Multiblocks

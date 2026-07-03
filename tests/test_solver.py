@@ -21,6 +21,7 @@ from gtnh_solver.ir import (
     Facing,
     InputIR,
     IODirection,
+    LayoutResult,
     LayoutStatus,
     Machine,
     MachineFaceRef,
@@ -30,7 +31,7 @@ from gtnh_solver.ir import (
     Segment,
 )
 from gtnh_solver.placement import optimize_placement, place
-from gtnh_solver.router import RouteResult
+from gtnh_solver.router import RouteResult, assign_auto_outputs
 from gtnh_solver.solver import core as solver_core
 from gtnh_solver.solver import solve
 from gtnh_solver.validator import validate
@@ -50,6 +51,62 @@ def test_solve_sand_items_auto_feed_and_power_is_cabled() -> None:
     assert [r.commodity for r in layout.routes] == [
         Commodity.POWER
     ]  # only the power trunk is cabled
+
+
+def _structure_metrics(layout: LayoutResult) -> tuple[int, int, int]:
+    """(footprint, volume, power cable cells) of the whole built structure (machines + routes)."""
+    cells = {(p.cell.x, p.cell.y, p.cell.z) for p in layout.placements}
+    power_cells: set[tuple[int, int, int]] = set()
+    for r in layout.routes:
+        for seg in r.segments:
+            ends = {(seg.start.x, seg.start.y, seg.start.z), (seg.end.x, seg.end.y, seg.end.z)}
+            cells.update(ends)
+            if r.commodity is Commodity.POWER:
+                power_cells.update(ends)
+    xs = [c[0] for c in cells]
+    ys = [c[1] for c in cells]
+    zs = [c[2] for c in cells]
+    footprint = (max(xs) - min(xs) + 1) * (max(zs) - min(zs) + 1)
+    volume = footprint * (max(ys) - min(ys) + 1)
+    return footprint, volume, len(power_cells)
+
+
+def test_solve_sand_optimized_matches_or_beats_the_hand_built_target() -> None:
+    # The acceptance target (docs/ROADMAP.md lane C): the maintainer hand-builds the sand line in
+    # a 3x2x2 volume with 3 power cables, so the optimizer must find that or better - VALID, the
+    # whole built structure (machines + routes) on a floor area <= 3x2 = 6 cells, and <= 3 power
+    # cable cells. The quality-driven feedback loop is what finds it: it routes every attempt and
+    # keeps the best by (footprint, cable cells, volume) instead of returning the first valid.
+    ir = adapt_file(_SAND)
+    layout = solve(ir)
+    assert layout.status is LayoutStatus.VALID
+    footprint, _, cables = _structure_metrics(layout)
+    assert footprint <= 6, f"structure footprint {footprint} exceeds the hand-built 3x2"
+    assert cables <= 3, f"{cables} power cable cells exceed the hand-built 3"
+
+
+def test_solve_sand_volume_objective_stays_within_the_hand_built_box() -> None:
+    # objective="volume" minimizes the enclosing box instead of the floor area: a flatter,
+    # larger-floor layout is acceptable, but the structure must fit the hand-built 3x2x2 = 12
+    # volume or better, and the <= 3-cable wire goal applies to every objective.
+    ir = adapt_file(_SAND)
+    layout = solve(ir, objective="volume")
+    assert layout.status is LayoutStatus.VALID
+    _, volume, cables = _structure_metrics(layout)
+    assert volume <= 12, f"structure volume {volume} exceeds the hand-built 3x2x2"
+    assert cables <= 3, f"{cables} power cable cells exceed the hand-built 3"
+
+
+def test_solve_sand_balanced_objective_is_valid_and_low_wire() -> None:
+    # objective="balanced" weighs floor area and enclosing box together; it must still produce a
+    # fully valid sand layout within the hand-built compactness and wire budget on both metrics.
+    ir = adapt_file(_SAND)
+    layout = solve(ir, objective="balanced")
+    assert layout.status is LayoutStatus.VALID
+    footprint, volume, cables = _structure_metrics(layout)
+    assert footprint <= 6
+    assert volume <= 12
+    assert cables <= 3
 
 
 def test_solve_is_deterministic() -> None:
@@ -197,7 +254,7 @@ def test_optimizer_reorients_to_enable_auto_output_the_seed_blocks() -> None:
         machines=machines,
         nets=[_net("n0", "m0", "m1"), _net("n1", "m1", "m2"), _net("n2", "m2", "m3")],
     )
-    seed_autos, _ = solver_core._assign_auto_outputs(problem, place(problem).placements)
+    seed_autos, _ = assign_auto_outputs(problem, place(problem).placements)
     assert len(seed_autos) == 0  # the seed orientation blocks every link; reorientation must fix it
     for s in range(8):
         layout = solve(problem, seed=s)

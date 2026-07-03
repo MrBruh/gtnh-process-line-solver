@@ -48,6 +48,19 @@ def test_cli_fast_flag_skips_optimization(capsys: pytest.CaptureFixture[str]) ->
     assert "# Build guide" in capsys.readouterr().out
 
 
+def test_cli_objective_flag_is_accepted(capsys: pytest.CaptureFixture[str]) -> None:
+    # --objective selects what the optimizer treats as compact; with --fast it is accepted but
+    # ignored (constructive placement is floor-first by construction), which keeps this test fast.
+    assert main([_SAND, "--objective", "volume", "--fast"]) == 0
+    assert "# Build guide" in capsys.readouterr().out
+
+
+def test_cli_rejects_an_unknown_objective(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        main([_SAND, "--objective", "tiny"])  # argparse rejects values outside the choices
+    assert "--objective" in capsys.readouterr().err
+
+
 def test_cli_preview_writes_self_contained_html(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -97,6 +110,31 @@ def test_cli_malformed_export_returns_2(tmp_path: Path, capsys: pytest.CaptureFi
     code = main([str(bad)])
     assert code == 2
     assert "could not load" in capsys.readouterr().err
+
+
+def test_cli_unwritable_output_returns_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # an unwritable output path (parent dir missing -> OSError) is reported and exits 2 per the
+    # documented 0/1/2 contract, not dumped as a raw traceback (GitHub #39)
+    target = tmp_path / "missing-dir" / "guide.txt"
+    code = main([_SAND, "-o", str(target)])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "could not write" in err
+    assert str(target) in err
+
+
+def test_cli_unwritable_preview_returns_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # same guard on the --preview write path
+    target = tmp_path / "missing-dir" / "view.html"
+    code = main([_SAND, "--preview", str(target)])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "could not write" in err
+    assert str(target) in err
 
 
 def test_cli_version_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:

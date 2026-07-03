@@ -14,13 +14,24 @@ from pydantic import ConfigDict, Field, model_validator
 
 from ._base import StrictModel
 from .enums import Commodity, Facing, LayoutStatus
-from .geometry import CellCoord
+from .geometry import Cell, CellCoord
 
 #: Bump on any breaking change to the output contract; record it in ``ir/__init__.py``.
 LAYOUT_RESULT_VERSION = 0
 
-#: Allowed GT cable thicknesses (1x/2x/4x/8x/16x, 16x max - docs/DOMAIN.md).
-_THICKNESSES = frozenset({1, 2, 4, 8, 16})
+#: Allowed GT cable thicknesses, smallest first (1x/2x/4x/8x/12x/16x; docs/DOMAIN.md). The single
+#: source: this contract enforces membership on every power route, and ``dataset`` re-exports the
+#: ladder as rule data for the router's sizing and the validator's re-check. Defined HERE because
+#: the ir package must stay the import leaf: ``dataset`` imports ir types (footprints, facings),
+#: so an ir -> dataset import would be a cycle waiting on import order.
+CABLE_THICKNESSES: tuple[int, ...] = (1, 2, 4, 8, 12, 16)
+
+#: The largest cable (16x). A segment whose summed amperage needs more must split into parallel
+#: runs or move to a higher voltage tier (Phase 2 optimization), not thicken further.
+MAX_CABLE_THICKNESS: int = CABLE_THICKNESSES[-1]
+
+#: Membership form of the ladder, for the per-segment thickness check below.
+_THICKNESSES = frozenset(CABLE_THICKNESSES)
 
 
 class Placement(StrictModel):
@@ -61,7 +72,16 @@ class Route(StrictModel):
     commodity: Commodity
     terminals: list[Terminal] = Field(default_factory=list)
     segments: list[Segment] = Field(default_factory=list)
-    thickness_per_segment: list[int] | None = None  # power only; 1/2/4/8/16 per segment
+    thickness_per_segment: list[int] | None = None  # power only; 1/2/4/8/12/16 per segment
+
+    def cells(self) -> set[Cell]:
+        """Every grid cell this route's segments touch (both endpoints of each hop). The
+        obstacle/occupancy set the routers, solver, and build guide each rebuilt by hand."""
+        out: set[Cell] = set()
+        for seg in self.segments:
+            out.add(seg.start.as_tuple())
+            out.add(seg.end.as_tuple())
+        return out
 
     @model_validator(mode="after")
     def _check(self) -> Route:
@@ -72,7 +92,7 @@ class Route(StrictModel):
                 raise ValueError("thickness_per_segment must align 1:1 with segments")
             bad = [t for t in self.thickness_per_segment if t not in _THICKNESSES]
             if bad:
-                raise ValueError(f"cable thickness must be one of 1/2/4/8/16, got {bad}")
+                raise ValueError(f"cable thickness must be one of 1/2/4/8/12/16, got {bad}")
         elif self.thickness_per_segment is not None:
             raise ValueError("thickness_per_segment is only valid on power routes")
         return self

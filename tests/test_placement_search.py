@@ -23,7 +23,9 @@ from gtnh_solver.ir import (
     Placement,
     Port,
 )
+from gtnh_solver.ir.geometry import front_on_boundary, occupied_cells
 from gtnh_solver.placement import optimize_placement, place
+from gtnh_solver.placement.search import _apply_occupied_delta
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
 
@@ -34,6 +36,7 @@ _PLACEMENT_CODES = {
     ViolationCode.BAD_ORIENTATION,
     ViolationCode.PLACEMENT_COUNT_MISMATCH,
     ViolationCode.UNKNOWN_MACHINE,
+    ViolationCode.POWER_FEED_NOT_ON_BOUNDARY,
 }
 
 
@@ -167,6 +170,19 @@ def test_optimize_is_deterministic_per_seed() -> None:
     )
 
 
+def test_optimize_objective_selects_the_compactness_weights() -> None:
+    # The objective (footprint | volume | balanced) picks the compactness weights: each mode must
+    # yield a complete, validator-clean placement, deterministically per seed. The layout-shape
+    # semantics (stack tall vs stay flat) are asserted end to end on sand in test_solver.
+    problem = _star(5)
+    for objective in ("footprint", "volume", "balanced"):
+        result = optimize_placement(problem, seed=2, objective=objective)
+        again = optimize_placement(problem, seed=2, objective=objective)
+        assert result.ok
+        assert result.placements == again.placements
+        assert _validates(problem, result.placements)
+
+
 def test_lns_scales_and_stays_valid_on_a_larger_star() -> None:
     # A 9-spoke star exercises the LNS ruin-and-recreate move (a hub + its net-neighbours are a
     # natural related cluster): the optimizer must still emit a complete, validator-clean placement
@@ -203,6 +219,98 @@ def test_lns_fills_a_tight_region_using_the_first_fit_fallback() -> None:
     assert _validates(problem, result.placements)
 
 
+def _powered_star(n_spokes: int = 3) -> InputIR:
+    """A hub feeding powered spokes plus a power source + per-tier net (the adapter's shape)."""
+    spokes = [
+        Machine(
+            id=f"s{i}",
+            type="spoke",
+            voltage_tier="LV",
+            eut=32.0,
+            orientation_options=[Facing.NORTH, Facing.SOUTH],
+            faces=FaceSpec(
+                ports=[
+                    Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT),
+                    Port(id="pin", commodity=Commodity.POWER, direction=IODirection.INPUT),
+                ]
+            ),
+        )
+        for i in range(n_spokes)
+    ]
+    source = Machine(
+        id="psrc",
+        type="Power Source (LV)",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH, Facing.SOUTH, Facing.EAST, Facing.WEST],
+        faces=FaceSpec(
+            ports=[Port(id="po", commodity=Commodity.POWER, direction=IODirection.OUTPUT)]
+        ),
+    )
+    nets = [
+        Net(
+            id=f"n{i}",
+            commodity=Commodity.ITEM,
+            fluid_or_item="x",
+            throughput=1.0,
+            endpoints=[
+                MachineFaceRef(machine_id="hub", port_id="out"),
+                MachineFaceRef(machine_id=f"s{i}", port_id="in"),
+            ],
+        )
+        for i in range(n_spokes)
+    ]
+    nets.append(
+        Net(
+            id="power:LV",
+            commodity=Commodity.POWER,
+            throughput=32.0 * n_spokes,
+            endpoints=[
+                MachineFaceRef(machine_id="psrc", port_id="po"),
+                *(MachineFaceRef(machine_id=f"s{i}", port_id="pin") for i in range(n_spokes)),
+            ],
+        )
+    )
+    return InputIR(
+        bounding_region=CellBox(sx=8, sy=2, sz=8),
+        machines=[_hub("hub"), *spokes, source],
+        nets=nets,
+    )
+
+
+def test_optimize_keeps_the_power_source_feed_on_the_boundary() -> None:
+    # Every move must keep the source's front (feed) face flush on a region wall - the hard
+    # constraint the validator enforces. Several seeds so relocate/swap/reorient and the LNS
+    # recreate all get exercised against it.
+    problem = _powered_star()
+    machine = next(m for m in problem.machines if m.id == "psrc")
+    for seed in range(4):
+        result = optimize_placement(problem, seed=seed)
+        assert result.ok
+        src = next(p for p in result.placements if p.machine_id == "psrc")
+        assert front_on_boundary(
+            src.cell, machine.footprint, src.orientation, problem.bounding_region
+        ), f"seed {seed}: source feed face left the boundary"
+        assert _validates(problem, result.placements)
+
+
+def test_power_net_penalty_switches_on_the_mst_pull() -> None:
+    # A power net has no base cost term (real cable cost is judged by the solver on routed
+    # layouts), so only a feedback penalty - the router failed the net - activates its MST pull.
+    # Under a heavy penalty the source must end up hugging its sinks: the trunk the router could
+    # not lay gets the shortest possible tree to try again with.
+    problem = _powered_star()
+    pulled = optimize_placement(problem, seed=1, net_penalties={"power:LV": 50.0})
+    assert pulled.ok
+    pos = {p.machine_id: p.cell for p in pulled.placements}
+    src = pos["psrc"]
+    nearest = min(
+        abs(src.x - pos[f"s{i}"].x) + abs(src.y - pos[f"s{i}"].y) + abs(src.z - pos[f"s{i}"].z)
+        for i in range(3)
+    )
+    assert nearest <= 2, f"penalized power net left the source {nearest} cells from its sinks"
+    assert _validates(problem, pulled.placements)
+
+
 def test_optimize_respects_reserved_and_bounds() -> None:
     problem = _star(3, region=CellBox(sx=4, sy=1, sz=3)).model_copy(
         update={"reserved_cells": [CellCoord(x=0, y=0, z=0)]}
@@ -225,3 +333,34 @@ def test_optimize_passes_through_infeasibility() -> None:
     result = optimize_placement(problem, seed=0)
     assert not result.ok
     assert result.infeasibility is not None
+
+
+def test_apply_occupied_delta_survives_lns_reordering_with_multiblock_footprints() -> None:
+    # Regression: an accepted LNS move returns the placement list REORDERED (kept machines
+    # first, reinserted ones appended), so the delta must diff by machine id. An index-paired
+    # diff vacates a machine that never moved and expands the wrong machine's footprint at the
+    # new cell - invisible while every footprint is 1x1x1, silently wrong once multiblocks land.
+    wide = Machine(
+        id="wide",
+        type="wide",
+        footprint=CellBox(sx=2, sy=1, sz=1),
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+    )
+    machines = {m.id: m for m in (_hub("a"), wide, _spoke("c"))}
+
+    def at(mid: str, x: int) -> Placement:
+        return Placement(machine_id=mid, cell=CellCoord(x=x, y=0, z=0), orientation=Facing.NORTH)
+
+    def rebuild(placements: list[Placement]) -> set[tuple[int, int, int]]:
+        return {
+            c for p in placements for c in occupied_cells(p.cell, machines[p.machine_id].footprint)
+        }
+
+    before = [at("a", 0), at("wide", 2), at("c", 5)]
+    # LNS ruined + reinserted the wide machine: kept a and c keep their cells but shift to the
+    # front of the list, and the wide machine lands at the tail with a new origin.
+    after = [before[0], before[2], at("wide", 7)]
+    occupied = rebuild(before)
+    _apply_occupied_delta(occupied, before, after, machines)
+    assert occupied == rebuild(after)
