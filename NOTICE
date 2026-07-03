@@ -11,3 +11,11 @@ Third-party components:
   gtnh-factory-flow source code is included or vendored in this repository; only the
   user's exported data files are read at runtime. GTNH recipe/texture data carried in
   those exports remains under its respective owners' licenses.
+
+- GT5-Unofficial (https://github.com/GTNewHorizons/GT5-Unofficial) and StructureLib
+  (https://github.com/GTNewHorizons/StructureLib), both LGPL, GTNewHorizons. The
+  dataset-extraction tool under tools/gtnh-extractor depends on these as unmodified
+  library dependencies (pulled from the GTNH Nexus) to run a headless server and read
+  back multiblock structure facts. No GT5-Unofficial or StructureLib source is vendored
+  or patched here. Extracted structure facts are committed to this repository; LGPL
+  assets (textures) are not vendored and are fetched from the mod jars at build time.

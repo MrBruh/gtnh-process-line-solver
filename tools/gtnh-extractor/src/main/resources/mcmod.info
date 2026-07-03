@@ -1,0 +1,21 @@
+{
+  "modListVersion": 2,
+  "modList": [{
+    "modid": "${modId}",
+    "name": "${modName}",
+    "description": "Headless extractor for the gtnh-process-line-solver dataset. Boots a dedicated 1.7.10 server with GT5-Unofficial + StructureLib, dumps multiblock structure facts to JSON, and exits. Internal build tool, never shipped to players.",
+    "version": "${modVersion}",
+    "mcversion": "${minecraftVersion}",
+    "url": "https://github.com/MrBruh/gtnh-process-line-solver",
+    "updateUrl": "",
+    "authorList": ["gtnh-process-line-solver contributors"],
+    "credits": "Structure facts are extracted from GT5-Unofficial and StructureLib (both LGPL, GTNewHorizons).",
+    "logoFile": "",
+    "screenshots": [],
+    "parent": "",
+    "requiredMods": [],
+    "dependencies": [],
+    "dependants": [],
+    "useDependencyInformation": false
+  }]
+}

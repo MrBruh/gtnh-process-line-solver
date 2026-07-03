@@ -7,6 +7,44 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Multiblock physical dataset - schema v1 + Python adapter (`dataset/`, GitHub #48).** The
+  first slice of the automated dataset-extraction pipeline (`DATASET_EXTRACTION_PLAN.md`): the
+  path from an extractor's raw JSON to the solver's physical rules. `dataset/schema.py` is a typed,
+  `extra="forbid"` Pydantic loader for schema v1 (`MultiblockDoc` + `_meta.json` `DatasetMeta`,
+  per plan section 4.2: `schema`, `controller`, `variants[blocks/hints/bbox]`, `substitutions`,
+  `failures`), the cross-language contract for the future Java extractor (issue #45), with a
+  derived JSON Schema (`multiblock_json_schema()`) for non-Python consumers so it cannot drift.
+  `dataset/multiblocks.py` is the adapter that does **all interpretation in Python** (plan design
+  principle 3): it derives each machine's footprint bounding box, hint-derived I/O faces, and
+  coil-tier count from the raw facts into an IR-shaped `MachinePhysical`, and `load_physical_dataset`
+  keys a whole dump by display name. Because the real extractor is not built yet, illustrative
+  hand-authored fixtures ship under `data/multiblocks/` (Electric Blast Furnace, Vacuum Freezer)
+  marked as such in a README, so the adapter and golden tests run today. Golden tests pin the
+  ground truths (EBF is 3x3x4 with two coil layers and hatch-layer hints; Vacuum Freezer is 3x3x3)
+  plus schema validation (every file validates, `_meta.json` failure list under a lenient
+  threshold). Wired **opt-in** into the gtnh-factory-flow adapter: `to_input_ir(plan, physical=...)`
+  stamps a known machine's real footprint on the `InputIR`, while the default path stays single-block
+  so the solver runs with or without a dump. No IR contract change (additive keyword-only argument).
+- **Automated dataset-update CI (`.github/workflows/update-dataset.yml`, lane 4)** - a
+  weekly + manual workflow that tracks the latest *stable* GTNH pack: it resolves the pack
+  version from the DreamAssemblerXXL manifests, diffs the pinned mod versions against
+  `gtnh.lock.json` (exiting green with no PR when unchanged), and on a change bumps the
+  extractor pins, runs the headless Forge dump, installs the dataset, re-locks, runs the
+  full test suite, and opens a reviewable PR whose summary surfaces the controller-count
+  delta, added/removed/changed multiblocks, and the extractor failure list. Never
+  auto-merges. Backed by a typed, tested CI helper (`tools/dataset_ci/`) and a dataset-diff
+  review checklist (`.github/PULL_REQUEST_TEMPLATE/dataset-update.md`).
+- **Dataset extractor scaffold (`tools/gtnh-extractor/`, the repo's only Java)** - lane 1 of
+  the automated multiblock-dataset pipeline (GitHub #44). A standalone GTNH
+  `ExampleMod1.7.10`-based Gradle tool whose `DumperMod` (`@Mod` entrypoint) hooks
+  `FMLServerStartedEvent`, runs an empty dump body, and calls `FMLCommonHandler.exitJava`
+  (0 on success, nonzero on failure) so `./gradlew runServer` boots a headless dedicated
+  1.7.10 server with GT5-Unofficial + StructureLib and exits as a pass/fail gate. GT5U and
+  StructureLib are pinned in `dependencies.gradle` from the current stable pack manifest
+  (2.8.4) and mirrored in the new repo-root `gtnh.lock.json`; the rest of GT5U's hard deps
+  resolve transitively from its Nexus POM. The Python solver gains no dependency on the tool
+  (it will read only the JSON the tool emits; the dump loop itself is lane 2). `NOTICE` now
+  credits the two LGPL mods.
 - Project scaffold: docs, package skeleton, CI, license.
 - Design and architecture documentation ported from the office-hours design doc
   and the engineering review (see `docs/`).

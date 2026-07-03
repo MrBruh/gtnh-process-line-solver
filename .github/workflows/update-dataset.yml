@@ -1,0 +1,241 @@
+name: Update dataset
+
+# Automated multiblock-dataset refresh (issue #47, lane 4 of the extraction plan).
+#
+#   resolve  -> pick the latest STABLE GTNH pack, diff its mod pins against gtnh.lock.json;
+#               if nothing changed the run ends green with no PR (the common weekly case).
+#   build    -> only when something changed: bump the extractor pins, run the headless
+#               Forge server to dump the dataset, install it, re-lock, run the full Python
+#               test suite + golden tests, then open a reviewable PR. Never auto-merges.
+#
+# This workflow is intentionally decoupled from update-textures.yml (lane 6): structures are
+# correctness-critical, textures are previewer-only and may lag a pack version.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly, Mondays 04:37 UTC (off the hour, per GitHub's load-spread guidance).
+    - cron: "37 4 * * 1"
+
+# Do not overlap runs: a cached Forge build still takes minutes and mutates the lock.
+concurrency:
+  group: update-dataset
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  MANIFEST_REPO: GTNewHorizons/DreamAssemblerXXL
+  # Extractor dependencies to pin from the manifest (both are GTNH-hosted, so under
+  # `github_mods`). Space-separated: expands into `--tracked GT5-Unofficial StructureLib`.
+  TRACKED_MODS: GT5-Unofficial StructureLib
+
+jobs:
+  resolve:
+    name: Resolve pack version
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+      pack_version: ${{ steps.diff.outputs.pack_version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+        # The resolver is stdlib-only, so no `pip install` is needed here.
+
+      - name: List available pack manifests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/${MANIFEST_REPO}/contents/releases/manifests" --jq '.[].name' > manifests.txt
+
+      - name: Pick latest stable pack version
+        id: latest
+        run: |
+          version="$(python tools/dataset_ci/resolve_versions.py latest-version --listing manifests.txt)"
+          echo "Latest stable pack: ${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch target manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${MANIFEST_REPO}/contents/releases/manifests/${{ steps.latest.outputs.version }}.json" \
+            -H "Accept: application/vnd.github.raw" > manifest.json
+
+      - name: Diff manifest against gtnh.lock.json
+        id: diff
+        run: |
+          python tools/dataset_ci/resolve_versions.py resolve \
+            --manifest manifest.json \
+            --lock gtnh.lock.json \
+            --tracked ${TRACKED_MODS} \
+            --summary-out version-summary.md
+          {
+            echo "## Resolve"
+            echo "Latest stable pack: \`${{ steps.latest.outputs.version }}\` "
+            echo "Changed vs lock: \`${{ steps.diff.outputs.changed }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Hand the resolved inputs to the build job unchanged (no re-fetch, no drift).
+      - name: Upload resolved inputs
+        if: steps.diff.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: resolved
+          path: |
+            manifest.json
+            version-summary.md
+          if-no-files-found: error
+
+  build:
+    name: Build and verify dataset
+    needs: resolve
+    if: needs.resolve.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      PACK_VERSION: ${{ needs.resolve.outputs.pack_version }}
+      # Where the extractor should emit its JSON. ASSUMPTION (reconcile with lane 1): the
+      # extractor honours `-PdatasetOut=<dir>` and writes `<dir>/multiblocks/` (incl.
+      # `_meta.json`). Adjust this + the "Install emitted dataset" step when lane 1 lands.
+      DATASET_OUT: ${{ github.workspace }}/out/extractor
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Download resolved inputs
+        uses: actions/download-artifact@v4
+        with:
+          name: resolved
+
+      # --- Toolchains ---------------------------------------------------------------
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # RetroFuturaGradle downloads + deobfuscates Minecraft into ~/.gradle; the first run is
+      # slow (tens of minutes), cached runs take minutes. Keyed on the pack version so a bump
+      # can refresh it, with a loose restore-key so most of the workspace still hits.
+      - name: Cache Forge/RFG workspace
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches/retro_futura_gradle
+            ~/.gradle/caches/minecraft
+            tools/gtnh-extractor/.gradle
+          key: rfg-${{ runner.os }}-${{ env.PACK_VERSION }}
+          restore-keys: |
+            rfg-${{ runner.os }}-
+
+      # --- Snapshot the pre-update dataset (for the PR diff summary) ----------------
+      - name: Snapshot current dataset
+        run: |
+          mkdir -p out
+          if [ -f data/multiblocks/_meta.json ]; then
+            cp data/multiblocks/_meta.json out/old_meta.json
+          else
+            echo '{}' > out/old_meta.json
+          fi
+          ls data/multiblocks/*.json 2>/dev/null | xargs -r -n1 basename \
+            | grep -v '^_meta.json$' > out/old_controllers.txt || true
+          touch out/old_controllers.txt
+
+      # --- Bump the extractor pins and build ----------------------------------------
+      - name: Bump extractor dependency pins
+        run: |
+          python tools/dataset_ci/resolve_versions.py bump-gradle \
+            --gradle tools/gtnh-extractor/dependencies.gradle \
+            --manifest manifest.json \
+            --tracked ${TRACKED_MODS}
+
+      - name: Run extractor (headless dedicated server)
+        working-directory: tools/gtnh-extractor
+        run: ./gradlew --no-daemon runServer "-PdatasetOut=${DATASET_OUT}"
+
+      # --- Install the emitted dataset and re-lock ----------------------------------
+      - name: Install emitted dataset
+        run: |
+          rm -rf data/multiblocks
+          mkdir -p data
+          cp -r "${DATASET_OUT}/multiblocks" data/multiblocks
+
+      - name: Update gtnh.lock.json
+        run: |
+          python tools/dataset_ci/resolve_versions.py write-lock \
+            --manifest manifest.json \
+            --out gtnh.lock.json \
+            --tracked ${TRACKED_MODS}
+
+      # --- Verify: full Python suite + golden tests (lane 5) ------------------------
+      - name: Install Python package
+        run: pip install -e ".[dev]"
+      - name: Test
+        run: pytest --cov-fail-under=90
+
+      # --- Compose the PR summary ---------------------------------------------------
+      - name: Compute controller listings
+        run: |
+          ls data/multiblocks/*.json 2>/dev/null | xargs -r -n1 basename \
+            | grep -v '^_meta.json$' > out/new_controllers.txt || true
+          touch out/new_controllers.txt
+          # Modified (not added/removed) tracked controller files == "changed".
+          git diff --name-only -- data/multiblocks \
+            | grep -v '_meta.json$' | xargs -r -n1 basename > out/changed_controllers.txt || true
+          touch out/changed_controllers.txt
+
+      - name: Render dataset diff summary
+        run: |
+          python tools/dataset_ci/dataset_summary.py \
+            --old-meta out/old_meta.json \
+            --new-meta data/multiblocks/_meta.json \
+            --old-list out/old_controllers.txt \
+            --new-list out/new_controllers.txt \
+            --changed-list out/changed_controllers.txt \
+            --out dataset-summary.md
+          cat version-summary.md dataset-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Assemble PR body
+        id: body
+        run: |
+          {
+            echo "body<<PR_BODY_EOF"
+            cat .github/PULL_REQUEST_TEMPLATE/dataset-update.md
+            echo
+            cat version-summary.md
+            echo
+            cat dataset-summary.md
+            echo "PR_BODY_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # --- Open the PR. Never auto-merges: a human reviews the dataset diff. ---------
+      # Uses a PAT (DATASET_PR_TOKEN) when configured so the opened PR triggers the `test`
+      # CI check; the default GITHUB_TOKEN does not trigger downstream workflows, but the
+      # build job above already ran the full suite, so review is never on unverified data.
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.DATASET_PR_TOKEN || github.token }}
+          branch: bot/dataset-update
+          base: main
+          title: "chore(dataset): update to GTNH ${{ env.PACK_VERSION }}"
+          commit-message: "chore(dataset): update to GTNH ${{ env.PACK_VERSION }}"
+          body: ${{ steps.body.outputs.body }}
+          labels: |
+            dataset
+            automated
+          add-paths: |
+            data/**
+            gtnh.lock.json
+            tools/gtnh-extractor/dependencies.gradle
+          delete-branch: true
