@@ -1,0 +1,615 @@
+{
+  "schema": 1,
+  "method": "server-icon-reflection",
+  "provenance": {
+    "pack_version": "2.8.4",
+    "mod_versions": {
+      "GT5-Unofficial": "MC1710",
+      "StructureLib": "1.4.23"
+    },
+    "generated_at": "2026-07-03T20:24:34.539Z",
+    "extractor_sha": "f0df8ad04ad5376487722a70a6af642a894730fe",
+    "note": "Icon names reflected server-side from GT Textures.BlockIcons (Option A). PNGs are NOT committed (LGPL); fetch them from the GT5-Unofficial jar on the GTNH Nexus at build/preview time using the paths in `icons`.",
+    "coverage": {
+      "blocks": 9,
+      "metas": 75,
+      "icons": 74,
+      "assignments": 150,
+      "gaps": 28
+    }
+  },
+  "asset_root": "assets/{modid}/textures/blocks/",
+  "blocks": {
+    "gregtech:gt.blockcasings": {
+      "source_class": "gregtech.common.blocks.BlockCasings1",
+      "metas": {
+        "10": {
+          "all": "gregtech:iconsets/MACHINE_BRONZEPLATEDBRICKS"
+        },
+        "11": {
+          "all": "gregtech:iconsets/MACHINE_HEATPROOFCASING"
+        },
+        "12": {
+          "all": "gregtech:iconsets/MACHINE_DIM_TRANS_CASING"
+        },
+        "13": {
+          "all": "gregtech:iconsets/MACHINE_DIM_INJECTOR"
+        },
+        "14": {
+          "all": "gregtech:iconsets/MACHINE_DIM_BRIDGE"
+        },
+        "15": {
+          "all": "gregtech:iconsets/MACHINE_COIL_SUPERCONDUCTOR"
+        }
+      }
+    },
+    "gregtech:gt.blockcasings.cyclotron_coils": {
+      "source_class": "gregtech.common.blocks.BlockCyclotronCoils",
+      "metas": {
+        "0": {
+          "0": "gregtech:iconsets/MV_TOP_CYCLOTRON_SOLENOID",
+          "1": "gregtech:iconsets/MV_TOP_CYCLOTRON_SOLENOID",
+          "2": "gregtech:iconsets/MV_SIDE_CYCLOTRON_SOLENOID",
+          "3": "gregtech:iconsets/MV_SIDE_CYCLOTRON_SOLENOID",
+          "4": "gregtech:iconsets/MV_SIDE_CYCLOTRON_SOLENOID",
+          "5": "gregtech:iconsets/MV_SIDE_CYCLOTRON_SOLENOID"
+        },
+        "1": {
+          "0": "gregtech:iconsets/HV_TOP_CYCLOTRON_SOLENOID",
+          "1": "gregtech:iconsets/HV_TOP_CYCLOTRON_SOLENOID",
+          "2": "gregtech:iconsets/HV_SIDE_CYCLOTRON_SOLENOID",
+          "3": "gregtech:iconsets/HV_SIDE_CYCLOTRON_SOLENOID",
+          "4": "gregtech:iconsets/HV_SIDE_CYCLOTRON_SOLENOID",
+          "5": "gregtech:iconsets/HV_SIDE_CYCLOTRON_SOLENOID"
+        },
+        "2": {
+          "0": "gregtech:iconsets/EV_TOP_CYCLOTRON_SOLENOID",
+          "1": "gregtech:iconsets/EV_TOP_CYCLOTRON_SOLENOID",
+          "2": "gregtech:iconsets/EV_SIDE_CYCLOTRON_SOLENOID",
+          "3": "gregtech:iconsets/EV_SIDE_CYCLOTRON_SOLENOID",
+          "4": "gregtech:iconsets/EV_SIDE_CYCLOTRON_SOLENOID",
+          "5": "gregtech:iconsets/EV_SIDE_CYCLOTRON_SOLENOID"
+        },
+        "3": {
+          "0": "gregtech:iconsets/IV_TOP_CYCLOTRON_SOLENOID",
+          "1": "gregtech:iconsets/IV_TOP_CYCLOTRON_SOLENOID",
+          "2": "gregtech:iconsets/IV_SIDE_CYCLOTRON_SOLENOID",
+          "3": "gregtech:iconsets/IV_SIDE_CYCLOTRON_SOLENOID",
+          "4": "gregtech:iconsets/IV_SIDE_CYCLOTRON_SOLENOID",
+          "5": "gregtech:iconsets/IV_SIDE_CYCLOTRON_SOLENOID"
+        },
+        "4": {
+          "0": "gregtech:iconsets/LuV_TOP_CYCLOTRON_SOLENOID",
+          "1": "gregtech:iconsets/LuV_TOP_CYCLOTRON_SOLENOID",
+          "2": "gregtech:iconsets/LuV_SIDE_CYCLOTRON_SOLENOID",
+          "3": "gregtech:iconsets/LuV_SIDE_CYCLOTRON_SOLENOID",
+          "4": "gregtech:iconsets/LuV_SIDE_CYCLOTRON_SOLENOID",
+          "5": "gregtech:iconsets/LuV_SIDE_CYCLOTRON_SOLENOID"
+        },
+        "5": {
+          "0": "gregtech:iconsets/ZPM_TOP_CYCLOTRON_SOLENOID",
+          "1": "gregtech:iconsets/ZPM_TOP_CYCLOTRON_SOLENOID",
+          "2": "gregtech:iconsets/ZPM_SIDE_CYCLOTRON_SOLENOID",
+          "3": "gregtech:iconsets/ZPM_SIDE_CYCLOTRON_SOLENOID",
+          "4": "gregtech:iconsets/ZPM_SIDE_CYCLOTRON_SOLENOID",
+          "5": "gregtech:iconsets/ZPM_SIDE_CYCLOTRON_SOLENOID"
+        },
+        "6": {
+          "0": "gregtech:iconsets/UV_TOP_CYCLOTRON_SOLENOID",
+          "1": "gregtech:iconsets/UV_TOP_CYCLOTRON_SOLENOID",
+          "2": "gregtech:iconsets/UV_SIDE_CYCLOTRON_SOLENOID",
+          "3": "gregtech:iconsets/UV_SIDE_CYCLOTRON_SOLENOID",
+          "4": "gregtech:iconsets/UV_SIDE_CYCLOTRON_SOLENOID",
+          "5": "gregtech:iconsets/UV_SIDE_CYCLOTRON_SOLENOID"
+        },
+        "7": {
+          "0": "gregtech:iconsets/UHV_TOP_CYCLOTRON_SOLENOID",
+          "1": "gregtech:iconsets/UHV_TOP_CYCLOTRON_SOLENOID",
+          "2": "gregtech:iconsets/UHV_SIDE_CYCLOTRON_SOLENOID",
+          "3": "gregtech:iconsets/UHV_SIDE_CYCLOTRON_SOLENOID",
+          "4": "gregtech:iconsets/UHV_SIDE_CYCLOTRON_SOLENOID",
+          "5": "gregtech:iconsets/UHV_SIDE_CYCLOTRON_SOLENOID"
+        },
+        "8": {
+          "0": "gregtech:iconsets/UEV_TOP_CYCLOTRON_SOLENOID",
+          "1": "gregtech:iconsets/UEV_TOP_CYCLOTRON_SOLENOID",
+          "2": "gregtech:iconsets/UEV_SIDE_CYCLOTRON_SOLENOID",
+          "3": "gregtech:iconsets/UEV_SIDE_CYCLOTRON_SOLENOID",
+          "4": "gregtech:iconsets/UEV_SIDE_CYCLOTRON_SOLENOID",
+          "5": "gregtech:iconsets/UEV_SIDE_CYCLOTRON_SOLENOID"
+        },
+        "9": {
+          "0": "gregtech:iconsets/UIV_TOP_CYCLOTRON_SOLENOID",
+          "1": "gregtech:iconsets/UIV_TOP_CYCLOTRON_SOLENOID",
+          "2": "gregtech:iconsets/UIV_SIDE_CYCLOTRON_SOLENOID",
+          "3": "gregtech:iconsets/UIV_SIDE_CYCLOTRON_SOLENOID",
+          "4": "gregtech:iconsets/UIV_SIDE_CYCLOTRON_SOLENOID",
+          "5": "gregtech:iconsets/UIV_SIDE_CYCLOTRON_SOLENOID"
+        },
+        "10": {
+          "0": "gregtech:iconsets/UMV_TOP_CYCLOTRON_SOLENOID",
+          "1": "gregtech:iconsets/UMV_TOP_CYCLOTRON_SOLENOID",
+          "2": "gregtech:iconsets/UMV_SIDE_CYCLOTRON_SOLENOID",
+          "3": "gregtech:iconsets/UMV_SIDE_CYCLOTRON_SOLENOID",
+          "4": "gregtech:iconsets/UMV_SIDE_CYCLOTRON_SOLENOID",
+          "5": "gregtech:iconsets/UMV_SIDE_CYCLOTRON_SOLENOID"
+        }
+      }
+    },
+    "gregtech:gt.blockcasings2": {
+      "source_class": "gregtech.common.blocks.BlockCasings2",
+      "metas": {
+        "0": {
+          "all": "gregtech:iconsets/MACHINE_CASING_SOLID_STEEL"
+        },
+        "1": {
+          "all": "gregtech:iconsets/MACHINE_CASING_FROST_PROOF"
+        },
+        "2": {
+          "all": "gregtech:iconsets/MACHINE_CASING_GEARBOX_BRONZE"
+        },
+        "3": {
+          "all": "gregtech:iconsets/MACHINE_CASING_GEARBOX_STEEL"
+        },
+        "4": {
+          "all": "gregtech:iconsets/MACHINE_CASING_GEARBOX_TITANIUM"
+        },
+        "5": {
+          "all": "gregtech:iconsets/MACHINE_CASING_GEARBOX_TUNGSTENSTEEL"
+        },
+        "6": {
+          "all": "gregtech:iconsets/MACHINE_CASING_PROCESSOR"
+        },
+        "7": {
+          "all": "gregtech:iconsets/MACHINE_CASING_DATA_DRIVE"
+        },
+        "8": {
+          "all": "gregtech:iconsets/MACHINE_CASING_CONTAINMENT_FIELD"
+        },
+        "9": {
+          "all": "gregtech:iconsets/MACHINE_CASING_ASSEMBLER"
+        },
+        "10": {
+          "all": "gregtech:iconsets/MACHINE_CASING_PUMP"
+        },
+        "11": {
+          "all": "gregtech:iconsets/MACHINE_CASING_MOTOR"
+        },
+        "12": {
+          "all": "gregtech:iconsets/MACHINE_CASING_PIPE_BRONZE"
+        },
+        "13": {
+          "all": "gregtech:iconsets/MACHINE_CASING_PIPE_STEEL"
+        },
+        "14": {
+          "all": "gregtech:iconsets/MACHINE_CASING_PIPE_TITANIUM"
+        },
+        "15": {
+          "all": "gregtech:iconsets/MACHINE_CASING_PIPE_TUNGSTENSTEEL"
+        }
+      }
+    },
+    "gregtech:gt.blockcasings3": {
+      "source_class": "gregtech.common.blocks.BlockCasings3",
+      "metas": {
+        "0": {
+          "all": "gregtech:iconsets/MACHINE_CASING_STRIPES_A"
+        },
+        "1": {
+          "all": "gregtech:iconsets/MACHINE_CASING_STRIPES_B"
+        },
+        "2": {
+          "all": "gregtech:iconsets/MACHINE_CASING_RADIOACTIVEHAZARD"
+        },
+        "3": {
+          "all": "gregtech:iconsets/MACHINE_CASING_BIOHAZARD"
+        },
+        "4": {
+          "all": "gregtech:iconsets/MACHINE_CASING_EXPLOSIONHAZARD"
+        },
+        "5": {
+          "all": "gregtech:iconsets/MACHINE_CASING_FIREHAZARD"
+        },
+        "6": {
+          "all": "gregtech:iconsets/MACHINE_CASING_ACIDHAZARD"
+        },
+        "7": {
+          "all": "gregtech:iconsets/MACHINE_CASING_MAGICHAZARD"
+        },
+        "8": {
+          "all": "gregtech:iconsets/MACHINE_CASING_FROSTHAZARD"
+        },
+        "9": {
+          "all": "gregtech:iconsets/MACHINE_CASING_NOISEHAZARD"
+        },
+        "10": {
+          "all": "gregtech:iconsets/MACHINE_CASING_GRATE"
+        },
+        "11": {
+          "all": "gregtech:iconsets/MACHINE_CASING_VENT"
+        },
+        "12": {
+          "all": "gregtech:iconsets/MACHINE_CASING_RADIATIONPROOF"
+        },
+        "13": {
+          "0": "gregtech:iconsets/MACHINE_BRONZEPLATEDBRICKS",
+          "1": "gregtech:iconsets/MACHINE_BRONZEPLATEDBRICKS",
+          "2": "gregtech:iconsets/MACHINE_CASING_FIREBOX_BRONZE",
+          "3": "gregtech:iconsets/MACHINE_CASING_FIREBOX_BRONZE",
+          "4": "gregtech:iconsets/MACHINE_CASING_FIREBOX_BRONZE",
+          "5": "gregtech:iconsets/MACHINE_CASING_FIREBOX_BRONZE"
+        },
+        "14": {
+          "0": "gregtech:iconsets/MACHINE_CASING_SOLID_STEEL",
+          "1": "gregtech:iconsets/MACHINE_CASING_SOLID_STEEL",
+          "2": "gregtech:iconsets/MACHINE_CASING_FIREBOX_STEEL",
+          "3": "gregtech:iconsets/MACHINE_CASING_FIREBOX_STEEL",
+          "4": "gregtech:iconsets/MACHINE_CASING_FIREBOX_STEEL",
+          "5": "gregtech:iconsets/MACHINE_CASING_FIREBOX_STEEL"
+        },
+        "15": {
+          "0": "gregtech:iconsets/MACHINE_CASING_ROBUST_TUNGSTENSTEEL",
+          "1": "gregtech:iconsets/MACHINE_CASING_ROBUST_TUNGSTENSTEEL",
+          "2": "gregtech:iconsets/MACHINE_CASING_FIREBOX_TUNGSTENSTEEL",
+          "3": "gregtech:iconsets/MACHINE_CASING_FIREBOX_TUNGSTENSTEEL",
+          "4": "gregtech:iconsets/MACHINE_CASING_FIREBOX_TUNGSTENSTEEL",
+          "5": "gregtech:iconsets/MACHINE_CASING_FIREBOX_TUNGSTENSTEEL"
+        }
+      }
+    },
+    "gregtech:gt.blockcasings4": {
+      "source_class": "gregtech.common.blocks.BlockCasings4",
+      "metas": {
+        "0": {
+          "all": "gregtech:iconsets/MACHINE_CASING_ROBUST_TUNGSTENSTEEL"
+        },
+        "1": {
+          "all": "gregtech:iconsets/MACHINE_CASING_CLEAN_STAINLESSSTEEL"
+        },
+        "2": {
+          "all": "gregtech:iconsets/MACHINE_CASING_STABLE_TITANIUM"
+        },
+        "3": {
+          "0": "gregtech:iconsets/MACHINE_CASING_STABLE_TITANIUM",
+          "1": "gregtech:iconsets/MACHINE_CASING_STABLE_TITANIUM",
+          "2": "gregtech:iconsets/MACHINE_CASING_FIREBOX_TITANIUM",
+          "3": "gregtech:iconsets/MACHINE_CASING_FIREBOX_TITANIUM",
+          "4": "gregtech:iconsets/MACHINE_CASING_FIREBOX_TITANIUM",
+          "5": "gregtech:iconsets/MACHINE_CASING_FIREBOX_TITANIUM"
+        },
+        "6": {
+          "all": "gregtech:iconsets/MACHINE_CASING_FUSION"
+        },
+        "7": {
+          "all": "gregtech:iconsets/MACHINE_CASING_FUSION_COIL"
+        },
+        "8": {
+          "all": "gregtech:iconsets/MACHINE_CASING_FUSION_2"
+        },
+        "9": {
+          "all": "gregtech:iconsets/MACHINE_CASING_TURBINE_STEEL"
+        },
+        "10": {
+          "all": "gregtech:iconsets/MACHINE_CASING_TURBINE_STAINLESSSTEEL"
+        },
+        "11": {
+          "all": "gregtech:iconsets/MACHINE_CASING_TURBINE_TITANIUM"
+        },
+        "12": {
+          "all": "gregtech:iconsets/MACHINE_CASING_TURBINE_TUNGSTENSTEEL"
+        },
+        "13": {
+          "all": "gregtech:iconsets/MACHINE_CASING_ENGINE_INTAKE"
+        },
+        "14": {
+          "all": "gregtech:iconsets/MACHINE_CASING_MINING_OSMIRIDIUM"
+        },
+        "15": {
+          "all": "gregtech:iconsets/MACHINE_CASING_DENSEBRICKS"
+        }
+      }
+    },
+    "miscutils:gtplusplus.blockcasings.2": {
+      "source_class": "gtPlusPlus.xmod.gregtech.common.blocks.GregtechMetaCasingBlocks2",
+      "metas": {
+        "10": {
+          "all": "gregtech:iconsets/MACHINE_CASING_RADIATIONPROOF"
+        }
+      }
+    },
+    "miscutils:gtplusplus.blockspecialcasings.1": {
+      "source_class": "gtPlusPlus.xmod.gregtech.common.blocks.GregtechMetaSpecialMultiCasings",
+      "metas": {
+        "1": {
+          "all": "gregtech:iconsets/MACHINE_CASING_TURBINE_STEEL"
+        },
+        "2": {
+          "all": "gregtech:iconsets/MACHINE_CASING_TURBINE_TITANIUM"
+        },
+        "3": {
+          "all": "gregtech:iconsets/MACHINE_CASING_TURBINE_STAINLESSSTEEL"
+        },
+        "4": {
+          "all": "gregtech:iconsets/MACHINE_CASING_TURBINE_TUNGSTENSTEEL"
+        },
+        "11": {
+          "all": "gregtech:iconsets/MACHINE_CASING_RADIATIONPROOF"
+        }
+      }
+    },
+    "miscutils:gtplusplus.blockspecialcasings.2": {
+      "source_class": "gtPlusPlus.xmod.gregtech.common.blocks.GregtechMetaSpecialMachineCasings",
+      "metas": {
+        "0": {
+          "all": "gregtech:iconsets/MACHINE_BRONZEPLATEDBRICKS"
+        },
+        "1": {
+          "all": "gregtech:iconsets/MACHINE_CASING_FROST_PROOF"
+        },
+        "3": {
+          "all": "gregtech:iconsets/MACHINE_HEATPROOFCASING"
+        }
+      }
+    },
+    "miscutils:miscutils.blockcasings": {
+      "source_class": "gtPlusPlus.xmod.gregtech.common.blocks.GregtechMetaCasingBlocks",
+      "metas": {
+        "2": {
+          "all": "gregtech:iconsets/MACHINE_CASING_FIREBOX_BRONZE"
+        },
+        "3": {
+          "all": "gregtech:iconsets/MACHINE_CASING_FIREBOX_STEEL"
+        },
+        "4": {
+          "all": "gregtech:iconsets/MACHINE_CASING_STABLE_TITANIUM"
+        }
+      }
+    }
+  },
+  "icons": {
+    "gregtech:iconsets/EV_SIDE_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/EV_SIDE_CYCLOTRON_SOLENOID.png",
+    "gregtech:iconsets/EV_TOP_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/EV_TOP_CYCLOTRON_SOLENOID.png",
+    "gregtech:iconsets/HV_SIDE_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/HV_SIDE_CYCLOTRON_SOLENOID.png",
+    "gregtech:iconsets/HV_TOP_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/HV_TOP_CYCLOTRON_SOLENOID.png",
+    "gregtech:iconsets/IV_SIDE_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/IV_SIDE_CYCLOTRON_SOLENOID.png",
+    "gregtech:iconsets/IV_TOP_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/IV_TOP_CYCLOTRON_SOLENOID.png",
+    "gregtech:iconsets/LuV_SIDE_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/LuV_SIDE_CYCLOTRON_SOLENOID.png",
+    "gregtech:iconsets/LuV_TOP_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/LuV_TOP_CYCLOTRON_SOLENOID.png",
+    "gregtech:iconsets/MACHINE_BRONZEPLATEDBRICKS": "assets/gregtech/textures/blocks/iconsets/MACHINE_BRONZEPLATEDBRICKS.png",
+    "gregtech:iconsets/MACHINE_CASING_ACIDHAZARD": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_ACIDHAZARD.png",
+    "gregtech:iconsets/MACHINE_CASING_ASSEMBLER": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_ASSEMBLER.png",
+    "gregtech:iconsets/MACHINE_CASING_BIOHAZARD": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_BIOHAZARD.png",
+    "gregtech:iconsets/MACHINE_CASING_CLEAN_STAINLESSSTEEL": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_CLEAN_STAINLESSSTEEL.png",
+    "gregtech:iconsets/MACHINE_CASING_CONTAINMENT_FIELD": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_CONTAINMENT_FIELD.png",
+    "gregtech:iconsets/MACHINE_CASING_DATA_DRIVE": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_DATA_DRIVE.png",
+    "gregtech:iconsets/MACHINE_CASING_DENSEBRICKS": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_DENSEBRICKS.png",
+    "gregtech:iconsets/MACHINE_CASING_ENGINE_INTAKE": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_ENGINE_INTAKE.png",
+    "gregtech:iconsets/MACHINE_CASING_EXPLOSIONHAZARD": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_EXPLOSIONHAZARD.png",
+    "gregtech:iconsets/MACHINE_CASING_FIREBOX_BRONZE": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_FIREBOX_BRONZE.png",
+    "gregtech:iconsets/MACHINE_CASING_FIREBOX_STEEL": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_FIREBOX_STEEL.png",
+    "gregtech:iconsets/MACHINE_CASING_FIREBOX_TITANIUM": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_FIREBOX_TITANIUM.png",
+    "gregtech:iconsets/MACHINE_CASING_FIREBOX_TUNGSTENSTEEL": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_FIREBOX_TUNGSTENSTEEL.png",
+    "gregtech:iconsets/MACHINE_CASING_FIREHAZARD": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_FIREHAZARD.png",
+    "gregtech:iconsets/MACHINE_CASING_FROSTHAZARD": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_FROSTHAZARD.png",
+    "gregtech:iconsets/MACHINE_CASING_FROST_PROOF": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_FROST_PROOF.png",
+    "gregtech:iconsets/MACHINE_CASING_FUSION": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_FUSION.png",
+    "gregtech:iconsets/MACHINE_CASING_FUSION_2": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_FUSION_2.png",
+    "gregtech:iconsets/MACHINE_CASING_FUSION_COIL": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_FUSION_COIL.png",
+    "gregtech:iconsets/MACHINE_CASING_GEARBOX_BRONZE": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_GEARBOX_BRONZE.png",
+    "gregtech:iconsets/MACHINE_CASING_GEARBOX_STEEL": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_GEARBOX_STEEL.png",
+    "gregtech:iconsets/MACHINE_CASING_GEARBOX_TITANIUM": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_GEARBOX_TITANIUM.png",
+    "gregtech:iconsets/MACHINE_CASING_GEARBOX_TUNGSTENSTEEL": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_GEARBOX_TUNGSTENSTEEL.png",
+    "gregtech:iconsets/MACHINE_CASING_GRATE": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_GRATE.png",
+    "gregtech:iconsets/MACHINE_CASING_MAGICHAZARD": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_MAGICHAZARD.png",
+    "gregtech:iconsets/MACHINE_CASING_MINING_OSMIRIDIUM": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_MINING_OSMIRIDIUM.png",
+    "gregtech:iconsets/MACHINE_CASING_MOTOR": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_MOTOR.png",
+    "gregtech:iconsets/MACHINE_CASING_NOISEHAZARD": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_NOISEHAZARD.png",
+    "gregtech:iconsets/MACHINE_CASING_PIPE_BRONZE": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_PIPE_BRONZE.png",
+    "gregtech:iconsets/MACHINE_CASING_PIPE_STEEL": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_PIPE_STEEL.png",
+    "gregtech:iconsets/MACHINE_CASING_PIPE_TITANIUM": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_PIPE_TITANIUM.png",
+    "gregtech:iconsets/MACHINE_CASING_PIPE_TUNGSTENSTEEL": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_PIPE_TUNGSTENSTEEL.png",
+    "gregtech:iconsets/MACHINE_CASING_PROCESSOR": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_PROCESSOR.png",
+    "gregtech:iconsets/MACHINE_CASING_PUMP": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_PUMP.png",
+    "gregtech:iconsets/MACHINE_CASING_RADIATIONPROOF": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_RADIATIONPROOF.png",
+    "gregtech:iconsets/MACHINE_CASING_RADIOACTIVEHAZARD": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_RADIOACTIVEHAZARD.png",
+    "gregtech:iconsets/MACHINE_CASING_ROBUST_TUNGSTENSTEEL": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_ROBUST_TUNGSTENSTEEL.png",
+    "gregtech:iconsets/MACHINE_CASING_SOLID_STEEL": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_SOLID_STEEL.png",
+    "gregtech:iconsets/MACHINE_CASING_STABLE_TITANIUM": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_STABLE_TITANIUM.png",
+    "gregtech:iconsets/MACHINE_CASING_STRIPES_A": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_STRIPES_A.png",
+    "gregtech:iconsets/MACHINE_CASING_STRIPES_B": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_STRIPES_B.png",
+    "gregtech:iconsets/MACHINE_CASING_TURBINE_STAINLESSSTEEL": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_TURBINE_STAINLESSSTEEL.png",
+    "gregtech:iconsets/MACHINE_CASING_TURBINE_STEEL": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_TURBINE_STEEL.png",
+    "gregtech:iconsets/MACHINE_CASING_TURBINE_TITANIUM": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_TURBINE_TITANIUM.png",
+    "gregtech:iconsets/MACHINE_CASING_TURBINE_TUNGSTENSTEEL": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_TURBINE_TUNGSTENSTEEL.png",
+    "gregtech:iconsets/MACHINE_CASING_VENT": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_VENT.png",
+    "gregtech:iconsets/MACHINE_COIL_SUPERCONDUCTOR": "assets/gregtech/textures/blocks/iconsets/MACHINE_COIL_SUPERCONDUCTOR.png",
+    "gregtech:iconsets/MACHINE_DIM_BRIDGE": "assets/gregtech/textures/blocks/iconsets/MACHINE_DIM_BRIDGE.png",
+    "gregtech:iconsets/MACHINE_DIM_INJECTOR": "assets/gregtech/textures/blocks/iconsets/MACHINE_DIM_INJECTOR.png",
+    "gregtech:iconsets/MACHINE_DIM_TRANS_CASING": "assets/gregtech/textures/blocks/iconsets/MACHINE_DIM_TRANS_CASING.png",
+    "gregtech:iconsets/MACHINE_HEATPROOFCASING": "assets/gregtech/textures/blocks/iconsets/MACHINE_HEATPROOFCASING.png",
+    "gregtech:iconsets/MV_SIDE_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/MV_SIDE_CYCLOTRON_SOLENOID.png",
+    "gregtech:iconsets/MV_TOP_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/MV_TOP_CYCLOTRON_SOLENOID.png",
+    "gregtech:iconsets/UEV_SIDE_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/UEV_SIDE_CYCLOTRON_SOLENOID.png",
+    "gregtech:iconsets/UEV_TOP_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/UEV_TOP_CYCLOTRON_SOLENOID.png",
+    "gregtech:iconsets/UHV_SIDE_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/UHV_SIDE_CYCLOTRON_SOLENOID.png",
+    "gregtech:iconsets/UHV_TOP_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/UHV_TOP_CYCLOTRON_SOLENOID.png",
+    "gregtech:iconsets/UIV_SIDE_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/UIV_SIDE_CYCLOTRON_SOLENOID.png",
+    "gregtech:iconsets/UIV_TOP_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/UIV_TOP_CYCLOTRON_SOLENOID.png",
+    "gregtech:iconsets/UMV_SIDE_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/UMV_SIDE_CYCLOTRON_SOLENOID.png",
+    "gregtech:iconsets/UMV_TOP_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/UMV_TOP_CYCLOTRON_SOLENOID.png",
+    "gregtech:iconsets/UV_SIDE_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/UV_SIDE_CYCLOTRON_SOLENOID.png",
+    "gregtech:iconsets/UV_TOP_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/UV_TOP_CYCLOTRON_SOLENOID.png",
+    "gregtech:iconsets/ZPM_SIDE_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/ZPM_SIDE_CYCLOTRON_SOLENOID.png",
+    "gregtech:iconsets/ZPM_TOP_CYCLOTRON_SOLENOID": "assets/gregtech/textures/blocks/iconsets/ZPM_TOP_CYCLOTRON_SOLENOID.png"
+  },
+  "gaps": [
+    {
+      "block": "gregtech:gt.blockcasings10",
+      "meta": -1,
+      "side": "all",
+      "reason": "no server-side getIcon(int,int) override (uses GT's client-only ITexture render path); resolve with Option B"
+    },
+    {
+      "block": "gregtech:gt.blockcasings11",
+      "meta": -1,
+      "side": "all",
+      "reason": "no server-side getIcon(int,int) override (uses GT's client-only ITexture render path); resolve with Option B"
+    },
+    {
+      "block": "gregtech:gt.blockcasings12",
+      "meta": -1,
+      "side": "all",
+      "reason": "no server-side getIcon(int,int) override (uses GT's client-only ITexture render path); resolve with Option B"
+    },
+    {
+      "block": "gregtech:gt.blockcasings13",
+      "meta": -1,
+      "side": "all",
+      "reason": "no server-side getIcon(int,int) override (uses GT's client-only ITexture render path); resolve with Option B"
+    },
+    {
+      "block": "gregtech:gt.blockcasings5",
+      "meta": -1,
+      "side": "all",
+      "reason": "getIcon named no iconset sprite for any meta (NoSuchMethodError: gregtech.api.interfaces.IIconContainer.getIcon()Lnet/minecraft/util/IIcon;); resolve with Option B"
+    },
+    {
+      "block": "gregtech:gt.blockcasings6",
+      "meta": -1,
+      "side": "all",
+      "reason": "no server-side getIcon(int,int) override (uses GT's client-only ITexture render path); resolve with Option B"
+    },
+    {
+      "block": "gregtech:gt.blockcasings8",
+      "meta": -1,
+      "side": "all",
+      "reason": "no server-side getIcon(int,int) override (uses GT's client-only ITexture render path); resolve with Option B"
+    },
+    {
+      "block": "gregtech:gt.blockcasings9",
+      "meta": -1,
+      "side": "all",
+      "reason": "no server-side getIcon(int,int) override (uses GT's client-only ITexture render path); resolve with Option B"
+    },
+    {
+      "block": "gregtech:gt.blockcasingsNH",
+      "meta": -1,
+      "side": "all",
+      "reason": "no server-side getIcon(int,int) override (uses GT's client-only ITexture render path); resolve with Option B"
+    },
+    {
+      "block": "gregtech:gt.blockglass1",
+      "meta": -1,
+      "side": "all",
+      "reason": "no server-side getIcon(int,int) override (uses GT's client-only ITexture render path); resolve with Option B"
+    },
+    {
+      "block": "gregtech:gt.blockmachines",
+      "meta": -1,
+      "side": "all",
+      "reason": "controller hull uses a composite tile-entity overlay texture, not a single registered iconset sprite; resolve with Option B (client-mode xvfb dump)"
+    },
+    {
+      "block": "gregtech:gt.blocktintedglass",
+      "meta": -1,
+      "side": "all",
+      "reason": "no server-side getIcon(int,int) override (uses GT's client-only ITexture render path); resolve with Option B"
+    },
+    {
+      "block": "gtnhintergalactic:gt.blockcasingsSE",
+      "meta": -1,
+      "side": "all",
+      "reason": "no server-side getIcon(int,int) override (uses GT's client-only ITexture render path); resolve with Option B"
+    },
+    {
+      "block": "gtnhintergalactic:gt.blockcasingsSEMotor",
+      "meta": -1,
+      "side": "all",
+      "reason": "no server-side getIcon(int,int) override (uses GT's client-only ITexture render path); resolve with Option B"
+    },
+    {
+      "block": "kubatech:defc.casing",
+      "meta": -1,
+      "side": "all",
+      "reason": "no server-side getIcon(int,int) override (uses GT's client-only ITexture render path); resolve with Option B"
+    },
+    {
+      "block": "miscutils:gtplusplus.blockcasings.3",
+      "meta": -1,
+      "side": "all",
+      "reason": "getIcon named no iconset sprite for any meta (getIcon returned null (no injected icon)); resolve with Option B"
+    },
+    {
+      "block": "miscutils:gtplusplus.blockcasings.4",
+      "meta": -1,
+      "side": "all",
+      "reason": "getIcon named no iconset sprite for any meta (getIcon returned null (no injected icon)); resolve with Option B"
+    },
+    {
+      "block": "miscutils:gtplusplus.blockcasings.5",
+      "meta": -1,
+      "side": "all",
+      "reason": "getIcon named no iconset sprite for any meta (getIcon returned null (no injected icon)); resolve with Option B"
+    },
+    {
+      "block": "miscutils:gtplusplus.blockcasings.6",
+      "meta": -1,
+      "side": "all",
+      "reason": "getIcon named no iconset sprite for any meta (getIcon returned null (no injected icon)); resolve with Option B"
+    },
+    {
+      "block": "miscutils:gtplusplus.blockcasings.pipesgears",
+      "meta": -1,
+      "side": "all",
+      "reason": "getIcon named no iconset sprite for any meta (getIcon returned null (no injected icon)); resolve with Option B"
+    },
+    {
+      "block": "miscutils:gtplusplus.blockspecialcasings.3",
+      "meta": -1,
+      "side": "all",
+      "reason": "getIcon named no iconset sprite for any meta (getIcon returned null (no injected icon)); resolve with Option B"
+    },
+    {
+      "block": "miscutils:gtplusplus.blocktieredcasings.1",
+      "meta": -1,
+      "side": "all",
+      "reason": "getIcon named no iconset sprite for any meta (NoSuchMethodError: gregtech.api.interfaces.IIconContainer.getIcon()Lnet/minecraft/util/IIcon;); resolve with Option B"
+    },
+    {
+      "block": "tectech:gt.blockcasingsBA0",
+      "meta": -1,
+      "side": "all",
+      "reason": "getIcon named no iconset sprite for any meta (getIcon returned null (no injected icon)); resolve with Option B"
+    },
+    {
+      "block": "tectech:gt.blockcasingsTT",
+      "meta": -1,
+      "side": "all",
+      "reason": "getIcon named no iconset sprite for any meta (getIcon returned null (no injected icon)); resolve with Option B"
+    },
+    {
+      "block": "tectech:gt.godforgecasing",
+      "meta": -1,
+      "side": "all",
+      "reason": "getIcon named no iconset sprite for any meta (getIcon returned null (no injected icon)); resolve with Option B"
+    },
+    {
+      "block": "tectech:gt.spacetime_compression_field_generator",
+      "meta": -1,
+      "side": "all",
+      "reason": "getIcon named no iconset sprite for any meta (getIcon returned null (no injected icon)); resolve with Option B"
+    },
+    {
+      "block": "tectech:gt.stabilisation_field_generator",
+      "meta": -1,
+      "side": "all",
+      "reason": "getIcon named no iconset sprite for any meta (getIcon returned null (no injected icon)); resolve with Option B"
+    },
+    {
+      "block": "tectech:gt.time_acceleration_field_generator",
+      "meta": -1,
+      "side": "all",
+      "reason": "getIcon named no iconset sprite for any meta (getIcon returned null (no injected icon)); resolve with Option B"
+    }
+  ]
+}

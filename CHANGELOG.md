@@ -7,6 +7,25 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Texture manifest extraction (`tools/gtnh-extractor/`, lane 6, GitHub #49).** A new
+  `TextureDumper` texture pass and a **separate** `update-textures.yml` workflow map GT casing/coil
+  blocks to their icons for the previewer, keeping LGPL PNGs out of this Apache-2.0 repo. It uses
+  **Option A (server-side icon reflection)**: the client-only `IIconRegister` cannot even load on a
+  dedicated server (FML's `SideTransformer` blocks it), so the pass reflectively sets each
+  `Textures.BlockIcons` constant's package-private `mIcon` field (a server-safe `IIcon`) to a
+  name-carrying icon, then invokes each casing block's own `getIcon(side, meta)` reflectively and
+  reads the name back - resolving the family generically with no client and no per-family switch
+  reimplementation (verified: the casing arrays hold only enum constants). It emits
+  `data/textures/manifest.json` mapping `(block_registry_name, meta, side)` to an iconset name to the
+  asset **path inside the mod jar** (`assets/<modid>/textures/blocks/iconsets/<NAME>.png`); PNGs are
+  never committed and are fetched from the GT5-Unofficial jar on the GTNH Nexus at preview time.
+  Scope is the GT casing/coil block families (every registered `IHasIndexedTexture` block - the
+  structural shell the previewer skins); blocks whose icon is a composite tile-entity overlay (the
+  `gt.blockmachines` controller hulls) are recorded under the manifest's `gaps` for the documented
+  **Option B** (client-mode `xvfb` dump) fallback. Wired additively via a single `-PtextureOut`
+  property: when set alone the run is texture-only and skips the correctness-critical structure dump,
+  so the texture workflow boots fast and, per plan section 5, stays decoupled and may lag a pack
+  version without affecting the solver. `NOTICE` already credits GT5-Unofficial and StructureLib.
 - **Extractor core dump loop (`tools/gtnh-extractor/`, lane 2, GitHub #45).** The Java tool now
   fills its `DumperMod.dump()` seam with `StructureDumper` + `JsonWriter` + `ErrorCollector` and
   emits the schema-v1 dataset. It iterates `GregTechAPI.METATILEENTITIES`, keeps the

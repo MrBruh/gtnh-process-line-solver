@@ -80,11 +80,28 @@ public class DumperMod {
      * silently produces an empty dataset fails CI rather than committing it.
      */
     private void dump() throws Exception {
-        File datasetOut = resolveDatasetOut();
         String packVersion = System.getProperty("gtnhextractor.packVersion", "unknown-dev");
         String extractorSha = resolveExtractorSha();
         Map<String, String> modVersions = collectModVersions();
 
+        // Lane 6 (issue #49): the texture manifest is a separate pass gated by -PtextureOut. It runs
+        // headlessly with no structure build (it only reflects GT's icon wiring off the block
+        // registry), so when only -PtextureOut is set the correctness-critical structure dump is
+        // skipped and the texture workflow boots fast and stays decoupled from it.
+        File textureOut = resolveOut("gtnhextractor.textureOut");
+        if (textureOut != null) {
+            LOG.info("gtnh-extractor: dumping texture manifest to {}", textureOut.getAbsolutePath());
+            int icons = new TextureDumper().run(textureOut, packVersion, modVersions, extractorSha);
+            if (icons == 0) {
+                throw new IllegalStateException("texture pass resolved no icons; the casing families changed");
+            }
+            LOG.info("gtnh-extractor: texture manifest complete ({} icon assignments).", icons);
+        }
+        if (textureOut != null && resolveOut("gtnhextractor.datasetOut") == null) {
+            return; // texture-only run: skip the structure dump entirely
+        }
+
+        File datasetOut = resolveDatasetOut();
         World world = MinecraftServer.getServer().worldServers[0];
         LOG.info(
             "gtnh-extractor: dumping multiblocks to {} (pack {}, extractor {})",
@@ -102,6 +119,16 @@ public class DumperMod {
             written,
             dumper.errors()
                 .count());
+    }
+
+    /** Resolve an output-directory system property to a {@link File}, or {@code null} if unset/blank. */
+    private File resolveOut(String propKey) {
+        String configured = System.getProperty(propKey);
+        if (configured != null && !configured.trim()
+            .isEmpty()) {
+            return new File(configured);
+        }
+        return null;
     }
 
     /** {@code -PdatasetOut} is forwarded as a system property by the build; default to an in-tree dir. */
