@@ -7,6 +7,45 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Extractor channel handling and identity-substitution tables (`tools/gtnh-extractor/`, lane 3,
+  GitHub #46).** `StructureDumper` now fills the per-controller `substitutions` object. After the
+  trigger-stack sweep it probes each GT channel (`GTStructureChannels.values()`, skipping the
+  always-applied `gt_no_hatch`) against the default build: holding the stack size at 1 it sets one
+  channel at a time and diffs the placed blocks. Because an unset StructureLib channel reads the
+  trigger's stack size, the existing stack sweep already varies every channel, so shape-changing
+  channels (a distillation tower's `height`, a structure's `length`) are already recorded as size
+  variants and the probe skips them; a channel that only swaps a tiered block (coil, glass, pipe
+  casing) keeps the same shape and is recorded once as `substitutions[channel]` = the default tier
+  plus every distinct higher tier `{channel_value, block, meta}`, rather than exploding into one
+  variant per tier. The default-placed block is always included, which is what lets the Python
+  adapter match the tiered blocks in the primary variant. Heating coils are a special case: the
+  classic furnaces (Electric Blast Furnace, Multi Smelter, ...) place a bare `ofCoil` whose tier is
+  read from the trigger's stack size rather than the `coil` channel, so the coil table is built by a
+  separate stack-size sweep that identifies coil blocks by the GT `IHeatingCoil` interface (which
+  also covers the channel-bound mega furnaces). New hard caps bound the per-channel value sweep and
+  the total substitution entries; a controller that overflows them lands on the `_meta.json` failure
+  list instead of emitting a runaway table. The Electric Blast Furnace stays one 3x3x4 shape variant
+  and now carries a populated `coil` substitution table (14 tiers), so the adapter counts 2 coil
+  layers.
+- **Texture manifest extraction (`tools/gtnh-extractor/`, lane 6, GitHub #49).** A new
+  `TextureDumper` texture pass and a **separate** `update-textures.yml` workflow map GT casing/coil
+  blocks to their icons for the previewer, keeping LGPL PNGs out of this Apache-2.0 repo. It uses
+  **Option A (server-side icon reflection)**: the client-only `IIconRegister` cannot even load on a
+  dedicated server (FML's `SideTransformer` blocks it), so the pass reflectively sets each
+  `Textures.BlockIcons` constant's package-private `mIcon` field (a server-safe `IIcon`) to a
+  name-carrying icon, then invokes each casing block's own `getIcon(side, meta)` reflectively and
+  reads the name back - resolving the family generically with no client and no per-family switch
+  reimplementation (verified: the casing arrays hold only enum constants). It emits
+  `data/textures/manifest.json` mapping `(block_registry_name, meta, side)` to an iconset name to the
+  asset **path inside the mod jar** (`assets/<modid>/textures/blocks/iconsets/<NAME>.png`); PNGs are
+  never committed and are fetched from the GT5-Unofficial jar on the GTNH Nexus at preview time.
+  Scope is the GT casing/coil block families (every registered `IHasIndexedTexture` block - the
+  structural shell the previewer skins); blocks whose icon is a composite tile-entity overlay (the
+  `gt.blockmachines` controller hulls) are recorded under the manifest's `gaps` for the documented
+  **Option B** (client-mode `xvfb` dump) fallback. Wired additively via a single `-PtextureOut`
+  property: when set alone the run is texture-only and skips the correctness-critical structure dump,
+  so the texture workflow boots fast and, per plan section 5, stays decoupled and may lag a pack
+  version without affecting the solver. `NOTICE` already credits GT5-Unofficial and StructureLib.
 - **Extractor core dump loop (`tools/gtnh-extractor/`, lane 2, GitHub #45).** The Java tool now
   fills its `DumperMod.dump()` seam with `StructureDumper` + `JsonWriter` + `ErrorCollector` and
   emits the schema-v1 dataset. It iterates `GregTechAPI.METATILEENTITIES`, keeps the
@@ -312,6 +351,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   so a resolvable contention is never misreported. Power trunks keep the
   failed-first rip-up/reroute (trees grown by multi-goal A* do not decompose into per-cell
   pricing). (`router/core.py`, `router/_grid.py`.)
+- **The test gate runs in a quarter of the time (GitHub #74).** Profiling showed ~3/4 of every
+  CI test leg was coverage tracer overhead, not test work (the solver's hot loops execute
+  millions of traced line events). The suite now runs parallel by default (`pytest-xdist`,
+  `-n auto` in addopts - the local gate drops ~155s to ~60s), CI gates coverage on ONE matrix
+  leg instead of every leg, and that leg uses coverage's `sys.monitoring` core
+  (`COVERAGE_CORE=sysmon`, branch-capable on 3.14+). No test dropped; the 90% gate and the
+  required `test` status check are unchanged.
 - **CI tests Python 3.14; packaging metadata reflects real support.** The test matrix now runs
   the floor and the latest release only (`3.10` + `3.14`; a floor break or a new-release break
   is what a leg catches, and the 3.11-3.13 intermediates cannot fail while both ends pass), and

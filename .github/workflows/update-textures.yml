@@ -1,0 +1,158 @@
+name: Update textures
+
+# Automated texture-manifest refresh (issue #49, lane 6 of the extraction plan).
+#
+# Emits data/textures/manifest.json: a block-to-icon map for the GT casing / coil families,
+# reflected headlessly on the dedicated server (Option A, plan section 5.2). No PNG is ever
+# committed - the manifest records the icon name and the asset path INSIDE the mod jar, which the
+# previewer fetches from the GTNH Nexus jar at preview time (LGPL assets stay out of this repo).
+#
+# This is DELIBERATELY SEPARATE from update-dataset.yml. Structures are correctness-critical for
+# the solver; the texture manifest only feeds the 3D previewer and may lag a pack version behind
+# without hurting anyone. It therefore does NOT bump dependencies.gradle / gtnh.lock.json - it
+# builds against whatever versions update-dataset.yml currently pins, so the manifest always matches
+# the committed dataset's pack version and the two workflows never fight over the lock.
+#
+# Option B (fallback, not run here). Option A names every block whose texture is a single registered
+# `Textures.BlockIcons` sprite - the casing/coil families the previewer needs. A block family whose
+# icon is a composite tile-entity overlay (e.g. the gt.blockmachines controller hulls) cannot be
+# named server-side; the manifest lists those under `gaps`. To resolve them, run the extractor in
+# CLIENT mode under xvfb (`xvfb-run ./gradlew runClient ...`) with a main-menu tick handler that
+# dumps `getIcon(side, meta).getIconName()` for the gap blocks. GitHub runners support xvfb; this is
+# a follow-up only if the previewer starts skinning controller hulls with real textures.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly, Tuesdays 05:17 UTC - offset from update-dataset (Mondays) so it picks up the pins that
+    # workflow just landed, and off the hour per GitHub's load-spread guidance. Lag is acceptable.
+    - cron: "17 5 * * 2"
+
+# Do not overlap runs: a cached Forge build still takes minutes.
+concurrency:
+  group: update-textures
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build texture manifest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      # Where the extractor emits manifest.json. -PtextureOut alone (no -PdatasetOut) makes the run
+      # texture-only: it skips the correctness-critical structure dump and boots fast.
+      TEXTURE_OUT: ${{ github.workspace }}/out/textures
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      # --- Toolchains (mirrors update-dataset.yml; those were fixes learned from booting) ---------
+      # The extractor's Gradle daemon is pinned to Java 25 (gradle/gradle-daemon-jvm.properties) and
+      # its foojay auto-provision is unreliable (serves a JRE with no javac on some platforms), so
+      # install a real JDK 25 here. The Forge 1.7.10 compile toolchains (Azul Zulu 17 for injected
+      # interfaces, Java 8 for the mod) still auto-download during the build.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: gradle
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # RetroFuturaGradle downloads + deobfuscates Minecraft into ~/.gradle; the first run is slow
+      # (tens of minutes), cached runs take minutes. Keyed on the pinned mod version so a bump can
+      # refresh it, with a loose restore-key so most of the workspace still hits.
+      - name: Read pinned pack version
+        id: lock
+        run: |
+          version="$(python -c 'import json;print(json.load(open("gtnh.lock.json"))["pack_version"])')"
+          mods="$(python -c 'import json;print(",".join(k+"="+v for k,v in json.load(open("gtnh.lock.json"))["mods"].items()))')"
+          echo "Pinned pack: ${version} (${mods})"
+          echo "pack_version=${version}" >> "$GITHUB_OUTPUT"
+          echo "mod_versions=${mods}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Forge/RFG workspace
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches/retro_futura_gradle
+            ~/.gradle/caches/minecraft
+            tools/gtnh-extractor/.gradle
+          key: rfg-${{ runner.os }}-${{ steps.lock.outputs.pack_version }}
+          restore-keys: |
+            rfg-${{ runner.os }}-
+
+      # --- Run the extractor (headless dedicated server, TEXTURE-ONLY) ---------------------------
+      - name: Run texture pass
+        working-directory: tools/gtnh-extractor
+        # runServer prompts on stdin for online-mode, then Minecraft EULA acceptance; with no stdin
+        # attached it reads EOF and fails ("Minecraft EULA not accepted"). Feed the answers in: 'n'
+        # keeps the server offline (no Mojang auth), 'y' accepts the EULA.
+        run: |
+          printf 'n\ny\n' | ./gradlew --no-daemon runServer \
+            "-PtextureOut=${TEXTURE_OUT}" \
+            "-PpackVersion=${{ steps.lock.outputs.pack_version }}" \
+            "-PmodVersions=${{ steps.lock.outputs.mod_versions }}" \
+            "-PextractorSha=${GITHUB_SHA}"
+
+      # --- Install the emitted manifest and sanity-check it ---------------------------------------
+      - name: Install texture manifest
+        run: |
+          mkdir -p data/textures
+          cp "${TEXTURE_OUT}/manifest.json" data/textures/manifest.json
+
+      - name: Validate manifest
+        run: |
+          python - <<'PY'
+          import json
+          m = json.load(open("data/textures/manifest.json"))
+          cov = m["provenance"]["coverage"]
+          assert m["schema"] == 1, m["schema"]
+          assert cov["blocks"] > 0 and cov["assignments"] > 0, cov
+          print("texture manifest OK:", cov)
+          PY
+
+      - name: Summarise
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          m = json.load(open("data/textures/manifest.json"))
+          cov = m["provenance"]["coverage"]
+          print("## Texture manifest")
+          print(f"Pack: `{m['provenance']['pack_version']}`  ")
+          print(f"Method: `{m['method']}`  ")
+          print(f"Blocks: {cov['blocks']}, metas: {cov['metas']}, icons: {cov['icons']}, "
+                f"assignments: {cov['assignments']}, gaps: {cov['gaps']}")
+          PY
+
+      # --- Open the PR. Never auto-merges: a human eyeballs the manifest diff. --------------------
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.DATASET_PR_TOKEN || github.token }}
+          branch: bot/texture-update
+          base: main
+          title: "chore(dataset): update texture manifest to GTNH ${{ steps.lock.outputs.pack_version }}"
+          commit-message: "chore(dataset): update texture manifest to GTNH ${{ steps.lock.outputs.pack_version }}"
+          body: |
+            Automated texture-manifest refresh (lane 6, issue #49). Feeds the previewer only.
+
+            The manifest maps `(block, meta, side)` to a GT iconset name to the asset path inside the
+            mod jar (Option A, server-side icon reflection). No PNG is committed; the previewer
+            fetches them from the GTNH Nexus jar. Blocks Option A cannot name (composite controller
+            hulls) are listed under `gaps` for the Option B (client-mode) fallback.
+
+            Review the manifest diff; this workflow never auto-merges.
+          labels: |
+            textures
+            automated
+          add-paths: |
+            data/textures/manifest.json
+          delete-branch: true
