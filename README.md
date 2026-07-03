@@ -4,9 +4,10 @@
 
 > **Status: Phase 1 complete - crude but end-to-end.** A real gtnh-factory-flow export now
 > goes all the way to a validated, buildable layout: the IR contracts (`ir/`), adapter,
-> dataset (demo-scale), placement, router, solver, validator, previewer, and build guide are
-> all implemented - each is an `Added` entry in [`CHANGELOG.md`](CHANGELOG.md). They are
-> deliberately crude (single-channel routing, size-or-reject power, a small pinned dataset), so
+> dataset (voltage ladder + amp helpers only), placement, router, solver, validator, previewer,
+> and build guide are all implemented - each is an `Added` entry in
+> [`CHANGELOG.md`](CHANGELOG.md). They are deliberately crude (single-channel routing,
+> size-or-reject power, and hardcoded footprints with no per-machine physical dataset yet), so
 > **Phase 2 is quality**: SA/LNS placement polish, the multi-channel realizability invariant,
 > power optimization, the full physical dataset, and previewer polish. See
 > [`docs/ROADMAP.md`](docs/ROADMAP.md).
@@ -24,7 +25,7 @@ that into a physical, buildable layout.
    gtnh-factory-flow (exported plan JSON) ──adapter──► IR ◄── physical-rules dataset
                                              │      (footprints, faces, tiers, ME)
                                              ▼
-                        placement (SA/LNS) ◄─routing-aware cost─► router (A*, 2.5D,
+                        placement (SA/LNS) ◄─routing-aware cost─► router (A*, 3D,
                                   │            + feedback loop     per-commodity, power)
                                   └──────────────┬─────────────────┘
                                                  ▼
@@ -46,6 +47,9 @@ pip install -e ".[dev]"
 gtnh-solve examples/gtnh-sand.json        # solve a gtnh-factory-flow export, print the build guide
 gtnh-solve plan.json -o guide.txt         # ...or write the guide to a file
 gtnh-solve plan.json --preview view.html  # ...or a double-clickable 3D preview (three.js)
+gtnh-solve plan.json --fast               # skip optimization: a near-instant constructive layout
+gtnh-solve plan.json --seed 3             # pick the solver seed (deterministic per seed)
+gtnh-solve plan.json --objective volume   # what "compact" means: footprint|volume|balanced
 ```
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md#setup) for the full dev setup (hooks, tests, lint).

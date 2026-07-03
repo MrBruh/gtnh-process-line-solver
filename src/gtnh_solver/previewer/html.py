@@ -374,4 +374,8 @@ animate();
 
 def render_html(scene: dict[str, Any]) -> str:
     """Return a self-contained viewer page with ``scene`` (from ``build_scene``) inlined."""
-    return _TEMPLATE.replace(_SCENE_TOKEN, json.dumps(scene))
+    # Plan JSON is external input: escape ``</`` so a machine type or resource id containing
+    # ``</script>`` cannot close this inline <script> and break (or inject into) the page. The
+    # JS parser reads ``<\/script>`` back as the identical string.
+    payload = json.dumps(scene).replace("</", "<\\/")
+    return _TEMPLATE.replace(_SCENE_TOKEN, payload)

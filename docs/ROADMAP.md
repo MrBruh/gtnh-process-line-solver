@@ -20,9 +20,17 @@ export/throughput/dataset path we consume, pin a fork commit + dataset version, 
 known-good dataset + sample exports as fixtures** in `examples/`. The solver's progress must
 never depend on the fork's health. Offer fixes upstream as PRs; don't adopt the whole app.
 
-**Already landed:** package skeleton + lint/type/test CI; the **IR** (`ir/`, T1); the
-**validator** geometric/structural half (`validator/`). These are the contracts + the safety
-gate that Phase 1 builds against.
+**Already landed:** the **entire Phase 1 pipeline**, end to end - package skeleton + lint/type/
+test CI; the **IR** contracts (`ir/`); the **adapter** (real gtnh-factory-flow exports ->
+`InputIR`, with two committed fixtures); **constructive placement**; the **crude router**
+(per-commodity A* + single-channel capacity); the **previewer** and **build guide**; the
+**validator**; and the **`gtnh-solve` CLI**. On top of that, several **Phase 2 slices** have
+shipped: SA + LNS placement over a routing-aware cost with a selectable footprint/volume/balanced
+objective (lane C); rip-up/reroute and the shared-amperage power model (source synthesis, tree
+trunks, cable voltage-loss sizing) (lane D); the **place<->route feedback loop** as a multi-start
+grid (`solver/core.py`); the summed-amperage + voltage-drop half of the validator's power checks
+(lane E); and the `system_io` boundary summary feeding both render surfaces. The full
+`Added`/`Changed` list is in [`../CHANGELOG.md`](../CHANGELOG.md).
 
 ### Phase 1 - thin end-to-end slice (prove the path)
 
@@ -47,7 +55,11 @@ silently invalid.
    This also spot-checks the starter dataset's tiers/face-rules/throughputs against reality.
 
 **Phase 1 success criterion:** the pinned demo line is buildable from the output and runs
-in-game. Do **not** start Phase 2 until this holds.
+in-game. This was written as a hard gate (do **not** start Phase 2 until it holds), but in
+practice several Phase 2 quality slices have since shipped ahead of it (see "Already landed"
+above). The in-game Assignment's outcome is **not recorded in this repo**, so read the gate as
+the *intended* discipline - keep the demo line buildable as slices land - rather than a
+precondition that has been formally cleared.
 
 ### Phase 2 - the optimizer core (queued right after Phase 1, NOT cut)
 
@@ -61,14 +73,17 @@ is demonstrably valid-but-bad (too large, unroutable, ugly). This is the recorde
 - **router** - rip-up-and-reroute, the **channels-per-edge realizability invariant**,
   cell->block realizability fed back into search, ME-toggle endpoint placement, pluggable
   multi-channel backends.
-- **solver** - the **place<->route feedback loop** + anytime wall-clock budget
-  (best-valid-so-far on timeout).
+- **solver** - the **place<->route feedback loop** (built: a multi-start grid in
+  `solver/core.py` that routes + validates every attempt and keeps the best VALID by quality)
+  plus the anytime wall-clock budget (still queued: today's grid is deterministic + bounded,
+  not a wall-clock timeout).
 - **power** - shared-amperage optimization (Steiner-like summing, thickness sizing, the 16x
   split/upgrade) beyond Phase 1's size-or-reject. Voltage loss is now modelled as a flat
   1 EU/block; Phase 2 adds **per-material cable loss** and, driven by it, **multi-source
   count/placement** (a nearer source instead of thickening a too-lossy run) and voltage upgrades.
-- **validator (rule half)** - throughput/tier caps, summed amperage <= cable rating,
-  one-fluid-per-line, required-I/O-face reachability, once the physical dataset is real.
+- **validator (rule half)** - throughput/tier caps, one-fluid-per-line, and the
+  dataset-specific half of face rules, once the physical dataset is real. (The summed-amperage
+  and voltage-drop power checks already shipped, independent of the dataset.)
 - **tests** - the on-disk golden corpus + broader hypothesis property tests.
 
 #### Parallel lanes (Phase 2 - after the thin slice proves the path)

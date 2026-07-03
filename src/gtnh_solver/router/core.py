@@ -17,6 +17,21 @@ set repeats (a genuine infeasibility, not an ordering accident). Crude on purpos
 routing are later lane-D work (GitHub #7). The shared cell-grid primitives (obstacle building,
 docking, A*) live in ``_grid`` so this router and ``router.power`` route over one grid model.
 
+Four phases (item/fluid nets; power is ``router.power``'s job)::
+
+    nets
+      |  [1] auto-assign  router.auto: adjacent 1-source-1-sink nets take GT's free auto-output
+      |                   (one per machine); only the uncovered nets are piped.
+      v
+    for each piped net:
+      |  [2] dock         a Terminal per endpoint on a usable (non-front) face, one cell out.
+      |  [3] A*           route between the terminals over the free cell grid; machine, reserved,
+      |                   and already-laid route cells are obstacles (one route per cell).
+      v
+    [4] rip-up / reroute  a net failed? rip every route up and retry with the failed nets first
+                          (most-constrained-first); stop when a pass is clean or the failed-net
+                          set repeats (a genuine infeasibility, not an ordering accident).
+
 Returns the auto-connections plus the routes, or an explicit ``Infeasibility`` naming the net
 that could not dock or route - never raises for the expected case, matching the placer/validator
 discipline. The validator independently certifies that every terminal is on a non-front face

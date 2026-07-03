@@ -42,10 +42,10 @@ as "safe to start on" rather than "unblocked".
 | Lane | Phase 2 work | Status |
 |------|--------------|--------|
 | A | adapter hardening: pin the plan-schema + recipe-dataset version | Open - Phase 1 adapter done; pinning not started |
-| B | full physical dataset (footprints / faces / tiers / cell->block) beyond the demo line | Open - only the demo line's entries exist |
-| C | placement: SA/LNS + routing-aware cost | In progress - SA + routing-aware cost landed; LNS remains |
+| B | full physical dataset (footprints / faces / tiers / cell->block) | Open - no per-machine entries exist yet; `dataset/` holds only the voltage ladder + amp helpers, and footprints/faces are hardcoded adapter defaults |
+| C | placement: SA/LNS + routing-aware cost | Largely landed - SA + LNS + the routing-aware (HPWL / compactness / auto-output) cost are in; the incremental congestion-aware cost is the remaining refinement |
 | D | router: negotiated-congestion, multi-channel cap, shared-amperage power optimization | In progress - rip-up/reroute, single-channel capacity, and size-or-reject power landed |
-| E | validator rule-half: tier caps, summed amperage, face reachability | Blocked on the real dataset (lane B) |
+| E | validator rule-half: tier caps, summed amperage, face reachability | Partly landed - summed-amperage + voltage-drop validation shipped independently; only the tier caps + dataset-specific face rules stay blocked on lane B |
 | F | previewer / build-guide polish | Previewer polish in progress; build-guide polish deferred |
 
 Pick a lane, comment on (or open) an issue to claim it, and ship one logical change per PR.

@@ -222,6 +222,24 @@ def test_render_html_inlines_the_exact_scene() -> None:
     assert json.dumps(scene) in render_html(scene)  # embedded verbatim - no file:// fetch needed
 
 
+def _inlined_scene_json(html: str) -> str:
+    # pull just the inlined `const SCENE = <json>;` payload back out of the rendered page, so an
+    # assertion can look at the data without tripping over the template's own literal </script>
+    after = html.split("const SCENE = ", 1)[1]
+    return after.split("const COMMODITY", 1)[0].rstrip().rstrip(";").rstrip()
+
+
+def test_render_html_escapes_closing_script_in_inline_json() -> None:
+    # Plan JSON is external input (GitHub #39): a machine type or resource id containing "</script>"
+    # must not be able to close the inline <script> and break (or inject into) the page.
+    scene = _sand_scene()
+    scene["machines"][0]["type"] = "</script><script>alert(1)</script>"
+    payload = _inlined_scene_json(render_html(scene))
+    assert "</script>" not in payload  # the raw closing tag never reaches the page as data...
+    assert "<\\/script>" in payload  # ...it is escaped to <\/script>
+    assert json.loads(payload) == scene  # ...and json still round-trips (\/ is a valid escape)
+
+
 def test_write_preview_writes_an_html_file(tmp_path: Path) -> None:
     ir = adapt_file(_SAND)
     out = write_preview(ir, solve(ir), tmp_path / "view.html")
