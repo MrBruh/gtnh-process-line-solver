@@ -61,7 +61,7 @@ where load **sums** along shared segments (Steiner-tree-like):
   delivered voltage reaches 0 cannot be powered at that tier and is reported infeasible. Loss is a
   flat **1 EU/block for every tier** for now (a simplifying assumption; per-material cable loss is
   Phase 2 dataset work).
-- **Thickness** (1x / 2x / 4x / 8x / 16x, **16x max**) is sized to the **summed load** through
+- **Thickness** (1x / 2x / 4x / 8x / 12x / 16x, **16x max**) is sized to the **summed load** through
   that segment, rounded up to whole amps.
 - A segment needing **> 16x** must split into **parallel runs** or move to a **higher voltage
   tier** (more power per amp).

@@ -14,6 +14,11 @@ spot-check tiers/face-rules/throughputs in-game (docs/ROADMAP.md step 0).
 
 from __future__ import annotations
 
+# The cable ladder is rule data, but its canonical home is the output contract that enforces
+# membership (ir/output.py): dataset imports ir, never the reverse, so the contract cannot end up
+# in an import cycle with the dataset loader (which needs ir types for footprints/facings).
+from gtnh_solver.ir.output import CABLE_THICKNESSES, MAX_CABLE_THICKNESS
+
 from .voltage import (
     CABLE_LOSS_PER_BLOCK,
     VOLTAGE_BY_TIER,
@@ -27,6 +32,8 @@ from .voltage import (
 
 __all__ = [
     "CABLE_LOSS_PER_BLOCK",
+    "CABLE_THICKNESSES",
+    "MAX_CABLE_THICKNESS",
     "VOLTAGE_BY_TIER",
     "UnknownTierError",
     "UnpowerableError",

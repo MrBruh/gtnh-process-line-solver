@@ -160,14 +160,10 @@ def _quality(problem: InputIR, layout: LayoutResult, objective: Objective) -> tu
             cells.update(occupied_cells(p.cell, machine.footprint))
     power_cells: set[tuple[int, int, int]] = set()
     for r in layout.routes:
-        for seg in r.segments:
-            for cell in (
-                (seg.start.x, seg.start.y, seg.start.z),
-                (seg.end.x, seg.end.y, seg.end.z),
-            ):
-                cells.add(cell)
-                if r.commodity is Commodity.POWER:
-                    power_cells.add(cell)
+        route_cells = r.cells()
+        cells.update(route_cells)
+        if r.commodity is Commodity.POWER:
+            power_cells.update(route_cells)
     if not cells:
         return (0, 0, 0)
     xs = [c[0] for c in cells]
@@ -214,9 +210,7 @@ def _assemble(
     autos = list(routing.auto_connections)
     # Power cables route around the item/fluid pipes already laid, so no cell carries two routes
     # (the crude single-channel capacity the validator enforces). docs/ARCHITECTURE.md #7.
-    item_cells = {
-        (seg.start.x, seg.start.y, seg.start.z) for r in routing.routes for seg in r.segments
-    } | {(seg.end.x, seg.end.y, seg.end.z) for r in routing.routes for seg in r.segments}
+    item_cells = {cell for r in routing.routes for cell in r.cells()}
     power = route_power(problem, placements, extra_obstacles=item_cells)
     routes = [*routing.routes, *power.routes]
     placement_list = list(placements)

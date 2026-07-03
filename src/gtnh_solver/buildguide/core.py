@@ -27,6 +27,7 @@ from gtnh_solver.ir import (
     Route,
 )
 from gtnh_solver.ir.geometry import Cell, occupied_cells
+from gtnh_solver.ir.nets import port_direction_map
 from gtnh_solver.system_io import (
     RATE_UNIT,
     BoundaryFlow,
@@ -48,7 +49,7 @@ def build_guide(problem: InputIR, layout: LayoutResult) -> str:
     """Render ``layout`` (its problem supplies machine types and net resources) as text."""
     machines = {m.id: m for m in problem.machines}
     nets = {n.id: n for n in problem.nets}
-    port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
+    port_dir = port_direction_map(problem)
     coord_of = {p.machine_id: p.cell for p in layout.placements}
     lines: list[str] = []
     lines += _header(problem, layout)
@@ -83,10 +84,7 @@ def _bom(layout: LayoutResult, machines: dict[str, Machine]) -> list[str]:
     pipe_cells: dict[str, set[Cell]] = {}
     covers = 0
     for r in layout.routes:
-        cells = pipe_cells.setdefault(r.commodity.value, set())
-        for seg in r.segments:
-            cells.add((seg.start.x, seg.start.y, seg.start.z))
-            cells.add((seg.end.x, seg.end.y, seg.end.z))
+        pipe_cells.setdefault(r.commodity.value, set()).update(r.cells())
         if r.commodity is not Commodity.POWER:
             covers += len(r.terminals)  # power cables connect bare; covers are item/fluid only
 
@@ -302,9 +300,8 @@ def _layer_maps(problem: InputIR, layout: LayoutResult, machines: dict[str, Mach
     route_cells: dict[Cell, str] = {}
     for r in layout.routes:
         char = _PIPE_CHAR[r.commodity.value]
-        for seg in r.segments:
-            route_cells.setdefault((seg.start.x, seg.start.y, seg.start.z), char)
-            route_cells.setdefault((seg.end.x, seg.end.y, seg.end.z), char)
+        for cell in r.cells():
+            route_cells.setdefault(cell, char)
 
     occupied = set(machine_cells) | set(route_cells)
     if not occupied:

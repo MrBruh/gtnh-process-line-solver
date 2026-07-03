@@ -90,7 +90,7 @@ Route
   commodity: "item" | "fluid" | "power"
   terminals: [Terminal]                  # where the route meets each machine endpoint (covers ride here)
   segments: [Segment]                    # cell-path; lowered to blocks only at export
-  thickness_per_segment: [int] | null    # power only (else null); 1/2/4/8/16, summed amperage
+  thickness_per_segment: [int] | null    # power only (else null); 1/2/4/8/12/16, summed amperage
 Terminal    { machine_id, port_id, face: Facing, cell: CellCoord }  # non-front face; cell just outside
 Segment     { start: CellCoord, end: CellCoord, channel: int }   # >= 0 only; the per-edge channel cap is Phase 2, not yet enforced
 AutoConnection { net_id, source_machine_id, source_face: Facing, target_machine_id, target_face: Facing }

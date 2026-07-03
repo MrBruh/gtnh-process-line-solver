@@ -127,7 +127,7 @@ doc as intent and reconcile.
    capacity - no cell carries two routes, validator-enforced. Phase 2, lane D: the per-edge
    multi-channel cap and cell→block realizability.)*
 8. **Power - shared-amperage net.** Amperage *sums* along shared segments (Steiner-tree-like).
-   Voltage tier follows the machine voltage; thickness (1x/2x/4x/8x/16x, 16x max) sizes to the
+   Voltage tier follows the machine voltage; thickness (1x/2x/4x/8x/12x/16x, 16x max) sizes to the
    summed amperage; past 16x split into parallel runs or a higher voltage. **Cable loss over
    distance** is modelled: a machine `d` blocks out receives `tier_voltage - loss·d`, so amperage
    is sized at that delivered voltage (thicker cable the farther out), and a run whose voltage

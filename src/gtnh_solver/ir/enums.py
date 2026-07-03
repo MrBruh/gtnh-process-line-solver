@@ -44,6 +44,17 @@ class LayoutStatus(str, Enum):
     PARTIAL_INVALID = "partial_invalid"
 
 
+#: The facings a machine front can take, in the canonical order machines default to (front
+#: defaults to the first, NORTH). The adapter seeds every machine's ``orientation_options`` with
+#: these; one source for both adapters, which each hard-coded the same list.
+HORIZONTAL_FACINGS_ORDERED: tuple[Facing, ...] = (
+    Facing.NORTH,
+    Facing.SOUTH,
+    Facing.EAST,
+    Facing.WEST,
+)
+
 #: The facings a machine front can take. GT machines are placed facing a horizontal direction;
-#: they never face up/down (top/bottom faces can still carry I/O - see docs/DOMAIN.md).
-HORIZONTAL_FACINGS = frozenset({Facing.NORTH, Facing.SOUTH, Facing.EAST, Facing.WEST})
+#: they never face up/down (top/bottom faces can still carry I/O - see docs/DOMAIN.md). The
+#: membership form the ``Machine`` validator checks orientation options against.
+HORIZONTAL_FACINGS = frozenset(HORIZONTAL_FACINGS_ORDERED)

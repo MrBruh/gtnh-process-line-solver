@@ -14,8 +14,8 @@ from __future__ import annotations
 from typing import Any
 
 from gtnh_solver.dataset import tier_voltage
-from gtnh_solver.ir import Commodity, InputIR, IODirection, LayoutResult, Machine
-from gtnh_solver.system_io import RATE_STEM, system_io
+from gtnh_solver.ir import Commodity, InputIR, LayoutResult, Machine
+from gtnh_solver.system_io import RATE_STEM, is_boundary_storage, system_io
 
 #: Bump if the scene shape the viewer template expects changes.
 SCENE_VERSION = 1
@@ -35,7 +35,9 @@ _MACHINE_PALETTE = (
     "#bc6c25",
 )
 
-#: Route colours by commodity (the viewer's legend mirrors these).
+#: Route colours by commodity. The single source: routes carry their colour, and the scene's
+#: ``routeLegend`` (below) carries the legend swatches, so the viewer no longer hard-codes a
+#: second copy of these hex values on the JS side.
 _COMMODITY_COLOR = {
     Commodity.ITEM: "#3cb44b",
     Commodity.FLUID: "#4363d8",
@@ -143,6 +145,12 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
         "autoConnections": scene_autos,
         "io": scene_io,
         "legend": [{"label": t, "color": color_for_type[t]} for t in types],
+        # The route-commodity legend swatches, so the viewer reads the colours from here instead of
+        # keeping a second hard-coded copy (one source: ``_COMMODITY_COLOR``).
+        "routeLegend": [
+            {"commodity": commodity.value, "color": color}
+            for commodity, color in _COMMODITY_COLOR.items()
+        ],
         "metrics": {
             "footprint": metrics.footprint,
             "layers": metrics.layers,
@@ -192,12 +200,11 @@ def _content_bounds(
 
 
 def _role(machine: Machine) -> str:
-    """Coarse render role: a power source, a boundary storage, or a plain machine."""
-    if any(
-        p.commodity is Commodity.POWER and p.direction is IODirection.OUTPUT
-        for p in machine.faces.ports
-    ):
+    """Coarse render role: a power source, a boundary storage, or a plain machine. Reuses the
+    shared predicates (``Machine.is_power_source``, ``system_io.is_boundary_storage``) so the role
+    stays in step with the build guide instead of re-deriving them here."""
+    if machine.is_power_source:
         return "source"
-    if machine.type.startswith("Super "):  # Super Chest / Super Tank boundary blocks
+    if is_boundary_storage(machine.type):  # Super Chest / Super Tank boundary blocks
         return "storage"
     return "machine"

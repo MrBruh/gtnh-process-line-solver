@@ -59,6 +59,7 @@ from gtnh_solver.ir import (
     Terminal,
 )
 from gtnh_solver.ir.geometry import Cell
+from gtnh_solver.ir.nets import placement_index
 
 from ._grid import astar, coord, dock, obstacle_cells
 from .auto import assign_auto_outputs
@@ -117,12 +118,17 @@ def route(problem: InputIR, placements: Sequence[Placement]) -> RouteResult:
 
     routes, failures = _rip_up_reroute(nets, lambda order: _route_pass(problem, placements, order))
     if not failures:
-        return RouteResult(tuple(routes), auto_connections=auto_connections)
+        return RouteResult(routes=tuple(routes), auto_connections=auto_connections)
 
     # Exhausted: report the first net still failing (in original order), with its specific reason,
     # plus every still-failing net so the solver's feedback loop can penalize them all.
     still_failing = tuple(net.id for net in nets if net.id in failures)
-    return RouteResult(tuple(routes), failures[still_failing[0]], still_failing, auto_connections)
+    return RouteResult(
+        routes=tuple(routes),
+        infeasibility=failures[still_failing[0]],
+        failed_nets=still_failing,
+        auto_connections=auto_connections,
+    )
 
 
 def _rip_up_reroute(
@@ -175,9 +181,7 @@ def _route_pass(
     what it is given.
     """
     machines = {m.id: m for m in problem.machines}
-    placement_by_machine: dict[str, Placement] = {}
-    for placement in placements:
-        placement_by_machine.setdefault(placement.machine_id, placement)  # one placement/machine
+    placement_by_machine = placement_index(placements)
     region = problem.bounding_region
 
     obstacles = obstacle_cells(problem, placements, machines)
@@ -190,7 +194,7 @@ def _route_pass(
             continue
         routes.append(outcome)
         # Capacity: this net now owns these cells, so the nets after it route around them.
-        obstacles.update(_segment_cells(outcome.segments))
+        obstacles.update(outcome.cells())
     return routes, failures
 
 
@@ -214,7 +218,7 @@ def _route_one_net(
         terminal = dock(endpoint.port_id, ep_placement, ep_machine, obstacles, chosen, region)
         if terminal is None:
             return _no_dock(net.id, endpoint.machine_id)
-        chosen.add((terminal.cell.x, terminal.cell.y, terminal.cell.z))
+        chosen.add(terminal.cell.as_tuple())
         terminals.append(terminal)
 
     segments = _connect([t.cell for t in terminals], obstacles, region)
@@ -223,22 +227,13 @@ def _route_one_net(
     return Route(net_id=net.id, commodity=net.commodity, terminals=terminals, segments=segments)
 
 
-def _segment_cells(segments: Sequence[Segment]) -> set[Cell]:
-    """Every cell a route's segments touch (both endpoints of each hop)."""
-    cells: set[Cell] = set()
-    for seg in segments:
-        cells.add((seg.start.x, seg.start.y, seg.start.z))
-        cells.add((seg.end.x, seg.end.y, seg.end.z))
-    return cells
-
-
 def _connect(
     cells: Sequence[CellCoord], obstacles: set[Cell], region: CellBox
 ) -> list[Segment] | None:
     """Chain consecutive terminals with A*; the union is a single connected subgraph."""
     segments: list[Segment] = []
     for a, b in pairwise(cells):
-        path = astar((a.x, a.y, a.z), (b.x, b.y, b.z), obstacles, region)
+        path = astar(a.as_tuple(), b.as_tuple(), obstacles, region)
         if path is None:
             return None
         for c0, c1 in pairwise(path):

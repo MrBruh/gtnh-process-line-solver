@@ -23,6 +23,11 @@ class CellCoord(FrozenModel):
     y: int
     z: int
 
+    def as_tuple(self) -> Cell:
+        """This coord as a bare ``(x, y, z)`` :data:`Cell` tuple - the lightweight form the hot
+        grid loops (routing, validation, the build guide) key sets and dicts on."""
+        return (self.x, self.y, self.z)
+
 
 class CellBox(FrozenModel):
     """An axis-aligned box measured in cells, given by its size (each dimension >= 1).
@@ -86,6 +91,11 @@ FACE_DELTAS: dict[Facing, Cell] = {
     Facing.UP: (0, 1, 0),
     Facing.DOWN: (0, -1, 0),
 }
+
+#: The six unit face-offsets as a bare tuple (``FACE_DELTAS`` values, in face order), for grid
+#: neighbour scans that don't need the ``Facing`` key. One source for the router's A* neighbours
+#: (``_grid.NEIGHBORS``) and placement's LNS insertion offsets, which both re-derived it.
+FACE_OFFSETS: tuple[Cell, ...] = tuple(FACE_DELTAS.values())
 
 #: The face on the far side of a block from a given face (shared by solver + validator for
 #: auto-output adjacency: a source's auto-output face meets the target's opposite input face).

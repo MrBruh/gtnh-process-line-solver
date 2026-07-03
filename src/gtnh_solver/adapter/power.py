@@ -20,18 +20,20 @@ from __future__ import annotations
 from gtnh_solver.ir import (
     Commodity,
     FaceSpec,
-    Facing,
     IODirection,
     Machine,
     MachineFaceRef,
     Net,
     Port,
 )
+from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
+
+from ._errors import AdapterError
 
 #: Port ids the synthesis adds (kept distinct from the adapter's ``direction:resource`` ids).
 POWER_IN = "power:in"
 POWER_OUT = "power:out"
-_DEFAULT_ORIENTATIONS = [Facing.NORTH, Facing.SOUTH, Facing.EAST, Facing.WEST]
+_DEFAULT_ORIENTATIONS = list(HORIZONTAL_FACINGS_ORDERED)  # front defaults to the first (NORTH)
 
 
 def _source_id(tier: str) -> str:
@@ -66,8 +68,6 @@ def synthesize_power(machines: list[Machine], nets: list[Net]) -> tuple[list[Mac
     for tier in sorted(by_tier):
         source_id = _source_id(tier)
         if source_id in existing_ids:
-            from .core import AdapterError
-
             raise AdapterError(
                 f"synthetic power source id {source_id!r} collides with an export machine id"
             )

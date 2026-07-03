@@ -24,11 +24,11 @@ from gtnh_solver.ir import (
     Commodity,
     Facing,
     InputIR,
-    IODirection,
     Machine,
     Placement,
 )
 from gtnh_solver.ir.geometry import auto_output_faces
+from gtnh_solver.ir.nets import net_sources_sinks, placement_index, port_direction_map
 
 
 def assign_auto_outputs(
@@ -40,10 +40,8 @@ def assign_auto_outputs(
     only for the rest).
     """
     machines = {m.id: m for m in problem.machines}
-    placement_of: dict[str, Placement] = {}
-    for p in placements:
-        placement_of.setdefault(p.machine_id, p)
-    port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
+    placement_of = placement_index(placements)
+    port_dir = port_direction_map(problem)
 
     spent: set[str] = set()  # source machines that have used their single auto-output face
     autos: list[AutoConnection] = []
@@ -51,19 +49,10 @@ def assign_auto_outputs(
     for net in problem.nets:
         if net.commodity is Commodity.POWER or problem.me_toggles.toggled(net.commodity):
             continue
-        sources = [
-            e.machine_id
-            for e in net.endpoints
-            if port_dir.get((e.machine_id, e.port_id)) is IODirection.OUTPUT
-        ]
-        sinks = [
-            e.machine_id
-            for e in net.endpoints
-            if port_dir.get((e.machine_id, e.port_id)) is IODirection.INPUT
-        ]
+        sources, sinks = net_sources_sinks(net, port_dir)
         if len(sources) != 1 or len(sinks) != 1:
             continue  # crude: only simple 1->1 nets auto-output; fan-out routes as pipes
-        source, sink = sources[0], sinks[0]
+        source, sink = sources[0].machine_id, sinks[0].machine_id
         if source in spent:
             continue  # this machine's one auto-output is already used; the rest pipe
 

@@ -32,11 +32,11 @@ from gtnh_solver.ir import (
     Facing,
     Infeasibility,
     InputIR,
-    IODirection,
     Machine,
     Placement,
 )
 from gtnh_solver.ir.geometry import Cell, front_on_boundary, in_region, occupied_cells
+from gtnh_solver.ir.nets import net_sources_sinks, port_direction_map
 
 
 @dataclass(frozen=True)
@@ -138,23 +138,16 @@ def _flow_order(problem: InputIR) -> list[Machine]:
     to input order. This puts the material chain adjacent so the solver can auto-feed it
     (docs/DOMAIN.md auto-output)."""
     by_id = {m.id: m for m in problem.machines}
-    port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
+    port_dir = port_direction_map(problem)
     succ: dict[str, set[str]] = {m.id: set() for m in problem.machines}
     indeg: dict[str, int] = {m.id: 0 for m in problem.machines}
     material: set[str] = set()  # machines tied by an item/fluid net (the chain to keep adjacent)
     for net in problem.nets:
         if net.commodity is Commodity.POWER:
             continue
-        sources = [
-            e.machine_id
-            for e in net.endpoints
-            if port_dir.get((e.machine_id, e.port_id)) is IODirection.OUTPUT
-        ]
-        sinks = [
-            e.machine_id
-            for e in net.endpoints
-            if port_dir.get((e.machine_id, e.port_id)) is IODirection.INPUT
-        ]
+        src_eps, sink_eps = net_sources_sinks(net, port_dir)
+        sources = [e.machine_id for e in src_eps]
+        sinks = [e.machine_id for e in sink_eps]
         material.update(sources, sinks)
         for s in sources:
             for t in sinks:

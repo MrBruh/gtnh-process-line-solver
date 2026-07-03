@@ -57,7 +57,7 @@ disagree, the doc is the intent - fix one of them and say which.
   consumer is **Schematica-Plus** (classic `.schematic`, numeric block IDs). Don't target
   Litematica/`litemapy`. (Export is a post-v1 milestone anyway.)
 - **Power is a shared-amperage net**, not a per-pipe flow: voltage tier follows the machine
-  voltage; amperage *sums* on shared cable segments and sets thickness (1x/2x/4x/8x/16x,
+  voltage; amperage *sums* on shared cable segments and sets thickness (1x/2x/4x/8x/12x/16x,
   16x max → parallel runs or higher voltage). See [`docs/DOMAIN.md`](docs/DOMAIN.md).
 - **Machine faces:** the front face carries no I/O; the other five can input or output
   (covers make a specific pull/push explicit); a single auto-output face carries items OR

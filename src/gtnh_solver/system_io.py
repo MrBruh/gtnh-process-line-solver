@@ -23,6 +23,7 @@ from dataclasses import dataclass
 
 from gtnh_solver.dataset import UnknownTierError, UnpowerableError, amp_load, whole_amps
 from gtnh_solver.ir import Commodity, InputIR, IODirection, LayoutResult, Net, Port, Route, Segment
+from gtnh_solver.ir.nets import port_direction_map
 
 #: Per-commodity rate unit stem, no time suffix. The previewer appends ``/t`` or ``/s`` for its
 #: tick-vs-second toggle; the text guide uses ``RATE_UNIT`` below.
@@ -73,7 +74,7 @@ def port_resource(port: Port) -> str:
 
 def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
     """Derive the boundary I/O + summed power of ``layout`` (only machines it actually placed)."""
-    port_dir = {(m.id, p.id): p.direction for m in problem.machines for p in m.faces.ports}
+    port_dir = port_direction_map(problem)
     coord_of = {pl.machine_id: pl.cell for pl in layout.placements}
 
     # The net each output port sources / each input port sinks (keyed by machine+port). A source's
@@ -95,7 +96,7 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
         cell = coord_of.get(machine.id)
         if cell is None:  # only describe machines the layout actually placed
             continue
-        cell_t = (cell.x, cell.y, cell.z)
+        cell_t = cell.as_tuple()
         out_ports = [p for p in machine.faces.ports if p.direction is IODirection.OUTPUT]
         dirs = {p.direction for p in machine.faces.ports}
         only_sources = IODirection.INPUT not in dirs and IODirection.OUTPUT in dirs
@@ -180,7 +181,7 @@ def _power_distances(
         if r.commodity is not Commodity.POWER:
             continue
         sources = [
-            (t.cell.x, t.cell.y, t.cell.z)
+            t.cell.as_tuple()
             for t in r.terminals
             if port_dir.get((t.machine_id, t.port_id)) is IODirection.OUTPUT
         ]
@@ -191,7 +192,7 @@ def _power_distances(
             continue  # not a single tree; the validator flags it, we just skip the summary
         for t in r.terminals:
             if port_dir.get((t.machine_id, t.port_id)) is IODirection.INPUT:
-                d = depth.get((t.cell.x, t.cell.y, t.cell.z))
+                d = depth.get(t.cell.as_tuple())
                 if d is not None:
                     distances[t.machine_id] = d
     return distances
@@ -206,8 +207,8 @@ def _cable_depth(
     nodes: set[tuple[int, int, int]] = set()
     edges = 0
     for seg in segments:
-        a = (seg.start.x, seg.start.y, seg.start.z)
-        b = (seg.end.x, seg.end.y, seg.end.z)
+        a = seg.start.as_tuple()
+        b = seg.end.as_tuple()
         adj[a].add(b)
         adj[b].add(a)
         nodes.add(a)

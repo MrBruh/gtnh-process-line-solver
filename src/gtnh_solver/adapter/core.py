@@ -34,7 +34,6 @@ from gtnh_solver.ir import (
     CellBox,
     Commodity,
     FaceSpec,
-    Facing,
     InputIR,
     IODirection,
     Machine,
@@ -42,22 +41,20 @@ from gtnh_solver.ir import (
     Net,
     Port,
 )
+from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 
+from ._errors import AdapterError
 from .plan import Edge, Node, Plan, Recipe
 from .power import synthesize_power
 
 # Crude single-block physical defaults until the dataset lane provides real footprints/faces.
 _DEFAULT_FOOTPRINT = CellBox()  # 1x1x1
-_DEFAULT_ORIENTATIONS = [Facing.NORTH, Facing.SOUTH, Facing.EAST, Facing.WEST]
+_DEFAULT_ORIENTATIONS = list(HORIZONTAL_FACINGS_ORDERED)  # front defaults to the first (NORTH)
 _STORAGE_TIER = "LV"  # storages are unpowered; placeholder tier to satisfy the contract
 
 _COMMODITY = {"item": Commodity.ITEM, "fluid": Commodity.FLUID}
 # Boundary I/O blocks that accept I/O covers on their faces (keeps covers off pipes).
 _STORAGE_TYPE = {"item": "Super Chest", "fluid": "Super Tank"}
-
-
-class AdapterError(ValueError):
-    """An exported plan could not be mapped to the IR (dangling reference, bad kind, ...)."""
 
 
 def load_plan(path: str | Path) -> Plan:
@@ -142,6 +139,13 @@ def _port_id(direction: IODirection, resource_id: str) -> str:
     return f"{direction.value}:{resource_id}"  # e.g. "output:minecraft:sand"
 
 
+def _port_resource(port_id: str) -> str:
+    """The resource id back out of a ``_port_id`` (drop the ``{direction}:`` prefix) - the inverse
+    of :func:`_port_id`, kept beside it so the encode/decode stay in sync. The resource keeps its
+    own colons (``output:minecraft:sand`` -> ``minecraft:sand``)."""
+    return port_id.split(":", 1)[1]
+
+
 def _recipe_ports(recipe: Recipe, node: Node) -> list[Port]:
     """One input/output port per distinct recipe resource (deduped by id), each carrying the
     throughput it moves (items/t or mB/t) so boundary rates - notably a dangling output's product,
@@ -198,7 +202,7 @@ def _add_output_buffers(
                 continue
             if (machine.id, port.id) in wired:
                 continue  # already consumed by a net
-            resource = port.id.split(":", 1)[1]  # strip the "output:" prefix -> the resource id
+            resource = _port_resource(port.id)  # strip the "output:" prefix -> the resource id
             buffer_id = f"output-buffer:{machine.id}:{resource}"
             in_pid = _port_id(IODirection.INPUT, resource)
             buffers.append(
