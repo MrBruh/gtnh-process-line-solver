@@ -115,10 +115,14 @@ jobs:
           name: resolved
 
       # --- Toolchains ---------------------------------------------------------------
+      # The extractor's Gradle daemon is pinned to Java 25 (gradle/gradle-daemon-jvm.properties)
+      # and its foojay auto-provision is unreliable (serves a JRE with no javac on some
+      # platforms), so install a real JDK 25 here. The Forge 1.7.10 compile toolchains (Azul
+      # Zulu 17 for injected interfaces, Java 8 for the mod) still auto-download during the build.
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "25"
           cache: gradle
       - uses: actions/setup-python@v6
         with:
@@ -161,7 +165,10 @@ jobs:
 
       - name: Run extractor (headless dedicated server)
         working-directory: tools/gtnh-extractor
-        run: ./gradlew --no-daemon runServer "-PdatasetOut=${DATASET_OUT}"
+        # runServer prompts on stdin for online-mode, then Minecraft EULA acceptance; with no
+        # stdin attached it reads EOF and fails ("Minecraft EULA not accepted"). Feed the
+        # answers in: 'n' keeps the server offline (no Mojang auth), 'y' accepts the EULA.
+        run: printf 'n\ny\n' | ./gradlew --no-daemon runServer "-PdatasetOut=${DATASET_OUT}"
 
       # --- Install the emitted dataset and re-lock ----------------------------------
       - name: Install emitted dataset
