@@ -1,27 +1,39 @@
 package net.gtnhsolver.extractor;
 
+import java.io.File;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.World;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import cpw.mods.fml.common.FMLCommonHandler;
+import cpw.mods.fml.common.Loader;
 import cpw.mods.fml.common.Mod;
+import cpw.mods.fml.common.ModContainer;
 import cpw.mods.fml.common.event.FMLServerStartedEvent;
 
 /**
  * Headless entrypoint for the GTNH structure-dataset extractor.
  *
- * <p>This is the lane 1 scaffold (issue #44). The mod loads on a dedicated server
+ * <p>
+ * This is the lane 1 scaffold (issue #44). The mod loads on a dedicated server
  * alongside GT5-Unofficial + StructureLib, waits for the server to finish starting, runs
  * the dump, and then terminates the JVM so that {@code ./gradlew runServer} returns a
  * shell exit code CI can gate on: 0 on success, nonzero on any fatal failure.
  *
- * <p>The dump body itself is intentionally empty here. The real extraction loop
+ * <p>
+ * The dump body itself is intentionally empty here. The real extraction loop
  * (StructureDumper + JsonWriter + ErrorCollector, iterating
  * {@code GregTechAPI.METATILEENTITIES} and calling each controller's
  * {@code construct(...)}) lands in lane 2 (issue #45). Landing the boot/exit plumbing
  * first means lane 2 drops into a seam that a real server boot already exercises.
  *
- * <p>GT5U / StructureLib API surface touched by this class: none yet. It references only
+ * <p>
+ * GT5U / StructureLib API surface touched by this class: none yet. It references only
  * Forge/FML ({@link FMLServerStartedEvent} and
  * {@link FMLCommonHandler#exitJava(int, boolean)}). The intended (deliberately tiny) GT5U
  * surface for the dump loop is catalogued in this tool's {@code README.md}.
@@ -39,7 +51,8 @@ public class DumperMod {
      * post-init complete) - the point at which the GregTech registry is populated and a
      * structure dump could run. Runs the dump, then exits the JVM.
      *
-     * <p>Exit code contract: 0 when the dump succeeds so CI goes green; nonzero when any
+     * <p>
+     * Exit code contract: 0 when the dump succeeds so CI goes green; nonzero when any
      * {@link Throwable} escapes the dump so CI fails loudly rather than committing an
      * empty or partial dataset. {@code hardExit = false} lets FML shut the server down
      * gracefully before the process exits.
@@ -55,14 +68,77 @@ public class DumperMod {
             LOG.error("gtnh-extractor: dump failed, aborting with a nonzero exit code.", t);
             exitCode = 1;
         }
-        FMLCommonHandler.instance().exitJava(exitCode, false);
+        FMLCommonHandler.instance()
+            .exitJava(exitCode, false);
     }
 
     /**
-     * Lane 1: a no-op that only proves the scaffold boots. Lane 2 (issue #45) replaces
-     * this with the StructureDumper loop over {@code GregTechAPI.METATILEENTITIES}.
+     * Lane 2 (issue #45): run the core dump. Resolve the output directory and run metadata from
+     * system properties (the lane-4 workflow passes them via {@code -PdatasetOut=...} etc.), build
+     * every constructable controller with {@link StructureDumper}, and write the schema-v1 dataset
+     * to {@code <datasetOut>/multiblocks/}. Throws if nothing was dumped, so an extractor that
+     * silently produces an empty dataset fails CI rather than committing it.
      */
-    private void dump() {
-        LOG.info("gtnh-extractor: scaffold boot OK; dump loop not yet implemented (lane 2, issue #45).");
+    private void dump() throws Exception {
+        File datasetOut = resolveDatasetOut();
+        String packVersion = System.getProperty("gtnhextractor.packVersion", "unknown-dev");
+        String extractorSha = resolveExtractorSha();
+        Map<String, String> modVersions = collectModVersions();
+
+        World world = MinecraftServer.getServer().worldServers[0];
+        LOG.info(
+            "gtnh-extractor: dumping multiblocks to {} (pack {}, extractor {})",
+            datasetOut.getAbsolutePath(),
+            packVersion,
+            extractorSha);
+
+        StructureDumper dumper = new StructureDumper(world);
+        int written = dumper.run(datasetOut, packVersion, modVersions, extractorSha);
+        if (written == 0) {
+            throw new IllegalStateException("dump produced no controllers; see the failure list in _meta.json");
+        }
+        LOG.info(
+            "gtnh-extractor: wrote {} controllers, {} failures.",
+            written,
+            dumper.errors()
+                .count());
+    }
+
+    /** {@code -PdatasetOut} is forwarded as a system property by the build; default to an in-tree dir. */
+    private File resolveDatasetOut() {
+        String configured = System.getProperty("gtnhextractor.datasetOut");
+        if (configured != null && !configured.trim()
+            .isEmpty()) {
+            return new File(configured);
+        }
+        return new File(System.getProperty("user.dir"), "dataset-out");
+    }
+
+    /** Prefer an explicit property, then the CI-provided commit SHA, else a non-empty placeholder. */
+    private String resolveExtractorSha() {
+        String sha = System.getProperty("gtnhextractor.extractorSha");
+        if (sha == null || sha.trim()
+            .isEmpty()) {
+            sha = System.getenv("GITHUB_SHA");
+        }
+        return sha != null && !sha.trim()
+            .isEmpty() ? sha : "unknown";
+    }
+
+    /** The versions of the two manifest-tracked mods this dump was built from, for {@code _meta.json}. */
+    private Map<String, String> collectModVersions() {
+        Map<String, String> versions = new LinkedHashMap<>();
+        putModVersion(versions, "GT5-Unofficial", "gregtech");
+        putModVersion(versions, "StructureLib", "structurelib");
+        return versions;
+    }
+
+    private void putModVersion(Map<String, String> versions, String label, String modId) {
+        ModContainer container = Loader.instance()
+            .getIndexedModList()
+            .get(modId);
+        if (container != null) {
+            versions.put(label, container.getVersion());
+        }
     }
 }
