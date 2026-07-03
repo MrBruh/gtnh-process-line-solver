@@ -241,8 +241,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Sand passes the hand-built compactness + <= 3-cable budget under every objective.
 
 ### Changed
-- **CI tests Python 3.14; packaging metadata reflects real support.** The test matrix adds
-  `3.14` (floor through latest), and the package gains per-version trove classifiers
+- **CI tests Python 3.14; packaging metadata reflects real support.** The test matrix now runs
+  the floor and the latest release only (`3.10` + `3.14`; a floor break or a new-release break
+  is what a leg catches, and the 3.11-3.13 intermediates cannot fail while both ends pass), and
+  the package gains per-version trove classifiers
   (`Programming Language :: Python :: 3.10` through `3.14`) and moves from
   `Development Status :: 1 - Planning` to `3 - Alpha`. Internal CI/build polish along with it:
   pip caching, least-privilege `permissions`, cancel-superseded-runs `concurrency`, a
