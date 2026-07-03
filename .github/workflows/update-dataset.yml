@@ -39,7 +39,7 @@ jobs:
       changed: ${{ steps.diff.outputs.changed }}
       pack_version: ${{ steps.diff.outputs.pack_version }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:
@@ -105,7 +105,7 @@ jobs:
       # `_meta.json`). Adjust this + the "Install emitted dataset" step when lane 1 lands.
       DATASET_OUT: ${{ github.workspace }}/out/extractor
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
