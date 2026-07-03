@@ -9,3 +9,8 @@ from __future__ import annotations
 
 class AdapterError(ValueError):
     """An exported plan could not be mapped to the IR (dangling reference, bad kind, ...)."""
+
+
+class AdapterWarning(UserWarning):
+    """A recoverable adapter finding, e.g. a v2 export's ``resolved`` figures disagreeing with
+    the recipe-derived synthesis beyond float tolerance (the resolved figures still win - #2)."""
