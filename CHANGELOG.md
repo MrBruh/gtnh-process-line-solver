@@ -241,6 +241,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Sand passes the hand-built compactness + <= 3-cable budget under every objective.
 
 ### Changed
+- **CI tests Python 3.14; packaging metadata reflects real support.** The test matrix now runs
+  the floor and the latest release only (`3.10` + `3.14`; a floor break or a new-release break
+  is what a leg catches, and the 3.11-3.13 intermediates cannot fail while both ends pass), and
+  the package gains per-version trove classifiers
+  (`Programming Language :: Python :: 3.10` through `3.14`) and moves from
+  `Development Status :: 1 - Planning` to `3 - Alpha`. Internal CI/build polish along with it:
+  pip caching, least-privilege `permissions`, cancel-superseded-runs `concurrency`, a
+  `hatchling>=1.26` build pin, and a Dependabot config (GitHub Actions + pip, weekly).
 - **The router now owns the auto-output vs pipe decision.** `route()` decides itself, from the
   final placements + orientations, which nets GT's free auto-output connection covers (the logic
   moved from `solver/core.py` to `router/auto.py`, public `assign_auto_outputs`) and lays pipes
@@ -343,6 +351,25 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   nets, not just the first, so the place↔route feedback loop can penalize them all. The bounded-
   retry loop is now shared with the item router (`core._rip_up_reroute`). (`router/power.py`,
   `router/core.py`.)
+- **Validator derives power amperage independently of the router (GitHub #36).** The validator is
+  meant to be a second, differently-written implementation so a bug in the router's power math is
+  caught, not certified (docs/ARCHITECTURE.md #4) - but its amperage re-check still called the same
+  `dataset.amp_load` / `whole_amps` helpers the router sizes cables with, so a bug in the loss
+  formula or the ceil-with-epsilon rounding would have been blessed by both sides. It now inlines
+  its own arithmetic (`eut / (tier_voltage - loss * distance)` per machine, summed per segment,
+  `ceil` with the shared epsilon), importing only the rule DATA (the voltage ladder,
+  `CABLE_LOSS_PER_BLOCK`, `_AMP_EPSILON`) so the rounding policy stays identical and the two still
+  agree on every valid layout, while a sizing bug is now caught on a separate code path. Separately,
+  an unknown/off-ladder voltage tier was reported as `power_thickness_insufficient` (whose meaning
+  is "cable thinner than the summed amps") - a wrong signal for a route that is merely unverifiable;
+  it now gets its own additive `power_tier_unknown` violation code. (`validator/`.)
+- **User-facing output surfaces are hardened against bad input and bad paths (GitHub #39).** The
+  previewer inlined the scene JSON into its `<script>` block unescaped, so a machine type or
+  resource id containing `</script>` (plan JSON is external input) could close the tag and break or
+  inject into the page; the inline JSON now escapes `</` to `<\/` (JSON-transparent, the scene still
+  round-trips). The CLI's `-o`/`--preview` writes raised an uncaught `OSError` on an unwritable path,
+  dumping a raw traceback instead of honoring the documented 0/1/2 exit-code contract; both writes
+  now report `error: could not write <path>: <reason>` to stderr and exit 2. (`previewer/`, `cli`.)
 - **Amperage is sized from fractional machine loads, rounded up per aggregate - not per machine**
   (maintainer-verified in game). GT machines pull whole packets (1 amp = one packet of up to tier
   voltage) into an internal buffer only when it has room, so a 16 EU/t LV machine *averages* 0.5

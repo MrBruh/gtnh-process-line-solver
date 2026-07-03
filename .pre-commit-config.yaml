@@ -35,7 +35,10 @@ repos:
         entry: mypy
         language: system
         pass_filenames: false
-        types: [python]
+        # Run on Python changes *and* on pyproject.toml (mypy/ruff config lives there),
+        # so a config-only commit is still type-checked. pass_filenames is false, so mypy
+        # always checks the whole installed package regardless of what triggered it.
+        types_or: [python, toml]
 
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v4.0.0
