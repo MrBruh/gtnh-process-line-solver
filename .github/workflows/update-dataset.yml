@@ -230,7 +230,7 @@ jobs:
       # CI check; the default GITHUB_TOKEN does not trigger downstream workflows, but the
       # build job above already ran the full suite, so review is never on unverified data.
       - name: Create pull request
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.DATASET_PR_TOKEN || github.token }}
           branch: bot/dataset-update
