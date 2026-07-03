@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from itertools import pairwise
 
 import pytest
@@ -102,3 +104,15 @@ def test_amp_load_raises_when_loss_kills_the_voltage() -> None:
         amp_load(1, "LV", 40)
     # a source/unpowered block draws nothing regardless of distance (never reaches the check).
     assert amp_load(0, "LV", 999) == 0.0
+
+
+def test_ir_and_dataset_import_cleanly_in_either_order() -> None:
+    # ir is the package's import leaf: dataset imports ir (the cable ladder the output contract
+    # enforces), never the reverse. A reintroduced ir -> dataset import would form a cycle that
+    # only crashes on one import order - and the suite's own import order can mask it - so pin
+    # both orders in fresh interpreters.
+    for first, second in (("ir", "dataset"), ("dataset", "ir")):
+        subprocess.run(
+            [sys.executable, "-c", f"import gtnh_solver.{first}; import gtnh_solver.{second}"],
+            check=True,
+        )

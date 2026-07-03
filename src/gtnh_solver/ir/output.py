@@ -12,8 +12,6 @@ from __future__ import annotations
 
 from pydantic import ConfigDict, Field, model_validator
 
-from gtnh_solver.dataset import CABLE_THICKNESSES
-
 from ._base import StrictModel
 from .enums import Commodity, Facing, LayoutStatus
 from .geometry import Cell, CellCoord
@@ -21,9 +19,18 @@ from .geometry import Cell, CellCoord
 #: Bump on any breaking change to the output contract; record it in ``ir/__init__.py``.
 LAYOUT_RESULT_VERSION = 0
 
-#: Allowed GT cable thicknesses as a membership set (1x/2x/4x/8x/12x/16x, 16x max - docs/DOMAIN.md).
-#: The ladder itself lives in ``dataset`` (rule data); this is the frozenset the contract validates
-#: a power route's per-segment thickness against.
+#: Allowed GT cable thicknesses, smallest first (1x/2x/4x/8x/12x/16x; docs/DOMAIN.md). The single
+#: source: this contract enforces membership on every power route, and ``dataset`` re-exports the
+#: ladder as rule data for the router's sizing and the validator's re-check. Defined HERE because
+#: the ir package must stay the import leaf: ``dataset`` imports ir types (footprints, facings),
+#: so an ir -> dataset import would be a cycle waiting on import order.
+CABLE_THICKNESSES: tuple[int, ...] = (1, 2, 4, 8, 12, 16)
+
+#: The largest cable (16x). A segment whose summed amperage needs more must split into parallel
+#: runs or move to a higher voltage tier (Phase 2 optimization), not thicken further.
+MAX_CABLE_THICKNESS: int = CABLE_THICKNESSES[-1]
+
+#: Membership form of the ladder, for the per-segment thickness check below.
 _THICKNESSES = frozenset(CABLE_THICKNESSES)
 
 

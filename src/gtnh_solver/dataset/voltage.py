@@ -43,15 +43,6 @@ VOLTAGE_BY_TIER: dict[str, int] = {
     "MAX": 2147483648,
 }
 
-#: Allowed GT cable thicknesses, smallest first (1x/2x/4x/8x/12x/16x; docs/DOMAIN.md). The single
-#: source both routers size against, the output contract validates, and the validator re-checks -
-#: it is rule DATA, so the validator may import it without giving up its independent LOGIC.
-CABLE_THICKNESSES: tuple[int, ...] = (1, 2, 4, 8, 12, 16)
-
-#: The largest cable (16x). A segment whose summed amperage needs more must split into parallel
-#: runs or move to a higher voltage tier (Phase 2 optimization), not thicken further.
-MAX_CABLE_THICKNESS: int = CABLE_THICKNESSES[-1]
-
 #: EU lost per cable block a power packet travels. GT cables lose voltage over distance; the
 #: voltage a machine receives is the source voltage minus this loss times the block distance
 #: (docs/DOMAIN.md). Simplifying assumption for now (maintainer call): every tier has a 1-loss
