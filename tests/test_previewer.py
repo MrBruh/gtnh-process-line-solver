@@ -51,7 +51,7 @@ def test_scene_power_route_carries_thickness() -> None:
     thicknesses = [seg["thickness"] for r in power for seg in r["segments"]]
     assert thicknesses  # the trunk has segments
     assert all(isinstance(t, int) for t in thicknesses)
-    assert set(thicknesses) <= {1, 2, 4, 8, 16}
+    assert set(thicknesses) <= {1, 2, 4, 8, 12, 16}
 
 
 def test_scene_items_auto_feed_so_no_item_pipes() -> None:

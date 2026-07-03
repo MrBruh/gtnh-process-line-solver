@@ -250,17 +250,20 @@ def _apply_occupied_delta(
 ) -> None:
     """Fold an accepted move into ``occupied`` in place, instead of rebuilding it.
 
-    ``before`` and ``after`` list the same machines in the same order, so a differing ``cell`` at an
-    index marks a machine that relocated (a pure reorient leaves its cells unchanged). Every vacated
-    cell is removed before any new cell is added, so two machines swapping into each other's
-    footprints stay occupied. The result is exactly the full-rebuild occupied set of ``after`` -
-    every layout the loop holds is overlap-free - only far cheaper to reach."""
+    ``before`` and ``after`` hold the same machines but not necessarily in the same order (an
+    accepted LNS move lists the kept machines first and the reinserted ones last), so the diff is
+    keyed by machine id: a machine whose ``cell`` changed vacates its old footprint and claims the
+    new one. Every vacated cell is removed before any new cell is added, so two machines swapping
+    into each other's footprints stay occupied. The result is exactly the full-rebuild occupied set
+    of ``after`` - every layout the loop holds is overlap-free - only far cheaper to reach."""
+    before_cell = {p.machine_id: p.cell for p in before}
     removed: set[Cell] = set()
     added: set[Cell] = set()
-    for old_p, new_p in zip(before, after, strict=True):
-        if old_p.cell != new_p.cell:
-            footprint = machines[old_p.machine_id].footprint
-            removed.update(occupied_cells(old_p.cell, footprint))
+    for new_p in after:
+        old_cell = before_cell[new_p.machine_id]
+        if old_cell != new_p.cell:
+            footprint = machines[new_p.machine_id].footprint
+            removed.update(occupied_cells(old_cell, footprint))
             added.update(occupied_cells(new_p.cell, footprint))
     occupied.difference_update(removed)
     occupied.update(added)

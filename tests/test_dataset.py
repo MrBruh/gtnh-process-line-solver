@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from itertools import pairwise
 
 import pytest
 
 from gtnh_solver.dataset import (
     CABLE_LOSS_PER_BLOCK,
+    CABLE_THICKNESSES,
+    MAX_CABLE_THICKNESS,
     VOLTAGE_BY_TIER,
     UnknownTierError,
     UnpowerableError,
@@ -16,6 +20,14 @@ from gtnh_solver.dataset import (
     tier_voltage,
     whole_amps,
 )
+
+
+def test_cable_thickness_ladder_is_the_six_gt_sizes() -> None:
+    # 1x/2x/4x/8x/12x/16x - GT ships a 12x rung between 8x and 16x (once missing here, which
+    # over-thickened every 9..12-amp segment to 16x). Ascending order is load-bearing: the router
+    # picks the first rung that carries the load.
+    assert CABLE_THICKNESSES == (1, 2, 4, 8, 12, 16)
+    assert MAX_CABLE_THICKNESS == 16
 
 
 def test_voltage_ladder_starts_at_ulv_8_and_quadruples() -> None:
@@ -92,3 +104,15 @@ def test_amp_load_raises_when_loss_kills_the_voltage() -> None:
         amp_load(1, "LV", 40)
     # a source/unpowered block draws nothing regardless of distance (never reaches the check).
     assert amp_load(0, "LV", 999) == 0.0
+
+
+def test_ir_and_dataset_import_cleanly_in_either_order() -> None:
+    # ir is the package's import leaf: dataset imports ir (the cable ladder the output contract
+    # enforces), never the reverse. A reintroduced ir -> dataset import would form a cycle that
+    # only crashes on one import order - and the suite's own import order can mask it - so pin
+    # both orders in fresh interpreters.
+    for first, second in (("ir", "dataset"), ("dataset", "ir")):
+        subprocess.run(
+            [sys.executable, "-c", f"import gtnh_solver.{first}; import gtnh_solver.{second}"],
+            check=True,
+        )

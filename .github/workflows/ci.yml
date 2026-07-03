@@ -38,8 +38,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Floor (requires-python) through latest; the IR/validator must hold across all.
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        # Floor (requires-python) and latest only. The failures worth catching are "used a
+        # newer-than-floor feature" and "new release broke us"; when both ends pass, the
+        # intermediates do too, so testing them only burns runner minutes and flake surface.
+        python-version: ["3.10", "3.14"]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6

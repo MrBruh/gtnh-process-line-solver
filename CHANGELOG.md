@@ -7,6 +7,44 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Multiblock physical dataset - schema v1 + Python adapter (`dataset/`, GitHub #48).** The
+  first slice of the automated dataset-extraction pipeline (`DATASET_EXTRACTION_PLAN.md`): the
+  path from an extractor's raw JSON to the solver's physical rules. `dataset/schema.py` is a typed,
+  `extra="forbid"` Pydantic loader for schema v1 (`MultiblockDoc` + `_meta.json` `DatasetMeta`,
+  per plan section 4.2: `schema`, `controller`, `variants[blocks/hints/bbox]`, `substitutions`,
+  `failures`), the cross-language contract for the future Java extractor (issue #45), with a
+  derived JSON Schema (`multiblock_json_schema()`) for non-Python consumers so it cannot drift.
+  `dataset/multiblocks.py` is the adapter that does **all interpretation in Python** (plan design
+  principle 3): it derives each machine's footprint bounding box, hint-derived I/O faces, and
+  coil-tier count from the raw facts into an IR-shaped `MachinePhysical`, and `load_physical_dataset`
+  keys a whole dump by display name. Because the real extractor is not built yet, illustrative
+  hand-authored fixtures ship under `data/multiblocks/` (Electric Blast Furnace, Vacuum Freezer)
+  marked as such in a README, so the adapter and golden tests run today. Golden tests pin the
+  ground truths (EBF is 3x3x4 with two coil layers and hatch-layer hints; Vacuum Freezer is 3x3x3)
+  plus schema validation (every file validates, `_meta.json` failure list under a lenient
+  threshold). Wired **opt-in** into the gtnh-factory-flow adapter: `to_input_ir(plan, physical=...)`
+  stamps a known machine's real footprint on the `InputIR`, while the default path stays single-block
+  so the solver runs with or without a dump. No IR contract change (additive keyword-only argument).
+- **Automated dataset-update CI (`.github/workflows/update-dataset.yml`, lane 4)** - a
+  weekly + manual workflow that tracks the latest *stable* GTNH pack: it resolves the pack
+  version from the DreamAssemblerXXL manifests, diffs the pinned mod versions against
+  `gtnh.lock.json` (exiting green with no PR when unchanged), and on a change bumps the
+  extractor pins, runs the headless Forge dump, installs the dataset, re-locks, runs the
+  full test suite, and opens a reviewable PR whose summary surfaces the controller-count
+  delta, added/removed/changed multiblocks, and the extractor failure list. Never
+  auto-merges. Backed by a typed, tested CI helper (`tools/dataset_ci/`) and a dataset-diff
+  review checklist (`.github/PULL_REQUEST_TEMPLATE/dataset-update.md`).
+- **Dataset extractor scaffold (`tools/gtnh-extractor/`, the repo's only Java)** - lane 1 of
+  the automated multiblock-dataset pipeline (GitHub #44). A standalone GTNH
+  `ExampleMod1.7.10`-based Gradle tool whose `DumperMod` (`@Mod` entrypoint) hooks
+  `FMLServerStartedEvent`, runs an empty dump body, and calls `FMLCommonHandler.exitJava`
+  (0 on success, nonzero on failure) so `./gradlew runServer` boots a headless dedicated
+  1.7.10 server with GT5-Unofficial + StructureLib and exits as a pass/fail gate. GT5U and
+  StructureLib are pinned in `dependencies.gradle` from the current stable pack manifest
+  (2.8.4) and mirrored in the new repo-root `gtnh.lock.json`; the rest of GT5U's hard deps
+  resolve transitively from its Nexus POM. The Python solver gains no dependency on the tool
+  (it will read only the JSON the tool emits; the dump loop itself is lane 2). `NOTICE` now
+  credits the two LGPL mods.
 - Project scaffold: docs, package skeleton, CI, license.
 - Design and architecture documentation ported from the office-hours design doc
   and the engineering review (see `docs/`).
@@ -241,8 +279,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Sand passes the hand-built compactness + <= 3-cable budget under every objective.
 
 ### Changed
-- **CI tests Python 3.14; packaging metadata reflects real support.** The test matrix adds
-  `3.14` (floor through latest), and the package gains per-version trove classifiers
+- **CI tests Python 3.14; packaging metadata reflects real support.** The test matrix now runs
+  the floor and the latest release only (`3.10` + `3.14`; a floor break or a new-release break
+  is what a leg catches, and the 3.11-3.13 intermediates cannot fail while both ends pass), and
+  the package gains per-version trove classifiers
   (`Programming Language :: Python :: 3.10` through `3.14`) and moves from
   `Development Status :: 1 - Planning` to `3 - Alpha`. Internal CI/build polish along with it:
   pip caching, least-privilege `permissions`, cancel-superseded-runs `concurrency`, a
@@ -338,13 +378,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
 
 ### Fixed
-- **User-facing output surfaces are hardened against bad input and bad paths (GitHub #39).** The
-  previewer inlined the scene JSON into its `<script>` block unescaped, so a machine type or
-  resource id containing `</script>` (plan JSON is external input) could close the tag and break or
-  inject into the page; the inline JSON now escapes `</` to `<\/` (JSON-transparent, the scene still
-  round-trips). The CLI's `-o`/`--preview` writes raised an uncaught `OSError` on an unwritable path,
-  dumping a raw traceback instead of honoring the documented 0/1/2 exit-code contract; both writes
-  now report `error: could not write <path>: <reason>` to stderr and exit 2. (`previewer/`, `cli`.)
+- **The cable-thickness ladder gains GT's 12x rung** (maintainer-reported). GT ships six cable
+  sizes (1x/2x/4x/8x/12x/16x) but the dataset only knew five, so any segment or feed summing to
+  9 through 12 amps was sized a whole rung thick (16x). The router now picks 12x for that band,
+  the output contract and validator accept it, and the docs spell the full ladder.
+- **Power router does failed-first rip-up/reroute, like the item router (GitHub #40).** The power
+  router laid each tier's trunk in problem order and stopped at the first net that could not route,
+  reporting only that one - but capacity accretes obstacles, so a trunk laid for one tier can wedge
+  a later tier's trunk out of a chokepoint: a *false* infeasibility from net order alone, and a
+  weaker feedback-loop signal than the item router already gave for pipes. It now routes a pass
+  and, if any net failed, rips every trunk up and retries with the failed nets first (most-
+  constrained-first), stopping only when a pass is clean or a failed-net set repeats (a genuine
+  infeasibility, not an ordering accident). When routing does stall it reports ALL still-failing
+  nets, not just the first, so the place↔route feedback loop can penalize them all. The bounded-
+  retry loop is now shared with the item router (`core._rip_up_reroute`). (`router/power.py`,
+  `router/core.py`.)
 - **Validator derives power amperage independently of the router (GitHub #36).** The validator is
   meant to be a second, differently-written implementation so a bug in the router's power math is
   caught, not certified (docs/ARCHITECTURE.md #4) - but its amperage re-check still called the same
@@ -357,17 +405,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   an unknown/off-ladder voltage tier was reported as `power_thickness_insufficient` (whose meaning
   is "cable thinner than the summed amps") - a wrong signal for a route that is merely unverifiable;
   it now gets its own additive `power_tier_unknown` violation code. (`validator/`.)
-- **Power router does failed-first rip-up/reroute, like the item router (GitHub #40).** The power
-  router laid each tier's trunk in problem order and stopped at the first net that could not route,
-  reporting only that one - but capacity accretes obstacles, so a trunk laid for one tier can wedge
-  a later tier's trunk out of a chokepoint: a *false* infeasibility from net order alone, and a
-  weaker feedback-loop signal than the item router already gave for pipes. It now routes a pass
-  and, if any net failed, rips every trunk up and retries with the failed nets first (most-
-  constrained-first), stopping only when a pass is clean or a failed-net set repeats (a genuine
-  infeasibility, not an ordering accident). When routing does stall it reports ALL still-failing
-  nets, not just the first, so the place↔route feedback loop can penalize them all. The bounded-
-  retry loop is now shared with the item router (`core._rip_up_reroute`). (`router/power.py`,
-  `router/core.py`.)
+- **User-facing output surfaces are hardened against bad input and bad paths (GitHub #39).** The
+  previewer inlined the scene JSON into its `<script>` block unescaped, so a machine type or
+  resource id containing `</script>` (plan JSON is external input) could close the tag and break or
+  inject into the page; the inline JSON now escapes `</` to `<\/` (JSON-transparent, the scene still
+  round-trips). The CLI's `-o`/`--preview` writes raised an uncaught `OSError` on an unwritable path,
+  dumping a raw traceback instead of honoring the documented 0/1/2 exit-code contract; both writes
+  now report `error: could not write <path>: <reason>` to stderr and exit 2. (`previewer/`, `cli`.)
 - **Amperage is sized from fractional machine loads, rounded up per aggregate - not per machine**
   (maintainer-verified in game). GT machines pull whole packets (1 amp = one packet of up to tier
   voltage) into an internal buffer only when it has room, so a 16 EU/t LV machine *averages* 0.5

@@ -29,7 +29,7 @@ from gtnh_solver.ir import (
 )
 from gtnh_solver.router import route, route_power
 from gtnh_solver.solver import solve
-from tests._helpers import consumer, net, producer
+from tests._helpers import at, consumer, net, producer
 
 _SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
 
@@ -106,14 +106,11 @@ def test_build_guide_power_note_counts_a_sink_tapping_the_source_dock() -> None:
     storage = next(m for m in ir.machines if m.type == "Super Chest" and ":" not in m.id)
     out_buffer = next(m for m in ir.machines if m.id.startswith("output-buffer:"))
 
-    def at(m: Machine, x: int, y: int, z: int) -> Placement:
-        return Placement(machine_id=m.id, cell=CellCoord(x=x, y=y, z=z), orientation=Facing.NORTH)
-
     placements = [
-        at(storage, 0, 0, 0),
-        *(at(h, 1 + i, 0, 0) for i, h in enumerate(hammers)),
-        at(out_buffer, 4, 0, 0),
-        at(source, 4, 1, 0),  # front north on the z=0 boundary (the reserved feed face)
+        at(storage.id, 0, 0, 0),
+        *(at(h.id, 1 + i, 0, 0) for i, h in enumerate(hammers)),
+        at(out_buffer.id, 4, 0, 0),
+        at(source.id, 4, 1, 0),  # front north on the z=0 boundary (the reserved feed face)
     ]
     rr = route(ir, placements)  # the item chain is adjacent: all auto-output, no pipe cells
     pw = route_power(ir, placements)

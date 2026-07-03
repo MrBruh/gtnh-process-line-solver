@@ -375,7 +375,7 @@ def _cell(terminal: Terminal) -> Cell:
 
 
 def _cable_thickness(load: int) -> int:
-    """Smallest cable thickness (1/2/4/8/16) that carries ``load`` amps (>=1 even for 0)."""
+    """Smallest cable thickness (1/2/4/8/12/16) that carries ``load`` amps (>=1 even for 0)."""
     for t in CABLE_THICKNESSES:
         if load <= t:
             return t

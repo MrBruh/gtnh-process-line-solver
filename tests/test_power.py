@@ -182,6 +182,24 @@ def test_power_single_machine_thickness_matches_its_amperage() -> None:
     assert set(result.routes[0].thickness_per_segment or []) == {4}  # ceil(65/30)=3 -> 4x
 
 
+def test_power_a_9_to_12_amp_load_gets_the_12x_cable_not_16x() -> None:
+    # GT's ladder has a 12x rung between 8x and 16x (it was missing from the dataset, so a
+    # 9..12-amp segment came out a whole size thick). eut=320 at LV docked 2 blocks out:
+    # 320/30 = 10.67 -> 11 amps -> a 12x cable.
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[_src(), _load("m0", 320)],
+        nets=[_pnet("m0")],
+    )
+    placements = [at("src", 0, 0, 0), at("m0", 2, 0, 0)]
+    result = route_power(problem, placements)
+    assert result.ok
+    route = result.routes[0]
+    assert set(route.thickness_per_segment or []) == {12}
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route])
+    assert validate(problem, layout).ok, str(validate(problem, layout))
+
+
 def test_power_loss_thickens_a_far_cable_past_its_lossless_size() -> None:
     # 16 EU/t at LV is 1 amp at the source (16/32) and would stay 1 amp lossless, but docked toward
     # the source the machine is 18 blocks out -> 14 V delivered -> ceil(16/14)=2 amps -> a 2x cable.
