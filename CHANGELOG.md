@@ -7,6 +7,24 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Extractor core dump loop (`tools/gtnh-extractor/`, lane 2, GitHub #45).** The Java tool now
+  fills its `DumperMod.dump()` seam with `StructureDumper` + `JsonWriter` + `ErrorCollector` and
+  emits the schema-v1 dataset. It iterates `GregTechAPI.METATILEENTITIES`, keeps the
+  `IConstructable` controllers, and for each places it at a fixed origin in the server overworld,
+  sweeps the trigger stack (size 1..N, stopping when the placed cell set stops changing so
+  identity-only tier swaps collapse into one variant), and per size runs a hint pass
+  (`construct(_, hintsOnly=true)` with a `RecordingProxy` swapped into `StructureLib.proxy`, and the
+  world's `isRemote` flag briefly flipped since the hint walk is client-only) plus a block pass
+  (`construct(_, hintsOnly=false)` with the `gt_no_hatch` channel, then scan). It writes one
+  `<datasetOut>/multiblocks/<name>.json` per controller plus a `_meta.json` run summary (schema,
+  pack version, mod versions, timestamp, extractor SHA, controller count, failures), with stable
+  key + variant ordering. Every controller is wrapped so an exception, a non-terminating/explosive
+  sweep, or an empty scan lands in `_meta.json.failures` rather than aborting the run; hint capture
+  is best-effort so a controller with client-only icon hints still dumps its geometry. The output
+  directory and run metadata come from `-PdatasetOut`/`-PpackVersion`/`-PextractorSha`. A verified
+  headless `runServer` boot dumps 191 of 209 constructable controllers (Electric Blast Furnace
+  3x3x4, Vacuum Freezer 3x3x3), all validating against `dataset/schema.py`. Channel handling /
+  identity-substitution tables (`substitutions` stays empty) are lane 3; textures are lane 6.
 - **Multiblock physical dataset - schema v1 + Python adapter (`dataset/`, GitHub #48).** The
   first slice of the automated dataset-extraction pipeline (`DATASET_EXTRACTION_PLAN.md`): the
   path from an extractor's raw JSON to the solver's physical rules. `dataset/schema.py` is a typed,

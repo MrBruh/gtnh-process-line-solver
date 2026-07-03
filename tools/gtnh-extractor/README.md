@@ -13,19 +13,31 @@ output matches in-game behaviour by construction. See `DATASET_EXTRACTION_PLAN.m
 
 ## Status
 
-This is the **lane 1 scaffold** (issue #44). What is here:
+**Lane 2 (issue #45): the core dump loop is implemented.** On top of the lane 1 scaffold
+(the `ExampleMod1.7.10` buildscript wiring, `dependencies.gradle` pins, and the
+`DumperMod` boot/exit plumbing), the tool now builds every multiblock and emits the
+schema-v1 dataset:
 
-- The GTNH `ExampleMod1.7.10` buildscript wiring (Gradle wrapper, `gtnhconvention`
-  convention plugin, GTNH Nexus repositories), configured for this tool in
-  `gradle.properties`.
-- `dependencies.gradle` pinning GT5-Unofficial and StructureLib from the GTNH Nexus.
-- `DumperMod`, the `@Mod` entrypoint: it hooks `FMLServerStartedEvent`, runs an **empty**
-  dump body, and exits the JVM (0 on success, nonzero on failure) so a `runServer` boot
-  is a pass/fail gate.
+- `DumperMod` hooks `FMLServerStartedEvent`, resolves the run config, runs the dump, and
+  exits the JVM (0 on success, nonzero on failure) so a `runServer` boot is a pass/fail gate.
+- `StructureDumper` iterates `GregTechAPI.METATILEENTITIES`, keeps the `IConstructable`
+  controllers, and for each one places it at a fixed origin in the server overworld and
+  sweeps the trigger stack (size 1..N, stopping when the placed block set stops changing).
+  Per stack size it runs a **hint pass** (`construct(trigger, hintsOnly=true)` with a
+  recording proxy that captures the hologram's hint dots) and a **block pass**
+  (`construct(trigger, hintsOnly=false)` into a wiped void region, then scan), applying the
+  `gt_no_hatch` channel so real hatches stay out and the casing shell plus hint positions
+  are what get recorded.
+- `RecordingProxy` captures hint particles headlessly (the server's normal proxy no-ops
+  them); `JsonWriter` serialises the raw facts to schema-v1 JSON (Gson, stable key +
+  variant ordering); `ErrorCollector` sends any exception, non-terminating/explosive sweep,
+  or empty scan to `_meta.json.failures` so one broken multiblock never kills the run.
 
-What is **not** here yet: the actual dump loop (`StructureDumper` + `JsonWriter` +
-`ErrorCollector`) lands in lane 2 (issue #45). No game logic lives in this tool by design;
-the whole extractor targets a few hundred lines across 3-4 classes.
+Output: one `<datasetOut>/multiblocks/<name>.json` per controller plus a `_meta.json` run
+summary, both validating against `src/gtnh_solver/dataset/schema.py`. **What is still out of
+scope here:** channel handling / identity-substitution tables (lane 3, issue #46 - the
+`substitutions` object stays empty) and texture mapping (lane 6). No game logic beyond raw
+coordinate collection lives in this tool by design; all interpretation is the Python adapter's.
 
 ## Pinned versions
 
@@ -58,16 +70,31 @@ To bump: rewrite the two coordinates in `dependencies.gradle` and the entry in
 
 Kept deliberately tiny (plan risk 9.1: never reference the ~250 controller classes by
 name; keep the API surface to a handful of stable, ancient symbols so a GT5U bump either
-just works or fails to compile loudly and locally). The lane 1 scaffold touches **none** of
-these yet (only Forge/FML, below). This is the intended surface for the lane 2 dump loop:
+just works or fails to compile loudly and locally). This is the surface the lane 2 dump loop
+actually touches:
 
 | Symbol | Package | Used for |
 | ------ | ------- | -------- |
-| `GregTechAPI.METATILEENTITIES` | `gregtech.api` | The array of registered meta tile entities to iterate. |
-| `IMetaTileEntity` | `gregtech.api.interfaces.metatileentity` | Element type of that array; the thing we filter and place. |
-| `IConstructable` | `com.gtnewhorizons.structurelib.alignment.constructable` | Filter: controllers that can build themselves; exposes `construct(ItemStack, boolean hintsOnly)`. |
-| `ISurvivalConstructable` | `com.gtnewhorizons.structurelib.alignment.constructable` | Filter: the survival-buildable variant, swept for size/tier variants. |
-| `StructureLibAPI` | `com.gtnewhorizons.structurelib` | Hint-block / channel plumbing (e.g. `gt_no_hatch`) read during the scan. |
+| `GregTechAPI.METATILEENTITIES` | `gregtech.api` | The array of registered meta tile entities to iterate (index = meta id). |
+| `IMetaTileEntity` | `gregtech.api.interfaces.metatileentity` | Element type of that array; `getStackForm`, `newMetaEntity`, `setBaseMetaTileEntity`, `getLocalName`/`getMetaName` filter, place, and name the controller. |
+| `BaseMetaTileEntity` | `gregtech.api.metatileentity` | The tile entity the controller is placed into: `setMetaTileID`, `setMetaTileEntity`, `setFrontFacing`. |
+| `IConstructable` | `com.gtnewhorizon.structurelib.alignment.constructable` | Filter + the build call `construct(ItemStack trigger, boolean hintsOnly)` (hint pass and block pass). |
+| `ChannelDataAccessor` | `com.gtnewhorizon.structurelib.alignment.constructable` | `setChannelData(trigger, "gt_no_hatch", 1)` to keep auto-placed hatches out. |
+| `IAlignment` / `ExtendedFacing` | `com.gtnewhorizon.structurelib.alignment[.enumerable]` | Point the controller front at a fixed direction so the offset frame is deterministic. |
+| `StructureLibAPI.getBlockHint()` | `com.gtnewhorizon.structurelib` | Identify hint-block dots while scanning (a hatch/DOF slot vs. a solid casing cell). |
+| `StructureLib.proxy` (reflected) + `CommonProxy` (subclassed) | `com.gtnewhorizon.structurelib` | Temporarily swap in `RecordingProxy` to capture hint particles headlessly (the server's proxy no-ops them). The one reflective touch of a StructureLib internal; a bump that moves it fails loudly and locally. |
+
+One extra reflective touch, on the Minecraft side: StructureLib's hint walk is client-only
+(`iterate()` opens with `if (!world.isRemote && hintsOnly) return false;`), so the dump briefly
+flips the scratch world's `net.minecraft.world.World.isRemote` to `true` around each hint pass, then
+restores it. This is safe because the whole dump runs synchronously in the server-started handler,
+with nothing else touching the world; hint capture is best-effort, so a controller whose hint pass
+reaches a client-only icon path (`IIconContainer.getIcon()` throws on a dedicated server) still
+dumps its geometry from the block pass.
+
+Note the framework package is `com.gtnewhorizon.structurelib` (singular). `ISurvivalConstructable`
+is deliberately **not** used: the dump drives the creative `construct(...)` path, not survival
+autoplace. Textures (`Textures.BlockIcons` reflection) are lane 6, not here.
 
 Forge/FML symbols the scaffold uses today:
 
@@ -105,10 +132,19 @@ Commands (run from `tools/gtnh-extractor/`):
 # Headless CI (what jitpack.yml / the lane-4 workflow use):
 ./gradlew setupCIWorkspace
 
-# Boot a dedicated server with GT5U + StructureLib + hard deps, run the (empty) dump,
-# and exit. Exit code 0 == success. runServer transitively triggers the setup above.
-./gradlew runServer
+# Boot a dedicated server with GT5U + StructureLib + hard deps, run the dump, and exit.
+# Exit code 0 == success. runServer transitively triggers the setup above.
+./gradlew runServer -PdatasetOut=../../_dump_out
 ```
+
+Run properties (`build.gradle.kts` forwards them into the server JVM as system properties):
+
+- `-PdatasetOut=<dir>` where to emit `<dir>/multiblocks/` (resolved against the project dir;
+  defaults to `<cwd>/dataset-out` if unset). The lane 4 workflow copies `<dir>/multiblocks/`
+  into `data/`.
+- `-PpackVersion=<ver>` / `-PextractorSha=<sha>` recorded in `_meta.json` (default `unknown-dev` /
+  the `GITHUB_SHA` env var / `unknown`).
+- `-PdebugMeta=<id>` diagnostics: log what the hint pass captured for one controller meta id.
 
 Headless notes for CI (lane 4 wires these up; they are not committed here):
 
