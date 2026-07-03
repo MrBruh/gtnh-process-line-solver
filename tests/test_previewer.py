@@ -13,9 +13,15 @@ import pytest
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.ir import (
     CellBox,
+    CellCoord,
+    Commodity,
+    Facing,
     InputIR,
     LayoutResult,
     LayoutStatus,
+    Route,
+    Segment,
+    Terminal,
 )
 from gtnh_solver.previewer import build_scene, render_html, write_preview
 from gtnh_solver.solver import solve
@@ -71,6 +77,8 @@ def test_scene_item_pipe_segments_have_null_thickness() -> None:
     item_routes = [r for r in scene["routes"] if r["commodity"] == "item"]
     assert item_routes  # the piped fan-out leg
     assert all(seg["thickness"] is None for r in item_routes for seg in r["segments"])
+    # item/fluid terminals carry no thickness either, so their leads keep the fixed pipe size
+    assert all(t["thickness"] is None for r in item_routes for t in r["terminals"])
 
 
 def test_scene_bounds_are_tight_not_the_search_region() -> None:
@@ -94,8 +102,46 @@ def test_scene_routes_carry_terminals() -> None:
     power = next(r for r in _sand_scene()["routes"] if r["commodity"] == "power")
     assert power["terminals"]  # so the viewer can draw a lead to each machine face
     term = power["terminals"][0]
-    assert set(term) == {"machine", "face", "cell"}
+    assert set(term) == {"machine", "face", "cell", "thickness"}
     assert len(term["cell"]) == 3
+    # every power terminal sizes its lead from a real cable thickness (GitHub #6)
+    assert all(t["thickness"] in {1, 2, 4, 8, 12, 16} for t in power["terminals"])
+
+
+def test_scene_power_terminal_thickness_is_the_fattest_incident_segment() -> None:
+    # A hand-built trunk with known per-segment thicknesses (GitHub #6):
+    #
+    #   src ==4x== [tap] ==2x== m1
+    #               |
+    #               1x
+    #               |
+    #               m3
+    #
+    # Each terminal must report the thickness of the segment incident to its cell; m2 taps the
+    # branch cell, which 4x/2x/1x segments all touch, so the THICKEST (4) wins - that is the
+    # cable that visually meets the block. build_scene's route mapping never looks placements
+    # up, so a routes-only layout keeps the fixture minimal.
+    def cell(x: int, y: int, z: int) -> CellCoord:
+        return CellCoord(x=x, y=y, z=z)
+
+    def seg(a: CellCoord, b: CellCoord) -> Segment:
+        return Segment(start=a, end=b, channel=0)
+
+    def term(mid: str, c: CellCoord) -> Terminal:
+        return Terminal(machine_id=mid, port_id="power", face=Facing.NORTH, cell=c)
+
+    src, fork, m1, m3 = cell(0, 0, 0), cell(1, 0, 0), cell(2, 0, 0), cell(1, 0, 1)
+    route = Route(
+        net_id="power:LV",
+        commodity=Commodity.POWER,
+        terminals=[term("src", src), term("m1", m1), term("m2", fork), term("m3", m3)],
+        segments=[seg(src, fork), seg(fork, m1), seg(fork, m3)],
+        thickness_per_segment=[4, 2, 1],
+    )
+    problem = InputIR(bounding_region=CellBox(sx=4, sy=2, sz=4))
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, routes=[route])
+    (scene_route,) = build_scene(problem, layout)["routes"]
+    assert [t["thickness"] for t in scene_route["terminals"]] == [4, 2, 4, 1]
 
 
 def test_scene_reports_system_io() -> None:
@@ -139,6 +185,7 @@ def test_render_html_wires_the_requested_viewer_features() -> None:
     assert "BoxGeometry" in html  # cables/pipes are rectangular bars, not cylinders (#2)
     assert "PlaneGeometry" in html  # machine names live on the front face (#3)
     assert "faceArrow" in html  # per-face auto-output direction arrows (#4)
+    assert "t.thickness" in html  # leads sized from the scene's terminal thickness (#6)
 
 
 def test_scene_route_segments_and_terminals_drive_node_and_arm_drawing() -> None:

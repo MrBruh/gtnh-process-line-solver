@@ -297,6 +297,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Sand passes the hand-built compactness + <= 3-cable budget under every objective.
 
 ### Changed
+- **Previewer wire->machine leads take the connecting cable's thickness (GitHub #6).** Each route
+  terminal in the scene now carries the thickness of the fattest route segment incident to its
+  cell (a mid-trunk tap touches several; the fattest is what visually meets the block), and the
+  viewer sizes the short lead from the cable into the docked machine face with the same
+  thickness->cross-section ramp as the trunk segments - so a 4x run meets its machine visibly fat
+  and a 1x tap thin. Item/fluid terminals carry `null` and keep their fixed-size pipe leads.
+  Previewer-internal (scene + viewer template): an additive scene field the template reads with a
+  fallback, so no scene-version bump. (`previewer/`.)
 - **CI tests Python 3.14; packaging metadata reflects real support.** The test matrix now runs
   the floor and the latest release only (`3.10` + `3.14`; a floor break or a new-release break
   is what a leg catches, and the 3.11-3.13 intermediates cannot fail while both ends pass), and
