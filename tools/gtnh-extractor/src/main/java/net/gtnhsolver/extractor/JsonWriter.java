@@ -50,6 +50,11 @@ final class JsonWriter {
         .thenComparingInt(h -> h.dx)
         .thenComparingInt(h -> h.hint);
 
+    private static final Comparator<DumpModel.Substitution> SUB_ORDER = Comparator
+        .comparingInt((DumpModel.Substitution s) -> s.channelValue)
+        .thenComparing(s -> s.block)
+        .thenComparingInt(s -> s.meta);
+
     private final Gson gson = new GsonBuilder().setPrettyPrinting()
         .disableHtmlEscaping()
         .create();
@@ -66,8 +71,10 @@ final class JsonWriter {
             .forEach(v -> variants.add(variantJson(v)));
         root.add("variants", variants);
 
-        // Lane 2 leaves the identity-substitution table empty; lane 3 (channel handling) fills it.
-        root.add("substitutions", new JsonObject());
+        // Lane 3 (channel handling) fills the identity-substitution table: channels that only swap a
+        // tiered block (coil, glass, ...) without changing the shape, keyed by channel name. Keys and
+        // entries are sorted so a regenerated dataset diffs minimally rather than reshuffling.
+        root.add("substitutions", substitutionsJson(doc.substitutions));
         root.add("failures", new JsonArray());
 
         write(new File(multiblocksDir, fileName(doc.controller)), root);
@@ -147,6 +154,29 @@ final class JsonWriter {
 
         o.add("bbox", offset(v.bbox[0], v.bbox[1], v.bbox[2]));
         return o;
+    }
+
+    /** Serialise the identity-substitution table: {@code {channel: [{channel_value, block, meta}]}}. */
+    private JsonObject substitutionsJson(Map<String, List<DumpModel.Substitution>> substitutions) {
+        JsonObject subs = new JsonObject();
+        substitutions.entrySet()
+            .stream()
+            .sorted(Map.Entry.comparingByKey())
+            .forEach(entry -> {
+                JsonArray arr = new JsonArray();
+                entry.getValue()
+                    .stream()
+                    .sorted(SUB_ORDER)
+                    .forEach(s -> {
+                        JsonObject sj = new JsonObject();
+                        sj.addProperty("channel_value", s.channelValue);
+                        sj.addProperty("block", s.block);
+                        sj.addProperty("meta", s.meta);
+                        arr.add(sj);
+                    });
+                subs.add(entry.getKey(), arr);
+            });
+        return subs;
     }
 
     // The Minecraft 1.7.10 Gson predates JsonArray's primitive add overloads, so wrap each int.
