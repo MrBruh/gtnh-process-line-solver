@@ -215,23 +215,23 @@ function frontFace(text, bg, size, normal) {
   return { plane, axis };
 }
 
-// Real GT block textures are embedded per icon in SCENE.textures (data: URIs). A machine box is
-// skinned by mapping its six per-face icon names (three.js material order) to nearest-filtered
-// textures, so GT's pixel art stays crisp instead of getting blurred by the default mipmap filter.
-// A missing icon, or a machine with no SCENE.texture at all, falls back to the flat colour box -
-// the placeholder path is always available (graceful degradation).
+// Real GT block textures are pre-baked per (block, meta, side, state) into flat PNGs and embedded in
+// SCENE.textures (pool key -> data: URI). A machine that resolved its structure is drawn as ONE
+// nearest-filtered cube PER constituent block (SCENE.blocks), not a single stretched box - so coils,
+// glass, hatch faces, and the internal structure stay visible (principle 6). A machine with no
+// committed doc, or whose blocks did not bake, keeps its flat colour placeholder box.
 const TEXTURES = SCENE.textures || {};
 const _texCache = {};
-function faceTexture(name) {
-  if (!name) return null;
-  if (name in _texCache) return _texCache[name];
-  const uri = TEXTURES[name];
-  if (!uri) { _texCache[name] = null; return null; }
+function faceTexture(key) {
+  if (!key) return null;
+  if (key in _texCache) return _texCache[key];
+  const uri = TEXTURES[key];
+  if (!uri) { _texCache[key] = null; return null; }
   const tex = new THREE.TextureLoader().load(uri);
   tex.magFilter = THREE.NearestFilter;    // crisp pixel art, no bilinear smear
   tex.minFilter = THREE.NearestFilter;
   tex.colorSpace = THREE.SRGBColorSpace;
-  _texCache[name] = tex;
+  _texCache[key] = tex;
   return tex;
 }
 function flatMaterial(m) {
@@ -239,14 +239,14 @@ function flatMaterial(m) {
   if (m.role === 'source') { mm.emissive = new THREE.Color(m.color); mm.emissiveIntensity = 0.45; }
   return mm;
 }
-function machineMaterials(m) {
-  if (!m.texture) return flatMaterial(m);   // placeholder box
-  return m.texture.map((name) => {           // one material per BoxGeometry face
-    const tex = faceTexture(name);
-    if (!tex) return flatMaterial(m);        // untextured face keeps the type colour
-    const mm = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.75, metalness: 0.05 });
-    if (m.role === 'source') { mm.emissive = new THREE.Color(m.color); mm.emissiveIntensity = 0.25; }
-    return mm;
+// A per-block cube's six materials from its baked-face pool keys (three.js material order). A face
+// with no baked texture falls back to a neutral casing grey so the cube still reads as a block.
+const _UNBAKED = new THREE.MeshStandardMaterial({ color: '#6b7280', roughness: 0.8, metalness: 0.05 });
+function blockMaterials(faces) {
+  return faces.map((key) => {
+    const tex = faceTexture(key);
+    if (!tex) return _UNBAKED;
+    return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, metalness: 0.03 });
   });
 }
 
@@ -258,8 +258,12 @@ for (const m of SCENE.machines) {
   sizeById[m.id] = m.size;
   const minY = m.cell[1], maxY = m.cell[1] + sy - 1;
 
+  // Expanded machines are drawn below as per-block cubes; skip the box + name-plate for them so a
+  // textured multiblock shows its real structure instead of a smeared placeholder shell.
+  if (m.expanded) continue;
+
   const geo = new THREE.BoxGeometry(sx * 0.92, sy * 0.92, sz * 0.92);
-  const box = new THREE.Mesh(geo, machineMaterials(m));
+  const box = new THREE.Mesh(geo, flatMaterial(m));
   box.position.copy(pos);
   track(box, minY, maxY);
   const edges = new THREE.LineSegments(
@@ -272,6 +276,18 @@ for (const m of SCENE.machines) {
   plane.position.copy(pos).addScaledVector(new THREE.Vector3(n[0], n[1], n[2]), m.size[axis] * 0.46 + 0.012);
   plane.lookAt(pos.x + n[0], pos.y + n[1], pos.z + n[2]);  // face outward, text upright + unmirrored
   track(plane, minY, maxY);
+}
+
+// Per-block cubes: one nearest-filtered 1x1x1 cube per constituent block of every expanded machine
+// (SCENE.blocks), each of its six faces textured from the baked pool key the scene resolved. This is
+// the principle-6 render - a multiblock shows its casings, coils, glass, and hatch faces as distinct
+// blocks instead of one stretched box. Blocks sit flush (real GT blocks touch); the per-block texture
+// pattern is what makes the internal structure legible.
+for (const b of (SCENE.blocks || [])) {
+  const geo = new THREE.BoxGeometry(1, 1, 1);
+  const cube = new THREE.Mesh(geo, blockMaterials(b.texture));
+  cube.position.set(b.cell[0] + 0.5, b.cell[1] + 0.5, b.cell[2] + 0.5);
+  track(cube, b.cell[1], b.cell[1]);
 }
 
 // A route is drawn GT-style: a small cube at each cell centre, with a UNIFORM cross-section arm from

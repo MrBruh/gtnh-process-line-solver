@@ -1,465 +1,393 @@
-"""Tests for the previewer texture pipeline (issue #50): the pure resolution + embedding seam.
+"""Tests for the lane 7 v2 texture pipeline: the Pillow bake and per-block previewer expansion.
 
-The chain machine ``type`` -> multiblock doc -> representative block -> manifest icon -> PNG
-bytes -> ``data:`` URI is fully unit-tested here with fixture data and a fake PNG; the 135 MB jar
-fetch (``previewer/jar.py``) is exercised only through an injected fake downloader, so no network
-runs in the suite. The end-to-end proof against the real jar lives outside CI (see the PR notes).
+The golden tests here are the regression guards the reconciled plan section 7 asks for: a machine's
+baked base face is *tinted* (not neutral grey, so a dropped RGBA multiply is caught); a multiblock
+expands to many distinct textured cubes rather than one stretched box (principle 6); and at least one
+interior block (a coil) carries a texture distinct from the casing. Everything runs on synthetic
+sprites + a synthetic manifest, so no jar fetch and no network.
 """
 
 from __future__ import annotations
 
+import base64
+import io
 import json
-import struct
-import zipfile
-import zlib
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from gtnh_solver.ir import (
-    CellBox,
-    CellCoord,
-    Commodity,
-    FaceSpec,
-    Facing,
-    InputIR,
-    IODirection,
-    LayoutResult,
-    LayoutStatus,
-    Machine,
-    Placement,
-    Port,
-)
-from gtnh_solver.previewer import build_scene, render_html, write_preview
-from gtnh_solver.previewer import jar as jar_mod
+from gtnh_solver.dataset.schema import MultiblockDoc
+from gtnh_solver.previewer.bake import bake_layers
 from gtnh_solver.previewer.textures import (
     TextureManifest,
-    TextureSummary,
-    apply_textures,
-    load_multiblock_docs,
-    resolve_face_icons,
-    resolve_scene_types,
-)
-from gtnh_solver.previewer.textures import (
-    texturize_scene as texturize,
+    expand_machine,
+    primary_variant,
+    texturize_scene,
 )
 
-_DATA = Path(__file__).resolve().parents[1] / "data"
-_MULTIBLOCKS = _DATA / "multiblocks"
-_MANIFEST = _DATA / "textures" / "manifest.json"
+pytest.importorskip("PIL")
+from PIL import Image
 
-_HEATPROOF = "gregtech:iconsets/MACHINE_HEATPROOFCASING"
-_HEATPROOF_PATH = "assets/gregtech/textures/blocks/iconsets/MACHINE_HEATPROOFCASING.png"
-
-
-def _fake_png(color: int = 0x7F) -> bytes:
-    """A minimal but structurally valid 1x1 PNG (signature + IHDR + IDAT + IEND)."""
-
-    def chunk(tag: bytes, data: bytes) -> bytes:
-        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data))
-
-    sig = b"\x89PNG\r\n\x1a\n"
-    ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)  # 1x1, 8-bit, truecolour
-    raw = bytes([0, color, color, color])  # one filtered scanline: filter byte + RGB
-    idat = zlib.compress(raw)
-    return sig + chunk(b"IHDR", ihdr) + chunk(b"IDAT", idat) + chunk(b"IEND", b"")
+# --------------------------------------------------------------------------------------------------
+# Synthetic sprites + manifest + dataset
+# --------------------------------------------------------------------------------------------------
 
 
-def _fake_jar(path: Path, members: dict[str, bytes]) -> Path:
-    """Write a zip standing in for the GT5-Unofficial jar, with the given asset entries."""
-    with zipfile.ZipFile(path, "w") as archive:
-        for name, data in members.items():
-            archive.writestr(name, data)
-    return path
+def _png(color: tuple[int, int, int, int], size: int = 16) -> bytes:
+    """A solid-colour ``size``x``size`` RGBA PNG - a stand-in for a real GT iconset sprite."""
+    out = io.BytesIO()
+    Image.new("RGBA", (size, size), color).save(out, format="PNG")
+    return out.getvalue()
 
 
-def _ebf_machine() -> Machine:
-    return Machine(
-        id="ebf",
-        type="Electric Blast Furnace",
-        footprint=CellBox(sx=3, sy=4, sz=3),
-        voltage_tier="LV",
-        orientation_options=[Facing.NORTH],
-        faces=FaceSpec(
-            ports=[Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT)]
-        ),
-    )
+def _strip(frames: list[tuple[int, int, int, int]]) -> bytes:
+    """A vertical animation strip (16 wide, 16*len tall); the bake must take frame 0 (the top)."""
+    img = Image.new("RGBA", (16, 16 * len(frames)))
+    for i, c in enumerate(frames):
+        img.paste(Image.new("RGBA", (16, 16), c), (0, i * 16))
+    out = io.BytesIO()
+    img.save(out, format="PNG")
+    return out.getvalue()
 
 
-def _ebf_scene() -> dict:
-    machine = _ebf_machine()
-    problem = InputIR(bounding_region=CellBox(sx=8, sy=8, sz=8), machines=[machine])
-    layout = LayoutResult(
-        status=LayoutStatus.VALID,
-        seed=0,
-        placements=[
-            Placement(machine_id="ebf", cell=CellCoord(x=0, y=0, z=0), orientation=Facing.NORTH)
+def _pixel(png: bytes, xy: tuple[int, int] = (0, 0)) -> tuple[int, int, int, int]:
+    return Image.open(io.BytesIO(png)).convert("RGBA").getpixel(xy)
+
+
+#: Icon names used across the synthetic manifest.
+CASING = "gregtech:iconsets/MACHINE_HEATPROOFCASING"
+COIL = "gregtech:iconsets/BLOCK_COIL_CUPRONICKEL"
+MACH_SIDE = "gregtech:iconsets/MACHINE_LV_SIDE"
+OVERLAY = "gregtech:iconsets/OVERLAY_FRONT_MACERATOR"
+
+#: A png_provider: white base sprites so a tint multiply shows through as the tint colour, and a
+#: half-alpha overlay so compositing is observable.
+_ICON_PNG = {
+    CASING: _png((200, 200, 200, 255)),
+    COIL: _png((255, 255, 255, 255)),
+    MACH_SIDE: _png((255, 255, 255, 255)),
+    OVERLAY: _png((0, 0, 0, 128)),
+}
+
+
+def _provider(paths: Any) -> dict[str, bytes]:
+    return {icon: _ICON_PNG[icon] for icon in paths if icon in _ICON_PNG}
+
+
+def _manifest_dict() -> dict[str, Any]:
+    """A schema-2 layered manifest: an MTE machine (tinted base + overlay), a casing, and a coil."""
+    return {
+        "schema": 2,
+        "blocks": {
+            "gregtech:gt.blockmachines|5": {
+                "kind": "mte",
+                "display_name": "Test Macerator",
+                "sides": {
+                    "NORTH": {
+                        "inactive": [
+                            {"icon": MACH_SIDE, "rgba": [120, 130, 200, 0], "glow": False},
+                            {"icon": OVERLAY, "rgba": [255, 255, 255, 0], "glow": False},
+                        ]
+                    },
+                    "SOUTH": {
+                        "inactive": [{"icon": MACH_SIDE, "rgba": [120, 130, 200, 0], "glow": False}]
+                    },
+                },
+            },
+            "gregtech:gt.blockmachines|1000": {
+                "kind": "mte",
+                "display_name": "Test EBF",
+                "sides": {
+                    "NORTH": {
+                        "inactive": [
+                            {"icon": CASING, "rgba": [255, 255, 255, 255], "glow": False},
+                            {"icon": OVERLAY, "rgba": [255, 255, 255, 0], "glow": False},
+                        ]
+                    },
+                    "all": {
+                        "inactive": [{"icon": CASING, "rgba": [255, 255, 255, 255], "glow": False}]
+                    },
+                },
+            },
+            "gregtech:gt.blockcasings|11": {
+                "kind": "block",
+                "sides": {
+                    "all": {
+                        "inactive": [{"icon": CASING, "rgba": [255, 255, 255, 255], "glow": False}]
+                    }
+                },
+            },
+            "gregtech:gt.blockcasings5|0": {
+                "kind": "block",
+                "sides": {
+                    "all": {
+                        "inactive": [{"icon": COIL, "rgba": [255, 200, 120, 255], "glow": False}]
+                    }
+                },
+            },
+        },
+        "icons": {
+            CASING: "assets/gregtech/textures/blocks/iconsets/MACHINE_HEATPROOFCASING.png",
+            COIL: "assets/gregtech/textures/blocks/iconsets/BLOCK_COIL_CUPRONICKEL.png",
+            MACH_SIDE: "assets/gregtech/textures/blocks/iconsets/MACHINE_LV_SIDE.png",
+            OVERLAY: "assets/gregtech/textures/blocks/iconsets/OVERLAY_FRONT_MACERATOR.png",
+        },
+    }
+
+
+def _ebf_doc() -> dict[str, Any]:
+    """A mini EBF-like doc: a controller, three heat-proof casings, and one coil (5 blocks)."""
+    blocks = [
+        {"d": [0, 0, 0], "block": "gregtech:gt.blockmachines", "meta": 1000},
+        {"d": [1, 0, 0], "block": "gregtech:gt.blockcasings", "meta": 11},
+        {"d": [0, 0, 1], "block": "gregtech:gt.blockcasings", "meta": 11},
+        {"d": [1, 0, 1], "block": "gregtech:gt.blockcasings", "meta": 11},
+        {"d": [0, 1, 0], "block": "gregtech:gt.blockcasings5", "meta": 0},  # the coil layer
+    ]
+    return {
+        "schema": 1,
+        "controller": {
+            "registry_name": "gregtech:gt.blockmachines",
+            "meta": 1000,
+            "display_name": "Test EBF",
+            "source_class": "test.MTETestEBF",
+            "facing_convention": "front NORTH",
+        },
+        "variants": [
+            {
+                "trigger_stack_size": 1,
+                "channels": {},
+                "blocks": blocks,
+                "hints": [],
+                "bbox": [2, 2, 2],
+            }
         ],
+        "substitutions": {},
+        "failures": [],
+    }
+
+
+@pytest.fixture
+def dataset(tmp_path: Path) -> tuple[Path, Path]:
+    """A committed-dataset layout on disk: ``multiblocks/`` with the EBF doc + the layered manifest."""
+    mb = tmp_path / "multiblocks"
+    mb.mkdir()
+    (mb / "test_ebf.json").write_text(json.dumps(_ebf_doc()), encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(_manifest_dict()), encoding="utf-8")
+    return mb, manifest
+
+
+def _scene(machines: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"version": 1, "machines": machines}
+
+
+def _machine(
+    mid: str, mtype: str, cell: list[int], size: list[int], front: str = "north"
+) -> dict[str, Any]:
+    return {
+        "id": mid,
+        "type": mtype,
+        "cell": cell,
+        "size": size,
+        "front": front,
+        "role": "machine",
+        "color": "#6ca0dc",
+    }
+
+
+# --------------------------------------------------------------------------------------------------
+# bake.py - the Pillow compositor
+# --------------------------------------------------------------------------------------------------
+
+
+def test_bake_applies_rgba_tint_not_neutral() -> None:
+    """A white base sprite tinted [120,130,200] bakes to that colour, never left neutral grey."""
+    baked = bake_layers([{"icon": MACH_SIDE, "rgba": [120, 130, 200, 0], "glow": False}], _ICON_PNG)
+    assert baked is not None
+    r, g, b, a = _pixel(baked)
+    assert (r, g, b) == (120, 130, 200), "tint multiply must be applied to the base sprite"
+    assert a == 255, "a GT alpha of 0 means opaque, so the baked base stays fully opaque"
+
+
+def test_bake_composites_overlay_over_base() -> None:
+    """A half-alpha overlay darkens the base where it sits: the composite differs from the base alone."""
+    base_only = bake_layers(
+        [{"icon": MACH_SIDE, "rgba": [255, 255, 255, 0], "glow": False}], _ICON_PNG
     )
-    return build_scene(problem, layout)
-
-
-# --- TextureManifest -------------------------------------------------------------------------
-
-
-def test_manifest_resolves_uniform_all_block_to_six_faces() -> None:
-    manifest = TextureManifest.load(_MANIFEST)
-    faces = manifest.block_face_icons("gregtech:gt.blockcasings", 11)
-    assert faces == [_HEATPROOF] * 6  # an "all" entry fills every face
-    assert manifest.icon_asset_path(_HEATPROOF) == _HEATPROOF_PATH
-
-
-def test_manifest_per_side_block_lands_icons_on_the_right_faces() -> None:
-    # A per-side block ({ "0".."5": icon }) maps ForgeDirection index -> three.js material slot.
-    manifest = TextureManifest(
-        {
-            "blocks": {"m:b": {"metas": {"0": {"0": "top", "5": "east", "2": "north"}}}},
-            "icons": {},
-        }
-    )
-    faces = manifest.block_face_icons("m:b", 0)
-    assert faces is not None
-    # slot order [ +X east, -X west, +Y up, -Y down, +Z south, -Z north ]
-    assert faces[0] == "east"  # GT side 5 -> slot 0
-    assert faces[3] == "top"  # GT side 0 (down) -> slot 3
-    assert faces[5] == "north"  # GT side 2 -> slot 5
-    assert [faces[1], faces[2], faces[4]] == [None, None, None]  # unmapped faces stay empty
-
-
-def test_manifest_accepts_bare_string_side_entry() -> None:
-    manifest = TextureManifest({"blocks": {"m:b": {"metas": {"3": "flat"}}}, "icons": {}})
-    assert manifest.block_face_icons("m:b", 3) == ["flat"] * 6
-
-
-def test_manifest_missing_block_or_meta_is_none() -> None:
-    manifest = TextureManifest.load(_MANIFEST)
-    assert manifest.block_face_icons("gregtech:gt.blockcasings", 999) is None  # meta absent
-    assert manifest.block_face_icons("no:such.block", 0) is None  # block absent
-    assert manifest.icon_asset_path("no:such/icon") is None
-
-
-def test_manifest_per_side_with_no_known_face_is_none() -> None:
-    manifest = TextureManifest({"blocks": {"m:b": {"metas": {"0": {"9": "x"}}}}, "icons": {}})
-    assert manifest.block_face_icons("m:b", 0) is None  # side 9 maps to no slot
-
-
-# --- doc loading + representative-block resolution -------------------------------------------
-
-
-def test_load_multiblock_docs_keys_by_display_name_and_skips_meta() -> None:
-    docs = load_multiblock_docs(_MULTIBLOCKS)
-    assert "Electric Blast Furnace" in docs
-    assert "Vacuum Freezer" in docs
-    assert all("_meta" not in name for name in docs)  # _meta.json excluded
-
-
-def test_load_multiblock_docs_missing_dir_is_empty() -> None:
-    assert load_multiblock_docs(_DATA / "does-not-exist") == {}
-
-
-def test_resolve_ebf_falls_back_to_dominant_heatproof_casing() -> None:
-    # The controller block (gt.blockmachines:1000) is a gapped hull, so resolution falls back to
-    # the dominant resolvable casing the primary variant places: the heat-proof casing shell.
-    docs = load_multiblock_docs(_MULTIBLOCKS)
-    manifest = TextureManifest.load(_MANIFEST)
-    faces = resolve_face_icons(docs["Electric Blast Furnace"], manifest)
-    assert faces == [_HEATPROOF] * 6
-
-
-def test_resolve_prefers_controller_block_when_manifest_has_it() -> None:
-    # When the controller's own block resolves, it wins over the casing fallback.
-    docs = load_multiblock_docs(_MULTIBLOCKS)
-    doc = docs["Electric Blast Furnace"]
-    manifest = TextureManifest(
-        {
-            "blocks": {doc.controller.registry_name: {"metas": {str(doc.controller.meta): "ctrl"}}},
-            "icons": {},
-        }
-    )
-    assert resolve_face_icons(doc, manifest) == ["ctrl"] * 6
-
-
-def test_resolve_returns_none_when_nothing_in_manifest() -> None:
-    docs = load_multiblock_docs(_MULTIBLOCKS)
-    empty = TextureManifest({"blocks": {}, "icons": {}})
-    assert resolve_face_icons(docs["Electric Blast Furnace"], empty) is None
-
-
-def test_resolve_scene_types_only_documented_machines() -> None:
-    scene = _ebf_scene()
-    docs = load_multiblock_docs(_MULTIBLOCKS)
-    manifest = TextureManifest.load(_MANIFEST)
-    type_faces = resolve_scene_types(scene, docs, manifest)
-    assert set(type_faces) == {"Electric Blast Furnace"}
-
-
-# --- embedding -------------------------------------------------------------------------------
-
-
-def test_apply_textures_embeds_data_uri_and_marks_machine() -> None:
-    scene = _ebf_scene()
-    textured = apply_textures(
-        scene,
-        {"Electric Blast Furnace": [_HEATPROOF] * 6},
-        {_HEATPROOF: _fake_png()},
-    )
-    assert textured == {"Electric Blast Furnace"}
-    assert scene["textures"][_HEATPROOF].startswith("data:image/png;base64,")
-    assert scene["machines"][0]["texture"] == [_HEATPROOF] * 6
-
-
-def test_apply_textures_missing_bytes_stays_placeholder() -> None:
-    scene = _ebf_scene()
-    textured = apply_textures(scene, {"Electric Blast Furnace": [_HEATPROOF] * 6}, {})
-    assert textured == set()  # no PNG bytes supplied
-    assert "texture" not in scene["machines"][0]
-    assert scene["textures"] == {}
-
-
-def test_apply_textures_partial_faces_drop_unfetched_sides() -> None:
-    scene = _ebf_scene()
-    faces = [_HEATPROOF, "other", None, None, None, None]
-    apply_textures(scene, {"Electric Blast Furnace": faces}, {_HEATPROOF: _fake_png()})
-    # only the fetched icon rides; the unfetched "other" and the empty slots become None
-    assert scene["machines"][0]["texture"] == [_HEATPROOF, None, None, None, None, None]
-
-
-# --- texturize_scene orchestration ----------------------------------------------------------
-
-
-def test_texturize_scene_end_to_end_with_fake_provider() -> None:
-    scene = _ebf_scene()
-    calls: list[dict] = []
-
-    def provider(icon_paths: dict) -> dict:
-        calls.append(dict(icon_paths))
-        return {icon: _fake_png() for icon in icon_paths}
-
-    summary = texturize(
-        scene, multiblocks_dir=_MULTIBLOCKS, manifest_path=_MANIFEST, png_provider=provider
-    )
-    assert isinstance(summary, TextureSummary)
-    assert summary.textured_types == ("Electric Blast Furnace",)
-    assert summary.placeholder_types == ()
-    assert summary.embedded_icons == 1
-    assert calls == [{_HEATPROOF: _HEATPROOF_PATH}]  # asked only for the icon actually needed
-    assert scene["machines"][0]["texture"] == [_HEATPROOF] * 6
-
-
-def test_texturize_scene_no_provider_call_when_no_documented_machine() -> None:
-    # A scene of undocumented machines resolves nothing, so the provider (jar fetch) is never hit.
-    problem = InputIR(
-        bounding_region=CellBox(sx=4, sy=4, sz=4),
-        machines=[
-            Machine(
-                id="p",
-                type="Some Undocumented Machine",
-                voltage_tier="LV",
-                orientation_options=[Facing.NORTH],
-                faces=FaceSpec(ports=[]),
-            )
+    composited = bake_layers(
+        [
+            {"icon": MACH_SIDE, "rgba": [255, 255, 255, 0], "glow": False},
+            {"icon": OVERLAY, "rgba": [255, 255, 255, 0], "glow": False},
         ],
+        _ICON_PNG,
     )
-    layout = LayoutResult(
-        status=LayoutStatus.VALID,
-        seed=0,
-        placements=[
-            Placement(machine_id="p", cell=CellCoord(x=0, y=0, z=0), orientation=Facing.NORTH)
+    assert base_only is not None
+    assert composited is not None
+    assert _pixel(base_only) != _pixel(composited), "the overlay must change the baked result"
+
+
+def test_bake_identity_rgba_leaves_sprite_unchanged() -> None:
+    """An identity tint ([255,255,255,255]) bakes the sprite as-is (fast path, no per-pixel loop)."""
+    baked = bake_layers([{"icon": CASING, "rgba": [255, 255, 255, 255], "glow": False}], _ICON_PNG)
+    assert baked is not None
+    assert _pixel(baked)[:3] == (200, 200, 200)
+
+
+def test_bake_takes_frame0_of_an_animated_strip() -> None:
+    """An animated vertical strip bakes its first (top) frame, per the v1 animation non-goal."""
+    strip = {"anim": _strip([(10, 20, 30, 255), (200, 200, 200, 255)])}
+    baked = bake_layers([{"icon": "anim", "rgba": [255, 255, 255, 255], "glow": False}], strip)
+    assert baked is not None
+    assert _pixel(baked)[:3] == (10, 20, 30)
+
+
+def test_bake_skips_missing_icons_and_returns_none_when_all_missing() -> None:
+    """A layer whose PNG was not fetched is skipped; a stack with none available bakes to None."""
+    assert (
+        bake_layers([{"icon": "absent", "rgba": [255, 255, 255, 255], "glow": False}], _ICON_PNG)
+        is None
+    )
+    baked = bake_layers(
+        [
+            {"icon": "absent", "rgba": [255, 255, 255, 255], "glow": False},
+            {"icon": CASING, "rgba": [255, 255, 255, 255], "glow": False},
         ],
+        _ICON_PNG,
     )
-    scene = build_scene(problem, layout)
+    assert baked is not None  # the available casing layer still bakes
 
-    def provider(icon_paths: dict) -> dict:  # pragma: no cover - must never be called here
-        raise AssertionError("provider must not be called for undocumented machines")
 
-    summary = texturize(
-        scene, multiblocks_dir=_MULTIBLOCKS, manifest_path=_MANIFEST, png_provider=provider
+# --------------------------------------------------------------------------------------------------
+# Manifest v2 loader
+# --------------------------------------------------------------------------------------------------
+
+
+def test_manifest_layers_side_and_state_fallback() -> None:
+    m = TextureManifest(_manifest_dict())
+    assert m.layers("gregtech:gt.blockmachines", 5, "NORTH")[0]["icon"] == MACH_SIDE
+    assert (
+        m.layers("gregtech:gt.blockcasings", 11, "EAST")[0]["icon"] == CASING
+    )  # missing side -> "all"
+    assert m.layers("gregtech:nope", 0, "NORTH") == []
+
+
+def test_manifest_mte_block_reverse_index() -> None:
+    m = TextureManifest(_manifest_dict())
+    assert m.mte_block("Test Macerator") == ("gregtech:gt.blockmachines", 5)
+    assert m.mte_block("Nonexistent") is None
+
+
+# --------------------------------------------------------------------------------------------------
+# Per-block expansion
+# --------------------------------------------------------------------------------------------------
+
+
+def test_expand_machine_yields_one_cube_per_block_at_offsets() -> None:
+    doc = MultiblockDoc.model_validate(_ebf_doc())
+    machine = _machine("m1", "Test EBF", cell=[10, 0, 20], size=[2, 2, 2])
+    cubes = expand_machine(machine, doc)
+    assert len(cubes) == len(primary_variant(doc).blocks) == 5
+    cells = {c.cell for c in cubes}
+    assert (10, 0, 20) in cells  # controller min corner lands on the placement cell
+    assert (10, 1, 20) in cells  # the coil, one layer up
+
+
+def test_expand_machine_yaw_rotates_positions_for_east_facing() -> None:
+    doc = MultiblockDoc.model_validate(_ebf_doc())
+    north = expand_machine(_machine("m", "Test EBF", [0, 0, 0], [2, 2, 2], "north"), doc)
+    east = expand_machine(_machine("m", "Test EBF", [0, 0, 0], [2, 2, 2], "east"), doc)
+    assert {c.cell for c in north} != {c.cell for c in east}, (
+        "an east-facing machine rotates its blocks"
     )
-    assert summary.textured_types == ()
-    assert summary.placeholder_types == ("Some Undocumented Machine",)
-    assert scene["textures"] == {}
 
 
-def test_texturize_scene_missing_dataset_degrades_to_placeholder() -> None:
-    scene = _ebf_scene()
-    summary = texturize(
-        scene,
-        multiblocks_dir=_DATA / "does-not-exist",
-        manifest_path=_MANIFEST,
-        png_provider=None,
+# --------------------------------------------------------------------------------------------------
+# texturize_scene - the integration + the principle-6 golden guards
+# --------------------------------------------------------------------------------------------------
+
+
+def test_multiblock_expands_to_many_cubes_not_one_box(dataset: tuple[Path, Path]) -> None:
+    """Principle 6: an EBF renders as its constituent blocks, never a single stretched box."""
+    mb, manifest = dataset
+    scene = _scene([_machine("m1", "Test EBF", [0, 0, 0], [2, 2, 2])])
+    summary = texturize_scene(
+        scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider
     )
-    assert summary.textured_types == ()
-    assert summary.placeholder_types == ("Electric Blast Furnace",)
-    assert scene["textures"] == {}
+    assert summary.block_cubes == 5, "one textured cube per constituent block"
+    assert len(scene["blocks"]) == 5
+    assert scene["machines"][0].get("expanded") is True, "the box is replaced by the cubes"
+    assert "Test EBF" in summary.textured_types
 
 
-def test_texturize_scene_missing_manifest_degrades_to_placeholder() -> None:
-    scene = _ebf_scene()
-    summary = texturize(
-        scene,
-        multiblocks_dir=_MULTIBLOCKS,
-        manifest_path=_DATA / "textures" / "nope.json",
-        png_provider=None,
+def test_interior_coil_texture_distinct_from_casing(dataset: tuple[Path, Path]) -> None:
+    """At least one interior block (the coil) bakes a texture distinct from the casing shell."""
+    mb, manifest = dataset
+    scene = _scene([_machine("m1", "Test EBF", [0, 0, 0], [2, 2, 2])])
+    texturize_scene(scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider)
+    pool = scene["textures"]
+    coil_keys = [k for k in pool if "blockcasings5" in k]
+    casing_keys = [k for k in pool if "gt.blockcasings|11" in k]
+    assert coil_keys
+    assert casing_keys
+    assert pool[coil_keys[0]] != pool[casing_keys[0]], "coil and casing must bake to different PNGs"
+
+
+def test_single_block_machine_renders_one_textured_cube(dataset: tuple[Path, Path]) -> None:
+    """A machine with no multiblock doc but a manifest display name renders as one textured cube."""
+    mb, manifest = dataset
+    scene = _scene([_machine("m1", "Test Macerator", [3, 0, 3], [1, 1, 1])])
+    summary = texturize_scene(
+        scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider
     )
-    assert summary.textured_types == ()
-    assert summary.placeholder_types == ("Electric Blast Furnace",)
+    assert summary.block_cubes == 1
+    assert scene["blocks"][0]["cell"] == [3, 0, 3]
+    assert "Test Macerator" in summary.textured_types
 
 
-# --- jar shim (no network) -------------------------------------------------------------------
+def test_single_block_machine_base_face_is_tinted(dataset: tuple[Path, Path]) -> None:
+    """Golden tint guard: the single-block machine's baked base face is the tint, not neutral grey."""
+    mb, manifest = dataset
+    scene = _scene([_machine("m1", "Test Macerator", [0, 0, 0], [1, 1, 1])])
+    texturize_scene(scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider)
+    key = next(k for k in scene["textures"] if k.startswith("gregtech:gt.blockmachines|5|SOUTH"))
+    png = base64.b64decode(scene["textures"][key].split(",", 1)[1])
+    r, g, b, _ = _pixel(png)
+    assert (r, g, b) == (120, 130, 200), "a dropped RGBA multiply would leave this neutral grey"
 
 
-def test_extract_icons_reads_present_skips_absent(tmp_path: Path) -> None:
-    jar = _fake_jar(tmp_path / "x.jar", {_HEATPROOF_PATH: _fake_png()})
-    got = jar_mod.extract_icons(jar, {_HEATPROOF: _HEATPROOF_PATH, "missing": "assets/nope.png"})
-    assert set(got) == {_HEATPROOF}
-    assert got[_HEATPROOF].startswith(b"\x89PNG")
+def test_icon_name_stability_ebf_casing(dataset: tuple[Path, Path]) -> None:
+    """The EBF heat-proof casing resolves the exact expected iconset name (deobf-rename guard)."""
+    m = TextureManifest(json.loads(Path(dataset[1]).read_text(encoding="utf-8")))
+    layers = m.layers("gregtech:gt.blockcasings", 11, "all")
+    assert layers[0]["icon"] == "gregtech:iconsets/MACHINE_HEATPROOFCASING"
 
 
-def test_fetch_jar_returns_cached_without_download(tmp_path: Path) -> None:
-    dest = tmp_path / jar_mod.JAR_NAME
-    dest.write_bytes(b"cached")
-
-    def download(url: str, filename: str) -> None:  # pragma: no cover - must not run on a cache hit
-        raise AssertionError("download must not run when the jar is already cached")
-
-    assert jar_mod.fetch_jar(tmp_path, download=download) == dest
-
-
-def test_fetch_jar_downloads_when_absent(tmp_path: Path) -> None:
-    def download(url: str, filename: str) -> None:
-        Path(filename).write_bytes(b"downloaded")
-
-    out = jar_mod.fetch_jar(tmp_path / "cache", url="http://example/x.jar", download=download)
-    assert out.read_bytes() == b"downloaded"
-    assert out.name == jar_mod.JAR_NAME
-    assert not out.with_suffix(out.suffix + ".part").exists()  # renamed off the .part sibling
-
-
-def test_jar_png_provider_fetches_then_extracts(tmp_path: Path) -> None:
-    _fake_jar(tmp_path / jar_mod.JAR_NAME, {_HEATPROOF_PATH: _fake_png()})
-    provider = jar_mod.jar_png_provider(tmp_path)  # cache hit -> no download
-    got = provider({_HEATPROOF: _HEATPROOF_PATH})
-    assert set(got) == {_HEATPROOF}
-
-
-def test_jar_png_provider_empty_request_skips_fetch(tmp_path: Path) -> None:
-    provider = jar_mod.jar_png_provider(tmp_path)  # no jar present; must not be fetched
-    assert provider({}) == {}
-
-
-def test_default_cache_dir_honours_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("GTNH_SOLVER_CACHE_DIR", str(tmp_path / "c"))
-    assert jar_mod.default_cache_dir() == tmp_path / "c"
-    monkeypatch.delenv("GTNH_SOLVER_CACHE_DIR", raising=False)
-    assert jar_mod.default_cache_dir() == Path.home() / ".cache" / "gtnh_solver"
-
-
-# --- html wiring + write_preview graceful degradation ---------------------------------------
-
-
-def test_render_html_wires_textured_materials() -> None:
-    html = render_html(_ebf_scene())
-    assert "SCENE.textures" in html  # the embedded texture pool
-    assert "NearestFilter" in html  # crisp GT pixel art
-    assert "machineMaterials" in html  # per-face material builder
-
-
-def test_render_html_embeds_data_uri_for_textured_machine() -> None:
-    scene = _ebf_scene()
-    apply_textures(scene, {"Electric Blast Furnace": [_HEATPROOF] * 6}, {_HEATPROOF: _fake_png()})
-    html = render_html(scene)
-    assert "data:image/png;base64," in html  # the PNG rides the page as a data URI
-    assert json.dumps(scene) in html  # inlined verbatim
-
-
-def test_write_preview_degrades_when_texture_pass_raises(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_undocumented_machine_stays_placeholder_and_fetches_nothing(
+    dataset: tuple[Path, Path],
 ) -> None:
-    # A texture pass that blows up (e.g. offline jar fetch) must never block the preview.
-    import gtnh_solver.previewer as previewer
+    """A machine with neither a doc nor a manifest name keeps its box and triggers no jar fetch."""
+    mb, manifest = dataset
+    calls: list[Any] = []
 
-    problem = InputIR(bounding_region=CellBox(sx=8, sy=8, sz=8), machines=[_ebf_machine()])
-    layout = LayoutResult(
-        status=LayoutStatus.VALID,
-        seed=0,
-        placements=[
-            Placement(machine_id="ebf", cell=CellCoord(x=0, y=0, z=0), orientation=Facing.NORTH)
-        ],
+    def spy(paths: Any) -> dict[str, bytes]:
+        calls.append(paths)
+        return _provider(paths)
+
+    scene = _scene([_machine("m1", "Coke Oven", [0, 0, 0], [3, 3, 3])])
+    summary = texturize_scene(scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=spy)
+    assert summary.block_cubes == 0
+    assert scene["machines"][0].get("expanded") is None
+    assert calls == [], "no icons needed -> the provider is never called"
+
+
+def test_missing_dataset_degrades_to_all_placeholder(tmp_path: Path) -> None:
+    """No committed dump -> every machine stays a placeholder, nothing raises."""
+    scene = _scene([_machine("m1", "Test EBF", [0, 0, 0], [2, 2, 2])])
+    summary = texturize_scene(
+        scene, multiblocks_dir=tmp_path / "absent", manifest_path=tmp_path / "absent.json"
     )
-
-    def boom(*_a: object, **_k: object) -> TextureSummary:
-        raise RuntimeError("network down")
-
-    monkeypatch.setattr(previewer, "texturize_scene", boom)
-    out = write_preview(problem, layout, tmp_path / "v.html")
-    assert out.exists()
-    assert "gtnh-solve preview" in out.read_text(encoding="utf-8")
-
-
-def test_write_preview_textures_off_skips_pass(tmp_path: Path) -> None:
-    problem = InputIR(bounding_region=CellBox(sx=8, sy=8, sz=8), machines=[_ebf_machine()])
-    layout = LayoutResult(
-        status=LayoutStatus.VALID,
-        seed=0,
-        placements=[
-            Placement(machine_id="ebf", cell=CellCoord(x=0, y=0, z=0), orientation=Facing.NORTH)
-        ],
-    )
-    out = write_preview(problem, layout, tmp_path / "v.html", textures=False)
-    assert out.exists()
-    # textures off -> no texture pool key injected, no data URI
-    assert "data:image/png;base64," not in out.read_text(encoding="utf-8")
-
-
-# --- CLI texture-summary logging -------------------------------------------------------------
-
-_SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
-
-
-def test_enable_previewer_logging_is_idempotent() -> None:
-    import logging
-
-    from gtnh_solver import cli
-
-    logger = logging.getLogger("gtnh_solver")
-    saved = logger.handlers[:]
-    saved_level = logger.level
-    for handler in saved:
-        logger.removeHandler(handler)
-    try:
-        cli._enable_previewer_logging()
-        cli._enable_previewer_logging()  # second call must not add a second handler
-        assert len(logger.handlers) == 1
-        assert logger.level == logging.INFO
-    finally:
-        for handler in logger.handlers[:]:
-            logger.removeHandler(handler)
-        for handler in saved:
-            logger.addHandler(handler)
-        logger.setLevel(saved_level)
-
-
-def test_cli_preview_logs_texture_summary(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    import logging
-
-    from gtnh_solver import cli
-
-    logger = logging.getLogger("gtnh_solver")
-    saved = logger.handlers[:]
-    saved_level = logger.level
-    for handler in saved:
-        logger.removeHandler(handler)  # force the handler (bound to capsys' stderr) to be created
-    try:
-        rc = cli.main([str(_SAND), "--fast", "--preview", str(tmp_path / "sand.html")])
-    finally:
-        for handler in logger.handlers[:]:
-            logger.removeHandler(handler)
-        for handler in saved:
-            logger.addHandler(handler)
-        logger.setLevel(saved_level)
-    assert rc == 0
-    assert (tmp_path / "sand.html").exists()
-    # the sand machines are undocumented, so every type falls back to a placeholder box
-    assert "textures:" in capsys.readouterr().err
+    assert summary.textured_types == ()
+    assert summary.placeholder_types == ("Test EBF",)
+    assert scene["blocks"] == []
