@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "manual-project",
   "name": "GTNH Planner",
   "recipes": [
@@ -1058,5 +1058,137 @@
   "metadata": {
     "createdAt": "2026-06-27T20:46:28.348Z",
     "updatedAt": "2026-06-27T21:18:43.353Z"
+  },
+  "datasetVersionId": "stable-2.8.4",
+  "app": {
+    "name": "gtnh-factory-flow",
+    "version": "0.1.0",
+    "exportedAt": "2026-06-28T00:00:00.000Z"
+  },
+  "resolved": {
+    "generatedAt": "2026-06-27T21:18:43.353Z",
+    "machines": [
+      {
+        "nodeId": "node-f4dbc148-646a-430f-8ec3-4dba5ef4d323",
+        "machineKey": "Forge Hammer",
+        "machineType": "Forge Hammer",
+        "tier": "LV",
+        "machineCount": 1,
+        "parallel": 1,
+        "eutPerMachine": 16,
+        "totalEut": 16,
+        "inputs": [
+          {
+            "kind": "item",
+            "id": "minecraft:gravel",
+            "perSecond": 2
+          }
+        ],
+        "outputs": [
+          {
+            "kind": "item",
+            "id": "minecraft:sand",
+            "perSecond": 2
+          }
+        ]
+      },
+      {
+        "nodeId": "node-9bfdeec1-d48f-4726-b003-c3aa45873460",
+        "machineKey": "Forge Hammer",
+        "machineType": "Forge Hammer",
+        "tier": "LV",
+        "machineCount": 1,
+        "parallel": 1,
+        "eutPerMachine": 16,
+        "totalEut": 16,
+        "inputs": [
+          {
+            "kind": "item",
+            "id": "minecraft:cobblestone",
+            "perSecond": 2
+          }
+        ],
+        "outputs": [
+          {
+            "kind": "item",
+            "id": "minecraft:gravel",
+            "perSecond": 2
+          }
+        ]
+      },
+      {
+        "nodeId": "node-f5d03ecc-d4c2-4106-9bc9-fdc168a62b45",
+        "machineKey": "Forge Hammer",
+        "machineType": "Forge Hammer",
+        "tier": "LV",
+        "machineCount": 1,
+        "parallel": 1,
+        "eutPerMachine": 16,
+        "totalEut": 16,
+        "inputs": [
+          {
+            "kind": "item",
+            "id": "minecraft:stone",
+            "perSecond": 2
+          }
+        ],
+        "outputs": [
+          {
+            "kind": "item",
+            "id": "minecraft:cobblestone",
+            "perSecond": 2
+          }
+        ]
+      }
+    ],
+    "nets": [
+      {
+        "edgeId": "edge-43bf774e-8a94-454c-b5a0-a5301fa72d8d",
+        "from": "node-9bfdeec1-d48f-4726-b003-c3aa45873460",
+        "to": "node-f4dbc148-646a-430f-8ec3-4dba5ef4d323",
+        "kind": "item",
+        "id": "minecraft:gravel",
+        "perSecond": 2
+      },
+      {
+        "edgeId": "edge-8edc446f-e8b6-4acd-b42f-4dd7475fea60",
+        "from": "node-f5d03ecc-d4c2-4106-9bc9-fdc168a62b45",
+        "to": "node-9bfdeec1-d48f-4726-b003-c3aa45873460",
+        "kind": "item",
+        "id": "minecraft:cobblestone",
+        "perSecond": 2
+      },
+      {
+        "edgeId": "edge-d3c27d2f-86b2-425d-b5b6-a1c235941a9e",
+        "from": "storage-ae28da5f-5127-45ed-9967-a2786fcfa436",
+        "to": "node-f5d03ecc-d4c2-4106-9bc9-fdc168a62b45",
+        "kind": "item",
+        "id": "minecraft:stone",
+        "perSecond": 2
+      }
+    ],
+    "externalIO": {
+      "inputs": [
+        {
+          "kind": "item",
+          "id": "minecraft:stone",
+          "perSecond": 2
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "item",
+          "id": "minecraft:sand",
+          "perSecond": 2
+        }
+      ]
+    },
+    "power": {
+      "totalEut": 48,
+      "totalEuPerSecond": 960,
+      "fuel": "biodiesel",
+      "fuelPerSecond": 0.075,
+      "fuelUnit": "L/s"
+    }
   }
 }

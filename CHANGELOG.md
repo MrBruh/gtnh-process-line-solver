@@ -7,6 +7,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Adapter consumes the plan-schema-v2 `resolved` block (`adapter/`, GitHub #2).** A
+  gtnh-factory-flow v2 export (`schemaVersion: 2`) additively carries `app`,
+  `datasetVersionId`, and a `resolved` throughput block (per-machine EU/t, per-edge rates,
+  external I/O, a power total); `adapter/plan.py` now parses all of it typed (unknown
+  subfields stay tolerated). When `resolved` covers a node, its `totalEut` is trusted for
+  `Machine.eut` - the exporter's balancer models overclocking, which `recipe.eut * parallel`
+  cannot - and cross-checked against that synthesis: a divergence beyond float tolerance
+  emits an `AdapterWarning` (new, exported) but the resolved figure wins, so power amperage
+  is sized for the real draw. `resolved.power.totalEut` is likewise cross-checked against the
+  synthesized per-tier power nets. v1 plans (no `resolved`) adapt exactly as before.
+  `examples/gtnh-sand.json` is refreshed to the v2 export (adapter output unchanged - its
+  resolved figures match the synthesis); the v2 nitrobenzene export ships as
+  `tests/fixtures/gtnh-nitrobenzene-v2.json` instead of replacing the example, because its
+  resolved EU/t legitimately diverges (overclocked LCR: 2880 vs 480 EU/t) and would shift the
+  example-pinned power numbers.
 - **Extractor channel handling and identity-substitution tables (`tools/gtnh-extractor/`, lane 3,
   GitHub #46).** `StructureDumper` now fills the per-controller `substitutions` object. After the
   trigger-stack sweep it probes each GT channel (`GTStructureChannels.values()`, skipping the
