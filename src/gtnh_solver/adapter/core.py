@@ -13,8 +13,12 @@ Mapping (see docs/ARCHITECTURE.md, docs/IR.md):
 - ``edge``    -> ``Net`` (resourceKind -> commodity, resourceId -> fluid_or_item); endpoints
                 reference the matching out/in ports; typed throughput is computed from the
                 recipe rate.
-- ``power``   -> synthesized, not in the export: a source machine + shared-amperage net per
-                voltage tier feed the powered machines (``power`` submodule, docs/DOMAIN.md).
+- ``power``   -> a source machine + shared-amperage net per voltage tier feed the powered
+                machines (``power`` submodule, docs/DOMAIN.md); the export carries no source.
+                Each machine's EU/t draw comes from a v2 export's ``resolved`` block when it
+                covers the node (the exporter's balancer models overclocking, which
+                ``recipe.eut`` cannot); ``recipe.eut * parallel`` is the v1 fallback and the
+                cross-check - a mismatch warns (``AdapterWarning``) but resolved wins (#2).
 
 Footprints: single-block 1x1x1 by default, or a machine's real multiblock footprint when an
 optional physical dataset (``dataset.load_physical_dataset``) is passed and knows the type - see
@@ -30,6 +34,8 @@ loud here, which is the adapter contract (docs/TESTING.md).
 from __future__ import annotations
 
 import json
+import math
+import warnings
 from pathlib import Path
 
 from gtnh_solver.dataset import PhysicalDataset
@@ -46,8 +52,8 @@ from gtnh_solver.ir import (
 )
 from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 
-from ._errors import AdapterError
-from .plan import Edge, Node, Plan, Recipe
+from ._errors import AdapterError, AdapterWarning
+from .plan import Edge, Node, Plan, Recipe, ResolvedMachine
 from .power import synthesize_power
 
 # Crude single-block physical defaults until the dataset lane provides real footprints/faces.
@@ -58,6 +64,10 @@ _STORAGE_TIER = "LV"  # storages are unpowered; placeholder tier to satisfy the 
 _COMMODITY = {"item": Commodity.ITEM, "fluid": Commodity.FLUID}
 # Boundary I/O blocks that accept I/O covers on their faces (keeps covers off pipes).
 _STORAGE_TYPE = {"item": "Super Chest", "fluid": "Super Tank"}
+# Cross-check tolerance (relative AND absolute) between a v2 export's resolved EU/t figures and
+# the recipe-derived synthesis: wide enough for float noise, tight enough that any modelling
+# difference (overclocking, duty cycling) trips the warning.
+_RESOLVED_EUT_TOLERANCE = 1e-6
 
 
 def load_plan(path: str | Path) -> Plan:
@@ -100,6 +110,9 @@ def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> Input
     recipes = {r.id: r for r in plan.recipes}
     nodes_by_id = {n.id: n for n in plan.nodes}
     storage_ids = {s.id for s in plan.storages}
+    resolved_machines = (
+        {rm.node_id: rm for rm in plan.resolved.machines} if plan.resolved is not None else {}
+    )
 
     machines: list[Machine] = []
     for node in plan.nodes:
@@ -120,10 +133,8 @@ def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> Input
                 faces=FaceSpec(ports=_recipe_ports(recipe, node)),
                 voltage_tier=node.overclock_tier,
                 orientation_options=_DEFAULT_ORIENTATIONS,
-                # EU/t draw the power synthesis sizes amperage from. ``parallel`` runs the recipe
-                # that many times at once, so the node draws ``recipe.eut`` per parallel - matching
-                # how ``_rate`` scales throughput. (``machineCount`` is forced to 1 above.)
-                eut=recipe.eut * node.parallel,
+                # EU/t draw the power synthesis sizes amperage from (see _node_eut).
+                eut=_node_eut(recipe, node, resolved_machines),
             )
         )
 
@@ -145,7 +156,66 @@ def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> Input
         machines, nets
     )  # close the line: collect each output (#16)
     machines, nets = synthesize_power(machines, nets)  # the export has no power source; invent it
+    _check_resolved_power(plan, nets)
     return InputIR(bounding_region=_bounding_region(len(machines)), machines=machines, nets=nets)
+
+
+def _node_eut(recipe: Recipe, node: Node, resolved: dict[str, ResolvedMachine]) -> float:
+    """The EU/t a node draws, which the power synthesis sizes amperage from.
+
+    Synthesized as ``recipe.eut * parallel``: ``parallel`` runs the recipe that many times at
+    once, matching how ``_rate`` scales throughput (``machineCount`` is forced to 1 upstream).
+    When a v2 export's ``resolved`` block covers the node, its ``totalEut`` is trusted instead -
+    the exporter's balancer models overclocking, which the raw recipe figure cannot - but is
+    cross-checked against the synthesis: a mismatch beyond float tolerance warns and the
+    resolved figure still wins (#2). v1 plans (no ``resolved``) always use the synthesis.
+    """
+    computed = recipe.eut * node.parallel
+    machine = resolved.get(node.id)
+    if machine is None:
+        return computed
+    if not math.isclose(
+        machine.total_eut,
+        computed,
+        rel_tol=_RESOLVED_EUT_TOLERANCE,
+        abs_tol=_RESOLVED_EUT_TOLERANCE,
+    ):
+        warnings.warn(
+            f"resolved EU/t for node {node.id!r} is {machine.total_eut}, but the recipe "
+            f"synthesizes {computed} (eut {recipe.eut} x parallel {node.parallel}); trusting "
+            f"the resolved figure",
+            AdapterWarning,
+            stacklevel=2,
+        )
+    return machine.total_eut
+
+
+def _check_resolved_power(plan: Plan, nets: list[Net]) -> None:
+    """Cross-check a v2 export's ``resolved.power`` total against the synthesized power nets.
+
+    Each per-tier power net carries the summed EU/t draw of its machines
+    (``power.synthesize_power``), so across tiers the nets must add up to
+    ``resolved.power.totalEut``. A mismatch beyond float tolerance means the resolved block is
+    internally inconsistent (its per-machine figures don't sum to its own total) or covers
+    machines the plan graph doesn't; warn and continue - amperage stays sized from the per-net
+    figures (#2). Silent for v1 plans and for a ``resolved`` block without ``power``.
+    """
+    if plan.resolved is None or plan.resolved.power is None:
+        return
+    synthesized = sum(net.throughput for net in nets if net.commodity is Commodity.POWER)
+    resolved_total = plan.resolved.power.total_eut
+    if not math.isclose(
+        resolved_total,
+        synthesized,
+        rel_tol=_RESOLVED_EUT_TOLERANCE,
+        abs_tol=_RESOLVED_EUT_TOLERANCE,
+    ):
+        warnings.warn(
+            f"resolved power total is {resolved_total} EU/t, but the synthesized power nets "
+            f"carry {synthesized} EU/t in total; layout keeps the per-net figures",
+            AdapterWarning,
+            stacklevel=2,
+        )
 
 
 def _commodity(kind: str) -> Commodity:

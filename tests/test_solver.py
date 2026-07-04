@@ -174,6 +174,34 @@ def test_solve_infeasible_when_machines_do_not_fit() -> None:
     layout = solve(problem)
     assert layout.status is LayoutStatus.INFEASIBLE
     assert layout.infeasibility is not None
+    assert layout.metrics.footprint is None  # nothing placed -> no measurable build to report
+
+
+def test_solve_populates_footprint_and_layer_metrics() -> None:
+    # LayoutMetrics is produced, not just declared (GitHub #13): the previewer reads footprint and
+    # layers off the returned layout, and the seed-compare workflow ranks on them.
+    ir = adapt_file(_SAND)
+    layout = solve(ir)
+    assert layout.status is LayoutStatus.VALID
+    assert layout.metrics.footprint is not None
+    assert layout.metrics.footprint > 0
+    assert layout.metrics.layers is not None
+    assert layout.metrics.layers >= 1
+    # the fast path assembles through the same code, so it reports metrics too
+    assert solve(ir, optimize=False).metrics.footprint is not None
+    # buildability/congestion have no scoring model yet, so they stay deferred (None), not faked
+    assert layout.metrics.buildability is None
+    assert layout.metrics.congestion is None
+
+
+def test_layout_metrics_empty_layout_reports_no_metrics() -> None:
+    # No placements (e.g. the infeasible path) -> all-None metrics, not a fake zero, so a viewer
+    # can tell "nothing built" from "a real 0-footprint build".
+    m = Machine(id="a", type="t", voltage_tier="LV", orientation_options=[Facing.NORTH])
+    ir = InputIR(bounding_region=CellBox(sx=2, sy=1, sz=2), machines=[m], nets=[])
+    metrics = solver_core._layout_metrics(ir, [], [])
+    assert metrics.footprint is None
+    assert metrics.layers is None
 
 
 # EAST-first orientation: the constructive seed faces every machine's front down the +x chain

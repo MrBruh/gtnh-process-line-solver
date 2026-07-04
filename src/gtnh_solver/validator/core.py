@@ -747,7 +747,7 @@ def _required_amps(load: float) -> int:
     return max(0, math.ceil(load - _AMP_EPSILON))
 
 
-def _check_route_capacity(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
+def _check_route_capacity(_problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
     """Crude single-channel realizability: at most one net's route may occupy a cell.
 
     The coarse cell grid models one routing channel per cell in Phase 1, so two different nets
@@ -758,6 +758,7 @@ def _check_route_capacity(problem: InputIR, layout: LayoutResult, out: list[Viol
     until then capacity is one route per cell. A net occupying its own cells is fine - only a cell
     claimed by more than one net is a collision (a duplicate route of one net is DUPLICATE_ROUTE).
     """
+    # ``_problem`` is unused here; kept for the uniform ``_check_*(problem, layout, out)`` dispatch.
     owners: dict[Cell, set[str]] = defaultdict(set)
     for r in layout.routes:
         for seg in r.segments:

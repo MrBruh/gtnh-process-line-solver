@@ -30,6 +30,28 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   interior coil textures distinct from the casing), and icon-name stability. PNGs stay LGPL and
   uncommitted, fetched from the pinned jar into an out-of-repo cache (`previewer/jar.py`, injected so
   the test suite never fetches).
+- **`LayoutMetrics` footprint/layers are now populated (`solver`, GitHub #13).** `solve()` fills
+  `LayoutResult.metrics.footprint` (floor-area bounding box of machines plus routes) and `.layers`
+  (vertical extent) on every assembled layout, computed from the same occupied-cell basis the
+  feedback loop ranks on. These are consumed as data (the seed-compare workflow, and the previewer
+  embeds them in its scene JSON); previously they were always `null`. `buildability` and
+  `congestion` stay `None` until a scoring model is defined; an infeasible (nothing-placed) result
+  leaves all metrics `None`.
+- **Adapter consumes the plan-schema-v2 `resolved` block (`adapter/`, GitHub #2).** A
+  gtnh-factory-flow v2 export (`schemaVersion: 2`) additively carries `app`,
+  `datasetVersionId`, and a `resolved` throughput block (per-machine EU/t, per-edge rates,
+  external I/O, a power total); `adapter/plan.py` now parses all of it typed (unknown
+  subfields stay tolerated). When `resolved` covers a node, its `totalEut` is trusted for
+  `Machine.eut` - the exporter's balancer models overclocking, which `recipe.eut * parallel`
+  cannot - and cross-checked against that synthesis: a divergence beyond float tolerance
+  emits an `AdapterWarning` (new, exported) but the resolved figure wins, so power amperage
+  is sized for the real draw. `resolved.power.totalEut` is likewise cross-checked against the
+  synthesized per-tier power nets. v1 plans (no `resolved`) adapt exactly as before.
+  `examples/gtnh-sand.json` is refreshed to the v2 export (adapter output unchanged - its
+  resolved figures match the synthesis); the v2 nitrobenzene export ships as
+  `tests/fixtures/gtnh-nitrobenzene-v2.json` instead of replacing the example, because its
+  resolved EU/t legitimately diverges (overclocked LCR: 2880 vs 480 EU/t) and would shift the
+  example-pinned power numbers.
 - **Extractor channel handling and identity-substitution tables (`tools/gtnh-extractor/`, lane 3,
   GitHub #46).** `StructureDumper` now fills the per-controller `substitutions` object. After the
   trigger-stack sweep it probes each GT channel (`GTStructureChannels.values()`, skipping the
@@ -359,6 +381,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Sand passes the hand-built compactness + <= 3-cable budget under every objective.
 
 ### Changed
+- **Previewer wire->machine leads take the connecting cable's thickness (GitHub #6).** Each route
+  terminal in the scene now carries the thickness of the fattest route segment incident to its
+  cell (a mid-trunk tap touches several; the fattest is what visually meets the block), and the
+  viewer sizes the short lead from the cable into the docked machine face with the same
+  thickness->cross-section ramp as the trunk segments - so a 4x run meets its machine visibly fat
+  and a 1x tap thin. Item/fluid terminals carry `null` and keep their fixed-size pipe leads.
+  Previewer-internal (scene + viewer template): an additive scene field the template reads with a
+  fallback, so no scene-version bump. (`previewer/`.)
 - **The item/fluid router negotiates congestion instead of retrying orders (GitHub #7).** Laying
   nets sequentially (each net's cells hard-blocking the next) made the result hostage to net
   order; the failed-first reorder retry only reduced that. The router now runs the FPGA
