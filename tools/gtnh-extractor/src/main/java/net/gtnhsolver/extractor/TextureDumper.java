@@ -10,15 +10,20 @@ import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
 import net.minecraft.block.Block;
+import net.minecraft.init.Blocks;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.IIcon;
+import net.minecraft.world.World;
+import net.minecraftforge.common.util.ForgeDirection;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -27,111 +32,97 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 
 import cpw.mods.fml.common.registry.FMLControlledNamespacedRegistry;
 import cpw.mods.fml.common.registry.GameData;
+import gregtech.api.GregTechAPI;
 import gregtech.api.enums.Textures;
 import gregtech.api.interfaces.IHasIndexedTexture;
+import gregtech.api.interfaces.IIconContainer;
+import gregtech.api.interfaces.ITexture;
+import gregtech.api.interfaces.metatileentity.IMetaTileEntity;
+import gregtech.api.interfaces.tileentity.IGregTechTileEntity;
+import gregtech.api.metatileentity.BaseMetaTileEntity;
+import gregtech.api.metatileentity.implementations.MTEBasicMachine;
 
 /**
- * The texture pass (lane 6, issue #49): emit a block-to-icon manifest for the GT casing / coil
- * block families, headlessly, on the dedicated server - <em>Option A</em> of the texture pipeline
- * (plan section 5.2). No PNG is ever read or written here; the manifest maps
- * {@code (block_registry_name, meta, side)} to an icon name ({@code "modid:iconsets/NAME"}) to the
- * asset path inside the mod jar, which the previewer fetches from the Nexus jar at preview time
- * (LGPL assets stay out of this Apache-2.0 repo).
+ * The texture pass, v2 (lane 6 v2, issue #79). Emits the <b>layered</b> texture manifest (plan
+ * section 5.4): for every block a preview draws, the ordered bottom-to-top {@code ITexture} layer
+ * stack per side and per active state, each layer resolved to an iconset name + RGBA tint + glow
+ * flag. This supersedes v1's flat single-icon Option A, which could only name casing shells and
+ * gapped every single-block machine and controller hull.
  *
  * <p>
- * <b>Why this works without a client.</b> In 1.7.10 {@code Block.getIcon(side, meta)} returns an
- * {@link IIcon} that is only populated by client-side texture registration, so on a dedicated server
- * it is normally {@code null} - and the register itself
- * ({@code net.minecraft.client.renderer.texture.IIconRegister}) is a {@code @SideOnly(CLIENT)} class
- * FML's {@code SideTransformer} refuses to even load on the server, so we cannot register icons the
- * client way. But GT wires every casing texture through a {@code Textures.BlockIcons} enum constant
- * whose name <em>is</em> the PNG filename: every constant's {@code run()} registers
- * {@code "gregtech:iconsets/" + name()}, and the PNG lives at
- * {@code assets/gregtech/textures/blocks/iconsets/<NAME>.png} (the constant's own
- * {@code getTextureFile()} is unusable here - it dereferences the client-only {@code TextureMap}
- * class the {@code SideTransformer} blocks). So we skip the register entirely: we reflectively set
- * every constant's package-private {@code mIcon} field (of the
- * server-safe {@code net.minecraft.util.IIcon} type) to a {@link NamedIcon} that carries the name,
- * then invoke each block's own {@code getIcon(side, meta)} <em>reflectively</em> (via
- * {@code MethodHandles.findVirtual}, so there is no compile-time reference to the possibly client-only
- * method). When the block's per-meta wiring references the icon constant directly, {@code getIcon}
- * hands back our {@link NamedIcon} and we read the name; no client, no icon register, and no
- * reimplementing the per-family switch. Where it instead goes through the {@code IIconContainer}
- * interface it cannot (see the documented gap below).
- *
- * <pre>
- *   reflectively set mIcon = NamedIcon("gregtech:iconsets/" + name()) on every BlockIcons constant
- *        |
- *        v
- *   for each registered block implementing IHasIndexedTexture (the casing/coil families):
- *        resolve its getIcon(int,int) override once (MethodHandles.findVirtual; skip if unresolvable)
- *        for each real meta, for sides 0..5 -> getIcon(side, meta) -> NamedIcon -> name + jar path
- *        collapse six identical sides to "all"; a block that names nothing becomes a recorded gap
- *        |
- *        v
- *   write <textureOut>/manifest.json (blocks -> icon names, icons -> jar paths, gaps, provenance)
- * </pre>
+ * <b>Two mechanisms, composed</b> (both proven by the lane S spike, #78):
+ * <ul>
+ * <li><b>MTE reflection</b> for machines, hatches, buses, and multiblock controller hulls: their
+ * {@code ITexture[]} is obtained server-side - via the {@code getXxxFacing{Inactive,Active}(byte)}
+ * accessors for basic single-block machines (reliable, no tile entity), and via
+ * {@code getTexture(base, side, facing, colour, active, redstone)} for the rest (placed like the
+ * StructureDumper does). Each layer is a {@code GTRenderedTexture} ({@code mIconContainer} +
+ * {@code getRGBA()} + {@code glow}), a sided/multi wrapper (recursed via {@code mTextures}), or a
+ * {@code GTCopiedBlockTextureRender} whose copied casing icon is resolved via the block-icon path.
+ * <li><b>Block-icon reflection</b> (v1's mechanism, kept) for the plain structure blocks a
+ * multiblock places - casings, coils, tiered glass: a single un-tinted iconset layer per meta.
+ * </ul>
  *
  * <p>
- * <b>Scope: the GT casing / coil block families</b> (every registered block that is an
- * {@link IHasIndexedTexture}). These are the structural shell blocks - machine casings, heating
- * coils, tiered glass, pipe casings - that a multiblock is built from and that the previewer needs
- * to skin the shell. It deliberately does <em>not</em> depend on the structure dump's output (so the
- * texture workflow stays decoupled and can lag a pack version, per the plan), and it does not touch
- * {@link StructureDumper}.
- *
- * <p>
- * <b>What Option A can and cannot name (the documented gap).</b> A meta resolves when its
- * {@code getIcon} references the icon constant <em>directly</em> ({@code invokevirtual} on the
- * concrete {@code Textures$BlockIcons} enum, whose {@code getIcon()} is <em>not</em> side-stripped) -
- * e.g. the Electric Blast Furnace's heat-proof machine casing ({@code gt.blockcasings} meta 11 ->
- * {@code MACHINE_HEATPROOFCASING}). A meta does <em>not</em> resolve when {@code getIcon} selects its
- * sprite through the {@code IIconContainer} <em>interface</em> - a shared {@code MACHINECASINGS_*}
- * array or a switch stored as {@code IIconContainer} - because {@code IIconContainer.getIcon()} is
- * itself {@code @SideOnly(CLIENT)} and FML strips it from the interface on the server, so the
- * {@code invokeinterface} throws {@code NoSuchMethodError}. The heating coils
- * ({@code gt.blockcasings5}) hit exactly this path. Those metas, plus families with no server-side
- * {@code getIcon} override at all (GT's newer client-only {@code ITexture} render path) and the
- * composite tile-entity {@code gt.blockmachines} controller hulls, are recorded in {@code gaps} for
- * the documented <b>Option B</b> (client-mode {@code runClient} dump under {@code xvfb}) fallback -
- * never invented. This is the "Option A does not fully generalize" case the plan anticipates.
+ * The {@code getTextureFile()} accessor is {@code @SideOnly(CLIENT)} and throws on the server, so
+ * icon names come from the {@code Textures.BlockIcons} enum {@code name()} (or a custom container's
+ * {@code mIconName} field), which map 1:1 to the PNGs under {@code assets/<modid>/textures/blocks/}.
+ * No PNG is read or written here; the previewer fetches them from the Nexus jar at preview time.
  */
 final class TextureDumper {
 
     private static final Logger LOG = LogManager.getLogger(DumperMod.MODID);
 
-    /** Manifest schema version. Bump when the on-disk shape changes. */
-    static final int SCHEMA_VERSION = 1;
+    /** Layered-manifest schema version. Bump when the on-disk shape changes. */
+    static final int SCHEMA_VERSION = 2;
 
-    /** Minecraft face indices passed to {@code getIcon(side, meta)}: down, up, N, S, W, E. */
-    private static final int SIDES = 6;
-
-    /** Deobf then SRG name for {@code Block.getIcon(int side, int meta)}, tried in order. */
     private static final String[] GET_ICON_NAMES = { "getIcon", "func_149691_a" };
-
-    /** GT registers every casing sprite under this resource domain: {@code gregtech:iconsets/NAME}. */
     private static final String ICON_DOMAIN = "gregtech";
+
+    /** ForgeDirection names in ordinal order (0 DOWN .. 5 EAST); the manifest keys sides by these. */
+    private static final String[] SIDE_NAMES = { "DOWN", "UP", "NORTH", "SOUTH", "WEST", "EAST" };
+
+    // Scratch origin for placing hull/hatch MTEs to read their getTexture (mirrors StructureDumper).
+    private static final int OX = 8;
+    private static final int OY = 210;
+    private static final int OZ = 8;
 
     private final Gson gson = new GsonBuilder().setPrettyPrinting()
         .disableHtmlEscaping()
         .create();
 
-    /** A resolved icon: its registered name and the derived asset path inside the mod jar. */
-    private static final class Icon {
+    private final World world;
 
-        final String name;
-        final String path;
+    /** icon name -> jar asset path, accumulated across every resolved layer. */
+    private final Map<String, String> icons = new TreeMap<>();
+    /** unresolved (block, meta, side, reason) units, surfaced in the manifest diff. */
+    private final List<Gap> gaps = new ArrayList<>();
 
-        Icon(String name, String path) {
-            this.name = name;
-            this.path = path;
+    private String lastIconError;
+
+    TextureDumper(World world) {
+        this.world = world;
+    }
+
+    /** One resolved texture layer: iconset name, RGBA multiply (r,g,b,a 0-255), and the glow flag. */
+    private static final class Layer {
+
+        final String icon;
+        final int[] rgba;
+        final boolean glow;
+
+        Layer(String icon, int[] rgba, boolean glow) {
+            this.icon = icon;
+            this.rgba = rgba;
+            this.glow = glow;
         }
     }
 
-    /** One (block, meta, side) the pass could not resolve to a registered icon name. */
+    /** One (block, meta, side) the pass could not resolve to a layer. */
     private static final class Gap {
 
         final String block;
@@ -147,243 +138,435 @@ final class TextureDumper {
         }
     }
 
+    /** A manifest block entry: its kind, display name (MTEs), source class, and per-side/state layers. */
+    private static final class Entry {
+
+        final String kind;
+        final String displayName;
+        final String sourceClass;
+        // side name -> state ("inactive"/"active") -> ordered layer list
+        final Map<String, Map<String, List<Layer>>> sides = new TreeMap<>();
+
+        Entry(String kind, String displayName, String sourceClass) {
+            this.kind = kind;
+            this.displayName = displayName;
+            this.sourceClass = sourceClass;
+        }
+    }
+
     /**
-     * Reflect the icon names for every casing-family block and write {@code <textureOut>/manifest.json}.
-     * Returns the number of resolved {@code (block, meta, side)} icon assignments.
+     * Build the layered manifest and write {@code <textureOut>/manifest.json}. Returns the number of
+     * resolved (block, side, state) layer stacks, so a run that resolves nothing fails CI loudly.
      */
     int run(File textureOut, String packVersion, Map<String, String> modVersions, String extractorSha)
         throws IOException {
         textureOut.mkdirs();
-
-        // block registry name -> meta -> side-key ("all" or "0".."5") -> icon name
-        Map<String, Map<Integer, Map<String, String>>> blocks = new TreeMap<>();
-        Map<String, String> sourceClasses = new TreeMap<>();
-        Map<String, Icon> icons = new TreeMap<>();
-        List<Gap> gaps = new ArrayList<>();
-
-        int blockCount = 0;
-        int metaCount = 0;
-        int resolved = 0;
-
         populateIconNames();
 
-        FMLControlledNamespacedRegistry<Block> registry = GameData.getBlockRegistry();
-        // The FML block registry is a raw Iterable in this Forge version, so it yields Object;
-        // filter to the indexed-texture (casing/coil) blocks and cast.
-        for (Object entry : registry) {
-            if (!(entry instanceof IHasIndexedTexture) || !(entry instanceof Block)) {
+        Map<String, Entry> blocks = new TreeMap<>();
+        int mteStacks = dumpMetaTileEntities(blocks);
+        int blockStacks = dumpPlainBlocks(blocks);
+
+        writeManifest(new File(textureOut, "manifest.json"), packVersion, modVersions, extractorSha, blocks);
+        int total = mteStacks + blockStacks;
+        LOG.info(
+            "gtnh-extractor: texture manifest v{} wrote {} block entries ({} MTE + plain stacks), "
+                + "{} icons, {} gaps.",
+            SCHEMA_VERSION,
+            blocks.size(),
+            total,
+            icons.size(),
+            gaps.size());
+        return total;
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // MTE layer reflection (machines, hatches, buses, controller hulls)
+    // ------------------------------------------------------------------------------------------
+
+    /** Reflect the layered textures of every registered MetaTileEntity into {@code blocks}. */
+    private int dumpMetaTileEntities(Map<String, Entry> blocks) {
+        IMetaTileEntity[] all = GregTechAPI.METATILEENTITIES;
+        int stacks = 0;
+        for (int id = 0; id < all.length; id++) {
+            IMetaTileEntity imte = all[id];
+            if (imte == null) {
                 continue;
             }
-            Block block = (Block) entry;
-            String registryName = String.valueOf(registry.getNameForObject(block));
-            MethodHandle getIcon = findGetIcon(block);
-            if (getIcon == null) {
-                gaps.add(
-                    new Gap(
-                        registryName,
-                        -1,
-                        "all",
-                        "no server-side getIcon(int,int) override (uses GT's client-only ITexture "
-                            + "render path); resolve with Option B"));
-                continue;
+            try {
+                stacks += dumpOneMTE(imte, id, blocks);
+            } catch (Throwable t) {
+                gaps.add(new Gap("meta." + id, id, "all", "MTE dump threw " + t.getClass().getSimpleName()));
+            } finally {
+                wipe();
             }
-            lastIconError = null;
-            Map<Integer, Map<String, String>> perMeta = new TreeMap<>();
-            for (int meta : realMetas(block)) {
-                Map<String, String> sideMap = resolveSides(block, getIcon, registryName, meta, icons, gaps);
-                if (!sideMap.isEmpty()) {
-                    perMeta.put(meta, sideMap);
-                    metaCount++;
-                    resolved += sideMap.size();
-                }
+        }
+        return stacks;
+    }
+
+    /** Dump one MTE: resolve its block+meta key, display name, and per-side/state layer stacks. */
+    private int dumpOneMTE(IMetaTileEntity imte, int id, Map<String, Entry> blocks) {
+        ItemStack form = imte.getStackForm(1);
+        Block block = form != null && form.getItem() != null ? Block.getBlockFromItem(form.getItem()) : null;
+        if (block == null || block == Blocks.air) {
+            return 0;
+        }
+        Object nameObj = Block.blockRegistry.getNameForObject(block);
+        if (nameObj == null) {
+            return 0;
+        }
+        String key = nameObj + "|" + id;
+        Entry entry = new Entry("mte", safeName(imte), imte.getClass().getName());
+
+        boolean basic = imte instanceof MTEBasicMachine;
+        // Non-basic MTEs (hulls/hatches) read their layers off a live getTexture, so place ONCE and
+        // reuse the base TE for all 12 side/state queries instead of re-placing per query.
+        IMetaTileEntity placed = null;
+        IGregTechTileEntity placedBase = null;
+        if (!basic) {
+            try {
+                placed = place(imte, id);
+                placedBase = (IGregTechTileEntity) placed.getBaseMetaTileEntity();
+            } catch (Throwable t) {
+                gaps.add(new Gap(nameObj.toString(), id, "all", "place threw " + t.getClass().getSimpleName()));
+                return 0;
             }
-            if (perMeta.isEmpty()) {
-                // A resolvable getIcon that named nothing: most often the casing selects its sprite via
-                // the @SideOnly IIconContainer.getIcon() interface method FML strips on the server
-                // (array / switch-indexed metas, e.g. the heating coils). Record it, never drop it
-                // silently, and point at Option B.
-                gaps.add(
-                    new Gap(
-                        registryName,
-                        -1,
-                        "all",
-                        "getIcon named no iconset sprite for any meta ("
-                            + (lastIconError != null ? lastIconError : "unknown")
-                            + "); resolve with Option B"));
-                continue;
-            }
-            blocks.put(registryName, perMeta);
-            sourceClasses.put(
-                registryName,
-                block.getClass()
-                    .getName());
-            blockCount++;
         }
 
-        // gt.blockmachines controllers carry composite tile-entity overlay textures, not a single
-        // registered casing sprite, so Option A cannot name them: record the family as an explicit
-        // gap pointing at Option B (a client-mode xvfb dump), so the manifest states its own limits.
-        gaps.add(
-            new Gap(
-                "gregtech:gt.blockmachines",
-                -1,
-                "all",
-                "controller hull uses a composite tile-entity overlay texture, not a single "
-                    + "registered iconset sprite; resolve with Option B (client-mode xvfb dump)"));
-
-        writeManifest(
-            new File(textureOut, "manifest.json"),
-            packVersion,
-            modVersions,
-            extractorSha,
-            blocks,
-            sourceClasses,
-            icons,
-            gaps,
-            blockCount,
-            metaCount,
-            resolved);
-
-        LOG.info(
-            "gtnh-extractor: texture manifest wrote {} blocks, {} metas, {} icons, {} (block,meta,side) "
-                + "assignments, {} gaps.",
-            blockCount,
-            metaCount,
-            icons.size(),
-            resolved,
-            gaps.size());
-        return resolved;
+        int stacks = 0;
+        for (int side = 0; side < 6; side++) {
+            Map<String, List<Layer>> perState = new TreeMap<>();
+            for (boolean active : new boolean[] { false, true }) {
+                List<Layer> layers = basic
+                    ? basicMachineLayers((MTEBasicMachine) imte, side, active)
+                    : getTextureLayers(placed, placedBase, side, active, nameObj.toString(), id);
+                if (layers != null && !layers.isEmpty()) {
+                    perState.put(active ? "active" : "inactive", layers);
+                }
+            }
+            if (!perState.isEmpty()) {
+                entry.sides.put(SIDE_NAMES[side], perState);
+                stacks += perState.size();
+            }
+        }
+        if (!entry.sides.isEmpty()) {
+            blocks.put(key, entry);
+        }
+        return stacks;
     }
 
     /**
-     * Reflectively point every {@code Textures.BlockIcons} constant's {@code mIcon} at a
-     * {@link NamedIcon} carrying that constant's iconset name and jar path (derived from its
-     * {@code name()}). This replaces the client-only {@code IIconRegister} sweep: the blocks'
-     * {@code getIcon} bodies read {@code mIcon} back, so they now return a named icon on the
-     * dedicated server. The mutation is harmless - the dump exits the JVM immediately after.
+     * A basic single-block machine's layer stack for one side/state, via the {@code getXxxFacing}
+     * accessors (no base tile entity needed - the spike showed {@code getTexture} NPEs on a bare
+     * placement for some of these). Front maps to NORTH; the other horizontals share the side texture.
      */
+    private List<Layer> basicMachineLayers(MTEBasicMachine mte, int side, boolean active) {
+        String accessor;
+        switch (side) {
+            case 0:
+                accessor = active ? "getBottomFacingActive" : "getBottomFacingInactive";
+                break;
+            case 1:
+                accessor = active ? "getTopFacingActive" : "getTopFacingInactive";
+                break;
+            case 2:
+                accessor = active ? "getFrontFacingActive" : "getFrontFacingInactive";
+                break;
+            default:
+                accessor = active ? "getSideFacingActive" : "getSideFacingInactive";
+        }
+        try {
+            Object result = MTEBasicMachine.class.getMethod(accessor, byte.class).invoke(mte, (byte) 0);
+            if (result instanceof ITexture[]) {
+                return describeAll((ITexture[]) result, side);
+            }
+        } catch (Throwable t) {
+            lastIconError = accessor + " threw " + t.getClass().getSimpleName();
+        }
+        return null;
+    }
+
+    /** Read an already-placed hull/hatch MTE's {@code getTexture} layer stack for one side/state. */
+    private List<Layer> getTextureLayers(IMetaTileEntity mte, IGregTechTileEntity base, int side, boolean active,
+        String registryName, int id) {
+        try {
+            ITexture[] layers = mte.getTexture(base, ForgeDirection.getOrientation(side), ForgeDirection.NORTH, -1,
+                active, false);
+            return layers == null ? null : describeAll(layers, side);
+        } catch (Throwable t) {
+            if (side == 0 && active) {
+                gaps.add(new Gap(registryName, id, "all", "getTexture threw " + t.getClass().getSimpleName()));
+            }
+            return null;
+        }
+    }
+
+    /** Describe an {@code ITexture[]} into a flat ordered layer list for {@code renderSide}. */
+    private List<Layer> describeAll(ITexture[] textures, int renderSide) {
+        List<Layer> out = new ArrayList<>();
+        for (ITexture t : textures) {
+            describe(t, renderSide, out, 0);
+        }
+        return out;
+    }
+
+    /**
+     * Recursively flatten one {@code ITexture} into {@code out}: unwrap multi/sided wrappers via
+     * {@code mTextures}, resolve a rendered leaf to {icon, rgba, glow}, and a copied-block leaf via
+     * the block-icon path. Unknown implementations are recorded once as a gap, never invented.
+     */
+    private void describe(ITexture t, int renderSide, List<Layer> out, int depth) {
+        if (t == null || depth > 6) {
+            return;
+        }
+        Object nested = readField(t, "mTextures");
+        if (nested instanceof ITexture[]) {
+            ITexture[] inner = (ITexture[]) nested;
+            // A sided wrapper holds one sub-texture per side; a multi wrapper stacks layers. Tell them
+            // apart by length: exactly 6 means sided (pick this side), else composite every layer.
+            if (inner.length == 6) {
+                describe(inner[renderSide], renderSide, out, depth + 1);
+            } else {
+                for (ITexture sub : inner) {
+                    describe(sub, renderSide, out, depth + 1);
+                }
+            }
+            return;
+        }
+        Object iconContainer = readField(t, "mIconContainer");
+        if (iconContainer instanceof IIconContainer) {
+            String name = iconName((IIconContainer) iconContainer);
+            if (name != null) {
+                out.add(new Layer(name, rgbaOf(t), boolField(t, "glow")));
+            }
+            return;
+        }
+        Object copiedBlock = readField(t, "mBlock");
+        if (copiedBlock instanceof Block) {
+            NamedIcon icon = copiedIcon((Block) copiedBlock, intField(t, "mMeta"), intField(t, "mSide"), renderSide);
+            if (icon != null) {
+                out.add(new Layer(icon.iconName, new int[] { 255, 255, 255, 255 }, false));
+            }
+            return;
+        }
+        // Unknown ITexture implementation (exotic ISBRH renderer): record it, do not guess.
+        gaps.add(new Gap(t.getClass().getName(), -1, SIDE_NAMES[renderSide], "unknown ITexture class"));
+    }
+
+    /** An {@code IIconContainer}'s iconset name: enum {@code name()}, else a custom {@code mIconName}. */
+    private String iconName(IIconContainer c) {
+        String rel = null;
+        if (c instanceof Enum) {
+            rel = "iconsets/" + ((Enum<?>) c).name();
+        } else {
+            Object mIconName = readField(c, "mIconName");
+            if (mIconName instanceof String && !((String) mIconName).isEmpty()) {
+                rel = (String) mIconName;
+            }
+        }
+        if (rel == null) {
+            gaps.add(new Gap(c.getClass().getName(), -1, "all", "unresolvable IIconContainer"));
+            return null;
+        }
+        String name = ICON_DOMAIN + ":" + rel;
+        icons.putIfAbsent(name, "assets/" + ICON_DOMAIN + "/textures/blocks/" + rel + ".png");
+        return name;
+    }
+
+    /** Resolve a copied casing block's icon (its base layer) via the injected {@code getIcon}. */
+    private NamedIcon copiedIcon(Block block, int meta, int copiedSide, int renderSide) {
+        int face = copiedSide >= 0 && copiedSide < 6 ? copiedSide : renderSide;
+        MethodHandle getIcon = findGetIcon(block);
+        if (getIcon == null) {
+            return null;
+        }
+        NamedIcon icon = iconAt(block, getIcon, face, meta);
+        if (icon != null) {
+            icons.putIfAbsent(icon.iconName, icon.assetPath);
+        }
+        return icon;
+    }
+
+    /** RGBA (r,g,b,a 0-255) from a colour-modulation texture's {@code getRGBA()} / {@code mRGBa}. */
+    private int[] rgbaOf(ITexture t) {
+        Object rgba = null;
+        try {
+            rgba = t.getClass().getMethod("getRGBA").invoke(t);
+        } catch (Throwable ignored) {
+            rgba = readField(t, "mRGBa");
+        }
+        if (rgba instanceof short[]) {
+            short[] s = (short[]) rgba;
+            int[] out = { 255, 255, 255, 255 };
+            for (int i = 0; i < 4 && i < s.length; i++) {
+                out[i] = s[i] & 0xFFFF;
+            }
+            return out;
+        }
+        return new int[] { 255, 255, 255, 255 };
+    }
+
+    /** Place an MTE at the scratch origin and return the live meta entity bound to its base TE. */
+    private IMetaTileEntity place(IMetaTileEntity imte, int id) {
+        ItemStack form = imte.getStackForm(1);
+        Block block = form != null && form.getItem() != null ? Block.getBlockFromItem(form.getItem()) : null;
+        if (block == null || block == Blocks.air) {
+            throw new IllegalStateException("no block form");
+        }
+        world.setBlock(OX, OY, OZ, block, 0, 3);
+        TileEntity te = world.getTileEntity(OX, OY, OZ);
+        if (!(te instanceof BaseMetaTileEntity)) {
+            throw new IllegalStateException("no BaseMetaTileEntity at origin");
+        }
+        BaseMetaTileEntity bmte = (BaseMetaTileEntity) te;
+        bmte.setMetaTileID((short) id);
+        IMetaTileEntity mte = imte.newMetaEntity(bmte);
+        bmte.setMetaTileEntity(mte);
+        mte.setBaseMetaTileEntity(bmte);
+        bmte.setFrontFacing(ForgeDirection.NORTH);
+        return mte;
+    }
+
+    private void wipe() {
+        try {
+            if (world.getBlock(OX, OY, OZ) != Blocks.air) {
+                world.setBlock(OX, OY, OZ, Blocks.air, 0, 2);
+            }
+        } catch (Throwable ignored) {
+            // best-effort cleanup between MTEs
+        }
+    }
+
+    private static String safeName(IMetaTileEntity imte) {
+        try {
+            String n = imte.getLocalName();
+            if (n != null && !n.trim().isEmpty()) {
+                return n;
+            }
+        } catch (Throwable ignored) {
+            // fall through
+        }
+        return imte.getClass().getSimpleName();
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // Plain structure blocks (casings, coils, glass) - v1's block-icon mechanism, kept
+    // ------------------------------------------------------------------------------------------
+
+    /** Emit a single un-tinted "all"-side layer per meta for every indexed-texture casing/coil block. */
+    private int dumpPlainBlocks(Map<String, Entry> blocks) {
+        FMLControlledNamespacedRegistry<Block> registry = GameData.getBlockRegistry();
+        int stacks = 0;
+        for (Object obj : registry) {
+            if (!(obj instanceof IHasIndexedTexture) || !(obj instanceof Block)) {
+                continue;
+            }
+            Block block = (Block) obj;
+            String registryName = String.valueOf(registry.getNameForObject(block));
+            MethodHandle getIcon = findGetIcon(block);
+            if (getIcon == null) {
+                gaps.add(new Gap(registryName, -1, "all",
+                    "no server-side getIcon override (" + lastGetIconError + ")"));
+                continue;
+            }
+            for (int meta : realMetas(block)) {
+                NamedIcon icon = iconAt(block, getIcon, 2, meta); // side 2 (north) as the representative face
+                if (icon == null) {
+                    continue;
+                }
+                icons.putIfAbsent(icon.iconName, icon.assetPath);
+                String key = registryName + "|" + meta;
+                Entry entry = blocks.computeIfAbsent(key, k -> new Entry("block", null, block.getClass().getName()));
+                Map<String, List<Layer>> perState = new TreeMap<>();
+                List<Layer> layers = new ArrayList<>();
+                layers.add(new Layer(icon.iconName, new int[] { 255, 255, 255, 255 }, false));
+                perState.put("inactive", layers);
+                entry.sides.put("all", perState);
+                stacks++;
+            }
+        }
+        return stacks;
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // Shared reflection helpers (from v1)
+    // ------------------------------------------------------------------------------------------
+
+    /** Inject a {@link NamedIcon} into every {@code BlockIcons} constant so block.getIcon names it. */
     private void populateIconNames() {
         Field mIconField;
         try {
             mIconField = Textures.BlockIcons.class.getDeclaredField("mIcon");
             mIconField.setAccessible(true);
         } catch (NoSuchFieldException e) {
-            throw new IllegalStateException("Textures.BlockIcons.mIcon field is gone: " + e.getMessage(), e);
+            throw new IllegalStateException("Textures.BlockIcons.mIcon is gone: " + e.getMessage(), e);
         }
         int ok = 0;
-        Textures.BlockIcons[] values = Textures.BlockIcons.values();
-        for (Textures.BlockIcons icon : values) {
+        for (Textures.BlockIcons icon : Textures.BlockIcons.values()) {
             try {
-                Icon named = iconFor(icon);
-                mIconField.set(icon, new NamedIcon(named.name, named.path));
+                String shortName = "iconsets/" + icon.name();
+                String name = ICON_DOMAIN + ":" + shortName;
+                String path = "assets/" + ICON_DOMAIN + "/textures/blocks/" + shortName + ".png";
+                mIconField.set(icon, new NamedIcon(name, path));
                 ok++;
             } catch (Throwable t) {
                 LOG.debug("gtnh-extractor: cannot name BlockIcons.{}: {}", icon.name(), t.toString());
             }
         }
-        LOG.info("gtnh-extractor: named {} of {} BlockIcons constants", ok, values.length);
+        LOG.info("gtnh-extractor: named {} BlockIcons constants", ok);
     }
 
-    /**
-     * Resolve sides 0..5 for one (block, meta). Returns a side map: a single {@code "all"} entry when
-     * every face carries the same icon (the common case for a casing), else one entry per resolved
-     * face. Faces that stay {@code null} while others resolve are recorded as gaps.
-     */
-    private Map<String, String> resolveSides(Block block, MethodHandle getIcon, String registryName, int meta,
-        Map<String, Icon> icons, List<Gap> gaps) {
-        String[] names = new String[SIDES];
-        int resolvedFaces = 0;
-        for (int side = 0; side < SIDES; side++) {
-            NamedIcon icon = iconAt(block, getIcon, side, meta);
-            if (icon != null) {
-                names[side] = icon.iconName;
-                resolvedFaces++;
-                icons.putIfAbsent(icon.iconName, new Icon(icon.iconName, icon.assetPath));
-            }
-        }
-        Map<String, String> sideMap = new TreeMap<>();
-        if (resolvedFaces == 0) {
-            return sideMap; // not a resolvable sub-block; skip silently (may not be a real meta)
-        }
-        boolean uniform = true;
-        for (int side = 1; side < SIDES; side++) {
-            if (!equalName(names[0], names[side])) {
-                uniform = false;
-                break;
-            }
-        }
-        if (uniform) {
-            sideMap.put("all", names[0]);
-            return sideMap;
-        }
-        for (int side = 0; side < SIDES; side++) {
-            if (names[side] != null) {
-                sideMap.put(Integer.toString(side), names[side]);
-            } else {
-                gaps.add(new Gap(registryName, meta, Integer.toString(side), "getIcon returned no named icon"));
-            }
-        }
-        return sideMap;
-    }
-
-    /**
-     * Invoke the block's own {@code getIcon(side, meta)} and read the injected {@link NamedIcon}, or
-     * null. A null result records the reason in {@link #lastIconError} so the block-level gap can
-     * explain it - most commonly a {@code NoSuchMethodError} because the casing selects its sprite
-     * through the {@code @SideOnly(CLIENT)} {@code IIconContainer.getIcon()} interface method that FML
-     * strips on the dedicated server (array / switch-indexed metas), which no server-side pass can
-     * reach.
-     */
     private NamedIcon iconAt(Block block, MethodHandle getIcon, int side, int meta) {
         try {
             Object icon = getIcon.invoke(block, side, meta);
             if (icon instanceof NamedIcon) {
                 return (NamedIcon) icon;
             }
-            lastIconError = icon == null ? "getIcon returned null (no injected icon)"
-                : "getIcon returned a foreign icon";
+            lastIconError = icon == null ? "getIcon returned null" : "getIcon returned a foreign icon";
         } catch (Throwable t) {
-            lastIconError = t.getClass()
-                .getSimpleName() + ": "
-                + String.valueOf(t.getMessage());
-            LOG.debug("gtnh-extractor: getIcon({}, {}) failed on {}: {}", side, meta, block.getClass(), lastIconError);
+            lastIconError = t.getClass().getSimpleName();
         }
         return null;
     }
 
-    /** Why the most recent {@code getIcon} call yielded no named icon, for the block-level gap reason. */
-    private String lastIconError;
-
-    /**
-     * Resolve the block's own {@code getIcon(int,int)} override as a {@link MethodHandle}. This is
-     * deliberate: the base {@code Block.getIcon(int,int)} is {@code @SideOnly(CLIENT)} and stripped on
-     * the dedicated server (a direct call throws {@code NoSuchMethodError}), while reflective
-     * {@code getMethod}/{@code getDeclaredMethod} eagerly resolve a whole class method table and die
-     * on the client-only {@code registerBlockIcons(IIconRegister)} the casings declare/inherit.
-     * {@code findVirtual} does a <em>targeted</em> name+type resolution (like linking one
-     * {@code invokevirtual}) that never touches that sibling, so it uniformly finds the casing's
-     * un-stripped {@code getIcon} override on whichever class declares it.
-     */
     private MethodHandle findGetIcon(Block block) {
         MethodType type = MethodType.methodType(IIcon.class, int.class, int.class);
-        MethodHandles.Lookup lookup = MethodHandles.publicLookup();
+        MethodHandles.Lookup pub = MethodHandles.publicLookup();
+        MethodHandles.Lookup priv = MethodHandles.lookup();
         for (String name : GET_ICON_NAMES) {
+            // 1. Targeted public virtual resolution (links one invokevirtual, never touches the
+            // client-only registerBlockIcons sibling a bulk getMethods() scan would trip over).
             try {
-                return lookup.findVirtual(block.getClass(), name, type);
+                return pub.findVirtual(block.getClass(), name, type);
             } catch (NoSuchMethodException | IllegalAccessException e) {
-                // not this name (SRG vs deobf); try the next
+                lastGetIconError = name + ": " + e.getClass().getSimpleName();
             } catch (Throwable t) {
-                LOG.debug("gtnh-extractor: cannot resolve getIcon on {}: {}", block.getClass(), t.toString());
+                lastGetIconError = name + ": " + t.getClass().getSimpleName() + " " + t.getMessage();
+            }
+            // 2. Fallback: unreflect the declared getIcon(int,int) walking the hierarchy. Some casings
+            // (e.g. the newer families) declare an un-annotated getIcon that publicLookup does not bind
+            // but a direct getDeclaredMethod + unreflect does; still targeted, so no sibling load.
+            for (Class<?> c = block.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+                try {
+                    java.lang.reflect.Method m = c.getDeclaredMethod(name, int.class, int.class);
+                    m.setAccessible(true);
+                    return priv.unreflect(m);
+                } catch (NoSuchMethodException e) {
+                    // keep walking up the hierarchy
+                } catch (Throwable t) {
+                    lastGetIconError = name + " unreflect: " + t.getClass().getSimpleName();
+                }
             }
         }
         return null;
     }
 
+    /** Why the most recent {@link #findGetIcon} returned null, folded into the block-level gap. */
+    private String lastGetIconError;
+
     /**
-     * The block's real sub-block metas, mirroring GT's own creative-list test (an
-     * {@code ItemStack.getDisplayName()} that still contains {@code ".name"} is an unnamed, non-real
-     * meta). Falls back to the full 0..15 casing range if server-side names are unavailable, so
-     * nothing is missed.
+     * The block's real sub-block metas (mirrors GT's creative-list test: an unnamed meta's display
+     * name still contains {@code ".name"}). Falls back to the full 0..15 range if names are absent.
      */
     private int[] realMetas(Block block) {
         Item item = Item.getItemFromBlock(block);
@@ -396,7 +579,7 @@ final class TextureDumper {
                         metas.add(meta);
                     }
                 } catch (Throwable ignored) {
-                    // an item that dislikes a meta is simply not that sub-block
+                    // not a real sub-block
                 }
             }
         }
@@ -413,53 +596,62 @@ final class TextureDumper {
         return out;
     }
 
-    private static boolean equalName(String a, String b) {
-        return a == null ? b == null : a.equals(b);
+    // ------------------------------------------------------------------------------------------
+    // Small reflection utilities
+    // ------------------------------------------------------------------------------------------
+
+    private static Object readField(Object owner, String name) {
+        for (Class<?> c = owner.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+            try {
+                Field f = c.getDeclaredField(name);
+                f.setAccessible(true);
+                return f.get(owner);
+            } catch (NoSuchFieldException e) {
+                // keep walking up
+            } catch (Throwable t) {
+                return null;
+            }
+        }
+        return null;
     }
 
-    /**
-     * The iconset name and jar asset path for one {@code BlockIcons} constant. Every constant's
-     * {@code run()} registers {@code Mods.GregTech.getResourcePath("iconsets", name())}, i.e.
-     * {@code "gregtech:iconsets/<NAME>"}, and the PNG lives at
-     * {@code assets/gregtech/textures/blocks/iconsets/<NAME>.png} (verified in the pinned jar). We
-     * derive both from {@code name()} directly - the constant's own {@code getTextureFile()} is
-     * unusable here because it dereferences the client-only {@code TextureMap} class, which FML's
-     * {@code SideTransformer} refuses to load on the dedicated server.
-     */
-    private static Icon iconFor(Textures.BlockIcons icon) {
-        String shortName = "iconsets/" + icon.name();
-        String name = ICON_DOMAIN + ":" + shortName;
-        String assetPath = "assets/" + ICON_DOMAIN + "/textures/blocks/" + shortName + ".png";
-        return new Icon(name, assetPath);
+    private static boolean boolField(Object owner, String name) {
+        Object v = readField(owner, name);
+        return v instanceof Boolean && (Boolean) v;
     }
+
+    private static int intField(Object owner, String name) {
+        Object v = readField(owner, name);
+        return v instanceof Number ? ((Number) v).intValue() : -1;
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // Manifest writer (schema 2)
+    // ------------------------------------------------------------------------------------------
 
     private void writeManifest(File file, String packVersion, Map<String, String> modVersions, String extractorSha,
-        Map<String, Map<Integer, Map<String, String>>> blocks, Map<String, String> sourceClasses,
-        Map<String, Icon> icons, List<Gap> gaps, int blockCount, int metaCount, int resolved) throws IOException {
+        Map<String, Entry> blocks) throws IOException {
         JsonObject root = new JsonObject();
         root.addProperty("schema", SCHEMA_VERSION);
-        root.addProperty("method", "server-icon-reflection");
+        root.addProperty("method", "server-itexture-reflection");
 
         JsonObject provenance = new JsonObject();
         provenance.addProperty("pack_version", packVersion);
         JsonObject mods = new JsonObject();
         modVersions.forEach(mods::addProperty);
         provenance.add("mod_versions", mods);
-        provenance.addProperty(
-            "generated_at",
-            java.time.Instant.now()
-                .toString());
+        provenance.addProperty("generated_at", java.time.Instant.now().toString());
         provenance.addProperty("extractor_sha", extractorSha);
         provenance.addProperty(
             "note",
-            "Icon names reflected server-side from GT Textures.BlockIcons (Option A). PNGs are NOT "
-                + "committed (LGPL); fetch them from the GT5-Unofficial jar on the GTNH Nexus at "
-                + "build/preview time using the paths in `icons`.");
+            "Layered ITexture stacks reflected server-side (icon name + rgba tint + glow) per side "
+                + "and active state. PNGs are NOT committed (LGPL); fetch from the GT5-Unofficial jar "
+                + "using the paths in `icons` and composite per `blocks` (see previewer/bake.py).");
         JsonObject coverage = new JsonObject();
-        coverage.addProperty("blocks", blockCount);
-        coverage.addProperty("metas", metaCount);
+        long mteCount = blocks.values().stream().filter(e -> "mte".equals(e.kind)).count();
+        coverage.addProperty("blocks", blocks.size());
+        coverage.addProperty("mte", (int) mteCount);
         coverage.addProperty("icons", icons.size());
-        coverage.addProperty("assignments", resolved);
         coverage.addProperty("gaps", gaps.size());
         provenance.add("coverage", coverage);
         root.add("provenance", provenance);
@@ -467,29 +659,37 @@ final class TextureDumper {
         root.addProperty("asset_root", "assets/{modid}/textures/blocks/");
 
         JsonObject blocksJson = new JsonObject();
-        blocks.forEach((registryName, perMeta) -> {
-            JsonObject blockJson = new JsonObject();
-            blockJson.addProperty("source_class", sourceClasses.get(registryName));
-            JsonObject metasJson = new JsonObject();
-            perMeta.forEach((meta, sideMap) -> {
-                JsonObject sideJson = new JsonObject();
-                sideMap.forEach(sideJson::addProperty);
-                metasJson.add(Integer.toString(meta), sideJson);
-            });
-            blockJson.add("metas", metasJson);
-            blocksJson.add(registryName, blockJson);
-        });
+        for (Map.Entry<String, Entry> e : blocks.entrySet()) {
+            Entry entry = e.getValue();
+            JsonObject bj = new JsonObject();
+            bj.addProperty("kind", entry.kind);
+            if (entry.displayName != null) {
+                bj.addProperty("display_name", entry.displayName);
+            }
+            if (entry.sourceClass != null) {
+                bj.addProperty("source_class", entry.sourceClass);
+            }
+            JsonObject sidesJson = new JsonObject();
+            for (Map.Entry<String, Map<String, List<Layer>>> side : entry.sides.entrySet()) {
+                JsonObject statesJson = new JsonObject();
+                for (Map.Entry<String, List<Layer>> state : side.getValue().entrySet()) {
+                    statesJson.add(state.getKey(), layersJson(state.getValue()));
+                }
+                sidesJson.add(side.getKey(), statesJson);
+            }
+            bj.add("sides", sidesJson);
+            blocksJson.add(e.getKey(), bj);
+        }
         root.add("blocks", blocksJson);
 
         JsonObject iconsJson = new JsonObject();
-        icons.forEach((name, icon) -> iconsJson.addProperty(name, icon.path));
+        icons.forEach(iconsJson::addProperty);
         root.add("icons", iconsJson);
 
         JsonArray gapsJson = new JsonArray();
         gaps.stream()
             .sorted(
-                java.util.Comparator.comparing((Gap g) -> g.block)
-                    .thenComparingInt(g -> g.meta)
+                java.util.Comparator.comparing((Gap g) -> g.block).thenComparingInt(g -> g.meta)
                     .thenComparing(g -> g.side))
             .forEach(g -> {
                 JsonObject gj = new JsonObject();
@@ -501,19 +701,32 @@ final class TextureDumper {
             });
         root.add("gaps", gapsJson);
 
-        file.getParentFile()
-            .mkdirs();
+        file.getParentFile().mkdirs();
         try (Writer w = Files.newBufferedWriter(file.toPath(), StandardCharsets.UTF_8)) {
             gson.toJson(root, w);
             w.write('\n');
         }
     }
 
+    private static JsonArray layersJson(List<Layer> layers) {
+        JsonArray arr = new JsonArray();
+        for (Layer l : layers) {
+            JsonObject lj = new JsonObject();
+            lj.addProperty("icon", l.icon);
+            JsonArray rgba = new JsonArray();
+            for (int c : l.rgba) {
+                rgba.add(new JsonPrimitive(c));
+            }
+            lj.add("rgba", rgba);
+            lj.addProperty("glow", l.glow);
+            arr.add(lj);
+        }
+        return arr;
+    }
+
     /**
-     * An {@link IIcon} that carries only its registered name and jar asset path. {@code IIcon} is a
-     * server-safe {@code net.minecraft.util} type (unlike the client-only {@code IIconRegister}), so
-     * it can be injected into a {@code BlockIcons.mIcon} field on a dedicated server. Its UV/size
-     * accessors return harmless defaults - nothing renders here; the name is the whole point.
+     * A server-safe {@link IIcon} carrying only a registered name and jar path, injected into the
+     * {@code BlockIcons.mIcon} fields so a block's own {@code getIcon} hands it back on the server.
      */
     private static final class NamedIcon implements IIcon {
 
