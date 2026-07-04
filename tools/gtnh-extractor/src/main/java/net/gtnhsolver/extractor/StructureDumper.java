@@ -3,9 +3,11 @@ package net.gtnhsolver.extractor;
 import java.io.File;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import net.minecraft.block.Block;
@@ -26,8 +28,10 @@ import com.gtnewhorizon.structurelib.alignment.constructable.IConstructable;
 import com.gtnewhorizon.structurelib.alignment.enumerable.ExtendedFacing;
 
 import gregtech.api.GregTechAPI;
+import gregtech.api.interfaces.IHeatingCoil;
 import gregtech.api.interfaces.metatileentity.IMetaTileEntity;
 import gregtech.api.metatileentity.BaseMetaTileEntity;
+import gregtech.common.misc.GTStructureChannels;
 
 /**
  * The core dump loop: iterate every registered GregTech meta tile entity, build the ones that can
@@ -58,10 +62,51 @@ import gregtech.api.metatileentity.BaseMetaTileEntity;
  *        v
  *   sweep trigger stack 1..N, stop when the occupied cell set stops changing -> one Variant per
  *   shape (identity-only tier swaps collapse; genuine size variants stay distinct)
+ *        |
+ *        v
+ *   CHANNEL PROBE (lane 3): recover the tiers the shape-signature collapse discarded.
  * </pre>
  *
- * Every controller is wrapped so an exception, a non-terminating/explosive sweep, or an empty scan
- * becomes a {@code _meta.json} failure instead of aborting the run.
+ * <p>
+ * <b>Why one sweep already covers shape-changing channels.</b> StructureLib reads a channel with
+ * {@code ChannelDataAccessor.getChannelData(trigger, channel)}, which falls back to the trigger's
+ * <em>stack size</em> when the channel is unset. So the stack sweep above already varies every
+ * channel at once: a channel that changes the <em>shape</em> (a distillation tower's {@code height},
+ * a structure's {@code length}) yields distinct occupied-cell sets and is recorded as separate
+ * variants; a channel that only swaps a tiered <em>block</em> (coil, glass, pipe casing) keeps the
+ * same shape and collapses into one variant, throwing its tier information away.
+ *
+ * <p>
+ * The channel probe recovers exactly that discarded tier information. Holding the stack size at 1
+ * (every other channel at its default) it sets one channel at a time to values {@code 1..N} and
+ * diffs the built blocks against the default build:
+ *
+ * <pre>
+ *   for each GT channel (skip gt_no_hatch, which is always applied):
+ *     set channel = 2..N, rebuild, compare occupied cells + block identity to the default build
+ *       occupied cells changed  -> shape-changing channel: already a size variant above, skip here
+ *       only block identity moved -> identity-only channel: record {channel_value, block, meta} for
+ *                                    the default tier and every distinct tier -> substitutions[chan]
+ *       nothing changed          -> controller does not use this channel, skip
+ * </pre>
+ *
+ * The default-placed block is always included (it is the value-1 entry), which is what lets the
+ * Python adapter match the tiered blocks in the primary variant.
+ *
+ * <p>
+ * <b>Heating coils are a special case.</b> Only some coil multiblocks bind their coil element to the
+ * {@code coil} channel (mega furnaces, via {@code HEATING_COIL.use(...)}); the classic ones (Electric
+ * Blast Furnace, Multi Smelter, ...) place a bare {@code ofCoil} element whose tier is read straight
+ * from the trigger's <em>stack size</em>, so an explicit {@code coil} channel does nothing. The coil
+ * table is therefore built by a separate stack-size sweep that identifies coil blocks by the GT
+ * {@code IHeatingCoil} interface the block itself implements (a fact the block declares, not a
+ * hard-coded name). This one sweep covers both kinds, since a channel-bound coil falls back to the
+ * stack size when its channel is unset.
+ *
+ * <p>
+ * Every controller is wrapped so an exception, a non-terminating/explosive sweep, or an
+ * over-cap channel/substitution space becomes a {@code _meta.json} failure instead of aborting the
+ * run.
  */
 final class StructureDumper {
 
@@ -69,6 +114,9 @@ final class StructureDumper {
 
     /** StructureLib channel that keeps auto-placed hatches out, leaving the casing shell + hints. */
     private static final String NO_HATCH_CHANNEL = "gt_no_hatch";
+
+    /** The GT heating-coil channel name; coils are swept by stack size, so it is skipped in the loop. */
+    private static final String COIL_CHANNEL = GTStructureChannels.HEATING_COIL.get();
 
     // Fixed scratch origin: high in the spawn chunks, well above terrain, so the region is empty
     // air we can build into and wipe freely. Offsets in the JSON are world deltas from here.
@@ -83,6 +131,12 @@ final class StructureDumper {
     private static final int MAX_CELLS = 20000;
     private static final int MAX_SCAN_DIM = 80;
     private static final int DEFAULT_SCAN_RADIUS = 12;
+
+    // Lane 3 caps: bound the per-channel value sweep (14 coil tiers + margin) and the total number of
+    // substitution entries a controller may emit, so a controller with a pathological channel space
+    // lands on the failure list rather than emitting a runaway table.
+    private static final int MAX_CHANNEL_VALUE = 16;
+    private static final int MAX_SUBSTITUTION_ENTRIES = 128;
 
     private final World world;
     private final ErrorCollector errors = new ErrorCollector();
@@ -137,6 +191,8 @@ final class StructureDumper {
         File multiblocksDir = new File(datasetOut, "multiblocks");
         multiblocksDir.mkdirs();
 
+        preloadRegion();
+
         JsonWriter writer = new JsonWriter();
         IMetaTileEntity[] metaTileEntities = GregTechAPI.METATILEENTITIES;
         int written = 0;
@@ -183,6 +239,34 @@ final class StructureDumper {
             written,
             errors.count());
         return written;
+    }
+
+    /**
+     * Force every chunk in the scratch working area into the loaded map up front, so nothing during
+     * the dump triggers on-demand chunk generation. A {@code getBlock} that loads a fresh chunk
+     * mid-dump runs terrain decoration, and a shared biome decorator re-entered that way throws
+     * {@code "Already decorating!!"} - which, once a controller's many probe builds provoke it, would
+     * corrupt later controllers too. Loading every working chunk here (each lands in the loaded map
+     * even if its own one-time decoration throws, and the scratch region sits at Y=210 above any
+     * decoration) keeps the whole dump reading only already-resident chunks.
+     */
+    private void preloadRegion() {
+        int radius = 6; // chunks around the origin: covers the widest structure plus scan/wipe margins
+        int ocx = OX >> 4;
+        int ocz = OZ >> 4;
+        int loaded = 0;
+        for (int cx = ocx - radius; cx <= ocx + radius; cx++) {
+            for (int cz = ocz - radius; cz <= ocz + radius; cz++) {
+                try {
+                    world.getBlock((cx << 4) + 8, OY, (cz << 4) + 8);
+                    loaded++;
+                } catch (Throwable t) {
+                    // A cascade during this one-time preload is harmless: the chunk still lands in the
+                    // loaded map, so no dump-time getBlock has to regenerate it.
+                }
+            }
+        }
+        LOG.info("gtnh-extractor: preloaded {} scratch chunks (radius {} around the origin).", loaded, radius);
     }
 
     /** Dump one controller: sweep the trigger stack and collect one variant per distinct form. */
@@ -237,6 +321,15 @@ final class StructureDumper {
             throw new DumpException("empty scan (no structure built in the void world)");
         }
         doc.variants.addAll(distinct.values());
+        // The first variant is the smallest stack size (1), i.e. the structure at its default tiers;
+        // probe channels against it to recover the identity-substitution tables the sweep collapsed.
+        probeChannels(
+            imte,
+            id,
+            distinct.values()
+                .iterator()
+                .next(),
+            doc);
         return doc;
     }
 
@@ -281,6 +374,292 @@ final class StructureDumper {
         } finally {
             safeWipe(cube);
         }
+    }
+
+    /** One scanned cell's identity, keyed by position in a block map. Equality is (block, meta). */
+    private static final class Cell {
+
+        final String block;
+        final int meta;
+
+        Cell(String block, int meta) {
+            this.block = block;
+            this.meta = meta;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof Cell)) {
+                return false;
+            }
+            Cell other = (Cell) o;
+            return meta == other.meta && block.equals(other.block);
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * block.hashCode() + meta;
+        }
+    }
+
+    /**
+     * Probe every GT channel against the default build and fill {@code doc.substitutions} with the
+     * identity-only channels (coil/glass/pipe-casing tiers). Shape-changing channels are left to the
+     * trigger-stack sweep (an unset channel reads the stack size, so the sweep already varies them);
+     * channels the controller does not use produce nothing. Best-effort: a channel that throws mid
+     * sweep just stops, and only an over-cap substitution space fails the whole controller.
+     */
+    private void probeChannels(IMetaTileEntity imte, int id, DumpModel.Variant base, DumpModel.MultiblockDoc doc)
+        throws DumpException {
+        ItemStack baseTrigger = imte.getStackForm(1);
+        if (baseTrigger == null) {
+            return; // no item form to carry channel data; the base variant is already recorded
+        }
+        ChannelDataAccessor.setChannelData(baseTrigger, NO_HATCH_CHANNEL, 1);
+        int[] cube = probeCube(base);
+        Map<Long, Cell> baseline = buildBlockMap(imte, id, baseTrigger, cube);
+        if (baseline == null || baseline.size() < 2) {
+            return; // nothing solid to compare tiers against (e.g. a hint-derived shell)
+        }
+        Set<Long> baseCells = baseline.keySet();
+
+        int totalEntries = 0;
+        // Coils first, by their own stack-size sweep (they are not driven by the coil channel on the
+        // classic furnaces). The channel loop then skips the coil channel so it is recorded once.
+        List<DumpModel.Substitution> coils = probeCoils(imte, id, baseline, cube);
+        if (!coils.isEmpty()) {
+            doc.substitutions.put(COIL_CHANNEL, coils);
+            totalEntries += coils.size();
+        }
+        for (GTStructureChannels channel : GTStructureChannels.values()) {
+            String name = channel.get();
+            if (name == null || name.equals(NO_HATCH_CHANNEL) || name.equals(COIL_CHANNEL)) {
+                continue; // gt_no_hatch is always applied; coils are handled by the stack-size sweep
+            }
+            List<DumpModel.Substitution> entries = probeChannel(imte, id, name, baseTrigger, baseline, baseCells, cube);
+            if (entries.isEmpty()) {
+                continue;
+            }
+            doc.substitutions.put(name, entries);
+            totalEntries += entries.size();
+            if (totalEntries > MAX_SUBSTITUTION_ENTRIES) {
+                throw new DumpException(
+                    "substitution table exceeded the cap of " + MAX_SUBSTITUTION_ENTRIES + " entries");
+            }
+        }
+        if (id == debugMeta && !doc.substitutions.isEmpty()) {
+            LOG.info("gtnh-extractor DEBUG meta {}: substitutions {}", id, doc.substitutions.keySet());
+        }
+    }
+
+    /**
+     * Enumerate a controller's heating-coil tiers into a {@code coil} substitution list. Runs only if
+     * the default build already placed a coil (a block implementing {@link IHeatingCoil}); then it
+     * sweeps the trigger stack size, which is what the coil element reads for its tier, and records
+     * each distinct coil block. Covers both the classic furnaces (bare {@code ofCoil}, stack-size
+     * driven) and the channel-bound mega furnaces (which fall back to the stack size when the coil
+     * channel is unset), so it is the single source of the coil table for both.
+     */
+    private List<DumpModel.Substitution> probeCoils(IMetaTileEntity imte, int id, Map<Long, Cell> baseline,
+        int[] cube) {
+        boolean baseHasCoil = false;
+        for (Cell c : baseline.values()) {
+            if (isCoilBlock(c.block)) {
+                baseHasCoil = true;
+                break;
+            }
+        }
+        if (!baseHasCoil) {
+            return new ArrayList<>(); // no coil in this structure; nothing to enumerate
+        }
+        List<DumpModel.Substitution> entries = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        Set<Cell> previousCoils = null;
+        for (int n = 1; n <= MAX_CHANNEL_VALUE; n++) {
+            ItemStack trigger = imte.getStackForm(n);
+            if (trigger == null) {
+                break;
+            }
+            ChannelDataAccessor.setChannelData(trigger, NO_HATCH_CHANNEL, 1);
+            Map<Long, Cell> map = buildBlockMap(imte, id, trigger, cube);
+            if (map == null) {
+                break;
+            }
+            Set<Cell> coils = new LinkedHashSet<>();
+            for (Cell c : map.values()) {
+                if (isCoilBlock(c.block)) {
+                    coils.add(c);
+                }
+            }
+            if (coils.isEmpty()) {
+                break;
+            }
+            if (coils.equals(previousCoils)) {
+                break; // the tier clamped at its maximum; the sweep has stabilised
+            }
+            for (Cell c : coils) {
+                if (seen.add(n + " " + c.block + " " + c.meta)) {
+                    entries.add(new DumpModel.Substitution(n, c.block, c.meta));
+                }
+            }
+            previousCoils = coils;
+        }
+        return entries;
+    }
+
+    /** Whether a registry name resolves to a block that declares itself a GT heating coil. */
+    private boolean isCoilBlock(String registryName) {
+        try {
+            return Block.getBlockFromName(registryName) instanceof IHeatingCoil;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * Sweep one channel's values at stack size 1, holding every other channel at its default, and
+     * return the identity-substitution entries for it. Returns an empty list when the channel is
+     * unused (no build differs from the default) or shape-changing (the occupied cells move, which
+     * the trigger-stack sweep already captured as a size variant).
+     */
+    private List<DumpModel.Substitution> probeChannel(IMetaTileEntity imte, int id, String name, ItemStack baseTrigger,
+        Map<Long, Cell> baseline, Set<Long> baseCells, int[] cube) {
+        // builds: channel value -> block map. Seed the default build as value 1, because an unset
+        // channel reads the stack size (1 here), so the default tier is exactly value 1.
+        LinkedHashMap<Integer, Map<Long, Cell>> builds = new LinkedHashMap<>();
+        builds.put(1, baseline);
+        Map<Long, Cell> previous = baseline;
+        for (int value = 2; value <= MAX_CHANNEL_VALUE; value++) {
+            ItemStack trigger = baseTrigger.copy();
+            ChannelDataAccessor.setChannelData(trigger, name, value);
+            Map<Long, Cell> map = buildBlockMap(imte, id, trigger, cube);
+            if (map == null || !map.keySet()
+                .equals(baseCells)) {
+                // The build failed, or the occupied cells moved: not identity-only. A genuine shape
+                // change is a size variant the stack sweep already enumerated, so stop probing here.
+                break;
+            }
+            if (map.equals(previous)) {
+                break; // the tier clamped past its maximum; the sweep has stabilised
+            }
+            builds.put(value, map);
+            previous = map;
+        }
+        // Controlled cells: those whose block identity moves as the channel changes (vs the default).
+        Set<Long> controlled = new LinkedHashSet<>();
+        for (Map.Entry<Integer, Map<Long, Cell>> build : builds.entrySet()) {
+            if (build.getKey() == 1) {
+                continue; // value 1 is the default itself; nothing differs from it yet
+            }
+            for (Long cell : baseCells) {
+                if (!baseline.get(cell)
+                    .equals(
+                        build.getValue()
+                            .get(cell))) {
+                    controlled.add(cell);
+                }
+            }
+        }
+        if (controlled.isEmpty()) {
+            return new ArrayList<>(); // channel unused by this controller (or a single default tier)
+        }
+        // One entry per (value, distinct block+meta) at the controlled cells, the default included.
+        List<DumpModel.Substitution> entries = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (Map.Entry<Integer, Map<Long, Cell>> build : builds.entrySet()) {
+            int value = build.getKey();
+            Set<Cell> tierBlocks = new LinkedHashSet<>();
+            for (Long cell : controlled) {
+                Cell c = build.getValue()
+                    .get(cell);
+                if (c != null) {
+                    tierBlocks.add(c);
+                }
+            }
+            for (Cell c : tierBlocks) {
+                if (seen.add(value + " " + c.block + " " + c.meta)) {
+                    entries.add(new DumpModel.Substitution(value, c.block, c.meta));
+                }
+            }
+        }
+        return entries;
+    }
+
+    /**
+     * A block pass with the given trigger, scanned into a position -> {@link Cell} map over
+     * {@code cube}. Used only for channel probing (no hint pass): the wipe/place/construct/scan is
+     * self-contained and always cleans up the scratch region. Returns {@code null} if the build
+     * threw, so a channel value that a controller rejects just ends that channel's sweep.
+     */
+    private Map<Long, Cell> buildBlockMap(IMetaTileEntity imte, int id, ItemStack trigger, int[] cube) {
+        try {
+            IConstructable controller = placeController(imte, id);
+            controller.construct(trigger, false);
+            Map<Long, Cell> map = new HashMap<>();
+            for (int x = cube[0]; x <= cube[3]; x++) {
+                for (int y = cube[1]; y <= cube[4]; y++) {
+                    for (int z = cube[2]; z <= cube[5]; z++) {
+                        Block block = world.getBlock(x, y, z);
+                        if (block == null || block == Blocks.air || block == hintBlock) {
+                            continue;
+                        }
+                        Object name = Block.blockRegistry.getNameForObject(block);
+                        if (name == null) {
+                            continue;
+                        }
+                        map.put(packKey(x, y, z), new Cell(name.toString(), world.getBlockMetadata(x, y, z)));
+                    }
+                }
+            }
+            return map;
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            // Wipe the scan region unioned with the default cube. Bounded to what phase 1 already
+            // touched (never a fixed margin beyond it): reaching into an ungenerated chunk here forces
+            // mid-dump terrain decoration, which throws "Already decorating!!" and corrupts the run.
+            safeWipe(unionCube(cube, defaultCube()));
+        }
+    }
+
+    /**
+     * The world cube to scan while probing: the default variant's block span expanded by one, capped
+     * to {@link #MAX_SCAN_DIM} and the world height. Tight enough that identity swaps are cheap to
+     * compare, yet a shape-changing channel still shows a moved (or added) cell so it can be told
+     * apart from an identity-only one. Not clamped to the default cube, so large tiered structures
+     * whose coils sit outside a 12-block radius still have every tier captured.
+     */
+    private int[] probeCube(DumpModel.Variant base) {
+        int minDx = Integer.MAX_VALUE;
+        int minDy = Integer.MAX_VALUE;
+        int minDz = Integer.MAX_VALUE;
+        int maxDx = Integer.MIN_VALUE;
+        int maxDy = Integer.MIN_VALUE;
+        int maxDz = Integer.MIN_VALUE;
+        for (DumpModel.PlacedBlock b : base.blocks) {
+            minDx = Math.min(minDx, b.dx);
+            maxDx = Math.max(maxDx, b.dx);
+            minDy = Math.min(minDy, b.dy);
+            maxDy = Math.max(maxDy, b.dy);
+            minDz = Math.min(minDz, b.dz);
+            maxDz = Math.max(maxDz, b.dz);
+        }
+        int minX = OX + minDx - 1;
+        int minY = Math.max(OY + minDy - 1, 0);
+        int minZ = OZ + minDz - 1;
+        int maxX = Math.min(OX + maxDx + 1, minX + MAX_SCAN_DIM - 1);
+        int maxY = Math.min(Math.min(OY + maxDy + 1, minY + MAX_SCAN_DIM - 1), 255);
+        int maxZ = Math.min(OZ + maxDz + 1, minZ + MAX_SCAN_DIM - 1);
+        return new int[] { minX, minY, minZ, maxX, maxY, maxZ };
+    }
+
+    /** The smallest world cube covering both {@code a} and {@code b}. */
+    private int[] unionCube(int[] a, int[] b) {
+        return new int[] { Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.min(a[2], b[2]), Math.max(a[3], b[3]),
+            Math.max(a[4], b[4]), Math.max(a[5], b[5]) };
     }
 
     /** Place the controller at the origin with a known facing and return it as an IConstructable. */

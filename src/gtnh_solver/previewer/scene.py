@@ -3,8 +3,10 @@
 The output-layout contract (``LayoutResult``) references machines by id and leaves their
 geometry in the ``InputIR``; a renderer needs it all in one place. ``build_scene`` flattens both
 into a plain dict the three.js viewer can draw with no further lookups (machine boxes, route
-segments coloured by commodity + sized by cable thickness, auto-output links, the region, a
-legend, and the ``io`` boundary summary - inputs to load, outputs to collect, summed power). This
+segments coloured by commodity + sized by cable thickness, terminals carrying their incident
+segment's thickness so the wire->machine leads match the trunk they join, auto-output links, the
+region, a legend, and the ``io`` boundary summary - inputs to load, outputs to collect, summed
+power). This
 is a *previewer-internal* format - NOT the versioned contract - so the un-testable
 WebGL last mile stays a thin static template while the mapping here is pure and fully tested.
 """
@@ -14,7 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from gtnh_solver.dataset import tier_voltage
-from gtnh_solver.ir import Commodity, InputIR, LayoutResult, Machine
+from gtnh_solver.ir import Commodity, InputIR, LayoutResult, Machine, Route, Terminal
 from gtnh_solver.system_io import RATE_STEM, is_boundary_storage, system_io
 
 #: Bump if the scene shape the viewer template expects changes.
@@ -81,7 +83,12 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
             for i, seg in enumerate(route.segments)
         ]
         terminals = [
-            {"machine": t.machine_id, "face": t.face.value, "cell": [t.cell.x, t.cell.y, t.cell.z]}
+            {
+                "machine": t.machine_id,
+                "face": t.face.value,
+                "cell": [t.cell.x, t.cell.y, t.cell.z],
+                "thickness": _terminal_thickness(route, t),
+            }
             for t in route.terminals
         ]
         scene_routes.append(
@@ -158,6 +165,31 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
             "buildability": metrics.buildability,
         },
     }
+
+
+def _terminal_thickness(route: Route, terminal: Terminal) -> int | None:
+    """Thickness of the fattest route segment incident to ``terminal``'s cell, or ``None``.
+
+    Sizes the viewer's short lead from the terminal cell into the machine face it docks on
+    (GitHub #6): a power trunk varies in thickness along its run, so the lead should match the
+    cable that actually meets the block, not a fixed size. Power segments are single-cell hops,
+    so every terminal cell - a docked leg end or a tap on an existing trunk cell - is the start
+    or end of at least one segment; when several touch it (a mid-trunk tap), the THICKEST wins:
+    the lead feeds a machine drawing through that cell, and the fattest incident cable is what
+    visually meets the block. Item/fluid routes carry no ``thickness_per_segment``, so their
+    terminals get ``None`` and the viewer keeps its fixed-size leads.
+    """
+    tps = route.thickness_per_segment
+    if tps is None:
+        return None
+    return max(
+        (
+            thickness
+            for seg, thickness in zip(route.segments, tps, strict=True)
+            if terminal.cell in (seg.start, seg.end)
+        ),
+        default=None,
+    )
 
 
 def _content_bounds(

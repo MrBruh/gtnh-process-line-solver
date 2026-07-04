@@ -19,7 +19,7 @@ jobs:
     name: Lint + types
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -42,8 +42,15 @@ jobs:
         # newer-than-floor feature" and "new release broke us"; when both ends pass, the
         # intermediates do too, so testing them only burns runner minutes and flake surface.
         python-version: ["3.10", "3.14"]
+        # Coverage is gated on ONE leg (the number is interpreter-independent, and the tracer
+        # used to cost ~3/4 of every leg's wall clock - issue #74). It rides the latest leg
+        # because sys.monitoring can only measure BRANCH coverage on 3.14+; keep this include
+        # pointed at the newest matrix entry when the version list moves.
+        include:
+          - python-version: "3.14"
+            coverage: true
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
@@ -52,6 +59,12 @@ jobs:
       - name: Install
         run: pip install -e ".[dev]"
       - name: Test
+        if: ${{ !matrix.coverage }}
+        run: pytest --no-cov
+      - name: Test (coverage gate)
+        if: ${{ matrix.coverage }}
+        env:
+          COVERAGE_CORE: sysmon  # sys.monitoring core: branch-capable and cheap on 3.14+
         run: pytest --cov-fail-under=90
 
   # Single stable required status check for branch protection. The matrix produces
@@ -75,7 +88,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       # Advisory only: non-conforming commit messages are surfaced in the logs but do
