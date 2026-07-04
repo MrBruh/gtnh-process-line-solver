@@ -127,7 +127,7 @@ prefix the description with its number: `fix/17-validator-overlap`.
 - If the PR resolves an issue, link it in the description with a closing keyword (`Closes #123`,
   `Fixes #123`) so the issue closes automatically on merge. No issue is fine too.
 - Green CI is required: the `static` job (ruff lint + format + `mypy`) and the `test` matrix
-  (pytest + coverage on Python 3.10-3.13). The Conventional-Commits check is **advisory** -
+  (pytest on the floor and latest Python; coverage is gated once, on the latest leg). The Conventional-Commits check is **advisory** -
   it flags non-conforming messages in the logs but does not block the merge; the local
   `commit-msg` hook is the real nudge.
 - Describe what changed and which doc/decision (or issue) it implements.

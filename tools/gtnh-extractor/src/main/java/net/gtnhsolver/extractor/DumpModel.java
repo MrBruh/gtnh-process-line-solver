@@ -89,11 +89,32 @@ final class DumpModel {
         }
     }
 
-    /** A whole {@code data/multiblocks/<name>.json} file: one controller and its variants. */
+    /**
+     * One identity-only channel alternative: a tiered block a channel value swaps in without changing
+     * the structure's shape (a coil/glass/pipe-casing tier). Recorded once per controller in the
+     * {@code substitutions} table keyed by channel, so a 14-tier coil is one shape variant plus a
+     * substitution list rather than 14 exploded variants.
+     */
+    static final class Substitution {
+
+        final int channelValue;
+        final String block;
+        final int meta;
+
+        Substitution(int channelValue, String block, int meta) {
+            this.channelValue = channelValue;
+            this.block = block;
+            this.meta = meta;
+        }
+    }
+
+    /** A whole {@code data/multiblocks/<name>.json} file: one controller, its variants, and subs. */
     static final class MultiblockDoc {
 
         final Controller controller;
         final List<Variant> variants = new ArrayList<>();
+        /** Identity-only channel effects keyed by channel name (e.g. {@code "coil"}); may be empty. */
+        final Map<String, List<Substitution>> substitutions = new LinkedHashMap<>();
 
         MultiblockDoc(Controller controller) {
             this.controller = controller;
