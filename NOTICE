@@ -19,3 +19,7 @@ Third-party components:
   back multiblock structure facts. No GT5-Unofficial or StructureLib source is vendored
   or patched here. Extracted structure facts are committed to this repository; LGPL
   assets (textures) are not vendored and are fetched from the mod jars at build time.
+  Specifically, the 3D previewer (src/gtnh_solver/previewer) fetches the pinned
+  GT5-Unofficial jar from the GTNH Nexus at preview time, caches it outside the
+  repository, extracts the referenced iconset PNGs, and embeds them (as data: URIs) only
+  in the generated preview HTML. No PNG is ever committed to this repository.

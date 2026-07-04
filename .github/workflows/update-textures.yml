@@ -1,11 +1,12 @@
 name: Update textures
 
-# Automated texture-manifest refresh (issue #49, lane 6 of the extraction plan).
+# Automated texture-manifest refresh (issue #79, lane 6 v2 of the extraction plan).
 #
-# Emits data/textures/manifest.json: a block-to-icon map for the GT casing / coil families,
-# reflected headlessly on the dedicated server (Option A, plan section 5.2). No PNG is ever
-# committed - the manifest records the icon name and the asset path INSIDE the mod jar, which the
-# previewer fetches from the GTNH Nexus jar at preview time (LGPL assets stay out of this repo).
+# Emits data/textures/manifest.json (schema 2): the layered ITexture stack per (block, meta, side,
+# state), reflected headlessly on the dedicated server - each MetaTileEntity's getTexture / face
+# accessors plus the plain casing block icons (plan section 5.3-5.4). No PNG is ever committed - the
+# manifest records the icon name and the asset path INSIDE the mod jar, which the previewer fetches
+# from the GTNH Nexus jar at preview time (LGPL assets stay out of this repo).
 #
 # This is DELIBERATELY SEPARATE from update-dataset.yml. Structures are correctness-critical for
 # the solver; the texture manifest only feeds the 3D previewer and may lag a pack version behind
@@ -13,13 +14,10 @@ name: Update textures
 # builds against whatever versions update-dataset.yml currently pins, so the manifest always matches
 # the committed dataset's pack version and the two workflows never fight over the lock.
 #
-# Option B (fallback, not run here). Option A names every block whose texture is a single registered
-# `Textures.BlockIcons` sprite - the casing/coil families the previewer needs. A block family whose
-# icon is a composite tile-entity overlay (e.g. the gt.blockmachines controller hulls) cannot be
-# named server-side; the manifest lists those under `gaps`. To resolve them, run the extractor in
-# CLIENT mode under xvfb (`xvfb-run ./gradlew runClient ...`) with a main-menu tick handler that
-# dumps `getIcon(side, meta).getIconName()` for the gap blocks. GitHub runners support xvfb; this is
-# a follow-up only if the previewer starts skinning controller hulls with real textures.
+# Coverage. The layered reflection resolves casings, single-block machines, hatches, and multiblock
+# hulls (base + overlay + tint + glow). A tail that does not decompose - exotic ISBRH renderers and
+# some newer casing families - lands under `gaps`; the documented Option B (a client-mode xvfb dump)
+# stays the fallback for those if the previewer ever needs them.
 
 on:
   workflow_dispatch:
@@ -114,8 +112,8 @@ jobs:
           import json
           m = json.load(open("data/textures/manifest.json"))
           cov = m["provenance"]["coverage"]
-          assert m["schema"] == 1, m["schema"]
-          assert cov["blocks"] > 0 and cov["assignments"] > 0, cov
+          assert m["schema"] == 2, m["schema"]
+          assert cov["blocks"] > 0 and cov["mte"] > 0 and cov["icons"] > 0, cov
           print("texture manifest OK:", cov)
           PY
 
@@ -128,8 +126,7 @@ jobs:
           print("## Texture manifest")
           print(f"Pack: `{m['provenance']['pack_version']}`  ")
           print(f"Method: `{m['method']}`  ")
-          print(f"Blocks: {cov['blocks']}, metas: {cov['metas']}, icons: {cov['icons']}, "
-                f"assignments: {cov['assignments']}, gaps: {cov['gaps']}")
+          print(f"Blocks: {cov['blocks']} ({cov['mte']} MTE), icons: {cov['icons']}, gaps: {cov['gaps']}")
           PY
 
       # --- Open the PR. Never auto-merges: a human eyeballs the manifest diff. --------------------
@@ -142,12 +139,13 @@ jobs:
           title: "chore(dataset): update texture manifest to GTNH ${{ steps.lock.outputs.pack_version }}"
           commit-message: "chore(dataset): update texture manifest to GTNH ${{ steps.lock.outputs.pack_version }}"
           body: |
-            Automated texture-manifest refresh (lane 6, issue #49). Feeds the previewer only.
+            Automated texture-manifest refresh (lane 6 v2, issue #79). Feeds the previewer only.
 
-            The manifest maps `(block, meta, side)` to a GT iconset name to the asset path inside the
-            mod jar (Option A, server-side icon reflection). No PNG is committed; the previewer
-            fetches them from the GTNH Nexus jar. Blocks Option A cannot name (composite controller
-            hulls) are listed under `gaps` for the Option B (client-mode) fallback.
+            The layered manifest (schema 2) records, per `(block, meta, side, state)`, the ordered
+            ITexture layer stack (icon name, RGBA tint, glow) reflected server-side from each
+            MetaTileEntity, plus the plain casing block icons. No PNG is committed; the previewer
+            fetches them from the GTNH Nexus jar. Units that do not decompose (exotic renderers, a
+            tail of newer casing families) are listed under `gaps`.
 
             Review the manifest diff; this workflow never auto-merges.
           labels: |

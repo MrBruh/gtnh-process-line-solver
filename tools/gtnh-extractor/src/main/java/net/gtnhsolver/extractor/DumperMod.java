@@ -84,18 +84,20 @@ public class DumperMod {
         String extractorSha = resolveExtractorSha();
         Map<String, String> modVersions = collectModVersions();
 
-        // Lane 6 (issue #49): the texture manifest is a separate pass gated by -PtextureOut. It runs
-        // headlessly with no structure build (it only reflects GT's icon wiring off the block
-        // registry), so when only -PtextureOut is set the correctness-critical structure dump is
-        // skipped and the texture workflow boots fast and stays decoupled from it.
+        // Lane 6 v2 (issue #79): the layered texture manifest is a separate pass gated by
+        // -PtextureOut. It reflects each MetaTileEntity's ITexture layer stack (which needs a booted
+        // server + a scratch world to place hulls/hatches into) plus the plain casing block icons, so
+        // when only -PtextureOut is set the correctness-critical structure dump is still skipped and
+        // the texture workflow stays decoupled from it.
         File textureOut = resolveOut("gtnhextractor.textureOut");
         if (textureOut != null) {
-            LOG.info("gtnh-extractor: dumping texture manifest to {}", textureOut.getAbsolutePath());
-            int icons = new TextureDumper().run(textureOut, packVersion, modVersions, extractorSha);
-            if (icons == 0) {
-                throw new IllegalStateException("texture pass resolved no icons; the casing families changed");
+            LOG.info("gtnh-extractor: dumping layered texture manifest to {}", textureOut.getAbsolutePath());
+            World textureWorld = MinecraftServer.getServer().worldServers[0];
+            int stacks = new TextureDumper(textureWorld).run(textureOut, packVersion, modVersions, extractorSha);
+            if (stacks == 0) {
+                throw new IllegalStateException("texture pass resolved no layer stacks; GT texture wiring changed");
             }
-            LOG.info("gtnh-extractor: texture manifest complete ({} icon assignments).", icons);
+            LOG.info("gtnh-extractor: texture manifest complete ({} layer stacks).", stacks);
         }
         if (textureOut != null && resolveOut("gtnhextractor.datasetOut") == null) {
             return; // texture-only run: skip the structure dump entirely

@@ -35,11 +35,16 @@ dependencies = [
 [project.optional-dependencies]
 # Deferred CP-SAT placement backend (v1 uses SA/LNS; see docs/ARCHITECTURE.md).
 cpsat = ["ortools>=9.8"]
+# The 3D previewer's texture bake composites GT layer stacks into flat PNGs with Pillow
+# (previewer/bake.py). It is optional: without it the previewer degrades to placeholder boxes,
+# so a solver-only install stays dependency-light. `pip install gtnh_solver[preview]` enables it.
+preview = ["pillow>=10"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",  # coverage measurement + CI gate (see [tool.coverage])
     "pytest-xdist>=3.5",  # parallel test run; the suite is CPU-bound and test-independent
     "hypothesis>=6.0",  # property-based tests for the validator safety net
+    "pillow>=10",  # texture-bake tests (previewer/bake.py); a `preview` extra ships it to users
     "ruff>=0.5",
     "mypy>=1.8",
     "pre-commit>=3.5",  # local enforcement of ruff/mypy/commit-msg before push

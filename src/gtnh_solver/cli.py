@@ -19,6 +19,7 @@ explicit infeasibility (the reason is printed to stderr), 2 when the export coul
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -69,6 +70,17 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _enable_previewer_logging() -> None:
+    """Route ``gtnh_solver`` INFO logs to stderr (idempotently) so ``--preview`` shows the texture
+    summary. Scoped to this logger and guarded against double-attaching a handler on re-entry."""
+    logger = logging.getLogger("gtnh_solver")
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -99,6 +111,10 @@ def main(argv: list[str] | None = None) -> int:
         print(guide, end="")  # default to stdout, unless the user asked only for the visual preview
 
     if args.preview:
+        # Surface the previewer's texture-resolution summary (which machines got a real GT texture
+        # vs a placeholder box, and the jar fetch) on stderr - a per-user info log, added only for
+        # the preview path so the normal build-guide run stays quiet.
+        _enable_previewer_logging()
         try:
             write_preview(problem, layout, args.preview)
         except OSError as exc:
