@@ -6,7 +6,8 @@ pans (right-drag / arrow keys), and a layer-by-layer slider isolates each y-leve
 solid boxes with their name on the front face (placeholder until real textures); routes (cables and
 pipes) are drawn GT-style, a small cube at each cell centre with a uniform arm out to the block edge
 for every connection (an adjacent route cell or a docked machine face), power sized by cable
-thickness; auto-output is a small arrow on each source-machine face perpendicular to the ejecting
+thickness - each wire->machine lead by the terminal's incident-segment thickness the scene emits
+(#6); auto-output is a small arrow on each source-machine face perpendicular to the ejecting
 direction (so one stays visible however the machines are packed). A side panel lists the
 machine/route legend plus the
 system's boundary inputs, outputs, and power (``scene.io``), with a per-tick / per-second rate
@@ -258,7 +259,9 @@ for (const r of SCENE.routes) {
   }
   for (const t of (r.terminals || [])) {
     const nrm = FACE_NORMAL[t.face]; if (!nrm) continue;
-    touch(t.cell, 1).dirs.add([-nrm[0], -nrm[1], -nrm[2]].join(','));   // an arm toward the machine
+    // an arm toward the machine - the lead - sized by the incident segment's thickness, computed
+    // in build_scene (#6). Null (item/fluid) falls back to 1, keeping those leads the fixed size.
+    touch(t.cell, t.thickness || 1).dirs.add([-nrm[0], -nrm[1], -nrm[2]].join(','));
   }
   for (const e of cells.values()) {
     const cross = isPower ? 0.09 * Math.sqrt(e.thick) : 0.07;

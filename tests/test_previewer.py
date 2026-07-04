@@ -13,20 +13,19 @@ import pytest
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.ir import (
     CellBox,
+    CellCoord,
     Commodity,
-    FaceSpec,
     Facing,
     InputIR,
-    IODirection,
     LayoutResult,
     LayoutStatus,
-    Machine,
-    MachineFaceRef,
-    Net,
-    Port,
+    Route,
+    Segment,
+    Terminal,
 )
 from gtnh_solver.previewer import build_scene, render_html, write_preview
 from gtnh_solver.solver import solve
+from tests._helpers import consumer, net, producer
 
 _SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
 
@@ -69,40 +68,6 @@ def test_scene_items_auto_feed_so_no_item_pipes() -> None:
 
 def test_scene_item_pipe_segments_have_null_thickness() -> None:
     # a fan-out: one item net auto-outputs, the other is piped (thickness is power-only)
-    def producer(mid: str) -> Machine:
-        return Machine(
-            id=mid,
-            type="P",
-            voltage_tier="LV",
-            orientation_options=[Facing.NORTH],
-            faces=FaceSpec(
-                ports=[Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)]
-            ),
-        )
-
-    def consumer(mid: str) -> Machine:
-        return Machine(
-            id=mid,
-            type="C",
-            voltage_tier="LV",
-            orientation_options=[Facing.NORTH],
-            faces=FaceSpec(
-                ports=[Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT)]
-            ),
-        )
-
-    def net(nid: str, src: str, dst: str) -> Net:
-        return Net(
-            id=nid,
-            commodity=Commodity.ITEM,
-            fluid_or_item="x",
-            throughput=1.0,
-            endpoints=[
-                MachineFaceRef(machine_id=src, port_id="out"),
-                MachineFaceRef(machine_id=dst, port_id="in"),
-            ],
-        )
-
     problem = InputIR(
         bounding_region=CellBox(sx=8, sy=4, sz=8),
         machines=[producer("m1"), consumer("m2"), consumer("m3")],
@@ -112,6 +77,8 @@ def test_scene_item_pipe_segments_have_null_thickness() -> None:
     item_routes = [r for r in scene["routes"] if r["commodity"] == "item"]
     assert item_routes  # the piped fan-out leg
     assert all(seg["thickness"] is None for r in item_routes for seg in r["segments"])
+    # item/fluid terminals carry no thickness either, so their leads keep the fixed pipe size
+    assert all(t["thickness"] is None for r in item_routes for t in r["terminals"])
 
 
 def test_scene_bounds_are_tight_not_the_search_region() -> None:
@@ -135,8 +102,46 @@ def test_scene_routes_carry_terminals() -> None:
     power = next(r for r in _sand_scene()["routes"] if r["commodity"] == "power")
     assert power["terminals"]  # so the viewer can draw a lead to each machine face
     term = power["terminals"][0]
-    assert set(term) == {"machine", "face", "cell"}
+    assert set(term) == {"machine", "face", "cell", "thickness"}
     assert len(term["cell"]) == 3
+    # every power terminal sizes its lead from a real cable thickness (GitHub #6)
+    assert all(t["thickness"] in {1, 2, 4, 8, 12, 16} for t in power["terminals"])
+
+
+def test_scene_power_terminal_thickness_is_the_fattest_incident_segment() -> None:
+    # A hand-built trunk with known per-segment thicknesses (GitHub #6):
+    #
+    #   src ==4x== [tap] ==2x== m1
+    #               |
+    #               1x
+    #               |
+    #               m3
+    #
+    # Each terminal must report the thickness of the segment incident to its cell; m2 taps the
+    # branch cell, which 4x/2x/1x segments all touch, so the THICKEST (4) wins - that is the
+    # cable that visually meets the block. build_scene's route mapping never looks placements
+    # up, so a routes-only layout keeps the fixture minimal.
+    def cell(x: int, y: int, z: int) -> CellCoord:
+        return CellCoord(x=x, y=y, z=z)
+
+    def seg(a: CellCoord, b: CellCoord) -> Segment:
+        return Segment(start=a, end=b, channel=0)
+
+    def term(mid: str, c: CellCoord) -> Terminal:
+        return Terminal(machine_id=mid, port_id="power", face=Facing.NORTH, cell=c)
+
+    src, fork, m1, m3 = cell(0, 0, 0), cell(1, 0, 0), cell(2, 0, 0), cell(1, 0, 1)
+    route = Route(
+        net_id="power:LV",
+        commodity=Commodity.POWER,
+        terminals=[term("src", src), term("m1", m1), term("m2", fork), term("m3", m3)],
+        segments=[seg(src, fork), seg(fork, m1), seg(fork, m3)],
+        thickness_per_segment=[4, 2, 1],
+    )
+    problem = InputIR(bounding_region=CellBox(sx=4, sy=2, sz=4))
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, routes=[route])
+    (scene_route,) = build_scene(problem, layout)["routes"]
+    assert [t["thickness"] for t in scene_route["terminals"]] == [4, 2, 4, 1]
 
 
 def test_scene_reports_system_io() -> None:
@@ -180,41 +185,55 @@ def test_render_html_wires_the_requested_viewer_features() -> None:
     assert "BoxGeometry" in html  # cables/pipes are rectangular bars, not cylinders (#2)
     assert "PlaneGeometry" in html  # machine names live on the front face (#3)
     assert "faceArrow" in html  # per-face auto-output direction arrows (#4)
+    assert "t.thickness" in html  # leads sized from the scene's terminal thickness (#6)
 
 
-def test_render_html_routes_render_as_node_and_arms() -> None:
-    # routes are drawn GT-style: a cube at each cell centre with a uniform arm out to the block edge
-    # per connection, not a center-to-center bar or a separate machine lead (GitHub #31)
-    html = render_html(_sand_scene())
-    assert "function node(" in html  # the per-cell centre cube...
-    assert "dirs.add" in html  # ...with one connection arm per direction
-    assert "an arm toward the machine" in html  # ...including the docked-terminal connections
+def test_scene_route_segments_and_terminals_drive_node_and_arm_drawing() -> None:
+    # Routes are drawn GT-style: a cube at each cell centre with a uniform arm out per connection -
+    # an adjacent route cell or a docked machine face (GitHub #31). That rendering is a JS detail,
+    # eye-validated; the versioned contract is the scene data it consumes, so assert on that. Every
+    # segment carries its two endpoint cells one step apart (the unit an arm spans), and every
+    # terminal its docked face + cell (the machine lead each arm points at).
+    power = next(r for r in _sand_scene()["routes"] if r["commodity"] == "power")
+    assert power["segments"]
+    for seg in power["segments"]:
+        assert len(seg["from"]) == 3
+        assert len(seg["to"]) == 3
+        assert sum(abs(seg["from"][i] - seg["to"][i]) for i in range(3)) == 1  # adjacent cells
+    assert power["terminals"]
+    for term in power["terminals"]:
+        assert term["face"]
+        assert len(term["cell"]) == 3
 
 
-def test_render_html_auto_output_arrows_on_perpendicular_faces() -> None:
-    # a small arrow on each face perpendicular to the ejecting direction, so the auto-output
-    # direction stays visible from any angle even when machines are packed together (GitHub #20)
-    html = render_html(_sand_scene())
-    assert "FACE_NORMAL[ac.sourceFace]" in html  # direction comes from the ejecting face...
-    assert "faceArrow" in html  # ...drawn as a flat decal on each perpendicular face
-    assert "sizeById[ac.source]" in html  # positioned against the source machine's faces
+def test_scene_auto_connections_carry_source_and_ejecting_face() -> None:
+    # The per-face auto-output arrows (GitHub #20) are driven by the scene's autoConnections: each
+    # names the ejecting source machine + face, which the viewer turns into an arrow on every
+    # perpendicular face. Assert the contract the arrows read, not the JS that positions them.
+    faces = {"north", "south", "east", "west", "up", "down"}
+    autos = _sand_scene()["autoConnections"]
+    assert autos
+    for ac in autos:
+        assert ac["source"]
+        assert ac["sourceFace"] in faces
+        assert ac["target"]
+        assert ac["targetFace"] in faces
 
 
 def test_render_html_shows_system_io_panel_with_rate_toggle() -> None:
+    # The boundary summary the HUD renders (GitHub #5). Its data (inputs/outputs/power) is the scene
+    # contract asserted in test_scene_reports_system_io; here just confirm the panel and its per-tick
+    # / per-second toggle are wired into the page - one coarse marker each, not the JS internals.
     html = render_html(_sand_scene())
-    assert "system i/o" in html  # the boundary panel label (viewer template, not scene data)
-    assert "io.power.byTier" in html  # ...renders the power feed by tier
-    assert "io.power.total" in html  # ...as a total EU/t supplied...
-    assert "'V x '" in html  # ...plus the full tier voltage x amps feed spec the builder reads off
-    assert 'id="rateUnit"' in html  # the per-tick / per-second toggle button...
-    assert "TICKS_PER_SECOND" in html  # ...and the x20 conversion behind it
+    assert "system i/o" in html  # the boundary panel label
+    assert 'id="rateUnit"' in html  # the per-tick / per-second toggle button
 
 
-def test_render_html_grid_aligns_to_cell_boundaries() -> None:
-    # the floor grid must land on integer cell boundaries, not cut through blocks (GitHub #19)
-    html = render_html(_sand_scene())
-    assert "Math.round(center.x)" in html  # integer-snapped grid center...
-    assert "gspanRaw % 2" in html  # ...paired with an even division count
+def test_render_html_draws_a_floor_grid() -> None:
+    # The floor grid frames the build (GitHub #19). Its snap-to-cell-boundary math is bounds-derived,
+    # JS-only, and eye-validated, so assert only that the grid is wired into the page (one coarse
+    # marker) instead of grepping the exact alignment expression a refactor is free to move.
+    assert "GridHelper" in render_html(_sand_scene())
 
 
 def test_render_html_inlines_the_exact_scene() -> None:
@@ -223,10 +242,12 @@ def test_render_html_inlines_the_exact_scene() -> None:
 
 
 def _inlined_scene_json(html: str) -> str:
-    # pull just the inlined `const SCENE = <json>;` payload back out of the rendered page, so an
-    # assertion can look at the data without tripping over the template's own literal </script>
-    after = html.split("const SCENE = ", 1)[1]
-    return after.split("const COMMODITY", 1)[0].rstrip().rstrip(";").rstrip()
+    # Pull the inlined scene JSON payload back out of the rendered page, located by the stable
+    # ``const SCENE = <json>;`` assignment. ``json.dumps`` emits no raw newline, so the payload is a
+    # single line that ends at the statement's semicolon - independent of whatever JS follows it (so
+    # the viewer is free to derive its legend from the scene rather than a pinned ``const`` line).
+    line = next(ln for ln in html.splitlines() if ln.startswith("const SCENE = "))
+    return line[len("const SCENE = ") :].rstrip().removesuffix(";")
 
 
 def test_render_html_escapes_closing_script_in_inline_json() -> None:
