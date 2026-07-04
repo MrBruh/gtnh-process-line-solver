@@ -7,6 +7,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`LayoutMetrics` footprint/layers are now populated (`solver`, GitHub #13).** `solve()` fills
+  `LayoutResult.metrics.footprint` (floor-area bounding box of machines plus routes) and `.layers`
+  (vertical extent) on every assembled layout, computed from the same occupied-cell basis the
+  feedback loop ranks on. The previewer's metrics panel shows real numbers instead of nulls, and
+  the seed-compare workflow has values to rank. `buildability` and `congestion` stay `None` until a
+  scoring model is defined; an infeasible (nothing-placed) result leaves all metrics `None`.
 - **Extractor core dump loop (`tools/gtnh-extractor/`, lane 2, GitHub #45).** The Java tool now
   fills its `DumperMod.dump()` seam with `StructureDumper` + `JsonWriter` + `ErrorCollector` and
   emits the schema-v1 dataset. It iterates `GregTechAPI.METATILEENTITIES`, keeps the
