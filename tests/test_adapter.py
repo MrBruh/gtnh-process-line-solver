@@ -158,7 +158,7 @@ def test_storage_sink_routes_with_throughput_from_producer() -> None:
             )
         ],
         nodes=[Node(id="n", recipe_id="r", overclock_tier="LV")],
-        storages=[Storage(id="s", kind="item", resource_id="R")],
+        storages=[Storage(id="s", kind="item")],
         edges=[Edge(id="e", source="n", target="s", resource_kind="item", resource_id="R")],
     )
     ir = to_input_ir(plan)
@@ -176,7 +176,7 @@ def test_throughput_falls_back_to_consumer_demand() -> None:
             )
         ],
         nodes=[Node(id="n", recipe_id="r", overclock_tier="LV")],
-        storages=[Storage(id="s", kind="item", resource_id="R")],
+        storages=[Storage(id="s", kind="item")],
         edges=[Edge(id="e", source="s", target="n", resource_kind="item", resource_id="R")],
     )
     assert _net_for_edge(to_input_ir(plan)).throughput == 1.5  # 3 / 2
@@ -263,7 +263,7 @@ def test_unpowered_plan_synthesizes_no_power() -> None:
             Recipe(id="r", machine_type="M", duration_ticks=4.0, outputs=[_resource("item", "x")])
         ],
         nodes=[Node(id="n", recipe_id="r", overclock_tier="LV")],
-        storages=[Storage(id="s", kind="item", resource_id="x")],
+        storages=[Storage(id="s", kind="item")],
         edges=[Edge(id="e", source="n", target="s", resource_kind="item", resource_id="x")],
     )
     ir = to_input_ir(plan)
@@ -275,8 +275,8 @@ def test_storage_to_storage_edge_has_zero_throughput() -> None:
     plan = Plan(
         schema_version=1,
         storages=[
-            Storage(id="a", kind="item", resource_id="R"),
-            Storage(id="b", kind="item", resource_id="R"),
+            Storage(id="a", kind="item"),
+            Storage(id="b", kind="item"),
         ],
         edges=[Edge(id="e", source="a", target="b", resource_kind="item", resource_id="R")],
     )
@@ -292,7 +292,7 @@ def test_zero_duration_recipe_yields_zero_rate() -> None:
             )
         ],
         nodes=[Node(id="n", recipe_id="r", overclock_tier="LV")],
-        storages=[Storage(id="s", kind="item", resource_id="R")],
+        storages=[Storage(id="s", kind="item")],
         edges=[Edge(id="e", source="n", target="s", resource_kind="item", resource_id="R")],
     )
     assert _net_for_edge(to_input_ir(plan)).throughput == 0.0

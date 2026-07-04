@@ -40,9 +40,11 @@ from gtnh_solver.ir import (
     Commodity,
     Infeasibility,
     InputIR,
+    LayoutMetrics,
     LayoutResult,
     LayoutStatus,
     Placement,
+    Route,
 )
 from gtnh_solver.ir.geometry import occupied_cells
 from gtnh_solver.placement import Objective, optimize_placement, place
@@ -142,6 +144,50 @@ def solve(
     return best_partial
 
 
+def _occupied_cells(
+    problem: InputIR, placements: list[Placement], routes: list[Route]
+) -> set[tuple[int, int, int]]:
+    """Every grid cell the build occupies - machine footprints plus route hops. The shared basis
+    for the compactness ranking (``_quality``) and the reported metrics (``_layout_metrics``), so
+    the previewer's footprint and the loop's ranking footprint are computed the same way."""
+    machines = {m.id: m for m in problem.machines}
+    cells: set[tuple[int, int, int]] = set()
+    for p in placements:
+        machine = machines.get(p.machine_id)
+        if machine is not None:
+            cells.update(occupied_cells(p.cell, machine.footprint))
+    for r in routes:
+        cells.update(r.cells())
+    return cells
+
+
+def _footprint_and_layers(cells: set[tuple[int, int, int]]) -> tuple[int, int]:
+    """(floor-area footprint, layer count) for a non-empty occupied-cell set. ``volume`` is
+    ``footprint * layers`` - the enclosing box - since the floor area already spans x/z.
+    Precondition: ``cells`` is non-empty; both callers return early on an empty layout."""
+    xs = [c[0] for c in cells]
+    ys = [c[1] for c in cells]
+    zs = [c[2] for c in cells]
+    footprint = (max(xs) - min(xs) + 1) * (max(zs) - min(zs) + 1)
+    layers = max(ys) - min(ys) + 1
+    return footprint, layers
+
+
+def _layout_metrics(
+    problem: InputIR, placements: list[Placement], routes: list[Route]
+) -> LayoutMetrics:
+    """Advisory compactness metrics for an assembled layout: floor-area ``footprint`` and
+    ``layers`` (vertical extent), the two the previewer surfaces (previewer/scene.py). An empty
+    layout (nothing placed, e.g. an infeasible result) leaves them ``None``. ``buildability`` /
+    ``congestion`` stay ``None`` too - they need a defined scoring model (docs/ROADMAP.md), so
+    they are left deferred rather than faked."""
+    cells = _occupied_cells(problem, placements, routes)
+    if not cells:
+        return LayoutMetrics()
+    footprint, layers = _footprint_and_layers(cells)
+    return LayoutMetrics(footprint=footprint, layers=layers)
+
+
 def _quality(problem: InputIR, layout: LayoutResult, objective: Objective) -> tuple[int, int, int]:
     """Rank a VALID layout for the feedback loop; smaller-lexicographic is better.
 
@@ -152,25 +198,15 @@ def _quality(problem: InputIR, layout: LayoutResult, objective: Objective) -> tu
     them (placement-time proxies cannot see dock faces or shared taps) - and the other
     compactness metric breaks ties toward the smaller build.
     """
-    machines = {m.id: m for m in problem.machines}
-    cells: set[tuple[int, int, int]] = set()
-    for p in layout.placements:
-        machine = machines.get(p.machine_id)
-        if machine is not None:
-            cells.update(occupied_cells(p.cell, machine.footprint))
+    cells = _occupied_cells(problem, layout.placements, layout.routes)
     power_cells: set[tuple[int, int, int]] = set()
     for r in layout.routes:
-        route_cells = r.cells()
-        cells.update(route_cells)
         if r.commodity is Commodity.POWER:
-            power_cells.update(route_cells)
+            power_cells.update(r.cells())
     if not cells:
         return (0, 0, 0)
-    xs = [c[0] for c in cells]
-    ys = [c[1] for c in cells]
-    zs = [c[2] for c in cells]
-    footprint = (max(xs) - min(xs) + 1) * (max(zs) - min(zs) + 1)
-    volume = footprint * (max(ys) - min(ys) + 1)
+    footprint, layers = _footprint_and_layers(cells)
+    volume = footprint * layers
     if objective == "volume":
         return (volume, len(power_cells), footprint)
     if objective == "balanced":
@@ -214,6 +250,7 @@ def _assemble(
     power = route_power(problem, placements, extra_obstacles=item_cells)
     routes = [*routing.routes, *power.routes]
     placement_list = list(placements)
+    metrics = _layout_metrics(problem, placement_list, routes)  # footprint/layers for every result
 
     infeasibility = routing.infeasibility or power.infeasibility
     if infeasibility is not None:
@@ -224,6 +261,7 @@ def _assemble(
             placements=placement_list,
             routes=routes,
             auto_connections=autos,
+            metrics=metrics,
         )
         return layout, (*routing.failed_nets, *power.failed_nets)
 
@@ -233,6 +271,7 @@ def _assemble(
         placements=placement_list,
         routes=routes,
         auto_connections=autos,
+        metrics=metrics,
     )
     # The placer and router each report success on their own terms; the validator is the only
     # gate written independently of them, so run it on the assembled layout before claiming VALID.
@@ -247,6 +286,7 @@ def _assemble(
             placements=placement_list,
             routes=routes,
             auto_connections=autos,
+            metrics=metrics,
         )
         return downgraded, ()
     return layout, ()

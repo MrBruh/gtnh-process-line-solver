@@ -38,8 +38,10 @@ class Port(StrictModel):
     id: str = Field(min_length=1)
     commodity: Commodity
     direction: IODirection
-    #: Cover required to drive this port (conveyor for items, pump/regulator for fluids),
-    #: ``None`` if the bare face suffices. Recorded for the build guide / export.
+    #: Reserved: a per-port cover override (conveyor for items, pump/regulator for fluids). Not
+    #: yet produced or consumed - covers are currently derived from commodity at render time
+    #: (buildguide ``_COVER``); this stays ``None`` until a dataset sets the specific cover a port
+    #: needs (e.g. a regulator vs a plain pump).
     cover: str | None = None
     #: Throughput through this port - items/t or mB/t (``None`` for power, or when unknown). The
     #: adapter fills it from the recipe; it surfaces boundary I/O rates (``system_io``, previewer).
@@ -124,9 +126,11 @@ class MachineFaceRef(FrozenModel):
 class Net(StrictModel):
     """One logical connection to route: a commodity from/to a set of machine ports.
 
-    ``throughput`` is **typed** - the router needs the real rate, not just connectivity:
-    mB/t (fluid), items/t (item), or EU/t (power). Power is a shared-amperage net, so its
-    physical thickness is computed downstream, not stored here.
+    ``throughput`` is **typed** - mB/t (fluid), items/t (item), or EU/t (power). Its consumer is
+    ``system_io``, which reads it to report boundary feed/product rates on the previewer and build
+    guide; the Phase 1 router needs only connectivity, not the rate (per-net tier-cap checks are a
+    Phase 2 upgrade). Power is a shared-amperage net, so its physical thickness is computed
+    downstream, not stored here.
     """
 
     id: str = Field(min_length=1)

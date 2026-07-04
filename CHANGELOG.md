@@ -7,6 +7,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`LayoutMetrics` footprint/layers are now populated (`solver`, GitHub #13).** `solve()` fills
+  `LayoutResult.metrics.footprint` (floor-area bounding box of machines plus routes) and `.layers`
+  (vertical extent) on every assembled layout, computed from the same occupied-cell basis the
+  feedback loop ranks on. These are consumed as data (the seed-compare workflow, and the previewer
+  embeds them in its scene JSON); previously they were always `null`. `buildability` and
+  `congestion` stay `None` until a scoring model is defined; an infeasible (nothing-placed) result
+  leaves all metrics `None`.
 - **Adapter consumes the plan-schema-v2 `resolved` block (`adapter/`, GitHub #2).** A
   gtnh-factory-flow v2 export (`schemaVersion: 2`) additively carries `app`,
   `datasetVersionId`, and a `resolved` throughput block (per-machine EU/t, per-edge rates,
