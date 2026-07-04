@@ -51,13 +51,14 @@ class Node(BaseModel):
 
 
 class Storage(BaseModel):
-    """A boundary source/sink (feed or drain) for one resource."""
+    """A boundary source/sink (feed or drain). The resource it carries is taken from the edges
+    touching it (``adapter.core._storage_ports``), so the export's per-storage ``resourceId`` is
+    redundant here and not modelled - the edge is the single source of truth for what flows."""
 
     model_config = _CFG
 
     id: str
     kind: str
-    resource_id: str
 
 
 class Edge(BaseModel):
