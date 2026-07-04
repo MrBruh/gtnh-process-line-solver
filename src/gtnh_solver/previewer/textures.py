@@ -196,16 +196,8 @@ class BlockCube:
     steps: int  # clockwise yaw turns applied to orient the machine to its placed front
 
 
-def expand_machine(machine: Mapping[str, Any], doc: MultiblockDoc) -> list[BlockCube]:
-    """Expand a scene machine into per-block cubes, translated and yaw-oriented into its footprint.
-
-    The dump builds every controller facing NORTH; a machine placed facing ``front`` rotates its
-    blocks by the matching yaw so they fill the oriented footprint. Blocks are then translated so
-    the variant's minimum corner lands on the machine's placement ``cell``. The controller's own
-    front (which carries the machine overlay) thus points the way the solver oriented it.
-    """
-    steps = _FRONT_CW_STEPS.get(str(machine.get("front", "north")), 0)
-    cell = machine["cell"]
+def _place_blocks(doc: MultiblockDoc, cell: list[int], steps: int) -> list[BlockCube]:
+    """Rotate the primary variant's blocks by ``steps`` and land the min corner on ``cell``."""
     placed: list[tuple[tuple[int, int, int], str, int]] = []
     for b in primary_variant(doc).blocks:
         dx, dy, dz = b.d
@@ -227,20 +219,51 @@ def expand_machine(machine: Mapping[str, Any], doc: MultiblockDoc) -> list[Block
     ]
 
 
+def _within_footprint(pos: tuple[int, int, int], origin: list[int], size: list[int]) -> bool:
+    """Whether cell ``pos`` lies inside the reserved footprint ``[origin, origin + size)``."""
+    return all(origin[i] <= pos[i] < origin[i] + size[i] for i in range(3))
+
+
+def expand_machine(machine: Mapping[str, Any], doc: MultiblockDoc) -> list[BlockCube]:
+    """Expand a scene machine into per-block cubes, kept strictly inside its reserved footprint.
+
+    The dump builds every controller facing NORTH; a machine placed facing ``front`` yaw-rotates its
+    blocks so the controller's front overlay points the way the solver oriented it, then translates
+    the variant's minimum corner onto the placement ``cell``.
+
+    **No overlap (wall-sharing is out of scope here).** The solver reserves the *unrotated* footprint
+    (``occupied_cells`` does not yet rotate non-cubic footprints, a documented TODO), so a yaw that
+    would push a non-cubic machine's blocks past that footprint is dropped in favour of the native
+    orientation, which fills the reserved footprint exactly. A final hard clamp discards any cube
+    still outside the footprint, so one machine's blocks can never spill into a neighbour's cells.
+    """
+    cell = machine["cell"]
+    size = machine.get("size", [1, 1, 1])
+    steps = _FRONT_CW_STEPS.get(str(machine.get("front", "north")), 0)
+    cubes = _place_blocks(doc, cell, steps)
+    if steps and not all(_within_footprint(c.cell, cell, size) for c in cubes):
+        cubes = _place_blocks(
+            doc, cell, 0
+        )  # native orientation fits the reserved footprint exactly
+    return [c for c in cubes if _within_footprint(c.cell, cell, size)]
+
+
 def _machine_cubes(
     machine: Mapping[str, Any], docs: Mapping[str, MultiblockDoc], manifest: TextureManifest
 ) -> list[BlockCube]:
     """The per-block cubes for a machine: its multiblock doc if committed, else a single-block cube.
 
-    A machine whose type has a dumped :class:`MultiblockDoc` expands to that structure; a single-
-    block machine (no doc, but present in the manifest by display name) is the trivial one-cube case;
-    anything else (an un-dumped or non-GT multiblock) yields nothing and stays a placeholder box.
+    A machine whose type has a dumped :class:`MultiblockDoc` expands to that structure. A genuine
+    single-block machine (a 1x1x1 footprint present in the manifest by display name) is the trivial
+    one-cube case. A doc-less MULTIblock (a bigger footprint whose structure failed extraction, e.g.
+    the dynamic-height Distillation Tower) must NOT collapse to a lone controller cube - it yields
+    nothing and keeps its placeholder box, so its true reserved footprint still shows.
     """
     doc = docs.get(machine["type"])
     if doc is not None:
         return expand_machine(machine, doc)
     single = manifest.mte_block(machine["type"])
-    if single is not None:
+    if single is not None and tuple(machine.get("size", (1, 1, 1))) == (1, 1, 1):
         block, meta = single
         cell = machine["cell"]
         steps = _FRONT_CW_STEPS.get(str(machine.get("front", "north")), 0)

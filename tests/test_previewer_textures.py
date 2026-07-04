@@ -303,6 +303,57 @@ def test_expand_machine_yaw_rotates_positions_for_east_facing() -> None:
     )
 
 
+def _bar_doc(length: int = 3) -> dict[str, Any]:
+    """A non-cubic ``length``x1x1 bar of casings, so a yaw would spill it past a reserved footprint."""
+    return {
+        "schema": 1,
+        "controller": {
+            "registry_name": "gregtech:gt.blockmachines",
+            "meta": 1,
+            "display_name": "Bar",
+            "source_class": "C",
+            "facing_convention": "",
+        },
+        "variants": [
+            {
+                "trigger_stack_size": 1,
+                "channels": {},
+                "blocks": [
+                    {"d": [i, 0, 0], "block": "gregtech:gt.blockcasings", "meta": 11}
+                    for i in range(length)
+                ],
+                "hints": [],
+                "bbox": [length, 1, 1],
+            }
+        ],
+        "substitutions": {},
+        "failures": [],
+    }
+
+
+def test_cubes_never_spill_outside_the_reserved_footprint() -> None:
+    """No cube may fall outside [cell, cell+size): a machine's blocks cannot overlap a neighbour."""
+    doc = MultiblockDoc.model_validate(_ebf_doc())
+    # Declare a footprint smaller than the structure; the hard clamp drops the out-of-bounds cubes.
+    cubes = expand_machine(_machine("m", "Test EBF", cell=[5, 0, 5], size=[1, 2, 2]), doc)
+    assert cubes
+    for c in cubes:
+        assert 5 <= c.cell[0] < 6
+        assert 0 <= c.cell[1] < 2
+        assert 5 <= c.cell[2] < 7
+
+
+def test_yaw_spill_falls_back_to_native_orientation() -> None:
+    """A non-cubic footprint whose yaw would spill renders native, so all cubes stay in-bounds."""
+    doc = MultiblockDoc.model_validate(_bar_doc(3))
+    cubes = expand_machine(_machine("m", "Bar", cell=[0, 0, 0], size=[3, 1, 1], front="east"), doc)
+    assert len(cubes) == 3, "native fallback keeps all three blocks, none clamped away"
+    for c in cubes:
+        assert 0 <= c.cell[0] < 3
+        assert c.cell[1] == 0
+        assert c.cell[2] == 0
+
+
 # --------------------------------------------------------------------------------------------------
 # texturize_scene - the integration + the principle-6 golden guards
 # --------------------------------------------------------------------------------------------------
@@ -344,6 +395,20 @@ def test_single_block_machine_renders_one_textured_cube(dataset: tuple[Path, Pat
     assert summary.block_cubes == 1
     assert scene["blocks"][0]["cell"] == [3, 0, 3]
     assert "Test Macerator" in summary.textured_types
+
+
+def test_docless_multiblock_keeps_placeholder_not_a_lone_cube(dataset: tuple[Path, Path]) -> None:
+    """A doc-less MULTIblock must not collapse to one controller cube (the Distillation Tower case)."""
+    mb, manifest = dataset
+    # "Test Macerator" is an MTE in the manifest, but here the machine is 3x3x3: a multiblock whose
+    # structure was not dumped. It must stay a placeholder box, not masquerade as a one-block machine.
+    scene = _scene([_machine("m1", "Test Macerator", [0, 0, 0], [3, 3, 3])])
+    summary = texturize_scene(
+        scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider
+    )
+    assert summary.block_cubes == 0
+    assert scene["machines"][0].get("expanded") is None
+    assert "Test Macerator" in summary.placeholder_types
 
 
 def test_single_block_machine_base_face_is_tinted(dataset: tuple[Path, Path]) -> None:

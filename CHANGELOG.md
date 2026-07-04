@@ -14,8 +14,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   block (principle 6): it looks up the machine's extracted multiblock doc, selects the representative
   variant, expands its `blocks` list at each block's `[dx, dy, dz]` offset (yaw-oriented to the placed
   front, so the controller's front overlay points the way the solver oriented it), and textures every
-  cube face independently. Single-block machines (no multiblock doc, the whole structure IS one block)
-  render as the trivial one cube, resolved through the manifest's display-name index. A new Pillow
+  cube face independently. Cubes are clamped to the machine's reserved footprint (and a yaw that
+  would spill a non-cubic machine past it falls back to native orientation), so one machine's blocks
+  can never overlap a neighbour - wall-sharing is a GTNH feature left to a later change. Only a
+  genuine 1x1x1 machine takes the single-block path (via the manifest's display-name index); a
+  doc-less MULTIblock, such as the dynamic-height Distillation Tower whose extraction overflowed the
+  variant cap, keeps its placeholder box rather than collapsing to a lone controller cube. A new Pillow
   pre-bake (`previewer/bake.py`) composites each face's layer stack - base times its RGBA multiply,
   then alpha-composited overlays, animated sprites reduced to frame 0 - into one flat 16x16 PNG per
   `(block, meta, side, state)`, so the three.js viewer only ever loads flat images and never
