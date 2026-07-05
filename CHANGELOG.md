@@ -7,6 +7,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Previewer active/idle machine skin toggle (`previewer/`).** The viewer now carries a `state`
+  control that swaps every machine between its idle (at-rest) and running skin, so a builder can see
+  which faces light up when the line runs (e.g. the Distillation Tower and Large Chemical Reactor
+  front overlays in the nitrobenzene preview). The texture pass bakes both states but emits a second
+  `data:` URI (`scene.texturesActive`) only for faces whose running bake actually differs from idle
+  (an `_ACTIVE` overlay); a plain casing, identical in both states, carries one texture, so the
+  embedded page never bloats for faces that look the same. State selection and the byte-level dedup
+  live in Python (`texturize_scene`); the viewer only swaps between the two maps the scene hands it,
+  and disables the control for a layout where no machine has a distinct running skin. Default display
+  stays idle (no behavior change until toggled).
 - **Previewer textures generically named single-block machines by voltage tier (`previewer/`,
   GitHub #3).** A plan export names a single-block machine generically ("Forge Hammer"), but the
   schema-2 texture manifest keys every single-block machine by its in-game tier-prefixed name

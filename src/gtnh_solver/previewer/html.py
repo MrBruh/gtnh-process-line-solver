@@ -5,7 +5,9 @@ clickable ``.html`` that pulls three.js from a CDN and draws the layout. The cam
 pans (right-drag / arrow keys), and a layer-by-layer slider isolates each y-level. Machines are
 solid boxes skinned with their real GT casing texture where ``scene.textures`` supplies one (the
 six per-face icons ride ``machine.texture``; missing icons fall back to the flat type colour), with
-the machine name on the front face; routes (cables and
+the machine name on the front face; a state control swaps every machine between its idle and running
+skin where the two differ (the running faces ride ``scene.texturesActive``, default idle); routes
+(cables and
 pipes) are drawn GT-style, a small cube at each cell centre with a uniform arm out to the block edge
 for every connection (an adjacent route cell or a docked machine face), power sized by cable
 thickness - each wire->machine lead by the terminal's incident-segment thickness the scene emits
@@ -61,6 +63,7 @@ _TEMPLATE = (
   <input id="layer" type="range" min="-1" max="0" value="-1" step="1">
   <button id="reset">reset camera</button>
   <button id="rateUnit" title="toggle throughput units">rate: per tick</button>
+  <button id="stateToggle" title="toggle machine idle / running skins">state: idle</button>
 </div>
 
 <script type="importmap">
@@ -221,19 +224,33 @@ function frontFace(text, bg, size, normal) {
 // nearest-filtered cube PER constituent block (SCENE.blocks), not a single stretched box - so coils,
 // glass, hatch faces, and the internal structure stay visible (principle 6). A machine with no
 // committed doc, or whose blocks did not bake, keeps its flat colour placeholder box.
+// Each machine face is baked idle (SCENE.textures) and, where the running skin differs, ALSO active
+// (SCENE.texturesActive - only the faces with an _ACTIVE overlay, so the page never carries a second
+// copy of an identical texture). The default render is idle; the #stateToggle control swaps the
+// registered face materials to their active map (see stateMaterials).
 const TEXTURES = SCENE.textures || {};
-const _texCache = {};
-function faceTexture(key) {
-  if (!key) return null;
-  if (key in _texCache) return _texCache[key];
-  const uri = TEXTURES[key];
-  if (!uri) { _texCache[key] = null; return null; }
+const TEXTURES_ACTIVE = SCENE.texturesActive || {};
+const _texCache = {}, _texCacheActive = {};
+const stateMaterials = [];   // { mat, idle, active } for faces whose running skin actually differs
+function loadTex(uri) {
   const tex = new THREE.TextureLoader().load(uri);
   tex.magFilter = THREE.NearestFilter;    // crisp pixel art, no bilinear smear
   tex.minFilter = THREE.NearestFilter;
   tex.colorSpace = THREE.SRGBColorSpace;
-  _texCache[key] = tex;
   return tex;
+}
+function faceTexture(key) {
+  if (!key) return null;
+  if (key in _texCache) return _texCache[key];
+  const uri = TEXTURES[key];
+  _texCache[key] = uri ? loadTex(uri) : null;
+  return _texCache[key];
+}
+function faceTextureActive(key) {
+  if (!key || !(key in TEXTURES_ACTIVE)) return null;   // no distinct running skin for this face
+  if (key in _texCacheActive) return _texCacheActive[key];
+  _texCacheActive[key] = loadTex(TEXTURES_ACTIVE[key]);
+  return _texCacheActive[key];
 }
 function flatMaterial(m) {
   const mm = new THREE.MeshStandardMaterial({ color: m.color, roughness: 0.6, metalness: 0.1 });
@@ -247,7 +264,10 @@ function blockMaterials(faces) {
   return faces.map((key) => {
     const tex = faceTexture(key);
     if (!tex) return _UNBAKED;
-    return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, metalness: 0.03 });
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, metalness: 0.03 });
+    const active = faceTextureActive(key);
+    if (active) stateMaterials.push({ mat, idle: tex, active });   // swappable by #stateToggle
+    return mat;
   });
 }
 
@@ -364,6 +384,22 @@ function applyLayer() {
 }
 layer.addEventListener('input', applyLayer);
 document.getElementById('reset').addEventListener('click', resetCamera);
+
+// Idle <-> running skin toggle. Only faces with a distinct active bake are registered, so the swap
+// touches those materials alone; a layout with none (every machine identical at rest and running)
+// disables the control rather than showing a dead no-op button.
+const stateToggle = document.getElementById('stateToggle');
+if (stateMaterials.length === 0) {
+  stateToggle.disabled = true;
+  stateToggle.title = 'no running-state textures in this layout';
+} else {
+  let running = false;
+  stateToggle.addEventListener('click', () => {
+    running = !running;
+    stateToggle.textContent = 'state: ' + (running ? 'running' : 'idle');
+    for (const s of stateMaterials) { s.mat.map = running ? s.active : s.idle; s.mat.needsUpdate = true; }
+  });
+}
 
 document.getElementById('hud').firstChild.textContent =
   'status: ' + SCENE.status + '   seed: ' + SCENE.seed +
