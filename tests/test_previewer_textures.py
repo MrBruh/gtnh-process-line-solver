@@ -110,6 +110,27 @@ def _manifest_dict() -> dict[str, Any]:
                     },
                 },
             },
+            # Two tiers of a generically named single-block machine, keyed by their GT tier-prefixed
+            # in-game names (as the real manifest is), to exercise tier-aware name resolution. There
+            # is deliberately no "Elite Test Hammer", so a higher tier must fall back to Basic.
+            "gregtech:gt.blockmachines|611": {
+                "kind": "mte",
+                "display_name": "Basic Test Hammer",
+                "sides": {
+                    "SOUTH": {
+                        "inactive": [{"icon": MACH_SIDE, "rgba": [120, 130, 200, 0], "glow": False}]
+                    }
+                },
+            },
+            "gregtech:gt.blockmachines|612": {
+                "kind": "mte",
+                "display_name": "Advanced Test Hammer",
+                "sides": {
+                    "SOUTH": {
+                        "inactive": [{"icon": MACH_SIDE, "rgba": [120, 130, 200, 0], "glow": False}]
+                    }
+                },
+            },
             "gregtech:gt.blockcasings|11": {
                 "kind": "block",
                 "sides": {
@@ -184,7 +205,12 @@ def _scene(machines: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _machine(
-    mid: str, mtype: str, cell: list[int], size: list[int], front: str = "north"
+    mid: str,
+    mtype: str,
+    cell: list[int],
+    size: list[int],
+    front: str = "north",
+    voltage_tier: str = "LV",
 ) -> dict[str, Any]:
     return {
         "id": mid,
@@ -192,6 +218,7 @@ def _machine(
         "cell": cell,
         "size": size,
         "front": front,
+        "voltage_tier": voltage_tier,
         "role": "machine",
         "color": "#6ca0dc",
     }
@@ -277,6 +304,37 @@ def test_manifest_mte_block_reverse_index() -> None:
     m = TextureManifest(_manifest_dict())
     assert m.mte_block("Test Macerator") == ("gregtech:gt.blockmachines", 5)
     assert m.mte_block("Nonexistent") is None
+
+
+def test_mte_block_resolves_generic_name_by_tier() -> None:
+    """A generic plan name plus its voltage tier resolves to the tier-prefixed manifest entry."""
+    m = TextureManifest(_manifest_dict())
+    assert m.mte_block("Test Hammer", "LV") == ("gregtech:gt.blockmachines", 611)  # Basic
+    assert m.mte_block("Test Hammer", "MV") == ("gregtech:gt.blockmachines", 612)  # Advanced
+
+
+def test_mte_block_unknown_tier_falls_back_to_basic() -> None:
+    """A tier without a determinable GT prefix (HV+, or absent) resolves the near-identical Basic skin."""
+    m = TextureManifest(_manifest_dict())
+    assert m.mte_block("Test Hammer", "HV") == (
+        "gregtech:gt.blockmachines",
+        611,
+    )  # no Elite -> Basic
+    assert m.mte_block("Test Hammer", None) == ("gregtech:gt.blockmachines", 611)
+
+
+def test_mte_block_normalizes_case_and_punctuation() -> None:
+    """Matching tolerates case, punctuation, and whitespace between the plan and the manifest name."""
+    m = TextureManifest(_manifest_dict())
+    assert m.mte_block("  basic   test-hammer ") == ("gregtech:gt.blockmachines", 611)
+    assert m.mte_block("test hammer", "MV") == ("gregtech:gt.blockmachines", 612)
+
+
+def test_mte_block_unknown_machine_stays_unresolved() -> None:
+    """A genuinely unknown machine resolves to None (kept on the placeholder fallback, never mis-mapped)."""
+    m = TextureManifest(_manifest_dict())
+    assert m.mte_block("Coke Oven", "LV") is None
+    assert m.mte_block("Coke Oven", "MV") is None
 
 
 # --------------------------------------------------------------------------------------------------
@@ -395,6 +453,19 @@ def test_single_block_machine_renders_one_textured_cube(dataset: tuple[Path, Pat
     assert summary.block_cubes == 1
     assert scene["blocks"][0]["cell"] == [3, 0, 3]
     assert "Test Macerator" in summary.textured_types
+
+
+def test_generic_single_block_machine_textures_via_tier(dataset: tuple[Path, Path]) -> None:
+    """A generically named 1x1x1 machine ("Test Hammer" at LV) textures via tier-prefixed resolution."""
+    mb, manifest = dataset
+    scene = _scene([_machine("m1", "Test Hammer", [4, 0, 4], [1, 1, 1], voltage_tier="LV")])
+    summary = texturize_scene(
+        scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider
+    )
+    assert summary.block_cubes == 1
+    assert scene["blocks"][0]["block"] == "gregtech:gt.blockmachines"
+    assert scene["blocks"][0]["meta"] == 611  # Basic Test Hammer, resolved from generic name + LV
+    assert "Test Hammer" in summary.textured_types
 
 
 def test_docless_multiblock_keeps_placeholder_not_a_lone_cube(dataset: tuple[Path, Path]) -> None:

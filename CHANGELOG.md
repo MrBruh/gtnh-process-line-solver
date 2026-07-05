@@ -7,6 +7,19 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Previewer textures generically named single-block machines by voltage tier (`previewer/`,
+  GitHub #3).** A plan export names a single-block machine generically ("Forge Hammer"), but the
+  schema-2 texture manifest keys every single-block machine by its in-game tier-prefixed name
+  ("Basic Forge Hammer" at LV, "Advanced Forge Hammer" at MV), so a generic name never matched and
+  the machine (e.g. the sand line's Forge Hammer) rendered as a flat placeholder box even though its
+  texture was in the manifest. `TextureManifest.mte_block` now resolves a generic name plus the
+  machine's voltage tier: it tries the exact name, then a case/punctuation/whitespace-normalized
+  match, then the tier's GT prefix (LV "Basic", MV "Advanced") with a "Basic" fallback for the higher
+  tiers whose naming diverges per family ("Advanced X II/III/IV", "Universal", "Elite"). Single-block
+  skins are near identical across tiers, so the Basic texture is an honest preview stand-in when the
+  exact tier key is absent; a genuinely unknown machine resolves to nothing and keeps its placeholder
+  box (never mis-mapped). The scene dict now carries each machine's `voltage_tier` for the texture
+  pass to read. The sand preview's three Forge Hammers now render with their real GT texture.
 - **Commit the schema-2 layered texture manifest (`data/textures/manifest.json`, ~5.8 MB).** The
   lane 7 v2 previewer reads this manifest to skin machines with real GT textures, but the repo still
   shipped only the old schema-1 (icon-only, 9 casing blocks) manifest, so a fresh clone rendered every

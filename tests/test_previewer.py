@@ -47,7 +47,8 @@ def test_scene_has_machines_region_and_legend() -> None:
     assert scene["legend"]  # one entry per machine type
     # every machine carries the geometry the viewer needs, with no further lookups
     m = scene["machines"][0]
-    assert set(m) >= {"id", "type", "cell", "size", "front", "role", "color"}
+    assert set(m) >= {"id", "type", "cell", "size", "front", "role", "color", "voltage_tier"}
+    assert all(mm["voltage_tier"] for mm in scene["machines"])  # tier drives single-block texturing
 
 
 def test_scene_power_route_carries_thickness() -> None:
