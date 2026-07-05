@@ -7,6 +7,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Commit the schema-2 layered texture manifest (`data/textures/manifest.json`, ~5.8 MB).** The
+  lane 7 v2 previewer reads this manifest to skin machines with real GT textures, but the repo still
+  shipped only the old schema-1 (icon-only, 9 casing blocks) manifest, so a fresh clone rendered every
+  machine as a placeholder. This is the extractor's `server-itexture-reflection` output (pack 2.8.4,
+  GT5-Unofficial 5.09.51.482): 1470 blocks (1395 machine-tile-entities carrying their `display_name`,
+  75 plain blocks), 816 icons. The pre-commit large-file guard is scoped to exclude `data/` so the
+  dataset can live in the repo (rather than a repo-wide `maxkb` bump). PNGs are still never committed
+  (LGPL); the previewer fetches them from the pinned GT5U jar at render time.
 - **Previewer real GT textures via per-block cubes and a Pillow bake (`previewer/`, lane 7 v2,
   GitHub #50).** Supersedes the v1 that skinned one stretched box per machine with a single
   representative casing - a defect that erased the coils, glass, and hatch faces that make a layout
