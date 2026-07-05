@@ -230,6 +230,13 @@ def test_render_html_shows_system_io_panel_with_rate_toggle() -> None:
     assert 'id="rateUnit"' in html  # the per-tick / per-second toggle button
 
 
+def test_render_html_wires_the_active_idle_state_toggle() -> None:
+    # The idle/running skin toggle: builders can switch every machine between its at-rest and running
+    # texture where the two differ. Assert the stable control id is wired into the page (one coarse
+    # marker), not the JS that swaps the materials - the running faces ride scene.texturesActive.
+    assert 'id="stateToggle"' in render_html(_sand_scene())
+
+
 def test_render_html_draws_a_floor_grid() -> None:
     # The floor grid frames the build (GitHub #19). Its snap-to-cell-boundary math is bounds-derived,
     # JS-only, and eye-validated, so assert only that the grid is wired into the page (one coarse

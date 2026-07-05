@@ -60,8 +60,13 @@ _GT_SIDE_TO_THREE_SLOT = {0: 3, 1: 2, 2: 5, 3: 4, 4: 1, 5: 0}
 _FACE_SLOTS = 6
 
 #: The render state the idle preview shows. GT overlays have an ``active`` variant too; the
-#: previewer draws machines at rest.
+#: previewer draws machines at rest by default and lets the viewer toggle to the running skin.
 _STATE = "inactive"
+
+#: The running-machine render state. Its baked face is emitted only where it actually differs from
+#: the idle bake (an ``_ACTIVE`` overlay), so a plain casing carries no second texture (see
+#: :func:`texturize_scene`). The viewer's state toggle swaps to it.
+_STATE_ACTIVE = "active"
 
 #: Horizontal ForgeDirection sides as (dx, dz) unit vectors, for the yaw that orients a machine's
 #: blocks to its placed ``front`` (the dump builds every controller facing NORTH / -Z).
@@ -109,13 +114,15 @@ class TextureSummary:
     ``textured_types`` are machine types expanded into real per-block cubes; ``placeholder_types``
     kept their flat colour box (no committed doc, an all-unresolved variant, no PNG bytes, or no
     Pillow). ``block_cubes`` is the total textured cubes emitted; ``embedded_icons`` the distinct
-    baked face PNGs in the page.
+    baked idle-state face PNGs in the page; ``embedded_active_icons`` the extra running-state face
+    PNGs (only the faces whose active bake differs from idle, e.g. an ``_ACTIVE`` overlay).
     """
 
     textured_types: tuple[str, ...]
     placeholder_types: tuple[str, ...]
     block_cubes: int
     embedded_icons: int
+    embedded_active_icons: int = 0
 
 
 class TextureManifest:
@@ -367,6 +374,12 @@ def texturize_scene(
     URI). Every expanded machine is flagged ``expanded`` so the viewer draws its cubes instead of a
     box; machines with no doc (or no baked face) keep their placeholder box. Missing data, no PNGs,
     or no Pillow all degrade to all-placeholder. Returns a :class:`TextureSummary`.
+
+    Each face is also baked in its running (``active``) state, and ``scene["texturesActive"]`` maps a
+    pool key to the running-state ``data:`` URI **only where that bake differs** from the idle one
+    (an ``_ACTIVE`` overlay); an idle-identical face carries no second texture, so the viewer's state
+    toggle reuses the one image and the embedded page never bloats for faces that look the same at
+    rest and running. The default display stays idle.
     """
     all_types = tuple(sorted({m["type"] for m in scene["machines"]}))
     mb_dir = DEFAULT_MULTIBLOCKS_DIR if multiblocks_dir is None else Path(multiblocks_dir)
@@ -374,6 +387,7 @@ def texturize_scene(
 
     scene.setdefault("blocks", [])
     scene.setdefault("textures", {})
+    scene.setdefault("texturesActive", {})
     docs = load_multiblock_docs(mb_dir)
     if not docs or not Path(mf_path).is_file():
         _log.info("textures: no dataset/manifest; all %d types placeholder", len(all_types))
@@ -387,7 +401,10 @@ def texturize_scene(
     # even when some textures are missing (section 5.6).
     cubes: list[dict[str, Any]] = []
     needed_icons: set[str] = set()
-    key_layers: dict[str, list[dict[str, Any]]] = {}  # pool key -> layer stack, deduped
+    key_layers: dict[str, list[dict[str, Any]]] = {}  # pool key -> idle layer stack, deduped
+    # Only faces whose running stack differs from idle - the ones that can bake a distinct active
+    # texture - are collected here (a plain casing is identical in both states and skipped).
+    key_layers_active: dict[str, list[dict[str, Any]]] = {}
     for machine in scene["machines"]:
         machine_cubes = _machine_cubes(machine, docs, manifest)
         if not machine_cubes:
@@ -399,7 +416,12 @@ def texturize_scene(
             for key in faces:
                 if key is not None and key not in key_layers:
                     block, meta_s, side, state = key.split("|")
-                    key_layers[key] = manifest.layers(block, int(meta_s), side, state)
+                    idle = manifest.layers(block, int(meta_s), side, state)
+                    key_layers[key] = idle
+                    active = manifest.layers(block, int(meta_s), side, _STATE_ACTIVE)
+                    if active != idle:
+                        key_layers_active[key] = active
+                        needed_icons.update(layer["icon"] for layer in active)
             cubes.append(
                 {
                     "cell": list(cube.cell),
@@ -416,11 +438,25 @@ def texturize_scene(
     icon_png = png_provider(icon_paths) if (png_provider is not None and icon_paths) else {}
 
     pool: dict[str, str] = {}
+    pool_active: dict[str, str] = {}
     try:
+        baked_idle: dict[str, bytes] = {}
         for key, layers in key_layers.items():
             baked = bake_layers(layers, icon_png)
             if baked is not None:
+                baked_idle[key] = baked
                 pool[key] = _png_data_uri(baked)
+        # Bake the running state only for faces whose stack differs, and keep it only where the
+        # bytes actually differ from the idle bake AND the idle face itself baked (so the toggle
+        # never targets a placeholder face). Identical bakes are deduped away - the viewer reuses
+        # the idle texture there.
+        for key, layers in key_layers_active.items():
+            idle_png = baked_idle.get(key)
+            if idle_png is None:
+                continue
+            baked = bake_layers(layers, icon_png)
+            if baked is not None and baked != idle_png:
+                pool_active[key] = _png_data_uri(baked)
     except BakeUnavailableError as exc:
         _log.warning("textures: %s; falling back to placeholder boxes", exc)
         for machine in scene["machines"]:
@@ -433,6 +469,7 @@ def texturize_scene(
         rendered["texture"] = [key if key in pool else None for key in rendered["texture"]]
     scene["blocks"] = cubes
     scene["textures"] = pool
+    scene["texturesActive"] = pool_active
     expanded_types = {m["type"] for m in scene["machines"] if m.get("expanded")}
     placeholder = tuple(t for t in all_types if t not in expanded_types)
     summary = TextureSummary(
@@ -440,15 +477,17 @@ def texturize_scene(
         placeholder_types=placeholder,
         block_cubes=len(cubes),
         embedded_icons=len(pool),
+        embedded_active_icons=len(pool_active),
     )
     _log.info(
         "textures: %d/%d machine types expanded to %d textured cubes (%s); placeholder: %s; "
-        "%d baked face PNG(s)",
+        "%d baked face PNG(s), %d running-state override(s)",
         len(summary.textured_types),
         len(all_types),
         summary.block_cubes,
         ", ".join(summary.textured_types) or "none",
         ", ".join(summary.placeholder_types) or "none",
         summary.embedded_icons,
+        summary.embedded_active_icons,
     )
     return summary
