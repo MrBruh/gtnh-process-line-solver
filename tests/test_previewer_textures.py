@@ -230,12 +230,38 @@ def _machine(
 
 
 def test_bake_applies_rgba_tint_not_neutral() -> None:
-    """A white base sprite tinted [120,130,200] bakes to that colour, never left neutral grey."""
+    """A white base sprite tinted [120,130,200] bakes a hue-shifted colour, never neutral grey.
+
+    Peak-channel normalisation (max 200) scales the tint to (0.6, 0.65, 1.0), so the white sprite
+    bakes to (153, 166, 255): still visibly tinted toward blue, just brighter than the old
+    ``/ 255`` result (120, 130, 200) because the tint no longer doubles as a brightness cut.
+    """
     baked = bake_layers([{"icon": MACH_SIDE, "rgba": [120, 130, 200, 0], "glow": False}], _ICON_PNG)
     assert baked is not None
     r, g, b, a = _pixel(baked)
-    assert (r, g, b) == (120, 130, 200), "tint multiply must be applied to the base sprite"
+    assert (r, g, b) == (153, 166, 255), "tint hue must be applied to the base sprite"
+    assert r < b, "the tint must stay visibly hue-shifted (bluer), not neutral grey"
     assert a == 255, "a GT alpha of 0 means opaque, so the baked base stays fully opaque"
+
+
+def test_bake_dark_neutral_tint_does_not_blacken_sprite() -> None:
+    """Regression: a dark-neutral casing tint [32,32,32] must not crush a bright sprite to black.
+
+    A raw ``value / 255`` multiply turned [32,32,32] into ~0.125 and baked a bright casing to mean
+    RGB ~20 (near-black). Peak-channel normalisation makes a neutral tint identity, so the bright
+    sprite shows through at full brightness instead of blacking out.
+    """
+    baked = bake_layers([{"icon": CASING, "rgba": [32, 32, 32, 0], "glow": False}], _ICON_PNG)
+    assert baked is not None
+    r, g, b, _ = _pixel(baked)
+    assert (r + g + b) / 3 > 120, "a dark-neutral tint must not crush the sprite to near-black"
+
+
+def test_bake_fully_black_tint_defaults_to_identity() -> None:
+    """A degenerate all-zero tint has no brightest channel to normalise by, so it bakes as identity."""
+    baked = bake_layers([{"icon": CASING, "rgba": [0, 0, 0, 0], "glow": False}], _ICON_PNG)
+    assert baked is not None
+    assert _pixel(baked)[:3] == (200, 200, 200), "an all-zero tint must leave the sprite unchanged"
 
 
 def test_bake_composites_overlay_over_base() -> None:
@@ -483,14 +509,15 @@ def test_docless_multiblock_keeps_placeholder_not_a_lone_cube(dataset: tuple[Pat
 
 
 def test_single_block_machine_base_face_is_tinted(dataset: tuple[Path, Path]) -> None:
-    """Golden tint guard: the single-block machine's baked base face is the tint, not neutral grey."""
+    """Golden tint guard: the single-block machine's baked base face is hue-tinted, not neutral grey."""
     mb, manifest = dataset
     scene = _scene([_machine("m1", "Test Macerator", [0, 0, 0], [1, 1, 1])])
     texturize_scene(scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider)
     key = next(k for k in scene["textures"] if k.startswith("gregtech:gt.blockmachines|5|SOUTH"))
     png = base64.b64decode(scene["textures"][key].split(",", 1)[1])
     r, g, b, _ = _pixel(png)
-    assert (r, g, b) == (120, 130, 200), "a dropped RGBA multiply would leave this neutral grey"
+    assert (r, g, b) == (153, 166, 255), "a dropped RGBA multiply would leave this neutral grey"
+    assert r < b, "the tint stays visibly hue-shifted, not neutral grey"
 
 
 def test_icon_name_stability_ebf_casing(dataset: tuple[Path, Path]) -> None:

@@ -58,14 +58,23 @@ def _require_pillow() -> Any:
 def _multiplier(rgba: Sequence[int]) -> tuple[float, float, float, float]:
     """Turn a GT ``[r, g, b, a]`` (0-255) layer colour into per-channel multipliers in ``[0, 1]``.
 
-    GT stores the tint as a short quadruple and multiplies each sprite channel by ``value / 255``.
-    The alpha slot is ``0`` for the common opaque layers (it is a modulation colour, not a coverage
-    value), so a zero alpha is treated as fully opaque; any other alpha scales coverage. A missing
-    or short tuple defaults to identity (no tint), so an un-tinted layer bakes its sprite unchanged.
+    GT's ``mRGBa`` tints a casing's HUE, but the tier sprites we bake already carry their full
+    colour, so applying the raw value as a ``value / 255`` brightness multiply crushes dark-neutral
+    casings (e.g. bronze's ``[32, 32, 32]``) to near-black. Normalise the tint by its brightest
+    channel instead: identical to ``/ 255`` for any tint whose peak channel is 255 (the electric
+    ``[210, 220, 255]`` majority and plain whites are unchanged), but a dark-neutral tint becomes
+    identity so the sprite shows through at full brightness with its hue shift preserved. This is a
+    readability-first approximation, not GT-pixel-accurate colour (that remains a deferred cosmetic
+    item). The alpha slot is ``0`` for common opaque layers (a modulation colour, not coverage), so a
+    zero alpha is treated as fully opaque; any other alpha scales coverage. A missing/short tuple or a
+    fully black tint defaults to identity (no tint).
     """
     r, g, b, a = [*rgba, 255, 255, 255, 255][:4]
     alpha = 1.0 if a == 0 else a / 255.0
-    return (r / 255.0, g / 255.0, b / 255.0, alpha)
+    peak = max(r, g, b)
+    if peak <= 0:
+        return (1.0, 1.0, 1.0, alpha)
+    return (r / peak, g / peak, b / peak, alpha)
 
 
 def _frame0(image: Any, image_mod: Any) -> Any:
