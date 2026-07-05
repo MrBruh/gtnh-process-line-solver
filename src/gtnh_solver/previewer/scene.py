@@ -64,6 +64,10 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
                 machines[pl.machine_id].footprint.sz,
             ],
             "front": pl.orientation.value,
+            # The machine's voltage tier (LV/MV/HV/...), carried so the texture pass can resolve a
+            # generically named single-block machine to its GT tier-prefixed manifest entry
+            # (e.g. "Forge Hammer" at LV -> "Basic Forge Hammer").
+            "voltage_tier": machines[pl.machine_id].voltage_tier,
             "role": _role(machines[pl.machine_id]),
             "color": color_for_type[machines[pl.machine_id].type],
         }

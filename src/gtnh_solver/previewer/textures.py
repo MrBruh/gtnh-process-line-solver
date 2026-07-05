@@ -24,6 +24,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -69,6 +70,37 @@ _VEC_SIDE = {v: s for s, v in _SIDE_VEC.items()}
 #: Clockwise 90-degree steps (viewed from +Y) from the dump's NORTH front to each placed facing.
 _FRONT_CW_STEPS = {"north": 0, "east": 1, "south": 2, "west": 3}
 
+#: The GT single-block machine name prefix per voltage tier. A plan export names a single-block
+#: machine generically ("Forge Hammer"), but the manifest keys it by its in-game tier-prefixed name
+#: ("Basic Forge Hammer" at LV, "Advanced Forge Hammer" at MV). Only LV and MV share one prefix
+#: across every single-block family; above MV the scheme diverges per family ("Advanced X II/III/IV",
+#: "Universal", "Elite", steam-only variants), so there is no reliable generic tier->name rule there.
+#: Those tiers (and an unknown/absent tier) fall back to the ``_FALLBACK_PREFIX`` variant, an honest
+#: preview stand-in because GT single-block skins are near identical across tiers.
+_TIER_PREFIX = {"LV": "Basic", "MV": "Advanced"}
+_FALLBACK_PREFIX = "Basic"
+
+#: Runs of non-alphanumeric characters, collapsed to one space when normalizing a machine name so
+#: matching tolerates case, punctuation, and whitespace differences between plan and manifest.
+_NON_ALNUM = re.compile(r"[^a-z0-9]+")
+
+
+def _normalize_name(name: str) -> str:
+    """Casefold ``name`` and collapse non-alphanumeric runs to single spaces, for tolerant lookup."""
+    return _NON_ALNUM.sub(" ", name.casefold()).strip()
+
+
+def _tier_prefixes(tier: str | None) -> list[str]:
+    """Ordered name-prefix candidates for a machine at ``tier``: its GT prefix then the Basic fallback.
+
+    LV/MV map to their shared prefix; every other (or unknown) tier resolves through ``Basic`` alone,
+    the honest lowest-tier stand-in for the tiers whose GT naming is not a determinable generic rule.
+    """
+    prefix = _TIER_PREFIX.get(tier or "")
+    if prefix and prefix != _FALLBACK_PREFIX:
+        return [prefix, _FALLBACK_PREFIX]
+    return [_FALLBACK_PREFIX]
+
 
 @dataclass(frozen=True)
 class TextureSummary:
@@ -99,12 +131,17 @@ class TextureManifest:
         self._icons: Mapping[str, str] = raw.get("icons", {})
         # Reverse index: a single-block machine's display name -> its (block, meta), so a machine
         # type with no multiblock doc (the whole structure IS one block) still resolves to a cube.
+        # A normalized index alongside it lets a plan's generically named machine match its
+        # tier-prefixed manifest key without an exact-string collision (see ``mte_block``).
         self._mte_by_name: dict[str, tuple[str, int]] = {}
         for key, entry in self._blocks.items():
             name = entry.get("display_name")
             if entry.get("kind") == "mte" and name and "|" in key:
                 block, meta = key.rsplit("|", 1)
                 self._mte_by_name.setdefault(name, (block, int(meta)))
+        self._mte_by_norm: dict[str, tuple[str, int]] = {}
+        for name, block_meta in self._mte_by_name.items():
+            self._mte_by_norm.setdefault(_normalize_name(name), block_meta)
 
     @classmethod
     def load(cls, path: str | Path) -> TextureManifest:
@@ -134,13 +171,29 @@ class TextureManifest:
         """The path inside the mod jar for ``icon`` (e.g. ``assets/gregtech/.../NAME.png``)."""
         return self._icons.get(icon)
 
-    def mte_block(self, display_name: str) -> tuple[str, int] | None:
-        """The ``(block, meta)`` of the single-block machine named ``display_name``, or ``None``.
+    def mte_block(self, display_name: str, tier: str | None = None) -> tuple[str, int] | None:
+        """The ``(block, meta)`` of the single-block machine ``display_name`` (at ``tier``), or ``None``.
 
         Lets a machine type with no committed multiblock doc (a 1x1x1 machine whose whole structure
-        is its own block) resolve to that block so it renders as one textured cube.
+        is its own block) resolve to that block so it renders as one textured cube. A plan export
+        names such a machine generically ("Forge Hammer"), but the manifest keys it by its in-game
+        tier-prefixed name ("Basic Forge Hammer" at LV). Resolution tries, in order: the exact name
+        (a plan that already carries the full name still works), a normalized (case/punctuation/
+        whitespace-insensitive) match, then the tier-prefixed name plus a ``Basic`` fallback (see
+        ``_TIER_PREFIX``). A genuinely unknown machine returns ``None`` and keeps its placeholder box,
+        never mis-mapped.
         """
-        return self._mte_by_name.get(display_name)
+        exact = self._mte_by_name.get(display_name)
+        if exact is not None:
+            return exact
+        normalized = self._mte_by_norm.get(_normalize_name(display_name))
+        if normalized is not None:
+            return normalized
+        for prefix in _tier_prefixes(tier):
+            hit = self._mte_by_norm.get(_normalize_name(f"{prefix} {display_name}"))
+            if hit is not None:
+                return hit
+        return None
 
 
 def load_multiblock_docs(data_dir: str | Path) -> dict[str, MultiblockDoc]:
@@ -254,15 +307,16 @@ def _machine_cubes(
     """The per-block cubes for a machine: its multiblock doc if committed, else a single-block cube.
 
     A machine whose type has a dumped :class:`MultiblockDoc` expands to that structure. A genuine
-    single-block machine (a 1x1x1 footprint present in the manifest by display name) is the trivial
-    one-cube case. A doc-less MULTIblock (a bigger footprint whose structure failed extraction, e.g.
+    single-block machine (a 1x1x1 footprint) is the trivial one-cube case, resolved by its plan name
+    plus voltage tier against the manifest's tier-prefixed keys (see :meth:`TextureManifest.mte_block`).
+    A doc-less MULTIblock (a bigger footprint whose structure failed extraction, e.g.
     the dynamic-height Distillation Tower) must NOT collapse to a lone controller cube - it yields
     nothing and keeps its placeholder box, so its true reserved footprint still shows.
     """
     doc = docs.get(machine["type"])
     if doc is not None:
         return expand_machine(machine, doc)
-    single = manifest.mte_block(machine["type"])
+    single = manifest.mte_block(machine["type"], machine.get("voltage_tier"))
     if single is not None and tuple(machine.get("size", (1, 1, 1))) == (1, 1, 1):
         block, meta = single
         cell = machine["cell"]
