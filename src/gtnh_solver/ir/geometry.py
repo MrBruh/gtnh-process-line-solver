@@ -63,7 +63,10 @@ def occupied_cells(origin: CellCoord, footprint: CellBox) -> Iterator[Cell]:
       placement, the router AND the validator (its independent safety net), a rotated multi-cell
       machine would be mis-modeled *identically* on both sides - so when rotation lands the
       validator must get its own rotation-aware expansion (or this primitive must be oracle-tested)
-      or the gate will share the solver's blind spot instead of catching it.
+      or the gate will share the solver's blind spot instead of catching it. Until then the adapter
+      side-steps the blind spot by pinning a non-square-base multiblock to a single orientation
+      (``adapter.core._orientations_for``), so every reserved box this expands matches reality; a
+      square-base footprint (all current dataset machines) is rotation-invariant and rotates freely.
     """
     for dx in range(footprint.sx):
         for dy in range(footprint.sy):

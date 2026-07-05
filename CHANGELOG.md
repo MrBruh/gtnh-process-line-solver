@@ -7,6 +7,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Real multiblock footprints wired into the solve path (`cli`, `adapter`, GAP A / the overlap
+  fix).** `gtnh-solve` now loads the committed physical dataset (`data/multiblocks/`) and passes it
+  to the adapter, so a machine whose type the dataset knows (Electric Blast Furnace, Vacuum Freezer)
+  reserves its real multi-cell footprint instead of the crude 1x1x1 default that made multiblock
+  structures overlap and the previewer render them sparse. The lookup stays a graceful enhancement:
+  a missing, unreadable, or empty dataset warns to stderr and falls back to 1x1x1 footprints, so the
+  documented 0/1/2 exit-code contract is untouched (a type the dataset lacks, e.g. Forge Hammer or
+  the nitrobenzene multiblocks, still gets the single-block default, so those examples are
+  unchanged). `_bounding_region` is now footprint-aware: the region height clears the tallest machine
+  (a hardcoded 4 made a 10-tall Distillation Tower infeasible before placement even ran) and the
+  floor holds the summed footprint areas with routing slack, reproducing the old `side x 4 x side`
+  sizing exactly for an all-1x1x1 line. A non-square-base multiblock is pinned to a single
+  orientation until `occupied_cells` becomes rotation-aware (the placer, router, and validator share
+  that primitive, so a rotated non-cubic footprint would be a shared blind spot); every current
+  dataset machine is square-base and keeps all four orientations.
 - **Previewer active/idle machine skin toggle (`previewer/`).** The viewer now carries a `state`
   control that swaps every machine between its idle (at-rest) and running skin, so a builder can see
   which faces light up when the line runs (e.g. the Distillation Tower and Large Chemical Reactor

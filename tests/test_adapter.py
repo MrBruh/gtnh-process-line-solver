@@ -29,7 +29,17 @@ from gtnh_solver.adapter import (
     load_plan,
     to_input_ir,
 )
-from gtnh_solver.ir import Commodity, InputIR, IODirection, LayoutResult, LayoutStatus, Net
+from gtnh_solver.adapter.core import _bounding_region, _orientations_for
+from gtnh_solver.ir import (
+    CellBox,
+    Commodity,
+    InputIR,
+    IODirection,
+    LayoutResult,
+    LayoutStatus,
+    Net,
+)
+from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 from gtnh_solver.placement import place
 from gtnh_solver.validator import validate
 from tests._helpers import PLACEMENT_CODES
@@ -409,3 +419,52 @@ def test_resolved_without_the_node_falls_back_to_synthesis() -> None:
         warnings.simplefilter("error")
         ir = to_input_ir(plan)
     assert next(m for m in ir.machines if m.id == "n").eut == 30.0
+
+
+# ----------------------------------------------- footprint-aware region + orientation constraint
+
+
+def test_bounding_region_matches_the_old_sizing_for_unit_machines() -> None:
+    # For an all-1x1x1 line the footprint-aware sizing must reproduce the historical side x 4 x side
+    # region exactly, so the shipped single-block examples are byte-for-byte unchanged.
+    for n in (1, 3, 5, 12):
+        region = _bounding_region([CellBox() for _ in range(n)])
+        side = max(8, n * 2)
+        assert region == CellBox(sx=side, sy=4, sz=side)
+
+
+def test_bounding_region_clears_the_tallest_machine() -> None:
+    # A tall multiblock (a Distillation Tower is 10+ high) must fit: a hardcoded height of 4 would
+    # make placement infeasible before it even runs. Height clears the tallest footprint.
+    region = _bounding_region([CellBox(sx=3, sy=12, sz=3), CellBox()])
+    assert region.sy > 12
+
+
+def test_bounding_region_fits_the_summed_footprint_area() -> None:
+    # A few large-based machines whose summed floor area exceeds the count-based generosity: the
+    # floor must still hold them (side^2 >= summed footprint area), with routing slack on top.
+    footprints = [CellBox(sx=5, sy=1, sz=5) for _ in range(4)]  # 100 cells of floor area
+    region = _bounding_region(footprints)
+    assert region.sx * region.sz >= sum(fp.sx * fp.sz for fp in footprints)
+    assert region.sx >= max(fp.sx for fp in footprints)  # never narrower than one machine
+
+
+def test_bounding_region_empty_is_a_defensive_default() -> None:
+    # Synthesis always adds at least a power source in practice, but the sizing must not divide by
+    # an empty list; it returns the historical minimum region instead.
+    assert _bounding_region([]) == CellBox(sx=8, sy=4, sz=8)
+
+
+def test_orientations_square_base_keeps_all_four() -> None:
+    # A square-base footprint (sx == sz) is rotation-invariant about the vertical axis, so all four
+    # horizontal facings are safe - occupied_cells expands the same box for each. The EBF (3x4x3)
+    # and every 1x1x1 block are square-base.
+    assert _orientations_for(CellBox(sx=3, sy=4, sz=3)) == list(HORIZONTAL_FACINGS_ORDERED)
+    assert _orientations_for(CellBox()) == list(HORIZONTAL_FACINGS_ORDERED)
+
+
+def test_orientations_non_square_base_is_pinned_to_one() -> None:
+    # A non-square base (sx != sz) would swap extents under a 90-degree turn, which occupied_cells
+    # does not yet model, so it is pinned to a single default orientation until rotation lands.
+    for footprint in (CellBox(sx=2, sy=1, sz=5), CellBox(sx=7, sy=3, sz=2)):
+        assert _orientations_for(footprint) == [HORIZONTAL_FACINGS_ORDERED[0]]

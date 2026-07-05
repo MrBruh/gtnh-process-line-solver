@@ -28,6 +28,7 @@ from pydantic import ValidationError
 from gtnh_solver import __version__
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.buildguide import build_guide
+from gtnh_solver.dataset import PhysicalDataset, load_physical_dataset
 from gtnh_solver.ir import LayoutStatus
 from gtnh_solver.previewer import write_preview
 from gtnh_solver.solver import solve
@@ -70,6 +71,33 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _load_physical_or_warn() -> PhysicalDataset | None:
+    """The committed multiblock dataset (real footprints), or ``None`` with a stderr warning.
+
+    Wiring the physical dataset into the solve path is what gives multiblocks their real footprints
+    instead of the crude 1x1x1 default (GAP A, the overlap fix). It stays a GRACEFUL enhancement: a
+    missing, unreadable, or empty ``data/multiblocks/`` dump warns and falls back to ``physical=None``
+    (the historical single-block behaviour) rather than crashing, so the documented 0/1/2 exit-code
+    contract is untouched. ``DatasetError`` is a ``ValueError``; ``OSError`` covers a missing dir and
+    ``ValidationError`` a malformed file, so the whole load can never take the CLI down.
+    """
+    try:
+        physical = load_physical_dataset()
+    except (OSError, ValueError, ValidationError) as exc:
+        print(
+            f"warning: physical multiblock dataset unavailable ({exc}); using 1x1x1 footprints",
+            file=sys.stderr,
+        )
+        return None
+    if not physical.machines:
+        print(
+            "warning: physical multiblock dataset is empty; using 1x1x1 footprints",
+            file=sys.stderr,
+        )
+        return None
+    return physical
+
+
 def _enable_previewer_logging() -> None:
     """Route ``gtnh_solver`` INFO logs to stderr (idempotently) so ``--preview`` shows the texture
     summary. Scoped to this logger and guarded against double-attaching a handler on re-entry."""
@@ -91,8 +119,9 @@ def main(argv: list[str] | None = None) -> int:
         print("error: an export path is required (try 'gtnh-solve --help')", file=sys.stderr)
         return 2
 
+    physical = _load_physical_or_warn()  # real multiblock footprints; None -> 1x1x1 fallback
     try:
-        problem = adapt_file(args.export)
+        problem = adapt_file(args.export, physical=physical)
     except (OSError, ValueError, ValidationError) as exc:
         print(f"error: could not load {args.export!r}: {exc}", file=sys.stderr)
         return 2
