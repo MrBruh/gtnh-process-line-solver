@@ -47,7 +47,8 @@ def test_scene_has_machines_region_and_legend() -> None:
     assert scene["legend"]  # one entry per machine type
     # every machine carries the geometry the viewer needs, with no further lookups
     m = scene["machines"][0]
-    assert set(m) >= {"id", "type", "cell", "size", "front", "role", "color"}
+    assert set(m) >= {"id", "type", "cell", "size", "front", "role", "color", "voltage_tier"}
+    assert all(mm["voltage_tier"] for mm in scene["machines"])  # tier drives single-block texturing
 
 
 def test_scene_power_route_carries_thickness() -> None:
@@ -227,6 +228,13 @@ def test_render_html_shows_system_io_panel_with_rate_toggle() -> None:
     html = render_html(_sand_scene())
     assert "system i/o" in html  # the boundary panel label
     assert 'id="rateUnit"' in html  # the per-tick / per-second toggle button
+
+
+def test_render_html_wires_the_active_idle_state_toggle() -> None:
+    # The idle/running skin toggle: builders can switch every machine between its at-rest and running
+    # texture where the two differ. Assert the stable control id is wired into the page (one coarse
+    # marker), not the JS that swaps the materials - the running faces ride scene.texturesActive.
+    assert 'id="stateToggle"' in render_html(_sand_scene())
 
 
 def test_render_html_draws_a_floor_grid() -> None:

@@ -60,6 +60,9 @@ CASING = "gregtech:iconsets/MACHINE_HEATPROOFCASING"
 COIL = "gregtech:iconsets/BLOCK_COIL_CUPRONICKEL"
 MACH_SIDE = "gregtech:iconsets/MACHINE_LV_SIDE"
 OVERLAY = "gregtech:iconsets/OVERLAY_FRONT_MACERATOR"
+#: A fully-transparent overlay: an active layer that differs in the STACK but composites to nothing,
+#: so its bake is byte-identical to idle - the case the byte-level active dedup must drop.
+CLEAR = "gregtech:iconsets/OVERLAY_CLEAR"
 
 #: A png_provider: white base sprites so a tint multiply shows through as the tint colour, and a
 #: half-alpha overlay so compositing is observable.
@@ -68,6 +71,7 @@ _ICON_PNG = {
     COIL: _png((255, 255, 255, 255)),
     MACH_SIDE: _png((255, 255, 255, 255)),
     OVERLAY: _png((0, 0, 0, 128)),
+    CLEAR: _png((0, 0, 0, 0)),
 }
 
 
@@ -110,6 +114,98 @@ def _manifest_dict() -> dict[str, Any]:
                     },
                 },
             },
+            # Two tiers of a generically named single-block machine, keyed by their GT tier-prefixed
+            # in-game names (as the real manifest is), to exercise tier-aware name resolution. There
+            # is deliberately no "Elite Test Hammer", so a higher tier must fall back to Basic.
+            "gregtech:gt.blockmachines|611": {
+                "kind": "mte",
+                "display_name": "Basic Test Hammer",
+                "sides": {
+                    "SOUTH": {
+                        "inactive": [{"icon": MACH_SIDE, "rgba": [120, 130, 200, 0], "glow": False}]
+                    }
+                },
+            },
+            "gregtech:gt.blockmachines|612": {
+                "kind": "mte",
+                "display_name": "Advanced Test Hammer",
+                "sides": {
+                    "SOUTH": {
+                        "inactive": [{"icon": MACH_SIDE, "rgba": [120, 130, 200, 0], "glow": False}]
+                    }
+                },
+            },
+            # A single-block machine that carries a DISTINCT running skin: its NORTH face gains an
+            # overlay when active (so its active bake differs from idle), while its SOUTH face stores
+            # an identical active stack (so that face dedupes to one texture). Drives the state-toggle
+            # scene contract.
+            "gregtech:gt.blockmachines|7": {
+                "kind": "mte",
+                "display_name": "Test Toggle",
+                "sides": {
+                    "NORTH": {
+                        "inactive": [
+                            {"icon": MACH_SIDE, "rgba": [255, 255, 255, 255], "glow": False}
+                        ],
+                        "active": [
+                            {"icon": MACH_SIDE, "rgba": [255, 255, 255, 255], "glow": False},
+                            {"icon": OVERLAY, "rgba": [255, 255, 255, 0], "glow": False},
+                        ],
+                    },
+                    "SOUTH": {
+                        "inactive": [
+                            {"icon": MACH_SIDE, "rgba": [255, 255, 255, 255], "glow": False}
+                        ],
+                        "active": [
+                            {"icon": MACH_SIDE, "rgba": [255, 255, 255, 255], "glow": False}
+                        ],
+                    },
+                },
+            },
+            # A machine whose active NORTH stack DIFFERS in layers (it adds a fully-transparent
+            # overlay) but bakes byte-identical to idle. The byte-level dedup must drop it - no
+            # active override, even though the stacks are not equal.
+            "gregtech:gt.blockmachines|8": {
+                "kind": "mte",
+                "display_name": "Test Ghost",
+                "sides": {
+                    "NORTH": {
+                        "inactive": [
+                            {"icon": MACH_SIDE, "rgba": [255, 255, 255, 255], "glow": False}
+                        ],
+                        "active": [
+                            {"icon": MACH_SIDE, "rgba": [255, 255, 255, 255], "glow": False},
+                            {"icon": CLEAR, "rgba": [255, 255, 255, 255], "glow": False},
+                        ],
+                    }
+                },
+            },
+            # A machine whose idle NORTH face references an UNFETCHABLE icon (absent from the icons
+            # map, so it bakes to nothing) while its active stack differs. The active override must be
+            # skipped so it never targets a face that fell back to a placeholder.
+            "gregtech:gt.blockmachines|9": {
+                "kind": "mte",
+                "display_name": "Test Phantom",
+                "sides": {
+                    "NORTH": {
+                        "inactive": [
+                            {
+                                "icon": "gregtech:iconsets/UNFETCHABLE",
+                                "rgba": [0, 0, 0, 0],
+                                "glow": False,
+                            }
+                        ],
+                        "active": [
+                            {
+                                "icon": "gregtech:iconsets/UNFETCHABLE",
+                                "rgba": [0, 0, 0, 0],
+                                "glow": False,
+                            },
+                            {"icon": OVERLAY, "rgba": [255, 255, 255, 0], "glow": False},
+                        ],
+                    }
+                },
+            },
             "gregtech:gt.blockcasings|11": {
                 "kind": "block",
                 "sides": {
@@ -132,6 +228,7 @@ def _manifest_dict() -> dict[str, Any]:
             COIL: "assets/gregtech/textures/blocks/iconsets/BLOCK_COIL_CUPRONICKEL.png",
             MACH_SIDE: "assets/gregtech/textures/blocks/iconsets/MACHINE_LV_SIDE.png",
             OVERLAY: "assets/gregtech/textures/blocks/iconsets/OVERLAY_FRONT_MACERATOR.png",
+            CLEAR: "assets/gregtech/textures/blocks/iconsets/OVERLAY_CLEAR.png",
         },
     }
 
@@ -184,7 +281,12 @@ def _scene(machines: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _machine(
-    mid: str, mtype: str, cell: list[int], size: list[int], front: str = "north"
+    mid: str,
+    mtype: str,
+    cell: list[int],
+    size: list[int],
+    front: str = "north",
+    voltage_tier: str = "LV",
 ) -> dict[str, Any]:
     return {
         "id": mid,
@@ -192,6 +294,7 @@ def _machine(
         "cell": cell,
         "size": size,
         "front": front,
+        "voltage_tier": voltage_tier,
         "role": "machine",
         "color": "#6ca0dc",
     }
@@ -203,12 +306,38 @@ def _machine(
 
 
 def test_bake_applies_rgba_tint_not_neutral() -> None:
-    """A white base sprite tinted [120,130,200] bakes to that colour, never left neutral grey."""
+    """A white base sprite tinted [120,130,200] bakes a hue-shifted colour, never neutral grey.
+
+    Peak-channel normalisation (max 200) scales the tint to (0.6, 0.65, 1.0), so the white sprite
+    bakes to (153, 166, 255): still visibly tinted toward blue, just brighter than the old
+    ``/ 255`` result (120, 130, 200) because the tint no longer doubles as a brightness cut.
+    """
     baked = bake_layers([{"icon": MACH_SIDE, "rgba": [120, 130, 200, 0], "glow": False}], _ICON_PNG)
     assert baked is not None
     r, g, b, a = _pixel(baked)
-    assert (r, g, b) == (120, 130, 200), "tint multiply must be applied to the base sprite"
+    assert (r, g, b) == (153, 166, 255), "tint hue must be applied to the base sprite"
+    assert r < b, "the tint must stay visibly hue-shifted (bluer), not neutral grey"
     assert a == 255, "a GT alpha of 0 means opaque, so the baked base stays fully opaque"
+
+
+def test_bake_dark_neutral_tint_does_not_blacken_sprite() -> None:
+    """Regression: a dark-neutral casing tint [32,32,32] must not crush a bright sprite to black.
+
+    A raw ``value / 255`` multiply turned [32,32,32] into ~0.125 and baked a bright casing to mean
+    RGB ~20 (near-black). Peak-channel normalisation makes a neutral tint identity, so the bright
+    sprite shows through at full brightness instead of blacking out.
+    """
+    baked = bake_layers([{"icon": CASING, "rgba": [32, 32, 32, 0], "glow": False}], _ICON_PNG)
+    assert baked is not None
+    r, g, b, _ = _pixel(baked)
+    assert (r + g + b) / 3 > 120, "a dark-neutral tint must not crush the sprite to near-black"
+
+
+def test_bake_fully_black_tint_defaults_to_identity() -> None:
+    """A degenerate all-zero tint has no brightest channel to normalise by, so it bakes as identity."""
+    baked = bake_layers([{"icon": CASING, "rgba": [0, 0, 0, 0], "glow": False}], _ICON_PNG)
+    assert baked is not None
+    assert _pixel(baked)[:3] == (200, 200, 200), "an all-zero tint must leave the sprite unchanged"
 
 
 def test_bake_composites_overlay_over_base() -> None:
@@ -277,6 +406,37 @@ def test_manifest_mte_block_reverse_index() -> None:
     m = TextureManifest(_manifest_dict())
     assert m.mte_block("Test Macerator") == ("gregtech:gt.blockmachines", 5)
     assert m.mte_block("Nonexistent") is None
+
+
+def test_mte_block_resolves_generic_name_by_tier() -> None:
+    """A generic plan name plus its voltage tier resolves to the tier-prefixed manifest entry."""
+    m = TextureManifest(_manifest_dict())
+    assert m.mte_block("Test Hammer", "LV") == ("gregtech:gt.blockmachines", 611)  # Basic
+    assert m.mte_block("Test Hammer", "MV") == ("gregtech:gt.blockmachines", 612)  # Advanced
+
+
+def test_mte_block_unknown_tier_falls_back_to_basic() -> None:
+    """A tier without a determinable GT prefix (HV+, or absent) resolves the near-identical Basic skin."""
+    m = TextureManifest(_manifest_dict())
+    assert m.mte_block("Test Hammer", "HV") == (
+        "gregtech:gt.blockmachines",
+        611,
+    )  # no Elite -> Basic
+    assert m.mte_block("Test Hammer", None) == ("gregtech:gt.blockmachines", 611)
+
+
+def test_mte_block_normalizes_case_and_punctuation() -> None:
+    """Matching tolerates case, punctuation, and whitespace between the plan and the manifest name."""
+    m = TextureManifest(_manifest_dict())
+    assert m.mte_block("  basic   test-hammer ") == ("gregtech:gt.blockmachines", 611)
+    assert m.mte_block("test hammer", "MV") == ("gregtech:gt.blockmachines", 612)
+
+
+def test_mte_block_unknown_machine_stays_unresolved() -> None:
+    """A genuinely unknown machine resolves to None (kept on the placeholder fallback, never mis-mapped)."""
+    m = TextureManifest(_manifest_dict())
+    assert m.mte_block("Coke Oven", "LV") is None
+    assert m.mte_block("Coke Oven", "MV") is None
 
 
 # --------------------------------------------------------------------------------------------------
@@ -397,6 +557,19 @@ def test_single_block_machine_renders_one_textured_cube(dataset: tuple[Path, Pat
     assert "Test Macerator" in summary.textured_types
 
 
+def test_generic_single_block_machine_textures_via_tier(dataset: tuple[Path, Path]) -> None:
+    """A generically named 1x1x1 machine ("Test Hammer" at LV) textures via tier-prefixed resolution."""
+    mb, manifest = dataset
+    scene = _scene([_machine("m1", "Test Hammer", [4, 0, 4], [1, 1, 1], voltage_tier="LV")])
+    summary = texturize_scene(
+        scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider
+    )
+    assert summary.block_cubes == 1
+    assert scene["blocks"][0]["block"] == "gregtech:gt.blockmachines"
+    assert scene["blocks"][0]["meta"] == 611  # Basic Test Hammer, resolved from generic name + LV
+    assert "Test Hammer" in summary.textured_types
+
+
 def test_docless_multiblock_keeps_placeholder_not_a_lone_cube(dataset: tuple[Path, Path]) -> None:
     """A doc-less MULTIblock must not collapse to one controller cube (the Distillation Tower case)."""
     mb, manifest = dataset
@@ -412,14 +585,15 @@ def test_docless_multiblock_keeps_placeholder_not_a_lone_cube(dataset: tuple[Pat
 
 
 def test_single_block_machine_base_face_is_tinted(dataset: tuple[Path, Path]) -> None:
-    """Golden tint guard: the single-block machine's baked base face is the tint, not neutral grey."""
+    """Golden tint guard: the single-block machine's baked base face is hue-tinted, not neutral grey."""
     mb, manifest = dataset
     scene = _scene([_machine("m1", "Test Macerator", [0, 0, 0], [1, 1, 1])])
     texturize_scene(scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider)
     key = next(k for k in scene["textures"] if k.startswith("gregtech:gt.blockmachines|5|SOUTH"))
     png = base64.b64decode(scene["textures"][key].split(",", 1)[1])
     r, g, b, _ = _pixel(png)
-    assert (r, g, b) == (120, 130, 200), "a dropped RGBA multiply would leave this neutral grey"
+    assert (r, g, b) == (153, 166, 255), "a dropped RGBA multiply would leave this neutral grey"
+    assert r < b, "the tint stays visibly hue-shifted, not neutral grey"
 
 
 def test_icon_name_stability_ebf_casing(dataset: tuple[Path, Path]) -> None:
@@ -456,3 +630,69 @@ def test_missing_dataset_degrades_to_all_placeholder(tmp_path: Path) -> None:
     assert summary.textured_types == ()
     assert summary.placeholder_types == ("Test EBF",)
     assert scene["blocks"] == []
+
+
+# --------------------------------------------------------------------------------------------------
+# Active / idle state toggle - the scene contract the viewer's control swaps between
+# --------------------------------------------------------------------------------------------------
+
+
+def test_active_state_texture_emitted_only_for_a_differing_face(dataset: tuple[Path, Path]) -> None:
+    """A face whose running skin differs carries BOTH an idle and an active bake (and they differ);
+    an idle-identical face carries just the one texture (deduped). Idle stays the default pool."""
+    mb, manifest = dataset
+    scene = _scene([_machine("m1", "Test Toggle", [0, 0, 0], [1, 1, 1])])
+    summary = texturize_scene(
+        scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider
+    )
+    idle = scene["textures"]
+    active = scene["texturesActive"]
+    north = next(k for k in idle if k.startswith("gregtech:gt.blockmachines|7|NORTH"))
+    south = next(k for k in idle if k.startswith("gregtech:gt.blockmachines|7|SOUTH"))
+    # the NORTH face gains an _ACTIVE-style overlay when running: both bakes emitted, and distinct
+    assert north in active
+    assert active[north] != idle[north]
+    # the SOUTH face looks the same at rest and running: only the idle bake survives (deduped away)
+    assert south in idle
+    assert south not in active
+    assert summary.embedded_active_icons == 1
+
+
+def test_no_active_override_when_every_face_is_idle_identical(dataset: tuple[Path, Path]) -> None:
+    """A layout whose machines have no distinct running skin bakes no second texture: the active
+    pool is empty (the viewer disables the toggle rather than swapping to identical images)."""
+    mb, manifest = dataset
+    scene = _scene([_machine("m1", "Test EBF", [0, 0, 0], [2, 2, 2])])
+    summary = texturize_scene(
+        scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider
+    )
+    assert scene["textures"]  # it still textured its faces...
+    assert scene["texturesActive"] == {}  # ...but not a single face needs a second running texture
+    assert summary.embedded_active_icons == 0
+
+
+def test_active_dedup_is_by_baked_bytes_not_layer_equality(dataset: tuple[Path, Path]) -> None:
+    """An active stack that differs in layers but bakes byte-identical to idle emits no override:
+    the dedup compares the baked PNG bytes, not just the layer lists."""
+    mb, manifest = dataset
+    scene = _scene([_machine("m1", "Test Ghost", [0, 0, 0], [1, 1, 1])])
+    summary = texturize_scene(
+        scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider
+    )
+    assert any(k.startswith("gregtech:gt.blockmachines|8|NORTH") for k in scene["textures"])
+    assert scene["texturesActive"] == {}  # the transparent overlay baked to the same bytes
+    assert summary.embedded_active_icons == 0
+
+
+def test_active_override_skipped_when_idle_face_did_not_bake(dataset: tuple[Path, Path]) -> None:
+    """If a face's idle bake failed (its icon was unfetchable) the active override is dropped, so it
+    never points at a face that fell back to a neutral placeholder."""
+    mb, manifest = dataset
+    scene = _scene([_machine("m1", "Test Phantom", [0, 0, 0], [1, 1, 1])])
+    summary = texturize_scene(
+        scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider
+    )
+    # the idle NORTH face never baked, so it carries no idle texture...
+    assert not any(k.startswith("gregtech:gt.blockmachines|9|NORTH") for k in scene["textures"])
+    assert scene["texturesActive"] == {}  # ...and no orphan active override is emitted for it
+    assert summary.embedded_active_icons == 0

@@ -22,6 +22,37 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   orientation until `occupied_cells` becomes rotation-aware (the placer, router, and validator share
   that primitive, so a rotated non-cubic footprint would be a shared blind spot); every current
   dataset machine is square-base and keeps all four orientations.
+- **Previewer active/idle machine skin toggle (`previewer/`).** The viewer now carries a `state`
+  control that swaps every machine between its idle (at-rest) and running skin, so a builder can see
+  which faces light up when the line runs (e.g. the Distillation Tower and Large Chemical Reactor
+  front overlays in the nitrobenzene preview). The texture pass bakes both states but emits a second
+  `data:` URI (`scene.texturesActive`) only for faces whose running bake actually differs from idle
+  (an `_ACTIVE` overlay); a plain casing, identical in both states, carries one texture, so the
+  embedded page never bloats for faces that look the same. State selection and the byte-level dedup
+  live in Python (`texturize_scene`); the viewer only swaps between the two maps the scene hands it,
+  and disables the control for a layout where no machine has a distinct running skin. Default display
+  stays idle (no behavior change until toggled).
+- **Previewer textures generically named single-block machines by voltage tier (`previewer/`,
+  GitHub #3).** A plan export names a single-block machine generically ("Forge Hammer"), but the
+  schema-2 texture manifest keys every single-block machine by its in-game tier-prefixed name
+  ("Basic Forge Hammer" at LV, "Advanced Forge Hammer" at MV), so a generic name never matched and
+  the machine (e.g. the sand line's Forge Hammer) rendered as a flat placeholder box even though its
+  texture was in the manifest. `TextureManifest.mte_block` now resolves a generic name plus the
+  machine's voltage tier: it tries the exact name, then a case/punctuation/whitespace-normalized
+  match, then the tier's GT prefix (LV "Basic", MV "Advanced") with a "Basic" fallback for the higher
+  tiers whose naming diverges per family ("Advanced X II/III/IV", "Universal", "Elite"). Single-block
+  skins are near identical across tiers, so the Basic texture is an honest preview stand-in when the
+  exact tier key is absent; a genuinely unknown machine resolves to nothing and keeps its placeholder
+  box (never mis-mapped). The scene dict now carries each machine's `voltage_tier` for the texture
+  pass to read. The sand preview's three Forge Hammers now render with their real GT texture.
+- **Commit the schema-2 layered texture manifest (`data/textures/manifest.json`, ~5.8 MB).** The
+  lane 7 v2 previewer reads this manifest to skin machines with real GT textures, but the repo still
+  shipped only the old schema-1 (icon-only, 9 casing blocks) manifest, so a fresh clone rendered every
+  machine as a placeholder. This is the extractor's `server-itexture-reflection` output (pack 2.8.4,
+  GT5-Unofficial 5.09.51.482): 1470 blocks (1395 machine-tile-entities carrying their `display_name`,
+  75 plain blocks), 816 icons. The pre-commit large-file guard is scoped to exclude `data/` so the
+  dataset can live in the repo (rather than a repo-wide `maxkb` bump). PNGs are still never committed
+  (LGPL); the previewer fetches them from the pinned GT5U jar at render time.
 - **Previewer real GT textures via per-block cubes and a Pillow bake (`previewer/`, lane 7 v2,
   GitHub #50).** Supersedes the v1 that skinned one stretched box per machine with a single
   representative casing - a defect that erased the coils, glass, and hatch faces that make a layout
@@ -525,6 +556,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
 
 ### Fixed
+- **Dark casing tints no longer bake to near-black in the previewer (`previewer/bake.py`).** The
+  Pillow bake turned a GT layer tint into per-channel multipliers with a raw `value / 255`, so a
+  dark-neutral casing tint like bronze's `[32, 32, 32]` collapsed to `~0.125` and multiplied the
+  already-full-colour tier sprite down to mean RGB around 20 (a Basic Forge Hammer baked
+  effectively black). The tint is now normalised by its brightest channel instead: identical to
+  `/ 255` for any tint whose peak channel is 255 (the electric `[210, 220, 255]` majority and plain
+  whites are byte-unchanged), but a dark-neutral tint becomes identity, so the sprite shows through
+  at full brightness with its hue shift preserved. A regression test pins that a `[32, 32, 32]` tint
+  keeps a bright sprite bright, and the existing golden tint guards move to the new hue-shifted
+  values. This is a readability-first approximation; GT-pixel-accurate casing colour stays a
+  deferred cosmetic item.
 - **The cable-thickness ladder gains GT's 12x rung** (maintainer-reported). GT ships six cable
   sizes (1x/2x/4x/8x/12x/16x) but the dataset only knew five, so any segment or feed summing to
   9 through 12 amps was sized a whole rung thick (16x). The router now picks 12x for that band,

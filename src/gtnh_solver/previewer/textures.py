@@ -24,6 +24,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -59,8 +60,13 @@ _GT_SIDE_TO_THREE_SLOT = {0: 3, 1: 2, 2: 5, 3: 4, 4: 1, 5: 0}
 _FACE_SLOTS = 6
 
 #: The render state the idle preview shows. GT overlays have an ``active`` variant too; the
-#: previewer draws machines at rest.
+#: previewer draws machines at rest by default and lets the viewer toggle to the running skin.
 _STATE = "inactive"
+
+#: The running-machine render state. Its baked face is emitted only where it actually differs from
+#: the idle bake (an ``_ACTIVE`` overlay), so a plain casing carries no second texture (see
+#: :func:`texturize_scene`). The viewer's state toggle swaps to it.
+_STATE_ACTIVE = "active"
 
 #: Horizontal ForgeDirection sides as (dx, dz) unit vectors, for the yaw that orients a machine's
 #: blocks to its placed ``front`` (the dump builds every controller facing NORTH / -Z).
@@ -68,6 +74,37 @@ _SIDE_VEC = {2: (0, -1), 3: (0, 1), 4: (-1, 0), 5: (1, 0)}
 _VEC_SIDE = {v: s for s, v in _SIDE_VEC.items()}
 #: Clockwise 90-degree steps (viewed from +Y) from the dump's NORTH front to each placed facing.
 _FRONT_CW_STEPS = {"north": 0, "east": 1, "south": 2, "west": 3}
+
+#: The GT single-block machine name prefix per voltage tier. A plan export names a single-block
+#: machine generically ("Forge Hammer"), but the manifest keys it by its in-game tier-prefixed name
+#: ("Basic Forge Hammer" at LV, "Advanced Forge Hammer" at MV). Only LV and MV share one prefix
+#: across every single-block family; above MV the scheme diverges per family ("Advanced X II/III/IV",
+#: "Universal", "Elite", steam-only variants), so there is no reliable generic tier->name rule there.
+#: Those tiers (and an unknown/absent tier) fall back to the ``_FALLBACK_PREFIX`` variant, an honest
+#: preview stand-in because GT single-block skins are near identical across tiers.
+_TIER_PREFIX = {"LV": "Basic", "MV": "Advanced"}
+_FALLBACK_PREFIX = "Basic"
+
+#: Runs of non-alphanumeric characters, collapsed to one space when normalizing a machine name so
+#: matching tolerates case, punctuation, and whitespace differences between plan and manifest.
+_NON_ALNUM = re.compile(r"[^a-z0-9]+")
+
+
+def _normalize_name(name: str) -> str:
+    """Casefold ``name`` and collapse non-alphanumeric runs to single spaces, for tolerant lookup."""
+    return _NON_ALNUM.sub(" ", name.casefold()).strip()
+
+
+def _tier_prefixes(tier: str | None) -> list[str]:
+    """Ordered name-prefix candidates for a machine at ``tier``: its GT prefix then the Basic fallback.
+
+    LV/MV map to their shared prefix; every other (or unknown) tier resolves through ``Basic`` alone,
+    the honest lowest-tier stand-in for the tiers whose GT naming is not a determinable generic rule.
+    """
+    prefix = _TIER_PREFIX.get(tier or "")
+    if prefix and prefix != _FALLBACK_PREFIX:
+        return [prefix, _FALLBACK_PREFIX]
+    return [_FALLBACK_PREFIX]
 
 
 @dataclass(frozen=True)
@@ -77,13 +114,15 @@ class TextureSummary:
     ``textured_types`` are machine types expanded into real per-block cubes; ``placeholder_types``
     kept their flat colour box (no committed doc, an all-unresolved variant, no PNG bytes, or no
     Pillow). ``block_cubes`` is the total textured cubes emitted; ``embedded_icons`` the distinct
-    baked face PNGs in the page.
+    baked idle-state face PNGs in the page; ``embedded_active_icons`` the extra running-state face
+    PNGs (only the faces whose active bake differs from idle, e.g. an ``_ACTIVE`` overlay).
     """
 
     textured_types: tuple[str, ...]
     placeholder_types: tuple[str, ...]
     block_cubes: int
     embedded_icons: int
+    embedded_active_icons: int = 0
 
 
 class TextureManifest:
@@ -99,12 +138,17 @@ class TextureManifest:
         self._icons: Mapping[str, str] = raw.get("icons", {})
         # Reverse index: a single-block machine's display name -> its (block, meta), so a machine
         # type with no multiblock doc (the whole structure IS one block) still resolves to a cube.
+        # A normalized index alongside it lets a plan's generically named machine match its
+        # tier-prefixed manifest key without an exact-string collision (see ``mte_block``).
         self._mte_by_name: dict[str, tuple[str, int]] = {}
         for key, entry in self._blocks.items():
             name = entry.get("display_name")
             if entry.get("kind") == "mte" and name and "|" in key:
                 block, meta = key.rsplit("|", 1)
                 self._mte_by_name.setdefault(name, (block, int(meta)))
+        self._mte_by_norm: dict[str, tuple[str, int]] = {}
+        for name, block_meta in self._mte_by_name.items():
+            self._mte_by_norm.setdefault(_normalize_name(name), block_meta)
 
     @classmethod
     def load(cls, path: str | Path) -> TextureManifest:
@@ -134,13 +178,29 @@ class TextureManifest:
         """The path inside the mod jar for ``icon`` (e.g. ``assets/gregtech/.../NAME.png``)."""
         return self._icons.get(icon)
 
-    def mte_block(self, display_name: str) -> tuple[str, int] | None:
-        """The ``(block, meta)`` of the single-block machine named ``display_name``, or ``None``.
+    def mte_block(self, display_name: str, tier: str | None = None) -> tuple[str, int] | None:
+        """The ``(block, meta)`` of the single-block machine ``display_name`` (at ``tier``), or ``None``.
 
         Lets a machine type with no committed multiblock doc (a 1x1x1 machine whose whole structure
-        is its own block) resolve to that block so it renders as one textured cube.
+        is its own block) resolve to that block so it renders as one textured cube. A plan export
+        names such a machine generically ("Forge Hammer"), but the manifest keys it by its in-game
+        tier-prefixed name ("Basic Forge Hammer" at LV). Resolution tries, in order: the exact name
+        (a plan that already carries the full name still works), a normalized (case/punctuation/
+        whitespace-insensitive) match, then the tier-prefixed name plus a ``Basic`` fallback (see
+        ``_TIER_PREFIX``). A genuinely unknown machine returns ``None`` and keeps its placeholder box,
+        never mis-mapped.
         """
-        return self._mte_by_name.get(display_name)
+        exact = self._mte_by_name.get(display_name)
+        if exact is not None:
+            return exact
+        normalized = self._mte_by_norm.get(_normalize_name(display_name))
+        if normalized is not None:
+            return normalized
+        for prefix in _tier_prefixes(tier):
+            hit = self._mte_by_norm.get(_normalize_name(f"{prefix} {display_name}"))
+            if hit is not None:
+                return hit
+        return None
 
 
 def load_multiblock_docs(data_dir: str | Path) -> dict[str, MultiblockDoc]:
@@ -254,15 +314,16 @@ def _machine_cubes(
     """The per-block cubes for a machine: its multiblock doc if committed, else a single-block cube.
 
     A machine whose type has a dumped :class:`MultiblockDoc` expands to that structure. A genuine
-    single-block machine (a 1x1x1 footprint present in the manifest by display name) is the trivial
-    one-cube case. A doc-less MULTIblock (a bigger footprint whose structure failed extraction, e.g.
+    single-block machine (a 1x1x1 footprint) is the trivial one-cube case, resolved by its plan name
+    plus voltage tier against the manifest's tier-prefixed keys (see :meth:`TextureManifest.mte_block`).
+    A doc-less MULTIblock (a bigger footprint whose structure failed extraction, e.g.
     the dynamic-height Distillation Tower) must NOT collapse to a lone controller cube - it yields
     nothing and keeps its placeholder box, so its true reserved footprint still shows.
     """
     doc = docs.get(machine["type"])
     if doc is not None:
         return expand_machine(machine, doc)
-    single = manifest.mte_block(machine["type"])
+    single = manifest.mte_block(machine["type"], machine.get("voltage_tier"))
     if single is not None and tuple(machine.get("size", (1, 1, 1))) == (1, 1, 1):
         block, meta = single
         cell = machine["cell"]
@@ -313,6 +374,12 @@ def texturize_scene(
     URI). Every expanded machine is flagged ``expanded`` so the viewer draws its cubes instead of a
     box; machines with no doc (or no baked face) keep their placeholder box. Missing data, no PNGs,
     or no Pillow all degrade to all-placeholder. Returns a :class:`TextureSummary`.
+
+    Each face is also baked in its running (``active``) state, and ``scene["texturesActive"]`` maps a
+    pool key to the running-state ``data:`` URI **only where that bake differs** from the idle one
+    (an ``_ACTIVE`` overlay); an idle-identical face carries no second texture, so the viewer's state
+    toggle reuses the one image and the embedded page never bloats for faces that look the same at
+    rest and running. The default display stays idle.
     """
     all_types = tuple(sorted({m["type"] for m in scene["machines"]}))
     mb_dir = DEFAULT_MULTIBLOCKS_DIR if multiblocks_dir is None else Path(multiblocks_dir)
@@ -320,6 +387,7 @@ def texturize_scene(
 
     scene.setdefault("blocks", [])
     scene.setdefault("textures", {})
+    scene.setdefault("texturesActive", {})
     docs = load_multiblock_docs(mb_dir)
     if not docs or not Path(mf_path).is_file():
         _log.info("textures: no dataset/manifest; all %d types placeholder", len(all_types))
@@ -333,7 +401,10 @@ def texturize_scene(
     # even when some textures are missing (section 5.6).
     cubes: list[dict[str, Any]] = []
     needed_icons: set[str] = set()
-    key_layers: dict[str, list[dict[str, Any]]] = {}  # pool key -> layer stack, deduped
+    key_layers: dict[str, list[dict[str, Any]]] = {}  # pool key -> idle layer stack, deduped
+    # Only faces whose running stack differs from idle - the ones that can bake a distinct active
+    # texture - are collected here (a plain casing is identical in both states and skipped).
+    key_layers_active: dict[str, list[dict[str, Any]]] = {}
     for machine in scene["machines"]:
         machine_cubes = _machine_cubes(machine, docs, manifest)
         if not machine_cubes:
@@ -345,7 +416,12 @@ def texturize_scene(
             for key in faces:
                 if key is not None and key not in key_layers:
                     block, meta_s, side, state = key.split("|")
-                    key_layers[key] = manifest.layers(block, int(meta_s), side, state)
+                    idle = manifest.layers(block, int(meta_s), side, state)
+                    key_layers[key] = idle
+                    active = manifest.layers(block, int(meta_s), side, _STATE_ACTIVE)
+                    if active != idle:
+                        key_layers_active[key] = active
+                        needed_icons.update(layer["icon"] for layer in active)
             cubes.append(
                 {
                     "cell": list(cube.cell),
@@ -362,11 +438,25 @@ def texturize_scene(
     icon_png = png_provider(icon_paths) if (png_provider is not None and icon_paths) else {}
 
     pool: dict[str, str] = {}
+    pool_active: dict[str, str] = {}
     try:
+        baked_idle: dict[str, bytes] = {}
         for key, layers in key_layers.items():
             baked = bake_layers(layers, icon_png)
             if baked is not None:
+                baked_idle[key] = baked
                 pool[key] = _png_data_uri(baked)
+        # Bake the running state only for faces whose stack differs, and keep it only where the
+        # bytes actually differ from the idle bake AND the idle face itself baked (so the toggle
+        # never targets a placeholder face). Identical bakes are deduped away - the viewer reuses
+        # the idle texture there.
+        for key, layers in key_layers_active.items():
+            idle_png = baked_idle.get(key)
+            if idle_png is None:
+                continue
+            baked = bake_layers(layers, icon_png)
+            if baked is not None and baked != idle_png:
+                pool_active[key] = _png_data_uri(baked)
     except BakeUnavailableError as exc:
         _log.warning("textures: %s; falling back to placeholder boxes", exc)
         for machine in scene["machines"]:
@@ -379,6 +469,7 @@ def texturize_scene(
         rendered["texture"] = [key if key in pool else None for key in rendered["texture"]]
     scene["blocks"] = cubes
     scene["textures"] = pool
+    scene["texturesActive"] = pool_active
     expanded_types = {m["type"] for m in scene["machines"] if m.get("expanded")}
     placeholder = tuple(t for t in all_types if t not in expanded_types)
     summary = TextureSummary(
@@ -386,15 +477,17 @@ def texturize_scene(
         placeholder_types=placeholder,
         block_cubes=len(cubes),
         embedded_icons=len(pool),
+        embedded_active_icons=len(pool_active),
     )
     _log.info(
         "textures: %d/%d machine types expanded to %d textured cubes (%s); placeholder: %s; "
-        "%d baked face PNG(s)",
+        "%d baked face PNG(s), %d running-state override(s)",
         len(summary.textured_types),
         len(all_types),
         summary.block_cubes,
         ", ".join(summary.textured_types) or "none",
         ", ".join(summary.placeholder_types) or "none",
         summary.embedded_icons,
+        summary.embedded_active_icons,
     )
     return summary
