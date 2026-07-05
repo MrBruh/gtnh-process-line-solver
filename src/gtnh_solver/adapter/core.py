@@ -22,9 +22,12 @@ Mapping (see docs/ARCHITECTURE.md, docs/IR.md):
 
 Footprints: single-block 1x1x1 by default, or a machine's real multiblock footprint when an
 optional physical dataset (``dataset.load_physical_dataset``) is passed and knows the type - see
-``to_input_ir(plan, physical=...)``. Still crude-on-purpose for Phase 1 (docs/ROADMAP.md): default
-orientations for every machine (hint-derived face constraints stay on the dataset record), and
-**multi-instance nodes (``machineCount > 1``) are rejected** rather than mapped - a net endpoint
+``to_input_ir(plan, physical=...)``; the bounding region is then sized to fit those footprints
+(``_bounding_region``). Still crude-on-purpose for Phase 1 (docs/ROADMAP.md): all four horizontal
+orientations for a square-base machine, but a non-square-base multiblock is pinned to one
+orientation until ``occupied_cells`` rotates (``_orientations_for``); hint-derived face constraints
+stay on the dataset record; and **multi-instance nodes (``machineCount > 1``) are rejected**
+rather than mapped - a net endpoint
 cannot address one instance of a group until routing is instance-aware (InputIR v1 dropped
 ``Machine.count``; see ``ir/__init__.py``, docs/ROADMAP.md). The InputIR's own
 referential-integrity check is the validation gate: a dangling edge or commodity mismatch fails
@@ -43,6 +46,7 @@ from gtnh_solver.ir import (
     CellBox,
     Commodity,
     FaceSpec,
+    Facing,
     InputIR,
     IODirection,
     Machine,
@@ -91,13 +95,33 @@ def _footprint_for(machine_type: str, physical: PhysicalDataset | None) -> CellB
     Opt-in by design - with no dataset every machine stays single-block (the Phase 1 behaviour), so
     the solver runs whether or not a ``data/multiblocks/`` dump is present. Orientation handling of
     non-cubic footprints is a placement TODO (``ir/geometry.occupied_cells``); the current dataset
-    machines have square (NxN) bases, so their bbox is rotation-invariant.
+    machines have square (NxN) bases, so their bbox is rotation-invariant. A footprint whose base is
+    *not* square is pinned to one orientation by :func:`_orientations_for` until that TODO lands.
     """
     if physical is not None:
         record = physical.get(machine_type)
         if record is not None:
             return record.footprint
     return _DEFAULT_FOOTPRINT
+
+
+def _orientations_for(footprint: CellBox) -> list[Facing]:
+    """Legal front-face orientations for a machine with this footprint.
+
+    ``ir.geometry.occupied_cells`` does NOT yet rotate a non-cubic footprint (its documented TODO),
+    and the validator's independent safety net shares that primitive - so a horizontally-rotated
+    non-square-base multiblock would reserve the wrong cells on BOTH the solver and its gate, a
+    *shared* blind spot the gate could not catch. Until ``occupied_cells`` is rotation-aware
+    (recorded as the follow-up there), a footprint whose base is not square (``sx != sz``) is pinned
+    to a single default orientation so its reserved box always matches reality. A square-base
+    footprint - every 1x1x1 block and every current dataset multiblock (EBF 3x3x4, Vacuum Freezer
+    3x3x3) - keeps all four horizontal facings, since a vertical-axis turn leaves its bbox unchanged;
+    this is the safe, lower-risk path (no dataset machine is non-square today, so shipping behaviour
+    is unchanged, and the guard is in place the moment one is added).
+    """
+    if footprint.sx == footprint.sz:
+        return list(_DEFAULT_ORIENTATIONS)
+    return [_DEFAULT_ORIENTATIONS[0]]  # non-square base: one orientation until rotation is modelled
 
 
 def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> InputIR:
@@ -125,14 +149,16 @@ def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> Input
                 f"are not supported yet (instance-aware routing is Phase 2 - see docs/ROADMAP.md). "
                 f"Split it into single-machine nodes in the export."
             )
+        footprint = _footprint_for(recipe.machine_type, physical)
         machines.append(
             Machine(
                 id=node.id,
                 type=recipe.machine_type,
-                footprint=_footprint_for(recipe.machine_type, physical),
+                footprint=footprint,
                 faces=FaceSpec(ports=_recipe_ports(recipe, node)),
                 voltage_tier=node.overclock_tier,
-                orientation_options=_DEFAULT_ORIENTATIONS,
+                # A non-square multiblock is pinned to one orientation until occupied_cells rotates.
+                orientation_options=_orientations_for(footprint),
                 # EU/t draw the power synthesis sizes amperage from (see _node_eut).
                 eut=_node_eut(recipe, node, resolved_machines),
             )
@@ -157,7 +183,8 @@ def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> Input
     )  # close the line: collect each output (#16)
     machines, nets = synthesize_power(machines, nets)  # the export has no power source; invent it
     _check_resolved_power(plan, nets)
-    return InputIR(bounding_region=_bounding_region(len(machines)), machines=machines, nets=nets)
+    region = _bounding_region([m.footprint for m in machines])
+    return InputIR(bounding_region=region, machines=machines, nets=nets)
 
 
 def _node_eut(recipe: Recipe, node: Node, resolved: dict[str, ResolvedMachine]) -> float:
@@ -372,7 +399,31 @@ def _rate(recipe: Recipe, resource_id: str, node: Node, *, outputs: bool) -> flo
     return amount * node.parallel * node.machine_count / recipe.duration_ticks
 
 
-def _bounding_region(n_machines: int) -> CellBox:
-    """A region comfortably larger than the machine count, so the crude placer + router fit."""
-    side = max(8, n_machines * 2)
-    return CellBox(sx=side, sy=4, sz=side)
+#: Multiplier on the summed footprint floor area when sizing the region's side (leaves routing
+#: slack around densely first-fit-packed machines). 4x -> ~75% of the floor is free for channels.
+_REGION_AREA_SLACK = 4
+#: Cells of clear headroom above the tallest machine for routing runs over the top of the stack.
+#: Tuned so an all-1x1x1 line (max height 1) keeps the historical region height of 4.
+_REGION_HEIGHT_HEADROOM = 3
+
+
+def _bounding_region(footprints: list[CellBox]) -> CellBox:
+    """A region comfortably larger than the machines, sized from their ACTUAL footprints.
+
+    Footprint-aware, not count-based: the height clears the *tallest* machine (a hardcoded 4 would
+    make a 10-tall Distillation Tower infeasible before placement even runs), and the square floor
+    holds the *summed* footprint areas with routing slack, never below the widest single machine nor
+    the old count-based generosity. This is a generous feasibility bound, not a compactness target -
+    the placement optimizer packs machines tightly inside it; the region only has to make a valid
+    layout reachable. For an all-1x1x1 line the result is identical to the previous ``side x 4 x
+    side`` sizing, so the shipped examples are unchanged.
+    """
+    if not footprints:
+        return CellBox(sx=8, sy=4, sz=8)  # defensive: synthesis always adds >=1 machine in practice
+    n = len(footprints)
+    max_height = max(fp.sy for fp in footprints)
+    widest = max(max(fp.sx, fp.sz) for fp in footprints)  # largest horizontal extent of one machine
+    total_area = sum(fp.sx * fp.sz for fp in footprints)
+    area_side = math.isqrt(total_area * _REGION_AREA_SLACK - 1) + 1  # ceil(sqrt(area * slack))
+    side = max(8, n * 2, widest, area_side)
+    return CellBox(sx=side, sy=max_height + _REGION_HEIGHT_HEADROOM, sz=side)

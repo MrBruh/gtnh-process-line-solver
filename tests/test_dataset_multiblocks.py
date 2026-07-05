@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from gtnh_solver.adapter import Node, Plan, Recipe, Resource, to_input_ir
+from gtnh_solver.adapter import Edge, Node, Plan, Recipe, Resource, to_input_ir
 from gtnh_solver.dataset import (
     DatasetError,
     MultiblockDoc,
@@ -24,7 +24,10 @@ from gtnh_solver.dataset import (
     load_physical_dataset,
     to_physical,
 )
-from gtnh_solver.ir import CellBox, Facing
+from gtnh_solver.ir import CellBox, Facing, LayoutStatus
+from gtnh_solver.solver import solve
+from gtnh_solver.validator import validate
+from tests._helpers import PLACEMENT_CODES
 
 _DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "multiblocks"
 
@@ -227,3 +230,63 @@ def test_adapter_falls_back_for_a_type_the_dataset_lacks(dataset: PhysicalDatase
     ir = to_input_ir(_one_machine_plan("Some Unknown Machine"), physical=dataset)
     machine = next(m for m in ir.machines if m.id == "n")
     assert machine.footprint == CellBox()  # 1x1x1 fallback
+
+
+# ---------------------------------------------- real footprints solve to a non-overlapping layout
+
+
+def _two_machine_line(upstream: str, downstream: str) -> Plan:
+    """A two-node line: ``upstream`` feeds an item to ``downstream`` (both dataset-known types)."""
+    up = Recipe(
+        id="r1",
+        machine_type=upstream,
+        eut=480.0,
+        duration_ticks=100.0,
+        inputs=[Resource(kind="item", id="minecraft:iron_ingot", amount=1.0)],
+        outputs=[Resource(kind="item", id="minecraft:iron_block", amount=1.0)],
+    )
+    down = Recipe(
+        id="r2",
+        machine_type=downstream,
+        eut=120.0,
+        duration_ticks=100.0,
+        inputs=[Resource(kind="item", id="minecraft:iron_block", amount=1.0)],
+        outputs=[Resource(kind="item", id="minecraft:cooled_block", amount=1.0)],
+    )
+    nodes = [
+        Node(id="up", recipe_id="r1", overclock_tier="MV"),
+        Node(id="down", recipe_id="r2", overclock_tier="MV"),
+    ]
+    edge = Edge(
+        id="e", source="up", target="down", resource_kind="item", resource_id="minecraft:iron_block"
+    )
+    return Plan(schema_version=1, recipes=[up, down], nodes=nodes, edges=[edge])
+
+
+def test_real_footprint_region_fits_the_tallest_multiblock(dataset: PhysicalDataset) -> None:
+    # The EBF is 3x3x4 (4 tall); the region the adapter sizes must clear it (the old hardcoded
+    # height of 4 gave zero routing headroom, and any taller multiblock was infeasible outright).
+    ir = to_input_ir(
+        _two_machine_line("Electric Blast Furnace", "Vacuum Freezer"), physical=dataset
+    )
+    tallest = max(m.footprint.sy for m in ir.machines)
+    assert ir.bounding_region.sy > tallest  # headroom above the tallest machine
+
+
+def test_real_footprint_layout_places_without_overlap(dataset: PhysicalDataset) -> None:
+    # The point of GAP A: with real multi-cell footprints the solver must still produce a VALID,
+    # non-overlapping layout (the validator's MACHINE_OVERLAP gate), not certify machines packed
+    # into a shared 1x1x1 reservation. Exercises the real dataset path end to end.
+    ir = to_input_ir(
+        _two_machine_line("Electric Blast Furnace", "Vacuum Freezer"), physical=dataset
+    )
+    ebf = next(m for m in ir.machines if m.id == "up")
+    assert ebf.footprint.volume > 1  # a real multi-cell reservation, not the crude 1x1x1 default
+
+    layout = solve(ir, seed=0)
+    assert layout.status is LayoutStatus.VALID  # fully routed, not a region-too-small infeasibility
+
+    report = validate(ir, layout)
+    assert report.ok  # the independent gate agrees: no overlap / out-of-bounds / bad orientation
+    codes = {v.code for v in report.violations}
+    assert codes.isdisjoint(PLACEMENT_CODES)

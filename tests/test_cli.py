@@ -10,8 +10,10 @@ from pathlib import Path
 
 import pytest
 
+import gtnh_solver.cli as cli_module
 from gtnh_solver import __version__
-from gtnh_solver.cli import main
+from gtnh_solver.cli import _load_physical_or_warn, main
+from gtnh_solver.dataset import DatasetError, DatasetMeta, PhysicalDataset
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 _SAND = str(_EXAMPLES / "gtnh-sand.json")
@@ -150,3 +152,71 @@ def test_package_exposes_a_nonempty_version_string() -> None:
     # tests/test_smoke.py scaffolding.)
     assert isinstance(__version__, str)
     assert __version__
+
+
+# ------------------------------------------- physical dataset wiring + graceful fallback (GAP A)
+
+
+def _empty_dataset() -> PhysicalDataset:
+    meta = DatasetMeta.model_validate(
+        {
+            "schema": 1,
+            "pack_version": "test",
+            "generated_at": "now",
+            "extractor_sha": "0",
+            "controller_count": 0,
+        }
+    )
+    return PhysicalDataset(meta=meta, machines={})
+
+
+def test_load_physical_returns_the_real_dataset(capsys: pytest.CaptureFixture[str]) -> None:
+    # The healthy path: the committed dump loads, so multiblocks can get real footprints, and a
+    # healthy load is silent (no spurious warning on the normal run).
+    ds = _load_physical_or_warn()
+    assert ds is not None
+    assert ds.get("Electric Blast Furnace") is not None
+    assert capsys.readouterr().err == ""
+
+
+def test_cli_threads_the_dataset_into_the_adapter(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Prove the wiring: the CLI must hand the loaded physical dataset to adapt_file so multiblocks
+    # resolve to real footprints (not the 1x1x1 default the no-arg adapt would give).
+    captured: dict[str, object] = {}
+    real = cli_module.adapt_file
+
+    def spy(path: str, *, physical: object = None) -> object:
+        captured["physical"] = physical
+        return real(path, physical=physical)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(cli_module, "adapt_file", spy)
+    assert main([_SAND]) == 0
+    dataset = captured["physical"]
+    assert isinstance(dataset, PhysicalDataset)
+    assert dataset.get("Electric Blast Furnace") is not None
+
+
+def test_cli_falls_back_when_dataset_load_fails(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A broken dataset must NOT crash the CLI or change the 0/1/2 contract: it warns and falls back
+    # to 1x1x1 footprints, so sand still solves valid (exit 0).
+    def boom(*_a: object, **_k: object) -> PhysicalDataset:
+        raise DatasetError("simulated bad scan bound")
+
+    monkeypatch.setattr(cli_module, "load_physical_dataset", boom)
+    assert _load_physical_or_warn() is None
+    assert "unavailable" in capsys.readouterr().err
+    assert main([_SAND]) == 0
+    assert "using 1x1x1 footprints" in capsys.readouterr().err
+
+
+def test_cli_falls_back_on_an_empty_dataset(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # An empty dump knows no machine types, so it is equivalent to no dataset: warn and fall back.
+    monkeypatch.setattr(cli_module, "load_physical_dataset", lambda *a, **k: _empty_dataset())
+    assert _load_physical_or_warn() is None
+    assert "empty" in capsys.readouterr().err
