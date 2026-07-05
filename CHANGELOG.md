@@ -541,6 +541,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
 
 ### Fixed
+- **Dark casing tints no longer bake to near-black in the previewer (`previewer/bake.py`).** The
+  Pillow bake turned a GT layer tint into per-channel multipliers with a raw `value / 255`, so a
+  dark-neutral casing tint like bronze's `[32, 32, 32]` collapsed to `~0.125` and multiplied the
+  already-full-colour tier sprite down to mean RGB around 20 (a Basic Forge Hammer baked
+  effectively black). The tint is now normalised by its brightest channel instead: identical to
+  `/ 255` for any tint whose peak channel is 255 (the electric `[210, 220, 255]` majority and plain
+  whites are byte-unchanged), but a dark-neutral tint becomes identity, so the sprite shows through
+  at full brightness with its hue shift preserved. A regression test pins that a `[32, 32, 32]` tint
+  keeps a bright sprite bright, and the existing golden tint guards move to the new hue-shifted
+  values. This is a readability-first approximation; GT-pixel-accurate casing colour stays a
+  deferred cosmetic item.
 - **The cable-thickness ladder gains GT's 12x rung** (maintainer-reported). GT ships six cable
   sizes (1x/2x/4x/8x/12x/16x) but the dataset only knew five, so any segment or feed summing to
   9 through 12 amps was sized a whole rung thick (16x). The router now picks 12x for that band,
