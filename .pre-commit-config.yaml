@@ -17,6 +17,10 @@ repos:
       - id: check-toml
       - id: check-merge-conflict
       - id: check-added-large-files
+        # Extractor-generated datasets under data/ (e.g. the ~6 MB schema-2 texture
+        # manifest) are intentionally committed and exceed the 500 KB default; scope the
+        # guard to everything else rather than a repo-wide maxkb bump.
+        exclude: ^data/
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.6
