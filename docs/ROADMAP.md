@@ -26,11 +26,16 @@ test CI; the **IR** contracts (`ir/`); the **adapter** (real gtnh-factory-flow e
 (per-commodity A* + single-channel capacity); the **previewer** and **build guide**; the
 **validator**; and the **`gtnh-solve` CLI**. On top of that, several **Phase 2 slices** have
 shipped: SA + LNS placement over a routing-aware cost with a selectable footprint/volume/balanced
-objective (lane C); rip-up/reroute and the shared-amperage power model (source synthesis, tree
-trunks, cable voltage-loss sizing) (lane D); the **place<->route feedback loop** as a multi-start
-grid (`solver/core.py`); the summed-amperage + voltage-drop half of the validator's power checks
-(lane E); and the `system_io` boundary summary feeding both render surfaces. The full
-`Added`/`Changed` list is in [`../CHANGELOG.md`](../CHANGELOG.md).
+objective (lane C); **negotiated-congestion routing** for item/fluid nets plus the shared-amperage
+power model (source synthesis, tree trunks, cable voltage-loss sizing, power trunks keeping
+failed-first rip-up/reroute) (lane D); the first slice of the **physical multiblock dataset** (a
+schema-v1 loader and the Electric Blast Furnace / Vacuum Freezer footprints, wired into the solve
+path) plus the **Java extractor** (`tools/gtnh-extractor/`) that will populate it and a weekly
+**dataset-update CI** (lane B); the **place<->route feedback loop** as a multi-start grid
+(`solver/core.py`); the summed-amperage + voltage-drop half of the validator's power checks
+(lane E); and real GT **textures in the previewer** alongside the `system_io` boundary summary
+feeding both render surfaces (lane F). The full `Added`/`Changed` list is in
+[`../CHANGELOG.md`](../CHANGELOG.md).
 
 ### Phase 1 - thin end-to-end slice (prove the path)
 

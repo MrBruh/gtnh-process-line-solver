@@ -6,10 +6,12 @@ extractor. See `DATASET_EXTRACTION_PLAN.md` (sections 3-4) for the full design.
 
 ## These files are ILLUSTRATIVE FIXTURES, not a real dump
 
-The Java extractor that will populate this directory automatically is **lane 2 / issue #45**, and
-is not built yet. The files here are **hand-authored by hand to conform to schema v1** so the
-Python adapter (`gtnh_solver.dataset.multiblocks`) and its golden tests have something real-shaped
-to run against. They encode true GTNH ground truth where the golden tests assert it (the Electric
+The Java extractor that will populate this directory automatically has landed its core dump loop
+(**lane 2 / issue #45**: `DumperMod`, `StructureDumper`, `JsonWriter`, and `ErrorCollector` under
+`tools/gtnh-extractor/`), but it has not yet been run to commit a real dump here. The files below
+are still **hand-authored to conform to schema v1** so the Python adapter
+(`gtnh_solver.dataset.multiblocks`) and its golden tests have something real-shaped to run against.
+They encode true GTNH ground truth where the golden tests assert it (the Electric
 Blast Furnace is a 3x3x4 shell with two coil layers; the Vacuum Freezer is 3x3x3), but the exact
 block metas, hint colours, and `_meta.json` provenance are placeholders. When the real extractor
 lands it **replaces every file here**; do not treat these coordinates as authoritative.
