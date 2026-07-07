@@ -166,9 +166,10 @@ function faceArrow(color) {
   ctx.lineTo(0.14 * S, 0.60 * S);
   ctx.closePath();
   ctx.fill();
-  // alphaTest (not transparent) so it renders in the opaque pass with depth testing - the machine-name
-  // plane, a hair further out, is alpha-cut too, so it draws ON TOP only where its text glyphs are and
-  // the arrow shows through the transparent gaps of the name canvas (GitHub #30).
+  // alphaTest (not transparent) so it renders in the opaque pass with normal depth testing. The arrow
+  // is positioned just OUTSIDE the machine's rendered surface (see the autoConnections loop), so it
+  // draws on top of the casing texture and the opaque name plate rather than being buried under either,
+  // while still being occluded by any other machine that sits in front of it (GitHub #30).
   return new THREE.Mesh(
     new THREE.PlaneGeometry(0.25, 0.25),
     new THREE.MeshBasicMaterial(
@@ -192,16 +193,15 @@ function wrap(ctx, words, maxW) {
 }
 
 // Name drawn onto the machine's front face - kept even when the box is textured, so the five other
-// faces show the GT casing texture while the front stays the readable identity label. The canvas is
-// left TRANSPARENT (only the glyphs are painted): the box's own colour shows behind the text, and a
-// front-face auto-output arrow sitting just under this plane shows through the gaps (GitHub #30) -
-// an opaque full-face fill here blanked it out entirely. textColor keys off the box colour the text
-// now sits directly on, so contrast is unchanged.
+// faces show the GT casing texture while the front stays the readable identity label. The fill is
+// opaque so the text keeps a flat, high-contrast backing; the auto-output arrow is lifted clear of
+// this plane so it still draws on top (GitHub #30 - see the autoConnections loop).
 function frontFace(text, bg, size, normal) {
   const W = 256, H = 256, pad = 20;
   const cnv = document.createElement('canvas');
   cnv.width = W; cnv.height = H;
   const ctx = cnv.getContext('2d');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = textColor(bg);
   let font = 46, lines = [];
   for (; font >= 13; font -= 2) {
@@ -219,10 +219,7 @@ function frontFace(text, bg, size, normal) {
   const dims = axis === 0 ? [size[2], size[1]] : (axis === 1 ? [size[0], size[2]] : [size[0], size[1]]);
   const plane = new THREE.Mesh(
     new THREE.PlaneGeometry(dims[0] * 0.92, dims[1] * 0.92),
-    // alphaTest cuts the transparent background in the opaque pass, so only the glyphs occlude what
-    // is behind the plane (the arrow) instead of the whole face - matching the faceArrow decal.
-    new THREE.MeshBasicMaterial(
-      { map: new THREE.CanvasTexture(cnv), alphaTest: 0.5, side: THREE.DoubleSide }));
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cnv), side: THREE.DoubleSide }));
   return { plane, axis };
 }
 
@@ -278,12 +275,13 @@ function blockMaterials(faces) {
   });
 }
 
-const centerById = {}, sizeById = {};
+const centerById = {}, sizeById = {}, expandedById = {};
 for (const m of SCENE.machines) {
   const [sx, sy, sz] = m.size;
   const pos = new THREE.Vector3(m.cell[0] + sx / 2, m.cell[1] + sy / 2, m.cell[2] + sz / 2);
   centerById[m.id] = pos;
   sizeById[m.id] = m.size;
+  expandedById[m.id] = !!m.expanded;   // full-size textured cubes below vs the 0.92-scaled placeholder box
   const minY = m.cell[1], maxY = m.cell[1] + sy - 1;
 
   // Expanded machines are drawn below as per-block cubes; skip the box + name-plate for them so a
@@ -362,6 +360,12 @@ for (const ac of SCENE.autoConnections) {
   const src = centerById[ac.source], n = FACE_NORMAL[ac.sourceFace];
   if (!src || !n) continue;
   const size = sizeById[ac.source] || [1, 1, 1], cellY = Math.round(src.y - size[1] / 2);
+  // Sit the arrow just OUTSIDE the machine's rendered surface so it is never buried in the geometry:
+  // an expanded machine draws full-size (0.50 half-extent) textured block cubes, a placeholder its
+  // 0.92-scaled box (0.46). The extra 0.03 also clears the front name plate (+0.012), so the arrow
+  // draws on top of the texture AND the label; normal depth testing still hides it behind any machine
+  // that is actually in front of it.
+  const surf = expandedById[ac.source] ? 0.50 : 0.46, lift = 0.03;
   const nv = new THREE.Vector3(n[0], n[1], n[2]);
   for (const m of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]) {
     if (m[0]*n[0] + m[1]*n[1] + m[2]*n[2] !== 0) continue;   // skip the output face and its opposite
@@ -370,8 +374,8 @@ for (const ac of SCENE.autoConnections) {
     const alongN = Math.abs(n[0])*size[0] + Math.abs(n[1])*size[1] + Math.abs(n[2])*size[2];
     const deco = faceArrow('#00e5ff');
     deco.position.copy(src)
-      .addScaledVector(mv, 0.46 * alongM + 0.008)   // just off the box face; < the name's +0.012 offset
-      .addScaledVector(nv, 0.46 * alongN - 0.10);   // slide toward the output edge so the tip touches it
+      .addScaledVector(mv, surf * alongM + lift)    // just outside the rendered face + name plate -> on top
+      .addScaledVector(nv, surf * alongN - 0.10);   // slide toward the output edge so the tip reaches it
     deco.quaternion.setFromRotationMatrix(
       new THREE.Matrix4().makeBasis(nv, new THREE.Vector3().crossVectors(mv, nv), mv));
     track(deco, cellY, cellY + size[1] - 1);

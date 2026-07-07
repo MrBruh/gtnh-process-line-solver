@@ -189,17 +189,21 @@ def test_render_html_wires_the_requested_viewer_features() -> None:
     assert "t.thickness" in html  # leads sized from the scene's terminal thickness (#6)
 
 
-def test_render_html_name_decal_is_alpha_cut_so_arrow_shows_through() -> None:
-    # GitHub #30: the front-face auto-output arrow (#20) was invisible because the machine-name decal
-    # painted an OPAQUE full-face background plane a hair in front of it, blanking it out instead of
-    # layering the text over it. The name canvas is now left transparent and its plane alpha-cut, so
-    # only the glyphs occlude the arrow. Assert that mechanism on the frontFace decal alone (a scoped
-    # slice, not a global grep that the alpha-cut arrow would also satisfy), since the WebGL result is
-    # eye-validated: the decal is alpha-cut and no longer opaque-fills the whole face.
+def test_render_html_auto_output_arrow_draws_on_top_of_the_machine() -> None:
+    # GitHub #30: the front-face auto-output arrow (#20) was buried - a placeholder machine's opaque
+    # name plate drew over it, and a machine that bakes textures renders as full-size (1.0) block cubes
+    # that swallowed an arrow tucked against the 0.92-scaled box. The arrow is now lifted just outside
+    # the machine's actual rendered surface (expansion-aware), so it draws on top of both the casing
+    # texture and the label, which keeps its opaque high-contrast backing. The WebGL result is eye-
+    # validated, so assert the two mechanisms on their own code: the arrow offset is expansion-aware,
+    # and the name decal still fills an opaque backing.
     html = render_html(_sand_scene())
-    body = html[html.index("function frontFace(") : html.index("const TEXTURES")]
-    assert "alphaTest" in body  # cuts the transparent background away in the opaque pass...
-    assert "fillRect(0, 0, W, H)" not in body  # ...instead of the opaque full-face fill that hid it
+    arrows = html[
+        html.index("for (const ac of SCENE.autoConnections)") : html.index("const layer =")
+    ]
+    assert "expandedById" in arrows  # arrow clears full-size textured cubes, not just the flat box
+    front = html[html.index("function frontFace(") : html.index("const TEXTURES")]
+    assert "fillRect(0, 0, W, H)" in front  # ...and the name keeps its opaque, readable backing
 
 
 def test_scene_route_segments_and_terminals_drive_node_and_arm_drawing() -> None:

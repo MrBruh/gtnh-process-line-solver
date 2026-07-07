@@ -564,15 +564,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
 
 ### Fixed
-- **Auto-output arrow shows on the machine-name face in the previewer (`previewer/html.py`, GitHub
+- **Auto-output arrow draws on top of the machine in the previewer (`previewer/html.py`, GitHub
   #30).** The per-face auto-output arrows (#20) render on every source face perpendicular to the
-  ejecting direction, but on the front (name) face the arrow was invisible: the name decal painted
-  the whole face with an opaque background plane sitting a hair in front of the arrow, so it blanked
-  the arrow out entirely rather than layering the text over it. The name canvas is now left
-  transparent and its plane is alpha-cut (like the arrow decal already was), so only the glyphs
-  occlude what is behind them and the arrow shows through the gaps. The box's own colour shows behind
-  the text and `textColor` still keys off it, so name contrast is unchanged; rendering-only, no scene
-  or contract change.
+  ejecting direction, but the arrow sat a hair off the 0.92-scaled placeholder box, so it was buried
+  under whatever drew in front of it: the opaque front-face name plate, and, on a machine that bakes
+  real textures, the full-size (1.0) block cubes of its expanded render (the sand line's Forge
+  Hammers hid the arrow entirely). The arrow is now lifted just outside the machine's actual rendered
+  surface, expansion-aware (1.0 for the textured cubes, 0.92 for the placeholder box, plus a hair to
+  clear the name plate), so it draws on top of both the casing texture and the label while normal
+  depth testing still hides it behind any machine genuinely in front of it. The name plate keeps its
+  opaque, high-contrast backing, so label readability is unchanged. Rendering-only, no scene or
+  contract change.
 - **Dark casing tints no longer bake to near-black in the previewer (`previewer/bake.py`).** The
   Pillow bake turned a GT layer tint into per-channel multipliers with a raw `value / 255`, so a
   dark-neutral casing tint like bronze's `[32, 32, 32]` collapsed to `~0.125` and multiplied the
