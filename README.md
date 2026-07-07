@@ -4,12 +4,13 @@
 
 > **Status: Phase 1 complete - crude but end-to-end.** A real gtnh-factory-flow export now
 > goes all the way to a validated, buildable layout: the IR contracts (`ir/`), adapter,
-> dataset (voltage ladder + amp helpers only), placement, router, solver, validator, previewer,
+> dataset (voltage ladder + amp helpers, a schema-v1 physical-rules loader, and the first
+> multiblock footprints), placement, router, solver, validator, previewer,
 > and build guide are all implemented - each is an `Added` entry in
-> [`CHANGELOG.md`](CHANGELOG.md). They are deliberately crude (single-channel routing,
-> size-or-reject power, and hardcoded footprints with no per-machine physical dataset yet), so
-> **Phase 2 is quality**: SA/LNS placement polish, the multi-channel realizability invariant,
-> power optimization, the full physical dataset, and previewer polish. See
+> [`CHANGELOG.md`](CHANGELOG.md). Some pieces stay deliberately crude (single-channel routing,
+> size-or-reject power), so **Phase 2 is quality**: SA/LNS placement polish, the multi-channel
+> realizability invariant, power optimization, the full physical dataset (the extractor is built,
+> but only the first footprint entries ship today), and previewer polish. See
 > [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 Yes, this project is heavily vibe coded. If you see any areas in the code or documentation that can be

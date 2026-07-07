@@ -42,9 +42,9 @@ as "safe to start on" rather than "unblocked".
 | Lane | Phase 2 work | Status |
 |------|--------------|--------|
 | A | adapter hardening: pin the plan-schema + recipe-dataset version | Open - Phase 1 adapter done; pinning not started |
-| B | full physical dataset (footprints / faces / tiers / cell->block) | Open - no per-machine entries exist yet; `dataset/` holds only the voltage ladder + amp helpers, and footprints/faces are hardcoded adapter defaults |
+| B | full physical dataset (footprints / faces / tiers / cell->block) | In progress - the schema-v1 `dataset/` loader and the first per-machine footprints (Electric Blast Furnace, Vacuum Freezer) ship and are wired into the solve path; the Java extractor (`tools/gtnh-extractor/`) is built but not yet run to populate a full dump, and faces / tiers / cell->block interpretation is still ahead |
 | C | placement: SA/LNS + routing-aware cost | Largely landed - SA + LNS + the routing-aware (HPWL / compactness / auto-output) cost are in; the incremental congestion-aware cost is the remaining refinement |
-| D | router: negotiated-congestion, multi-channel cap, shared-amperage power optimization | In progress - rip-up/reroute, single-channel capacity, and size-or-reject power landed |
+| D | router: negotiated-congestion, multi-channel cap, shared-amperage power optimization | In progress - negotiated-congestion routing (item/fluid nets), single-channel capacity, and size-or-reject power landed; power trunks keep failed-first rip-up/reroute. Ahead: the per-edge multi-channel cap and power optimization |
 | E | validator rule-half: tier caps, summed amperage, face reachability | Partly landed - summed-amperage + voltage-drop validation shipped independently; only the tier caps + dataset-specific face rules stay blocked on lane B |
 | F | previewer / build-guide polish | Previewer polish in progress; build-guide polish deferred |
 
