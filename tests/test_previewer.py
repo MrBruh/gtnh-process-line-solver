@@ -189,6 +189,19 @@ def test_render_html_wires_the_requested_viewer_features() -> None:
     assert "t.thickness" in html  # leads sized from the scene's terminal thickness (#6)
 
 
+def test_render_html_name_decal_is_alpha_cut_so_arrow_shows_through() -> None:
+    # GitHub #30: the front-face auto-output arrow (#20) was invisible because the machine-name decal
+    # painted an OPAQUE full-face background plane a hair in front of it, blanking it out instead of
+    # layering the text over it. The name canvas is now left transparent and its plane alpha-cut, so
+    # only the glyphs occlude the arrow. Assert that mechanism on the frontFace decal alone (a scoped
+    # slice, not a global grep that the alpha-cut arrow would also satisfy), since the WebGL result is
+    # eye-validated: the decal is alpha-cut and no longer opaque-fills the whole face.
+    html = render_html(_sand_scene())
+    body = html[html.index("function frontFace(") : html.index("const TEXTURES")]
+    assert "alphaTest" in body  # cuts the transparent background away in the opaque pass...
+    assert "fillRect(0, 0, W, H)" not in body  # ...instead of the opaque full-face fill that hid it
+
+
 def test_scene_route_segments_and_terminals_drive_node_and_arm_drawing() -> None:
     # Routes are drawn GT-style: a cube at each cell centre with a uniform arm out per connection -
     # an adjacent route cell or a docked machine face (GitHub #31). That rendering is a JS detail,

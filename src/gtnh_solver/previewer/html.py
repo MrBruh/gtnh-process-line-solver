@@ -166,8 +166,9 @@ function faceArrow(color) {
   ctx.lineTo(0.14 * S, 0.60 * S);
   ctx.closePath();
   ctx.fill();
-  // alphaTest (not transparent) so it renders in the opaque pass with depth testing - that lets the
-  // machine-name plane, sitting a hair further out, draw ON TOP of it where they share the front face.
+  // alphaTest (not transparent) so it renders in the opaque pass with depth testing - the machine-name
+  // plane, a hair further out, is alpha-cut too, so it draws ON TOP only where its text glyphs are and
+  // the arrow shows through the transparent gaps of the name canvas (GitHub #30).
   return new THREE.Mesh(
     new THREE.PlaneGeometry(0.25, 0.25),
     new THREE.MeshBasicMaterial(
@@ -191,13 +192,16 @@ function wrap(ctx, words, maxW) {
 }
 
 // Name drawn onto the machine's front face - kept even when the box is textured, so the five other
-// faces show the GT casing texture while the front stays the readable identity label.
+// faces show the GT casing texture while the front stays the readable identity label. The canvas is
+// left TRANSPARENT (only the glyphs are painted): the box's own colour shows behind the text, and a
+// front-face auto-output arrow sitting just under this plane shows through the gaps (GitHub #30) -
+// an opaque full-face fill here blanked it out entirely. textColor keys off the box colour the text
+// now sits directly on, so contrast is unchanged.
 function frontFace(text, bg, size, normal) {
   const W = 256, H = 256, pad = 20;
   const cnv = document.createElement('canvas');
   cnv.width = W; cnv.height = H;
   const ctx = cnv.getContext('2d');
-  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = textColor(bg);
   let font = 46, lines = [];
   for (; font >= 13; font -= 2) {
@@ -215,7 +219,10 @@ function frontFace(text, bg, size, normal) {
   const dims = axis === 0 ? [size[2], size[1]] : (axis === 1 ? [size[0], size[2]] : [size[0], size[1]]);
   const plane = new THREE.Mesh(
     new THREE.PlaneGeometry(dims[0] * 0.92, dims[1] * 0.92),
-    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cnv), side: THREE.DoubleSide }));
+    // alphaTest cuts the transparent background in the opaque pass, so only the glyphs occlude what
+    // is behind the plane (the arrow) instead of the whole face - matching the faceArrow decal.
+    new THREE.MeshBasicMaterial(
+      { map: new THREE.CanvasTexture(cnv), alphaTest: 0.5, side: THREE.DoubleSide }));
   return { plane, axis };
 }
 
