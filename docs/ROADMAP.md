@@ -30,8 +30,9 @@ objective (lane C); **negotiated-congestion routing** for item/fluid nets plus t
 power model (source synthesis, tree trunks, cable voltage-loss sizing, power trunks keeping
 failed-first rip-up/reroute) (lane D); the first slice of the **physical multiblock dataset** (a
 schema-v1 loader and the Electric Blast Furnace / Vacuum Freezer footprints, wired into the solve
-path) plus the **Java extractor** (`tools/gtnh-extractor/`) that will populate it and a weekly
-**dataset-update CI** (lane B); the **place<->route feedback loop** as a multi-start grid
+path) plus the **Java extractor** (`tools/gtnh-extractor/`) that regenerates the full dump locally
+on demand (the dump is local-only: never committed, no CI; lane B); the **place<->route feedback
+loop** as a multi-start grid
 (`solver/core.py`); the summed-amperage + voltage-drop half of the validator's power checks
 (lane E); and real GT **textures in the previewer** alongside the `system_io` boundary summary
 feeding both render surfaces (lane F). The full `Added`/`Changed` list is in

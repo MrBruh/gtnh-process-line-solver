@@ -8,11 +8,11 @@ name: Update textures
 # manifest records the icon name and the asset path INSIDE the mod jar, which the previewer fetches
 # from the GTNH Nexus jar at preview time (LGPL assets stay out of this repo).
 #
-# This is DELIBERATELY SEPARATE from update-dataset.yml. Structures are correctness-critical for
-# the solver; the texture manifest only feeds the 3D previewer and may lag a pack version behind
-# without hurting anyone. It therefore does NOT bump dependencies.gradle / gtnh.lock.json - it
-# builds against whatever versions update-dataset.yml currently pins, so the manifest always matches
-# the committed dataset's pack version and the two workflows never fight over the lock.
+# The texture manifest only feeds the 3D previewer and may lag a pack version behind without
+# hurting anyone. It therefore does NOT bump dependencies.gradle / gtnh.lock.json - it builds
+# against whatever versions gtnh.lock.json currently pins. That lock is maintained by hand when a
+# developer refreshes the local-only structure dump (there is no structure-dump CI), so the manifest
+# always matches the pinned pack version.
 #
 # Coverage. The layered reflection resolves casings, single-block machines, hatches, and multiblock
 # hulls (base + overlay + tint + glow). A tail that does not decompose - exotic ISBRH renderers and
@@ -22,8 +22,8 @@ name: Update textures
 on:
   workflow_dispatch:
   schedule:
-    # Weekly, Tuesdays 05:17 UTC - offset from update-dataset (Mondays) so it picks up the pins that
-    # workflow just landed, and off the hour per GitHub's load-spread guidance. Lag is acceptable.
+    # Weekly, Tuesdays 05:17 UTC - off the hour per GitHub's load-spread guidance. Builds against the
+    # committed gtnh.lock.json pin; lag behind a pack bump is acceptable for previewer-only textures.
     - cron: "17 5 * * 2"
 
 # Do not overlap runs: a cached Forge build still takes minutes.
@@ -50,7 +50,7 @@ jobs:
         with:
           submodules: recursive
 
-      # --- Toolchains (mirrors update-dataset.yml; those were fixes learned from booting) ---------
+      # --- Toolchains (fixes learned from booting the headless Forge server) ---------------------
       # The extractor's Gradle daemon is pinned to Java 25 (gradle/gradle-daemon-jvm.properties) and
       # its foojay auto-provision is unreliable (serves a JRE with no javac on some platforms), so
       # install a real JDK 25 here. The Forge 1.7.10 compile toolchains (Azul Zulu 17 for injected

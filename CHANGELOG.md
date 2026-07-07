@@ -551,6 +551,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   as fixtures so the solver is decoupled from the fork's health.
 
 ### Removed
+- **The multiblock structure dump is now local-only: retired the `update-dataset.yml` CI workflow**
+  (and its `dataset-update` PR template). The full ~190-controller dump (~17 MB of generated JSON)
+  is not worth its repo weight or a weekly Forge run, so it is no longer built or committed by CI; a
+  developer regenerates it on demand with the extractor. `data/multiblocks/` is gitignored apart from
+  the two curated fixtures (Electric Blast Furnace, Vacuum Freezer) the adapter/footprint tests pin.
+  The texture manifest is unaffected (`update-textures.yml` stays; it reads the hand-maintained
+  `gtnh.lock.json` pin). Consequence: a fresh clone places and renders only the two fixtures plus
+  single-block machines until the extractor is run locally.
 - Dropped the unused `networkx` and `numpy` core runtime dependencies - neither was
   imported anywhere in the implementation. They will be re-added if and when the Phase 2
   optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
