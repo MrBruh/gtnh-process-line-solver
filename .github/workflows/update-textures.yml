@@ -55,7 +55,7 @@ jobs:
       # its foojay auto-provision is unreliable (serves a JRE with no javac on some platforms), so
       # install a real JDK 25 here. The Forge 1.7.10 compile toolchains (Azul Zulu 17 for injected
       # interfaces, Java 8 for the mod) still auto-download during the build.
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "25"
