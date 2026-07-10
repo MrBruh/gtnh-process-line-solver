@@ -77,7 +77,7 @@ jobs:
           echo "mod_versions=${mods}" >> "$GITHUB_OUTPUT"
 
       - name: Cache Forge/RFG workspace
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.gradle/caches/retro_futura_gradle
