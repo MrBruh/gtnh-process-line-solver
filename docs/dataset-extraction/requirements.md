@@ -87,16 +87,28 @@ consumer fetches them from the pinned mod jar at render time (see Licensing).
 
 ## Commit and delivery policy
 
-- The **structure dump is local-only** (decided 2026-07-08): regenerated on demand, **never
-  committed**, and with **no CI**. Only two curated fixtures ship (`gregtech_machine_1000.json` =
-  Electric Blast Furnace, `gregtech_machine_1001.json` = Vacuum Freezer) for the tests;
-  `data/multiblocks/` is otherwise gitignored. A fresh clone can place and render those two plus
-  single-block machines; every other multiblock is a placeholder until a developer runs the
-  extractor. Rationale: the shipped example lines barely use multiblock docs, so ~190 churny
-  generated files are not worth their repo weight or a weekly Forge CI run.
-- The **texture manifest is committed** and refreshed by its own workflow
-  (`.github/workflows/update-textures.yml`), because it is the keystone that skins every machine
-  in the previewer; without it every machine renders as a placeholder.
+All generated data is **local-only and version-namespaced** (decided 2026-07-17): the extractor
+regenerates it on demand into gitignored `data/<version>/{multiblocks,textures}/` folders, so a user
+can hold several pack versions side by side without overwriting, and there is **no CI**.
+
+Only small curated fixtures ship, so a fresh clone and the test suite work offline:
+
+- the two multiblock fixtures (`gregtech_machine_1000.json` = Electric Blast Furnace,
+  `gregtech_machine_1001.json` = Vacuum Freezer); and
+- a small (~120 KB) `data/textures/manifest.json` scoped to the example lines' machines, derived
+  from a full manifest, so `gtnh-solve --preview examples/*.json` still skins out of the box.
+
+`.gitignore` is an allow-list under `data/`: everything is ignored except those fixtures and the
+small manifest, so any `data/<version>/` dump stays local automatically. A fresh clone places and
+renders the two fixtures plus single-block machines; the full data for anything else appears once a
+developer runs the extractor. Rationale: the shipped example lines barely use the full data, and a
+committed full dataset (~6 MB manifest, ~190 multiblock docs) is not worth its repo weight or a
+weekly Forge CI run.
+
+**Resolution.** `resolve_dataset_path` picks, per sub-path, the newest local `data/<version>/` that
+provides it, else the committed fixtures; `gtnh-solve --dataset-version <v>` pins one and
+`--list-dataset-versions` lists them. The GT5-Unofficial jar for texture PNGs is fetched at the
+GT5-Unofficial version the resolved manifest's provenance records, so its icons match.
 
 ## Output contracts
 

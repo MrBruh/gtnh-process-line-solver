@@ -8,18 +8,19 @@ contracts, and policy are in requirements.md and are not restated here. The livi
 
 ```
 tools/gtnh-extractor/   Forge 1.7.10 dedicated-server mod (JDK 25 daemon + JDK 8 toolchain)
-   runServer, gated by -PdatasetOut and/or -PtextureOut
+   runServer, gated by -PdatasetOut and/or -PtextureOut (write into data/<version>/)
         |
-        |-- structure dump  --> data/multiblocks/<controller>.json + _meta.json   (schema v1)
-        '-- texture manifest --> data/textures/manifest.json                       (schema v2)
-                                          |
+        |-- structure dump  --> data/<version>/multiblocks/<controller>.json + _meta.json  (v1)
+        '-- texture manifest --> data/<version>/textures/manifest.json                      (v2)
+                                          |  (local, gitignored; committed fixtures live at data/)
                                           v
 src/gtnh_solver/        pure Python; reads only the JSON
+   dataset/roots.py         resolve_dataset_path: newest local data/<version>/ else fixtures
    dataset/schema.py        validate raw facts (Pydantic v2, extra="forbid")
    dataset/multiblocks.py   interpret facts -> MachinePhysical (footprint, io_faces, coil layers)
-   previewer/textures.py    expand each machine into per-block textured cubes
+   previewer/textures.py    expand each machine into per-block textured cubes; resolve names
    previewer/bake.py        composite one layer stack -> a flat PNG
-   previewer/jar.py         fetch the pinned jar's PNG bytes (injected; never committed)
+   previewer/jar.py         fetch the GT5U jar's PNG bytes at the manifest's version (injected)
 ```
 
 The tool runs as a **dedicated server** (headless, no OpenGL). `DumperMod` hooks
@@ -102,6 +103,15 @@ gathers per-controller failures into `_meta.json.failures`.
 
 ## The Python consumer (`src/gtnh_solver/`)
 
+### dataset/roots.py: version resolution
+Generated data is local and version-namespaced (`data/<version>/{multiblocks,textures}/`);
+`resolve_dataset_path(rel, version=)` picks, per sub-path, the newest local `data/<version>/` that
+provides it (by directory mtime), else the committed fixtures at `data/`. So a fresh clone renders
+from the fixtures, a machine that has run the extractor renders from its full local dump, and a
+texture-only local run still falls back to the committed multiblock fixtures. An explicit `version`
+pins one folder; `list_versions()` backs `gtnh-solve --list-dataset-versions`. Every consumer below
+routes its default path through this.
+
 ### dataset/schema.py: the contract
 Pydantic v2 models with `extra="forbid"` that re-state the extractor's raw facts (controllers,
 variants, blocks, hints, substitutions) and nothing more. This is the cross-language contract;
@@ -130,11 +140,14 @@ Each cube face resolves its layer stack from the manifest, which `bake.py` bakes
 embedded as a `data:` URI.
 
 - **Single-block machines** have no multiblock doc (the whole machine *is* one block), so they
-  resolve through the manifest's MTE index by display name. A plan names them generically ("Forge
-  Hammer") but the manifest keys them by their tier-prefixed in-game name ("Basic Forge Hammer" at
-  LV, "Advanced" at MV); resolution tries exact, then normalised, then the tier prefix plus a
-  `Basic` fallback. Above MV the naming diverges per family, so those fall back to `Basic`, an
-  honest stand-in since GT single-block skins are near-identical across tiers.
+  resolve through the manifest's MTE index by display name (`TextureManifest.mte_block`). A plan
+  names them generically ("Forge Hammer", "Super Tank", "Chemical Plant") but the manifest keys them
+  by their full in-game name, so resolution tries, in order: exact, normalised (case/punctuation),
+  the voltage-tier prefix plus a `Basic` fallback ("Basic Forge Hammer"), the lowest tier of a
+  numeral-tiered family ("Super Tank" -> "Super Tank I"), and a flavor-prefixed name where the
+  generic name is a whole-word suffix ("Chemical Plant" -> "ExxonMobil Chemical Plant"). Each
+  stand-in is honest because GT skins are near-identical across tiers/variants; a genuinely unknown
+  machine resolves to nothing and keeps its placeholder box.
 - **Graceful degradation is the contract:** a machine with no doc, an all-unresolved variant, no
   PNG bytes, or a Pillow-less install keeps its flat placeholder box; a single unresolved face
   falls back to flat colour there. Nothing here raises on a miss.
@@ -143,10 +156,11 @@ embedded as a `data:` URI.
 `bake.py` composites a layer stack into one flat 16x16 PNG the way GT renders it: the base sprite
 tinted by the RGBA multiply (without it every casing renders grey), overlays alpha-composited,
 glow and animation-frame handled, behind an optional Pillow dependency. `jar.py` is the one
-network-touching shim: it fetches the **pinned** GT5-Unofficial jar from the Nexus, caches it
-outside the repo tree, and reads the requested `iconsets/*.png` bytes; it is injected as a
-`png_provider` so the test suite never downloads. PNGs are embedded only in the emitted HTML,
-never committed.
+network-touching shim: it fetches the GT5-Unofficial jar from the Nexus **at the version the active
+manifest's provenance records** (`gt5u_version_from_manifest`, falling back to a pinned default),
+caches it per version outside the repo tree, and reads the requested `iconsets/*.png` bytes; it is
+injected as a `png_provider` so the test suite never downloads. PNGs are embedded only in the
+emitted HTML, never committed.
 
 ## Known gaps and limitations
 
@@ -160,8 +174,7 @@ planning next steps:
 - **Doc-less multiblocks stay placeholders.** A multiblock whose structure failed extraction (e.g.
   the dynamic-height Distillation Tower) correctly refuses to collapse to a single cube; it renders
   as its reserved-footprint placeholder until its doc exists.
-- **Single-block tier naming above MV** falls back to `Basic`, so a high-tier machine may show the
-  low-tier skin (near-identical in GT, but not exact).
-- **Stale scaffold comments in `DumperMod`** still describe the lane-1 "empty dump" scaffold and a
-  lane-4 CI workflow that was dropped when the structure dump went local-only. The runtime is
-  correct; the comments are not.
+- **Single-block voltage tiers above MV** still fall back to `Basic`, so a high-tier machine may
+  show the low-tier skin (near-identical in GT, but not exact). Numeral-tiered storage families and
+  flavor-prefixed names now resolve (issue #3); only the per-family voltage naming above MV remains
+  a stand-in.

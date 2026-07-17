@@ -10,6 +10,18 @@ references are [requirements.md](requirements.md) (the *what*) and [implementati
 multiblock footprints, exact block configurations, hatch-position constraints, and texture
 mappings directly from the GTNH mod source.
 
+> **Amendment (2026-07-17): ALL generated data is now local-only and version-namespaced.** This
+> supersedes the split below: the texture manifest is no longer committed either. The extractor
+> regenerates both the structure dump and the texture manifest on demand into gitignored
+> `data/<version>/{multiblocks,textures}/` folders, so a user can hold several pack versions side by
+> side without overwriting. The repo ships only the two multiblock fixtures and a small (~120 KB)
+> `data/textures/manifest.json` scoped to the example lines' machines (derived from a full manifest),
+> so `gtnh-solve --preview examples/*.json` still skins out of the box. `resolve_dataset_path` picks
+> the newest local `data/<version>/` per sub-path, else the fixtures; `--dataset-version` pins one.
+> Both `update-dataset.yml` and `update-textures.yml`, and the `tools/dataset_ci` helper, are
+> retired. Where sections 3, 5, 6, 8 below still say the manifest is committed or that
+> `update-textures.yml` stays, read this amendment instead.
+
 > **Amendment (2026-07-08): the structure dump stays local. It is never committed and has
 > no CI.** The full multiblock structure dump (~190 controllers, ~17 MB of churny generated
 > JSON) is produced on a developer machine with the extractor and written to a gitignored
@@ -70,9 +82,9 @@ executes, the output matches in-game behavior by construction.
    semantics, and everything IR-shaped stays in Python, where our contracts and tests
    live. The moment the Java starts making solver-shaped decisions it becomes a second
    codebase - don't.
-4. **Texture-manifest changes arrive as reviewable PRs**, never auto-committed to `main`.
-   The structure dump is generated locally and never committed (2026-07-08 amendment), so
-   it has no PR flow.
+4. **Generated data is local, not committed.** Both the structure dump and the texture manifest
+   are regenerated on demand into gitignored `data/<version>/` folders (2026-07-17 amendment);
+   neither has a CI or PR flow. Only the two fixtures plus a small example-scoped manifest ship.
 5. **Fail loud, per-controller.** One broken multiblock must never kill a run; it lands
    on the `_meta.json` failure list as a visible coverage number instead of a silent
    absence.
@@ -342,7 +354,7 @@ All shipped except the dropped lane 4. Kept for provenance and to anchor the fol
 | 3 | Channel handling | Stack-size sweep + identity-substitution probe + coil sweep; variant/entry caps | **done** (#46) |
 | 4 | ~~Structure-dump CI~~ | Dropped 2026-07-08: structures are local-only, no `update-dataset.yml`; `gtnh.lock.json` is the hand-maintained pin | **dropped** |
 | 5 | Python adapter | `data/multiblocks/` → `MachinePhysical` (footprint/faces/coil tiers); opt-in in the flow adapter; golden tests | **done** (#48) |
-| 6 | Texture manifest | `TextureDumper` server-side layered reflection (schema 2) for casings, single-block machines, hatches, hulls; `update-textures.yml` | **done** (#79/#81) |
+| 6 | Texture manifest | `TextureDumper` server-side layered reflection (schema 2) for casings, single-block machines, hatches, hulls (manifest now local-only, see the 2026-07-17 amendment) | **done** (#79/#81) |
 | 7 | Texture bake + previewer hookup | `previewer/bake.py` (tint + composite → flat PNGs) + `previewer/textures.py` per-block cubes; three.js consumes baked `data:` URIs | **done** (#82/#83) |
 
 **Not yet built (see §9 and requirements.md "Known gaps"):** a hatch-assignment stage (choose and
