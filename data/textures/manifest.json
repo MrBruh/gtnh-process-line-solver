@@ -7,8 +7,8 @@
       "GT5-Unofficial": "5.09.51.482",
       "StructureLib": "1.4.23"
     },
-    "generated_at": "2026-07-05T00:01:10.815Z",
-    "extractor_sha": "local",
+    "generated_at": "2026-07-17T16:11:29.662Z",
+    "extractor_sha": "0ed451214df887e50e78cead7c5f1b546d601d52",
     "note": "SMALL committed manifest: only the blocks the shipped example lines and the two multiblock fixtures need, so `gtnh-solve --preview examples/*.json` skins out of the box. The full dump is local and version-namespaced (data/<version>/textures/manifest.json), never committed. Regenerate with tools/derive_small_manifest.py.",
     "coverage": {
       "blocks": 26,
@@ -69,9 +69,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LuV_BOTTOM",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -81,9 +81,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LuV_BOTTOM",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -95,9 +95,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LuV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -107,9 +107,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LuV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -121,9 +121,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LuV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -133,9 +133,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LuV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -147,9 +147,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LuV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -159,9 +159,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LuV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -173,9 +173,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LuV_TOP",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -185,9 +185,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LuV_TOP",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -199,9 +199,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LuV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -211,9 +211,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LuV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -232,9 +232,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_ZPM_BOTTOM",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -244,9 +244,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_ZPM_BOTTOM",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -258,9 +258,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_ZPM_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -270,9 +270,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_ZPM_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -284,9 +284,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_ZPM_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -296,9 +296,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_ZPM_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -310,9 +310,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_ZPM_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -322,9 +322,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_ZPM_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -336,9 +336,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_ZPM_TOP",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -348,9 +348,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_ZPM_TOP",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -362,9 +362,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_ZPM_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -374,9 +374,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_ZPM_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -395,9 +395,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_BRONZE_BOTTOM",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -427,9 +427,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_BRONZE_BOTTOM",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -461,9 +461,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_BRONZE_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -493,9 +493,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_BRONZE_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -527,9 +527,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_BRONZE_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -559,9 +559,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_BRONZE_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -593,9 +593,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_BRONZE_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -625,9 +625,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_BRONZE_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -659,9 +659,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_BRONZE_TOP",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -691,9 +691,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_BRONZE_TOP",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -725,9 +725,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_BRONZE_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -757,9 +757,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_BRONZE_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -1001,9 +1001,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_STEEL_BOTTOM",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -1033,9 +1033,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_STEEL_BOTTOM",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -1067,9 +1067,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_STEEL_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -1099,9 +1099,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_STEEL_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -1133,9 +1133,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_STEEL_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -1165,9 +1165,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_STEEL_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -1199,9 +1199,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_STEEL_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -1231,9 +1231,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_STEEL_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -1265,9 +1265,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_STEEL_TOP",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -1297,9 +1297,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_STEEL_TOP",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -1331,9 +1331,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_STEEL_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -1363,9 +1363,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_STEEL_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                255,
+                255,
+                255,
                 0
               ],
               "glow": false
@@ -3790,9 +3790,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LV_BOTTOM",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -3802,9 +3802,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LV_BOTTOM",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -3816,9 +3816,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -3828,9 +3828,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -3842,9 +3842,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -3854,9 +3854,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -3868,9 +3868,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -3880,9 +3880,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -3894,9 +3894,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LV_TOP",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -3906,9 +3906,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LV_TOP",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -3920,9 +3920,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -3932,9 +3932,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_LV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -3953,9 +3953,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_MV_BOTTOM",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -3965,9 +3965,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_MV_BOTTOM",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -3979,9 +3979,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_MV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -3991,9 +3991,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_MV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4005,9 +4005,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_MV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4017,9 +4017,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_MV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4031,9 +4031,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_MV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4043,9 +4043,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_MV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4057,9 +4057,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_MV_TOP",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4069,9 +4069,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_MV_TOP",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4083,9 +4083,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_MV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4095,9 +4095,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_MV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4116,9 +4116,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_HV_BOTTOM",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4128,9 +4128,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_HV_BOTTOM",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4142,9 +4142,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_HV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4154,9 +4154,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_HV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4168,9 +4168,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_HV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4180,9 +4180,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_HV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4194,9 +4194,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_HV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4206,9 +4206,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_HV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4220,9 +4220,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_HV_TOP",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4232,9 +4232,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_HV_TOP",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4246,9 +4246,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_HV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4258,9 +4258,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_HV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4279,9 +4279,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_EV_BOTTOM",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4291,9 +4291,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_EV_BOTTOM",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4305,9 +4305,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4317,9 +4317,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4331,9 +4331,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4343,9 +4343,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4357,9 +4357,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4369,9 +4369,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4383,9 +4383,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_EV_TOP",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4395,9 +4395,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_EV_TOP",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4409,9 +4409,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4421,9 +4421,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4442,9 +4442,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_IV_BOTTOM",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4454,9 +4454,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_IV_BOTTOM",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4468,9 +4468,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_IV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4480,9 +4480,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_IV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4494,9 +4494,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_IV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4506,9 +4506,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_IV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4520,9 +4520,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_IV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4532,9 +4532,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_IV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4546,9 +4546,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_IV_TOP",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4558,9 +4558,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_IV_TOP",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4572,9 +4572,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_IV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
@@ -4584,9 +4584,9 @@
             {
               "icon": "gregtech:iconsets/MACHINE_IV_SIDE",
               "rgba": [
-                32,
-                32,
-                32,
+                210,
+                220,
+                255,
                 0
               ],
               "glow": false
