@@ -131,7 +131,7 @@ jobs:
 
       # --- Open the PR. Never auto-merges: a human eyeballs the manifest diff. --------------------
       - name: Create pull request
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.DATASET_PR_TOKEN || github.token }}
           branch: bot/texture-update
