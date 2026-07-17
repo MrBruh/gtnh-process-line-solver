@@ -46,7 +46,7 @@ jobs:
       # texture-only: it skips the correctness-critical structure dump and boots fast.
       TEXTURE_OUT: ${{ github.workspace }}/out/textures
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
