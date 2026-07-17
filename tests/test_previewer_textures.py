@@ -732,3 +732,38 @@ def test_active_override_skipped_when_idle_face_did_not_bake(dataset: tuple[Path
     assert not any(k.startswith("gregtech:gt.blockmachines|9|NORTH") for k in scene["textures"])
     assert scene["texturesActive"] == {}  # ...and no orphan active override is emitted for it
     assert summary.embedded_active_icons == 0
+
+
+# --------------------------------------------------------------------------------------------------
+# Committed-manifest golden guard - basic single-block machine front overlays (issue #3)
+# --------------------------------------------------------------------------------------------------
+
+_COMMITTED_MANIFEST = Path(__file__).resolve().parents[1] / "data" / "textures" / "manifest.json"
+
+
+def test_committed_basic_machine_front_carries_overlay() -> None:
+    """Golden guard (issue #3): a basic single-block machine's front face in the SHIPPED manifest
+    carries its per-machine ``OVERLAY_FRONT`` glyph on top of the casing.
+
+    Basic machines' textured stack is built ``@SideOnly(CLIENT)`` and is null on the dedicated
+    server the extractor runs, so the overlay is reconstructed from its deterministic
+    ``basicmachines/<folder>/`` asset path. Before the fix these fronts were casing-only (a plain
+    steel box); this pins the Basic Forge Hammer (meta 611) so a future extractor change cannot
+    silently drop basic-machine overlays again.
+    """
+    manifest = json.loads(_COMMITTED_MANIFEST.read_text(encoding="utf-8"))
+    m = TextureManifest(manifest)
+    icons = [layer["icon"] for layer in m.layers("gregtech:gt.blockmachines", 611, "NORTH")]
+
+    assert icons, "the Basic Forge Hammer must be present in the committed manifest"
+    assert icons[0] == "gregtech:iconsets/MACHINE_LV_SIDE", (
+        "the LV steel casing stays the base layer"
+    )
+    assert "gregtech:basicmachines/hammer/OVERLAY_FRONT" in icons, (
+        "the Forge Hammer's front glyph overlay must sit above the casing, not be dropped"
+    )
+    # the overlay name resolves to its real jar asset path (a deobf-rename / dropped-icon guard).
+    assert (
+        manifest["icons"]["gregtech:basicmachines/hammer/OVERLAY_FRONT"]
+        == "assets/gregtech/textures/blocks/basicmachines/hammer/OVERLAY_FRONT.png"
+    )

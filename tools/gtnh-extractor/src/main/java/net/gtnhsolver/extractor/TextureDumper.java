@@ -57,12 +57,16 @@ import gregtech.api.metatileentity.implementations.MTEBasicMachine;
  * <b>Two mechanisms, composed</b> (both proven by the lane S spike, #78):
  * <ul>
  * <li><b>MTE reflection</b> for machines, hatches, buses, and multiblock controller hulls: their
- * {@code ITexture[]} is obtained server-side - via the {@code getXxxFacing{Inactive,Active}(byte)}
- * accessors for basic single-block machines (reliable, no tile entity), and via
+ * {@code ITexture[]} is obtained server-side - via the {@code getXxxFacing(byte)} accessors for
+ * basic single-block machines (no tile entity), and via
  * {@code getTexture(base, side, facing, colour, active, redstone)} for the rest (placed like the
  * StructureDumper does). Each layer is a {@code GTRenderedTexture} ({@code mIconContainer} +
  * {@code getRGBA()} + {@code glow}), a sided/multi wrapper (recursed via {@code mTextures}), or a
  * {@code GTCopiedBlockTextureRender} whose copied casing icon is resolved via the block-icon path.
+ * A basic machine's accessors return the casing layer ONLY (its {@code mTextures} stack, overlays
+ * included, is built {@code @SideOnly(CLIENT)} and is null on the dedicated server), so its
+ * per-machine front glyph is reconstructed from the deterministic {@code basicmachines/<folder>/}
+ * asset path (see the "Basic-machine per-face overlays" section).
  * <li><b>Block-icon reflection</b> (v1's mechanism, kept) for the plain structure blocks a
  * multiblock places - casings, coils, tiered glass: a single un-tinted iconset layer per meta.
  * </ul>
@@ -162,6 +166,7 @@ final class TextureDumper {
         throws IOException {
         textureOut.mkdirs();
         populateIconNames();
+        enumerateBasicMachineOverlays();
 
         Map<String, Entry> blocks = new TreeMap<>();
         int mteStacks = dumpMetaTileEntities(blocks);
@@ -178,6 +183,161 @@ final class TextureDumper {
             icons.size(),
             gaps.size());
         return total;
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // Basic-machine per-face overlays (issue #3)
+    // ------------------------------------------------------------------------------------------
+    //
+    // A basic single-block machine's per-machine glyph (the hammer, the macerator blades) is NOT
+    // reachable server-side: the whole textured stack (mTextures) is built @SideOnly(CLIENT) and is
+    // null on the dedicated server, and the getXxxFacing accessors return the casing layer only. But
+    // the overlay lives at a deterministic asset path,
+    //   assets/gregtech/textures/blocks/basicmachines/<folder>/OVERLAY_<FACE>[_ACTIVE][_GLOW].png
+    // and the <folder> is derivable from the machine's server-side mName (basicmachine.<token>.tier.NN)
+    // by matching <token> to the real folder set (folder key = folder with non-alphanumerics stripped;
+    // the 53 GT5U folders are collision-free under that key). We enumerate that folder set (and every
+    // OVERLAY_* file in it) once from the GT5U jar on the classpath, then reconstruct the overlay layer
+    // for the faces that actually have a PNG - never inventing one.
+
+    /** normalised machine token -> real overlay folder name (e.g. "alloysmelter" -> "alloy_smelter"). */
+    private final Map<String, String> overlayFolders = new LinkedHashMap<>();
+    /** every existing "<folder>/OVERLAY_..." asset (without the .png), for O(1) presence checks. */
+    private final TreeSet<String> overlayAssets = new TreeSet<>();
+
+    /** OVERLAY_&lt;FACE&gt; token per render side (0 DOWN .. 5 EAST); the front is NORTH. */
+    private static final String[] OVERLAY_FACE = { "BOTTOM", "TOP", "FRONT", "SIDE", "SIDE", "SIDE" };
+
+    private static final String BASICMACHINES_PREFIX = "assets/" + ICON_DOMAIN
+        + "/textures/blocks/basicmachines/";
+
+    /**
+     * Enumerate every {@code basicmachines/<folder>/OVERLAY_*.png} on the classpath into
+     * {@link #overlayFolders} + {@link #overlayAssets}. The assets can live in a different classpath
+     * entry than the deobfuscated GT classes, so the containing jar/dir is found by resolving a known
+     * overlay resource URL rather than a GT class's CodeSource. Best-effort: if nothing resolves,
+     * basic machines simply keep their casing-only faces (no overlay is invented).
+     */
+    private void enumerateBasicMachineOverlays() {
+        try {
+            ClassLoader cl = MTEBasicMachine.class.getClassLoader();
+            java.net.URL boot = null;
+            for (String probe : new String[] { "hammer", "macerator", "compressor", "extractor" }) {
+                boot = cl.getResource(BASICMACHINES_PREFIX + probe + "/OVERLAY_FRONT.png");
+                if (boot != null) {
+                    break;
+                }
+            }
+            if (boot == null) {
+                LOG.warn("gtnh-extractor: no basicmachines overlay assets on the classpath; skipping enumeration");
+                return;
+            }
+            LOG.info("gtnh-extractor: basicmachines overlays resolved from {}", boot);
+            if ("jar".equals(boot.getProtocol())) {
+                enumerateOverlaysFromJar(boot);
+            } else if ("file".equals(boot.getProtocol())) {
+                enumerateOverlaysFromDir(boot);
+            } else {
+                LOG.warn("gtnh-extractor: unsupported overlay asset URL protocol {}", boot.getProtocol());
+            }
+        } catch (Throwable t) {
+            LOG.warn("gtnh-extractor: could not enumerate basicmachines overlays: {}", t.toString());
+        }
+        LOG.info("gtnh-extractor: enumerated {} basicmachines overlay folders ({} files)", overlayFolders.size(),
+            overlayAssets.size());
+    }
+
+    /** Enumerate the jar behind a {@code jar:file:...!/...} overlay resource URL. */
+    private void enumerateOverlaysFromJar(java.net.URL bootResource) throws Exception {
+        java.net.JarURLConnection conn = (java.net.JarURLConnection) bootResource.openConnection();
+        File jar = new File(conn.getJarFileURL().toURI());
+        try (java.util.zip.ZipFile zf = new java.util.zip.ZipFile(jar)) {
+            java.util.Enumeration<? extends java.util.zip.ZipEntry> e = zf.entries();
+            while (e.hasMoreElements()) {
+                recordOverlayEntry(e.nextElement().getName());
+            }
+        }
+    }
+
+    /** Enumerate the exploded {@code .../basicmachines/} directory a {@code file:} resource URL sits in. */
+    private void enumerateOverlaysFromDir(java.net.URL bootResource) throws Exception {
+        // .../basicmachines/<folder>/OVERLAY_FRONT.png -> walk up to the shared basicmachines dir.
+        File basicmachines = new File(bootResource.toURI()).getParentFile().getParentFile();
+        File[] folders = basicmachines.listFiles(File::isDirectory);
+        if (folders == null) {
+            return;
+        }
+        for (File folder : folders) {
+            File[] pngs = folder.listFiles((d, n) -> n.endsWith(".png"));
+            if (pngs == null) {
+                continue;
+            }
+            for (File png : pngs) {
+                recordOverlayEntry(BASICMACHINES_PREFIX + folder.getName() + "/" + png.getName());
+            }
+        }
+    }
+
+    /** Record one {@code assets/.../basicmachines/<folder>/OVERLAY_*.png} entry into the lookup maps. */
+    private void recordOverlayEntry(String name) {
+        if (!name.startsWith(BASICMACHINES_PREFIX) || !name.endsWith(".png")) {
+            return;
+        }
+        String rel = name.substring(BASICMACHINES_PREFIX.length()); // "<folder>/OVERLAY_FRONT.png"
+        int slash = rel.indexOf('/');
+        if (slash <= 0) {
+            return;
+        }
+        overlayFolders.putIfAbsent(normalizeToken(rel.substring(0, slash)), rel.substring(0, slash));
+        overlayAssets.add(rel.substring(0, rel.length() - ".png".length())); // "<folder>/OVERLAY_FRONT"
+    }
+
+    /** Lower-case and strip non-alphanumerics, so {@code alloy_smelter} and {@code alloysmelter} unify. */
+    private static String normalizeToken(String s) {
+        return s.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]", "");
+    }
+
+    /** The overlay folder for a basic machine, from its {@code mName} (basicmachine.&lt;token&gt;.tier.NN). */
+    private String overlayFolderFor(MTEBasicMachine mte) {
+        Object nameObj = readField(mte, "mName");
+        if (!(nameObj instanceof String)) {
+            return null;
+        }
+        String mName = (String) nameObj;
+        String marker = ".tier.";
+        int tierAt = mName.lastIndexOf(marker);
+        if (!mName.startsWith("basicmachine.") || tierAt < 0) {
+            return null;
+        }
+        String token = mName.substring("basicmachine.".length(), tierAt);
+        return overlayFolders.get(normalizeToken(token));
+    }
+
+    /**
+     * Append the reconstructed overlay layer(s) for one folder + face/state to {@code layers}: the
+     * glyph itself, then - if a {@code _GLOW} sibling PNG exists - a separate emissive layer above it,
+     * exactly as the enum-overlay path represents a glowing front (casing, overlay, {@code _GLOW}).
+     * Nothing is appended if the machine has no overlay PNG for this face (never invented). Layers are
+     * untinted and fully opaque (rgba {@code [255,255,255,0]}, the OVERLAY_SCHEST convention).
+     */
+    private void appendOverlayLayers(List<Layer> layers, String folder, int side, boolean active) {
+        String base = "OVERLAY_" + OVERLAY_FACE[side] + (active ? "_ACTIVE" : "");
+        String rel = folder + "/" + base;
+        if (!overlayAssets.contains(rel)) {
+            return;
+        }
+        layers.add(overlayLayer(rel, false));
+        if (overlayAssets.contains(rel + "_GLOW")) {
+            layers.add(overlayLayer(rel + "_GLOW", true));
+        }
+    }
+
+    /** One overlay layer for a {@code <folder>/OVERLAY_...} asset, registering its icon -> jar path. */
+    private Layer overlayLayer(String rel, boolean glow) {
+        String iconRel = "basicmachines/" + rel;
+        String iconName = ICON_DOMAIN + ":" + iconRel;
+        icons.putIfAbsent(iconName, "assets/" + ICON_DOMAIN + "/textures/blocks/" + iconRel + ".png");
+        return new Layer(iconName, new int[] { 255, 255, 255, 0 }, glow);
     }
 
     // ------------------------------------------------------------------------------------------
@@ -256,11 +416,27 @@ final class TextureDumper {
     }
 
     /**
-     * A basic single-block machine's layer stack for one side/state, via the {@code getXxxFacing}
-     * accessors (no base tile entity needed - the spike showed {@code getTexture} NPEs on a bare
-     * placement for some of these). Front maps to NORTH; the other horizontals share the side texture.
+     * A basic single-block machine's layer stack for one side/state: the base casing (from the
+     * {@code getXxxFacing} accessors, which return the casing layer only) with the per-machine
+     * overlay glyph reconstructed on top from its deterministic asset path (see the
+     * "Basic-machine per-face overlays" section). {@code mTextures} - the stack GT actually renders -
+     * is null on the dedicated server, so the overlay cannot be read off it; it is rebuilt instead.
+     * Machines with no overlay PNG for this face keep a casing-only stack, so nothing is invented.
      */
     private List<Layer> basicMachineLayers(MTEBasicMachine mte, int side, boolean active) {
+        List<Layer> layers = basicMachineCasingLayers(mte, side, active);
+        if (layers == null || layers.isEmpty()) {
+            return layers; // casing did not resolve; an overlay without a casing under it makes no sense
+        }
+        String folder = overlayFolderFor(mte);
+        if (folder != null) {
+            appendOverlayLayers(layers, folder, side, active);
+        }
+        return layers;
+    }
+
+    /** The base casing layer(s) via the {@code getXxxFacing} accessors (colour -1 = unpainted steel). */
+    private List<Layer> basicMachineCasingLayers(MTEBasicMachine mte, int side, boolean active) {
         String accessor;
         switch (side) {
             case 0:
@@ -276,8 +452,6 @@ final class TextureDumper {
                 accessor = active ? "getSideFacingActive" : "getSideFacingInactive";
         }
         try {
-            // Colour index -1 = unpainted, so the base casing keeps the default MACHINE_METAL steel
-            // tint. A real index (0..15) paints it that dye (0 = black), which greyed every machine.
             Object result = MTEBasicMachine.class.getMethod(accessor, byte.class).invoke(mte, (byte) -1);
             if (result instanceof ITexture[]) {
                 return describeAll((ITexture[]) result, side);

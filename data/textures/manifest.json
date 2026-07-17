@@ -7,13 +7,13 @@
       "GT5-Unofficial": "5.09.51.482",
       "StructureLib": "1.4.23"
     },
-    "generated_at": "2026-07-17T16:11:29.662Z",
-    "extractor_sha": "0ed451214df887e50e78cead7c5f1b546d601d52",
+    "generated_at": "2026-07-17T17:12:35.907Z",
+    "extractor_sha": "7e33f330548beb0590439e039f1be9897e381710",
     "note": "SMALL committed manifest: only the blocks the shipped example lines and the two multiblock fixtures need, so `gtnh-solve --preview examples/*.json` skins out of the box. The full dump is local and version-namespaced (data/<version>/textures/manifest.json), never committed. Regenerate with tools/derive_small_manifest.py.",
     "coverage": {
       "blocks": 26,
       "mte": 24,
-      "icons": 68,
+      "icons": 84,
       "gaps": 0
     }
   },
@@ -75,6 +75,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -87,6 +107,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -101,6 +141,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -113,6 +173,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -127,6 +207,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -139,6 +239,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -153,6 +273,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -165,6 +305,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -179,6 +339,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -191,6 +371,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -205,6 +405,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -217,6 +437,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         }
@@ -238,6 +478,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -250,6 +510,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -264,6 +544,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -276,6 +576,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -290,6 +610,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -302,6 +642,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -316,6 +676,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -328,6 +708,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -342,6 +742,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -354,6 +774,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -368,6 +808,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -380,6 +840,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         }
@@ -3796,6 +4276,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -3808,6 +4308,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -3822,6 +4342,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -3834,6 +4374,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -3848,6 +4408,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -3860,6 +4440,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -3874,6 +4474,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -3886,6 +4506,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -3900,6 +4540,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -3912,6 +4572,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -3926,6 +4606,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -3938,6 +4638,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         }
@@ -3959,6 +4679,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -3971,6 +4711,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -3985,6 +4745,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -3997,6 +4777,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -4011,6 +4811,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4023,6 +4843,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -4037,6 +4877,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4049,6 +4909,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -4063,6 +4943,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4075,6 +4975,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -4089,6 +5009,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4101,6 +5041,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         }
@@ -4122,6 +5082,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4134,6 +5114,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -4148,6 +5148,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4160,6 +5180,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -4174,6 +5214,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4186,6 +5246,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -4200,6 +5280,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4212,6 +5312,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -4226,6 +5346,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4238,6 +5378,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -4252,6 +5412,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4264,6 +5444,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         }
@@ -4285,6 +5485,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4297,6 +5517,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -4311,6 +5551,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4323,6 +5583,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -4337,6 +5617,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4349,6 +5649,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -4363,6 +5683,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4375,6 +5715,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -4389,6 +5749,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4401,6 +5781,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -4415,6 +5815,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4427,6 +5847,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         }
@@ -4448,6 +5888,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4460,6 +5920,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -4474,6 +5954,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4486,6 +5986,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -4500,6 +6020,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4512,6 +6052,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_FRONT_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -4526,6 +6086,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4538,6 +6118,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -4552,6 +6152,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4564,6 +6184,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_TOP_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         },
@@ -4578,6 +6218,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ],
           "inactive": [
@@ -4590,6 +6250,26 @@
                 0
               ],
               "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
             }
           ]
         }
@@ -4853,6 +6533,22 @@
     }
   },
   "icons": {
+    "gregtech:basicmachines/hammer/OVERLAY_BOTTOM": "assets/gregtech/textures/blocks/basicmachines/hammer/OVERLAY_BOTTOM.png",
+    "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_ACTIVE": "assets/gregtech/textures/blocks/basicmachines/hammer/OVERLAY_BOTTOM_ACTIVE.png",
+    "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_ACTIVE_GLOW": "assets/gregtech/textures/blocks/basicmachines/hammer/OVERLAY_BOTTOM_ACTIVE_GLOW.png",
+    "gregtech:basicmachines/hammer/OVERLAY_BOTTOM_GLOW": "assets/gregtech/textures/blocks/basicmachines/hammer/OVERLAY_BOTTOM_GLOW.png",
+    "gregtech:basicmachines/hammer/OVERLAY_FRONT": "assets/gregtech/textures/blocks/basicmachines/hammer/OVERLAY_FRONT.png",
+    "gregtech:basicmachines/hammer/OVERLAY_FRONT_ACTIVE": "assets/gregtech/textures/blocks/basicmachines/hammer/OVERLAY_FRONT_ACTIVE.png",
+    "gregtech:basicmachines/hammer/OVERLAY_FRONT_ACTIVE_GLOW": "assets/gregtech/textures/blocks/basicmachines/hammer/OVERLAY_FRONT_ACTIVE_GLOW.png",
+    "gregtech:basicmachines/hammer/OVERLAY_FRONT_GLOW": "assets/gregtech/textures/blocks/basicmachines/hammer/OVERLAY_FRONT_GLOW.png",
+    "gregtech:basicmachines/hammer/OVERLAY_SIDE": "assets/gregtech/textures/blocks/basicmachines/hammer/OVERLAY_SIDE.png",
+    "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE": "assets/gregtech/textures/blocks/basicmachines/hammer/OVERLAY_SIDE_ACTIVE.png",
+    "gregtech:basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW": "assets/gregtech/textures/blocks/basicmachines/hammer/OVERLAY_SIDE_ACTIVE_GLOW.png",
+    "gregtech:basicmachines/hammer/OVERLAY_SIDE_GLOW": "assets/gregtech/textures/blocks/basicmachines/hammer/OVERLAY_SIDE_GLOW.png",
+    "gregtech:basicmachines/hammer/OVERLAY_TOP": "assets/gregtech/textures/blocks/basicmachines/hammer/OVERLAY_TOP.png",
+    "gregtech:basicmachines/hammer/OVERLAY_TOP_ACTIVE": "assets/gregtech/textures/blocks/basicmachines/hammer/OVERLAY_TOP_ACTIVE.png",
+    "gregtech:basicmachines/hammer/OVERLAY_TOP_ACTIVE_GLOW": "assets/gregtech/textures/blocks/basicmachines/hammer/OVERLAY_TOP_ACTIVE_GLOW.png",
+    "gregtech:basicmachines/hammer/OVERLAY_TOP_GLOW": "assets/gregtech/textures/blocks/basicmachines/hammer/OVERLAY_TOP_GLOW.png",
     "gregtech:iconsets/MACHINE_BRONZEPLATEDBRICKS": "assets/gregtech/textures/blocks/iconsets/MACHINE_BRONZEPLATEDBRICKS.png",
     "gregtech:iconsets/MACHINE_BRONZE_BOTTOM": "assets/gregtech/textures/blocks/iconsets/MACHINE_BRONZE_BOTTOM.png",
     "gregtech:iconsets/MACHINE_BRONZE_SIDE": "assets/gregtech/textures/blocks/iconsets/MACHINE_BRONZE_SIDE.png",
