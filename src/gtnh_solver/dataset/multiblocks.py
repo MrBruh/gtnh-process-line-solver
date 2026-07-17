@@ -1,6 +1,6 @@
 """Adapter: schema-v1 multiblock facts -> the solver's physical-rules dataset.
 
-Design principle 3 of ``DATASET_EXTRACTION_PLAN.md`` (section 2): the extractor emits raw facts
+Design principle 3 of ``docs/dataset-extraction/plan.md``: the extractor emits raw facts
 (blocks, hints, variants, substitutions); **all interpretation lives here**, in Python, where
 the IR contracts and the tests are. Footprint bounding boxes, hint-derived face constraints, and
 coil-tier semantics are computed from those facts and re-expressed as IR-shaped types
@@ -32,6 +32,7 @@ from pathlib import Path
 
 from gtnh_solver.ir import CellBox, Facing
 
+from .roots import resolve_dataset_path
 from .schema import (
     DatasetMeta,
     MultiblockDoc,
@@ -187,14 +188,22 @@ def to_physical(doc: MultiblockDoc) -> MachinePhysical:
     )
 
 
-def load_physical_dataset(data_dir: str | Path | None = None) -> PhysicalDataset:
-    """Load and interpret every multiblock file under ``data_dir`` (defaults to the committed dump).
+def load_physical_dataset(
+    data_dir: str | Path | None = None, *, version: str | None = None
+) -> PhysicalDataset:
+    """Load and interpret every multiblock file under ``data_dir``.
 
-    Reads ``_meta.json`` for the run summary, then every other ``*.json`` file as a controller,
-    keying the resulting records by display name. Raises :class:`DatasetError` on a duplicate key so
-    two files can never silently shadow one machine.
+    With no explicit ``data_dir`` the location is resolved (:func:`resolve_dataset_path`): the newest
+    local ``data/<version>/multiblocks/`` that exists, else the committed fixtures, with ``version``
+    to pin one. Reads ``_meta.json`` for the run summary, then every other ``*.json`` file as a
+    controller, keying the resulting records by display name. Raises :class:`DatasetError` on a
+    duplicate key so two files can never silently shadow one machine.
     """
-    directory = Path(data_dir) if data_dir is not None else DEFAULT_DATA_DIR
+    directory = (
+        Path(data_dir)
+        if data_dir is not None
+        else resolve_dataset_path("multiblocks", version=version)
+    )
     meta = load_meta(directory / "_meta.json")
     machines: dict[str, MachinePhysical] = {}
     for path in sorted(directory.glob("*.json")):

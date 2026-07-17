@@ -28,7 +28,7 @@ from pydantic import ValidationError
 from gtnh_solver import __version__
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.buildguide import build_guide
-from gtnh_solver.dataset import PhysicalDataset, load_physical_dataset
+from gtnh_solver.dataset import PhysicalDataset, list_versions, load_physical_dataset
 from gtnh_solver.ir import LayoutStatus
 from gtnh_solver.previewer import write_preview
 from gtnh_solver.solver import solve
@@ -68,11 +68,24 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         help="write a self-contained 3D preview (a double-clickable .html) to FILE",
     )
+    parser.add_argument(
+        "--dataset-version",
+        metavar="VERSION",
+        help=(
+            "use the generated dataset in data/<VERSION>/ (multiblocks + textures); default resolves "
+            "the newest local data/<version>/ if any is present, else the committed fixtures"
+        ),
+    )
+    parser.add_argument(
+        "--list-dataset-versions",
+        action="store_true",
+        help="list the generated dataset versions available under data/, then exit",
+    )
     return parser
 
 
-def _load_physical_or_warn() -> PhysicalDataset | None:
-    """The committed multiblock dataset (real footprints), or ``None`` with a stderr warning.
+def _load_physical_or_warn(version: str | None = None) -> PhysicalDataset | None:
+    """The resolved multiblock dataset (real footprints), or ``None`` with a stderr warning.
 
     Wiring the physical dataset into the solve path is what gives multiblocks their real footprints
     instead of the crude 1x1x1 default (GAP A, the overlap fix). It stays a GRACEFUL enhancement: a
@@ -82,7 +95,7 @@ def _load_physical_or_warn() -> PhysicalDataset | None:
     ``ValidationError`` a malformed file, so the whole load can never take the CLI down.
     """
     try:
-        physical = load_physical_dataset()
+        physical = load_physical_dataset(version=version)
     except (OSError, ValueError, ValidationError) as exc:
         print(
             f"warning: physical multiblock dataset unavailable ({exc}); using 1x1x1 footprints",
@@ -113,13 +126,21 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    if args.list_dataset_versions:
+        versions = list_versions()
+        for v in versions:
+            print(v.name)  # newest first; the folder name is the version
+        if not versions:
+            print("no generated dataset versions; using the committed fixtures", file=sys.stderr)
+        return 0
+
     # `export` is nargs="?" with this manual check (not argparse `required`) so main([]) can be
     # unit-tested for the exit-2 path without argparse raising SystemExit.
     if args.export is None:
         print("error: an export path is required (try 'gtnh-solve --help')", file=sys.stderr)
         return 2
 
-    physical = _load_physical_or_warn()  # real multiblock footprints; None -> 1x1x1 fallback
+    physical = _load_physical_or_warn(args.dataset_version)  # real footprints; None -> 1x1x1
     try:
         problem = adapt_file(args.export, physical=physical)
     except (OSError, ValueError, ValidationError) as exc:
@@ -145,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
         # the preview path so the normal build-guide run stays quiet.
         _enable_previewer_logging()
         try:
-            write_preview(problem, layout, args.preview)
+            write_preview(problem, layout, args.preview, version=args.dataset_version)
         except OSError as exc:
             print(f"error: could not write {args.preview}: {exc}", file=sys.stderr)
             return 2

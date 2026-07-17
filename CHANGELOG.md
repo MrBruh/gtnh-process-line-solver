@@ -7,6 +7,20 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Previewer: toggle the auto-output arrows (`previewer/`).** The controls bar gains an
+  `arrows: on/off` button that shows or hides the cyan auto-output direction arrows, so a builder can
+  declutter the view. When on, the arrows still follow the layer slider; the button disables itself
+  for a layout with no auto-output connections.
+- **Previewer resolves more single-block machines by name (`previewer/`, GitHub #3).** Building on
+  the voltage-tier prefix match, `TextureManifest.mte_block` now also resolves two naming shapes the
+  plan's generic names previously missed: tiered-storage families keyed by numeral in the manifest
+  (`Super Tank` -> the lowest `Super Tank I`, likewise `Super Chest`), and flavor-prefixed in-game
+  names where the generic name is a whole-word suffix (`Chemical Plant` -> `ExxonMobil Chemical
+  Plant`, `Coke Oven` -> `Industrial Coke Oven`). On the two example lines this takes single-block
+  texture resolution from 8 to 25 machines; only the solver-synthesized Power Sources stay
+  placeholders. The new strategies run after the exact/normalized/tier-prefix ones, so nothing that
+  resolved before changes, and a genuinely unknown machine still resolves to nothing (kept on its
+  placeholder box, never mis-mapped).
 - **Real multiblock footprints wired into the solve path (`cli`, `adapter`, GAP A / the overlap
   fix).** `gtnh-solve` now loads the committed physical dataset (`data/multiblocks/`) and passes it
   to the adapter, so a machine whose type the dataset knows (Electric Blast Furnace, Vacuum Freezer)
@@ -427,6 +441,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Sand passes the hand-built compactness + <= 3-cable budget under every objective.
 
 ### Changed
+- **The committed dataset is now just small fixtures; full datasets are local and version-namespaced
+  (`dataset`, `previewer`).** The extractor's outputs are regenerated on demand into gitignored
+  per-version folders (`data/<version>/{multiblocks,textures}/`), so several pack versions coexist
+  without overwriting. The repo ships only the two multiblock fixtures and a ~120 KB texture manifest
+  scoped to the example lines' machines (down from ~6 MB), so `gtnh-solve --preview examples/*.json`
+  still skins out of the box; the full manifest is now local. The loader resolves the newest local
+  `data/<version>/` that provides each of multiblocks/textures, else the committed fixtures, with
+  `gtnh-solve --dataset-version <v>` to pin one and `--list-dataset-versions` to list them; the jar
+  for texture PNGs is fetched at the GT5-Unofficial version the resolved manifest records, so its
+  icons match. Reverses the earlier "texture manifest is committed" policy.
 - **Previewer wire->machine leads take the connecting cable's thickness (GitHub #6).** Each route
   terminal in the scene now carries the thickness of the fattest route segment incident to its
   cell (a mid-trunk tap touches several; the fattest is what visually meets the block), and the
@@ -551,19 +575,32 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   as fixtures so the solver is decoupled from the fork's health.
 
 ### Removed
+- **All generated datasets are now local-only: retired the `update-textures.yml` CI workflow and
+  removed the `tools/dataset_ci` helper package.** With the full texture manifest no longer committed
+  (only the small example-scoped one is, see Changed), the workflow that regenerated and committed the
+  ~6 MB manifest has no job; the manifest is regenerated locally like the structure dump.
+  `tools/dataset_ci` (`resolve_versions`, `dataset_summary`) existed only to drive the already-removed
+  `update-dataset.yml`, so it and its tests are gone, along with the `mypy`/`pytest` `tools/` path
+  config that only served it.
 - **The multiblock structure dump is now local-only: retired the `update-dataset.yml` CI workflow**
   (and its `dataset-update` PR template). The full ~190-controller dump (~17 MB of generated JSON)
   is not worth its repo weight or a weekly Forge run, so it is no longer built or committed by CI; a
   developer regenerates it on demand with the extractor. `data/multiblocks/` is gitignored apart from
   the two curated fixtures (Electric Blast Furnace, Vacuum Freezer) the adapter/footprint tests pin.
-  The texture manifest is unaffected (`update-textures.yml` stays; it reads the hand-maintained
-  `gtnh.lock.json` pin). Consequence: a fresh clone places and renders only the two fixtures plus
-  single-block machines until the extractor is run locally.
+  Consequence: a fresh clone places and renders only the two fixtures plus single-block machines
+  until the extractor is run locally.
 - Dropped the unused `networkx` and `numpy` core runtime dependencies - neither was
   imported anywhere in the implementation. They will be re-added if and when the Phase 2
   optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
 
 ### Fixed
+- **Basic single-block machines were extracted painted black (`tools/gtnh-extractor`, `previewer`).**
+  `TextureDumper.basicMachineLayers` read each machine's texture through the `getXxxFacing…(byte)`
+  accessors with colour index `0`, which is the black dye, so the base casing came out tinted
+  `[32,32,32]` (near-black gray) instead of the default `MACHINE_METAL` steel. Passing `-1`
+  (unpainted) fixes it, and the committed example manifest was regenerated from a fresh extractor
+  run, so the Forge Hammers (and every other basic machine) now render steel-blue rather than gray.
+  (Their front-face overlay icon is a separate, still-open extraction gap.)
 - **Auto-output arrow draws on top of the machine in the previewer (`previewer/html.py`, GitHub
   #30).** The per-face auto-output arrows (#20) render on every source face perpendicular to the
   ejecting direction, but the arrow sat a hair off the 0.92-scaled placeholder box, so it was buried

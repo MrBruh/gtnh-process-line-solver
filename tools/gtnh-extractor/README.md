@@ -8,8 +8,8 @@ runs it, it only reads the JSON the tool emits.
 The tool boots a **headless dedicated server** with GT5-Unofficial + StructureLib loaded,
 builds every multiblock controller into a void world, scans the result, and dumps JSON.
 Because it executes the same `construct(...)` code the in-game hologram projector runs, the
-output matches in-game behaviour by construction. See `DATASET_EXTRACTION_PLAN.md` (section
-1.3 and 4) for the full rationale.
+output matches in-game behaviour by construction. See `docs/dataset-extraction/` (requirements.md,
+implementation.md, plan.md) for the full rationale.
 
 ## Status
 
@@ -126,10 +126,12 @@ autoplace. Texture reflection (`Textures.BlockIcons`) is lane 6, in `TextureDump
 
 ## Texture manifest (lane 6, issue #49)
 
-`TextureDumper` emits `data/textures/manifest.json`: a block-to-icon map so the previewer can skin a
-multiblock shell. It is a **separate pass** gated by `-PtextureOut`; PNGs are never committed (LGPL),
-only the icon **name** and the asset **path inside the mod jar**, which the previewer fetches from
-the GTNH Nexus jar at preview time.
+`TextureDumper` emits the texture manifest so the previewer can skin machines and casings. It is a
+**separate pass** gated by `-PtextureOut` and written into the local, version-namespaced
+`data/<version>/textures/manifest.json` (gitignored; only a small example-scoped manifest is
+committed, see `docs/dataset-extraction/`). PNGs are never committed (LGPL), only the icon **name**
+and the asset **path inside the mod jar**, which the previewer fetches from the GTNH Nexus jar at
+preview time.
 
 **Option A (implemented): server-side icon reflection.** In 1.7.10 `Block.getIcon(side, meta)`
 returns an `IIcon` that is only populated by client-side texture registration, so on a dedicated
@@ -162,9 +164,10 @@ the composite tile-entity `gt.blockmachines` controller hulls, are recorded in t
 with the reason - never invented - pointing at **Option B (fallback, not implemented): a client-mode
 `runClient` dump under `xvfb-run`** whose main-menu tick handler reads
 `getIcon(side, meta).getIconName()` for the gap blocks. Textures only feed the previewer, so this lane
-can slip a pack version without blocking the solver; hence the separate `update-textures.yml`
-workflow. (In the verified 2.8.4 boot: 9 casing blocks / 150 `(block,meta,side)` assignments resolved,
-28 families/metas recorded as Option-B gaps.)
+can slip a pack version without blocking the solver. The manifest is regenerated locally on demand
+(no CI: `update-textures.yml` was retired 2026-07-17, see `docs/dataset-extraction/plan.md`). (In the
+verified 2.8.4 boot: 9 casing blocks / 150 `(block,meta,side)` assignments resolved, 28 families/metas
+recorded as Option-B gaps.)
 
 Extra GT5U / Minecraft API surface this pass touches (all server-safe: `IIconRegister` and the
 client-only render path are deliberately avoided):

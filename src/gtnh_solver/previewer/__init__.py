@@ -19,10 +19,11 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from gtnh_solver.dataset.roots import resolve_dataset_path
 from gtnh_solver.ir import InputIR, LayoutResult
 
 from .html import render_html
-from .jar import jar_png_provider
+from .jar import JAR_VERSION, gt5u_version_from_manifest, jar_png_provider
 from .scene import SCENE_VERSION, build_scene
 from .textures import TextureSummary, texturize_scene
 
@@ -39,19 +40,31 @@ _log = logging.getLogger(__name__)
 
 
 def write_preview(
-    problem: InputIR, layout: LayoutResult, path: str | Path, *, textures: bool = True
+    problem: InputIR,
+    layout: LayoutResult,
+    path: str | Path,
+    *,
+    textures: bool = True,
+    version: str | None = None,
 ) -> Path:
     """Render the preview for ``layout`` and write the self-contained HTML to ``path``.
 
     With ``textures`` on (the default) each machine box is skinned with its real GT casing texture
-    where the committed dataset + manifest resolve one; the jar fetch is best-effort and any
-    failure (offline, missing jar) is logged and degrades to placeholder boxes, never blocking the
-    preview. Machines with no committed doc simply stay placeholders and trigger no jar fetch.
+    where the resolved dataset + manifest supply one; the jar fetch is best-effort and any failure
+    (offline, missing jar) is logged and degrades to placeholder boxes, never blocking the preview.
+    Machines with no doc simply stay placeholders and trigger no jar fetch. ``version`` pins a
+    generated ``data/<version>/`` dataset; the default resolves the newest local one, else the
+    committed fixtures. The jar is fetched at the version the resolved manifest was extracted
+    against, so its icons match.
     """
     scene = build_scene(problem, layout)
     if textures:
         try:
-            texturize_scene(scene, png_provider=jar_png_provider())
+            manifest_path = resolve_dataset_path("textures/manifest.json", version=version)
+            gt5u = gt5u_version_from_manifest(manifest_path) or JAR_VERSION
+            texturize_scene(
+                scene, version=version, png_provider=jar_png_provider(gt5u_version=gt5u)
+            )
         except Exception as exc:  # never let a texture fetch/parse issue block a preview
             _log.warning("texture pass skipped, using placeholder boxes: %s", exc)
             scene.setdefault("textures", {})

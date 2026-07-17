@@ -2,7 +2,7 @@
 
 A typed loader for the raw JSON the extractor emits (the Java tool of issue #45, lane 2 of
 the dataset-extraction plan). One file per controller plus a ``_meta.json`` run summary. The
-shape mirrors ``DATASET_EXTRACTION_PLAN.md`` section 4.2 exactly.
+shape mirrors ``docs/dataset-extraction/plan.md`` section 4.2 exactly.
 
 This is the **cross-language contract** between the (future) Java extractor and the Python
 solver, so it is validated the way the rest of the repo validates data: Pydantic models with

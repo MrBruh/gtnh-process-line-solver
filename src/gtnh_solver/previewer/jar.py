@@ -13,6 +13,7 @@ HTML, never committed. ``NOTICE`` credits GT5-Unofficial and StructureLib.
 
 from __future__ import annotations
 
+import json
 import os
 import zipfile
 from collections.abc import Callable, Mapping
@@ -21,14 +22,44 @@ from urllib.request import urlretrieve
 
 from .textures import PngProvider
 
-#: The pinned jar - version-locked so a texture matches the dataset it was extracted against. A
-#: pack bump changes this alongside the manifest (lane 6 / the texture workflow), not by hand here.
+#: The fallback GT5-Unofficial version, used when the active manifest carries no provenance version.
+#: Normally the manifest's provenance supplies it (see :func:`gt5u_version_from_manifest`), so the
+#: fetched jar matches the manifest the icons were extracted against.
 JAR_VERSION = "5.09.51.482"
-JAR_NAME = f"GT5-Unofficial-{JAR_VERSION}.jar"
-JAR_URL = (
-    "https://nexus.gtnewhorizons.com/repository/public/com/github/GTNewHorizons/"
-    f"GT5-Unofficial/{JAR_VERSION}/{JAR_NAME}"
-)
+
+
+def _jar_name(gt5u_version: str) -> str:
+    """The jar filename for ``gt5u_version`` (cached per version so several can coexist)."""
+    return f"GT5-Unofficial-{gt5u_version}.jar"
+
+
+def _jar_url(gt5u_version: str) -> str:
+    """The GTNH Nexus URL for the ``gt5u_version`` jar."""
+    return (
+        "https://nexus.gtnewhorizons.com/repository/public/com/github/GTNewHorizons/"
+        f"GT5-Unofficial/{gt5u_version}/{_jar_name(gt5u_version)}"
+    )
+
+
+JAR_NAME = _jar_name(JAR_VERSION)
+JAR_URL = _jar_url(JAR_VERSION)
+
+
+def gt5u_version_from_manifest(manifest_path: str | Path) -> str | None:
+    """The GT5-Unofficial version the manifest at ``manifest_path`` was extracted against.
+
+    Read from ``provenance.mod_versions["GT5-Unofficial"]`` so the fetched jar matches the manifest
+    the icons were named against. ``None`` if the manifest is absent, unreadable, or lacks the field,
+    in which case the caller keeps the pinned :data:`JAR_VERSION` default.
+    """
+    try:
+        raw = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    mods = raw.get("provenance", {}).get("mod_versions", {})
+    version = mods.get("GT5-Unofficial") if isinstance(mods, dict) else None
+    return version if isinstance(version, str) and version else None
+
 
 #: Environment override for the cache directory; otherwise a per-user cache OUTSIDE the repo tree,
 #: so the multi-megabyte jar is never at risk of being staged (no ``.gitignore`` entry needed).
@@ -51,16 +82,18 @@ def fetch_jar(
     cache_dir: str | Path | None = None,
     *,
     url: str = JAR_URL,
+    jar_name: str = JAR_NAME,
     download: Downloader = urlretrieve,
 ) -> Path:
     """Return the cached jar path, downloading it to the cache first if it is not already there.
 
     Idempotent: a present cache file is returned untouched (no network). The download lands on a
     ``.part`` sibling and is renamed on success so an interrupted fetch never leaves a truncated
-    jar that looks complete.
+    jar that looks complete. ``jar_name`` is the version-specific filename, so different pack
+    versions cache side by side.
     """
     directory = default_cache_dir() if cache_dir is None else Path(cache_dir)
-    dest = directory / JAR_NAME
+    dest = directory / jar_name
     if dest.exists():
         return dest
     directory.mkdir(parents=True, exist_ok=True)
@@ -89,15 +122,25 @@ def extract_icons(jar_path: str | Path, icon_paths: Mapping[str, str]) -> dict[s
 def jar_png_provider(
     cache_dir: str | Path | None = None,
     *,
+    gt5u_version: str | None = None,
     url: str = JAR_URL,
+    jar_name: str = JAR_NAME,
     download: Downloader = urlretrieve,
 ) -> PngProvider:
-    """Build the ``png_provider`` closure the texturizer calls: fetch the jar, extract the icons."""
+    """Build the ``png_provider`` closure the texturizer calls: fetch the jar, extract the icons.
+
+    A ``gt5u_version`` (typically from the active manifest's provenance, via
+    :func:`gt5u_version_from_manifest`) overrides ``url`` and ``jar_name`` so the fetched jar matches
+    the manifest the icons were extracted against, caching each version separately.
+    """
+    if gt5u_version is not None:
+        url = _jar_url(gt5u_version)
+        jar_name = _jar_name(gt5u_version)
 
     def provider(icon_paths: Mapping[str, str]) -> dict[str, bytes]:
         if not icon_paths:
             return {}
-        jar = fetch_jar(cache_dir, url=url, download=download)
+        jar = fetch_jar(cache_dir, url=url, jar_name=jar_name, download=download)
         return extract_icons(jar, icon_paths)
 
     return provider

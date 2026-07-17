@@ -30,6 +30,7 @@ from .multiblocks import (
     load_physical_dataset,
     to_physical,
 )
+from .roots import DEFAULT_DATA, list_versions, resolve_dataset_path
 from .schema import (
     SCHEMA_VERSION,
     Block,
@@ -87,4 +88,8 @@ __all__ = [  # noqa: RUF022 - grouped by submodule, not alphabetized
     "PhysicalDataset",
     "to_physical",
     "load_physical_dataset",
+    # dataset location (version-namespaced local folders + committed fixtures)
+    "DEFAULT_DATA",
+    "list_versions",
+    "resolve_dataset_path",
 ]

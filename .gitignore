@@ -27,12 +27,19 @@ out/
 *.litematic
 *.schematic
 
-# Structure dump is local-only (see gtnh-worktrees/DATASET_EXTRACTION_PLAN.md): the extractor
-# regenerates ~190 multiblock docs on demand; only the two curated fixtures are committed.
-data/multiblocks/*.json
-!data/multiblocks/_meta.json
-!data/multiblocks/gregtech_machine_1000.json
-!data/multiblocks/gregtech_machine_1001.json
+# Generated datasets are local-only and version-namespaced (data/<version>/{multiblocks,textures}/):
+# regenerated on demand, never committed, so a user can hold several pack versions side by side.
+# Only the small curated fixtures below ship (tests + out-of-box example previews). See
+# docs/dataset-extraction/plan.md.
+/data/*
+!/data/multiblocks/
+!/data/textures/
+/data/multiblocks/*
+!/data/multiblocks/_meta.json
+!/data/multiblocks/gregtech_machine_1000.json
+!/data/multiblocks/gregtech_machine_1001.json
+/data/textures/*
+!/data/textures/manifest.json
 
 # Editor / OS
 .idea/

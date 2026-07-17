@@ -7,6 +7,7 @@ jar, and a fake downloader records calls and writes that zip to the requested pa
 
 from __future__ import annotations
 
+import json
 import zipfile
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from gtnh_solver.previewer.jar import (
     default_cache_dir,
     extract_icons,
     fetch_jar,
+    gt5u_version_from_manifest,
     jar_png_provider,
 )
 
@@ -97,3 +99,38 @@ def test_jar_png_provider_no_icons_never_fetches(tmp_path: Path) -> None:
     provider = jar_png_provider(tmp_path, url="http://example/jar", download=download)
     assert provider({}) == {}
     assert calls == [], "an empty icon set must not trigger a 135 MB download"
+
+
+def test_gt5u_version_from_manifest_reads_provenance(tmp_path: Path) -> None:
+    m = tmp_path / "manifest.json"
+    m.write_text(
+        json.dumps({"provenance": {"mod_versions": {"GT5-Unofficial": "5.09.52.594"}}}),
+        encoding="utf-8",
+    )
+    assert gt5u_version_from_manifest(m) == "5.09.52.594"
+
+
+def test_gt5u_version_from_manifest_missing_file_or_field(tmp_path: Path) -> None:
+    assert gt5u_version_from_manifest(tmp_path / "nope.json") is None  # unreadable file
+    m = tmp_path / "manifest.json"
+    m.write_text(json.dumps({"provenance": {"mod_versions": {}}}), encoding="utf-8")
+    assert gt5u_version_from_manifest(m) is None  # no GT5-Unofficial entry
+
+
+def test_jar_png_provider_fetches_the_version_specific_jar(tmp_path: Path) -> None:
+    seen: list[tuple[str, str]] = []
+
+    def download(url: str, filename: str) -> None:
+        seen.append((url, filename))
+        _fake_jar(Path(filename), _ASSETS)
+
+    provider = jar_png_provider(tmp_path, gt5u_version="9.9.9", download=download)
+    icons = {
+        "gregtech:iconsets/OVERLAY_FRONT": (
+            "assets/gregtech/textures/blocks/iconsets/OVERLAY_FRONT.png"
+        )
+    }
+    provider(icons)
+    url, filename = seen[0]
+    assert "GT5-Unofficial-9.9.9.jar" in url  # the version-specific URL
+    assert filename.endswith("GT5-Unofficial-9.9.9.jar.part")  # cached per version

@@ -276,7 +276,9 @@ final class TextureDumper {
                 accessor = active ? "getSideFacingActive" : "getSideFacingInactive";
         }
         try {
-            Object result = MTEBasicMachine.class.getMethod(accessor, byte.class).invoke(mte, (byte) 0);
+            // Colour index -1 = unpainted, so the base casing keeps the default MACHINE_METAL steel
+            // tint. A real index (0..15) paints it that dye (0 = black), which greyed every machine.
+            Object result = MTEBasicMachine.class.getMethod(accessor, byte.class).invoke(mte, (byte) -1);
             if (result instanceof ITexture[]) {
                 return describeAll((ITexture[]) result, side);
             }

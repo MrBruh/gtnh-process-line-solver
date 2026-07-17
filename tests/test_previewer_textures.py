@@ -439,6 +439,42 @@ def test_mte_block_unknown_machine_stays_unresolved() -> None:
     assert m.mte_block("Coke Oven", "MV") is None
 
 
+def _mte_names(*names: str) -> TextureManifest:
+    """A manifest of just MTE display names (each its own block+meta), for name-resolution tests."""
+    blocks = {
+        f"gregtech:gt.blockmachines|{700 + i}": {"kind": "mte", "display_name": n, "sides": {}}
+        for i, n in enumerate(names)
+    }
+    return TextureManifest({"blocks": blocks, "icons": {}})
+
+
+def test_mte_block_tiered_storage_resolves_to_lowest_variant() -> None:
+    """A generic tiered-storage name (Super Tank) resolves to its lowest numeral variant."""
+    m = _mte_names("Super Tank III", "Super Tank I", "Super Tank II")
+    assert m.mte_block("Super Tank") == m.mte_block("Super Tank I")  # lowest tier, not III
+    assert m.mte_block("Super Chest") is None  # a family that is absent stays unresolved
+
+
+def test_mte_block_flavor_prefixed_name_resolves() -> None:
+    """A generic name that is a whole-word suffix of a flavor-prefixed in-game name resolves to it."""
+    m = _mte_names("ExxonMobil Chemical Plant", "Large Chemical Reactor", "Industrial Coke Oven")
+    assert m.mte_block("Chemical Plant") == m.mte_block("ExxonMobil Chemical Plant")
+    assert m.mte_block("Coke Oven") == m.mte_block("Industrial Coke Oven")
+    assert m.mte_block("eactor") is None  # a mid-word suffix must not count (whole word only)
+
+
+def test_mte_block_flavor_prefix_picks_shortest() -> None:
+    """When several flavor-prefixed names share the suffix, the shortest (fewest extra words) wins."""
+    m = _mte_names("Industrial Coke Oven", "Super Duper Industrial Coke Oven")
+    assert m.mte_block("Coke Oven") == m.mte_block("Industrial Coke Oven")
+
+
+def test_mte_block_tier_prefix_wins_over_tiered_and_flavor() -> None:
+    """A voltage-tier-prefix hit resolves before the tiered/flavor fallbacks are tried."""
+    m = _mte_names("Basic Forge Hammer", "Forge Hammer II", "Deluxe Forge Hammer")
+    assert m.mte_block("Forge Hammer", "LV") == m.mte_block("Basic Forge Hammer")
+
+
 # --------------------------------------------------------------------------------------------------
 # Per-block expansion
 # --------------------------------------------------------------------------------------------------

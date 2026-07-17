@@ -17,26 +17,25 @@ import cpw.mods.fml.common.ModContainer;
 import cpw.mods.fml.common.event.FMLServerStartedEvent;
 
 /**
- * Headless entrypoint for the GTNH structure-dataset extractor.
+ * Headless entrypoint for the GTNH physical-dataset extractor.
  *
  * <p>
- * This is the lane 1 scaffold (issue #44). The mod loads on a dedicated server
- * alongside GT5-Unofficial + StructureLib, waits for the server to finish starting, runs
- * the dump, and then terminates the JVM so that {@code ./gradlew runServer} returns a
- * shell exit code CI can gate on: 0 on success, nonzero on any fatal failure.
+ * The mod loads on a dedicated server alongside GT5-Unofficial + StructureLib, waits for the
+ * server to finish starting, runs the requested pass(es), and then terminates the JVM so that
+ * {@code ./gradlew runServer} returns a shell exit code a caller can gate on: 0 on success,
+ * nonzero on any fatal failure.
  *
  * <p>
- * The dump body itself is intentionally empty here. The real extraction loop
- * (StructureDumper + JsonWriter + ErrorCollector, iterating
- * {@code GregTechAPI.METATILEENTITIES} and calling each controller's
- * {@code construct(...)}) lands in lane 2 (issue #45). Landing the boot/exit plumbing
- * first means lane 2 drops into a seam that a real server boot already exercises.
+ * Two passes, gated independently by system properties (see {@link #dump()}): the structure dump
+ * ({@link StructureDumper} + {@link JsonWriter} + {@link ErrorCollector}, iterating
+ * {@code GregTechAPI.METATILEENTITIES} and calling each controller's {@code construct(...)}) under
+ * {@code -PdatasetOut}, and the layered texture manifest ({@link TextureDumper}) under
+ * {@code -PtextureOut}. A texture-only run skips the structure dump entirely.
  *
  * <p>
- * GT5U / StructureLib API surface touched by this class: none yet. It references only
- * Forge/FML ({@link FMLServerStartedEvent} and
- * {@link FMLCommonHandler#exitJava(int, boolean)}). The intended (deliberately tiny) GT5U
- * surface for the dump loop is catalogued in this tool's {@code README.md}.
+ * The GT5U / StructureLib API surface the dump loops touch is deliberately small and catalogued in
+ * this tool's {@code README.md}; the design lives in {@code docs/dataset-extraction/}
+ * (requirements.md, implementation.md, plan.md).
  */
 @Mod(modid = DumperMod.MODID, version = Tags.VERSION, name = DumperMod.NAME, acceptedMinecraftVersions = "[1.7.10]")
 public class DumperMod {
@@ -73,11 +72,13 @@ public class DumperMod {
     }
 
     /**
-     * Lane 2 (issue #45): run the core dump. Resolve the output directory and run metadata from
-     * system properties (the lane-4 workflow passes them via {@code -PdatasetOut=...} etc.), build
-     * every constructable controller with {@link StructureDumper}, and write the schema-v1 dataset
-     * to {@code <datasetOut>/multiblocks/}. Throws if nothing was dumped, so an extractor that
-     * silently produces an empty dataset fails CI rather than committing it.
+     * Run the requested passes. Resolve the output directories and run metadata from system
+     * properties (a local {@code ./gradlew runServer -PdatasetOut=... -PtextureOut=...} passes them;
+     * the structure dump is local-only with no CI, so the texture manifest is the only pass a
+     * workflow drives). The structure pass builds every constructable controller with
+     * {@link StructureDumper} and writes the schema-v1 dataset to {@code <datasetOut>/multiblocks/};
+     * the texture pass writes the schema-2 manifest. Throws if a requested pass produced nothing, so
+     * an extractor that silently emits an empty dataset fails loudly rather than being trusted.
      */
     private void dump() throws Exception {
         String packVersion = System.getProperty("gtnhextractor.packVersion", "unknown-dev");

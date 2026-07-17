@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from gtnh_solver.dataset.roots import resolve_dataset_path
 from gtnh_solver.dataset.schema import MultiblockDoc, Variant, load_multiblock_doc
 
 from .bake import BakeUnavailableError, bake_layers
@@ -107,6 +108,27 @@ def _tier_prefixes(tier: str | None) -> list[str]:
     return [_FALLBACK_PREFIX]
 
 
+#: Roman-numeral (and digit) tier tokens a tiered-storage name ends with: the manifest keys Super
+#: Tank / Super Chest as "Super Tank I".."IX", but a plan names them generically ("Super Tank"). A
+#: generic name maps to the LOWEST such variant, an honest stand-in (the tiers share a near-identical
+#: skin, like the Basic fallback for voltage tiers).
+_TIER_TOKENS: dict[str, int] = {
+    roman: rank
+    for rank, roman in enumerate(["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix"], start=1)
+}
+_TIER_TOKENS.update({str(n): n for n in range(1, 10)})
+
+
+def _split_tier_suffix(norm_name: str) -> tuple[str, int] | None:
+    """``(base, rank)`` when ``norm_name`` ends with a tier token, else ``None``.
+
+    ``"super tank iii"`` -> ``("super tank", 3)``; ``"forge hammer"`` -> ``None``.
+    """
+    base, _, last = norm_name.rpartition(" ")
+    rank = _TIER_TOKENS.get(last)
+    return (base, rank) if base and rank is not None else None
+
+
 @dataclass(frozen=True)
 class TextureSummary:
     """What :func:`texturize_scene` resolved - a small, loggable report for the CLI/verification.
@@ -149,6 +171,18 @@ class TextureManifest:
         self._mte_by_norm: dict[str, tuple[str, int]] = {}
         for name, block_meta in self._mte_by_name.items():
             self._mte_by_norm.setdefault(_normalize_name(name), block_meta)
+        # Tiered-storage index: "super tank" (generic) -> the LOWEST "Super Tank I".."IX" variant,
+        # since the plan names such families generically and the tiers share a skin (see mte_block).
+        self._mte_tiered: dict[str, tuple[str, int]] = {}
+        tiered_rank: dict[str, int] = {}
+        for norm, block_meta in self._mte_by_norm.items():
+            split = _split_tier_suffix(norm)
+            if split is None:
+                continue
+            base, rank = split
+            if base not in tiered_rank or rank < tiered_rank[base]:
+                tiered_rank[base] = rank
+                self._mte_tiered[base] = block_meta
 
     @classmethod
     def load(cls, path: str | Path) -> TextureManifest:
@@ -183,24 +217,46 @@ class TextureManifest:
 
         Lets a machine type with no committed multiblock doc (a 1x1x1 machine whose whole structure
         is its own block) resolve to that block so it renders as one textured cube. A plan export
-        names such a machine generically ("Forge Hammer"), but the manifest keys it by its in-game
-        tier-prefixed name ("Basic Forge Hammer" at LV). Resolution tries, in order: the exact name
-        (a plan that already carries the full name still works), a normalized (case/punctuation/
-        whitespace-insensitive) match, then the tier-prefixed name plus a ``Basic`` fallback (see
-        ``_TIER_PREFIX``). A genuinely unknown machine returns ``None`` and keeps its placeholder box,
-        never mis-mapped.
+        names such a machine generically ("Forge Hammer", "Super Tank", "Chemical Plant"), but the
+        manifest keys it by its full in-game name. Resolution tries, in order:
+
+        1. the exact name (a plan already carrying the full name still works);
+        2. a normalized (case/punctuation/whitespace) match;
+        3. the voltage-tier prefix plus a ``Basic`` fallback (``Basic Forge Hammer``, ``_TIER_PREFIX``);
+        4. the lowest tier of a tiered-storage family (``Super Tank`` -> ``Super Tank I``);
+        5. a flavor-prefixed in-game name (``Chemical Plant`` -> ``ExxonMobil Chemical Plant``).
+
+        A genuinely unknown machine returns ``None`` and keeps its placeholder box, never mis-mapped.
         """
         exact = self._mte_by_name.get(display_name)
         if exact is not None:
             return exact
-        normalized = self._mte_by_norm.get(_normalize_name(display_name))
+        query = _normalize_name(display_name)
+        normalized = self._mte_by_norm.get(query)
         if normalized is not None:
             return normalized
         for prefix in _tier_prefixes(tier):
             hit = self._mte_by_norm.get(_normalize_name(f"{prefix} {display_name}"))
             if hit is not None:
                 return hit
-        return None
+        tiered = self._mte_tiered.get(query)
+        if tiered is not None:
+            return tiered
+        return self._flavor_prefixed(query)
+
+    def _flavor_prefixed(self, query_norm: str) -> tuple[str, int] | None:
+        """A manifest name of the form ``"<flavor> <query>"`` (the query as a whole-word suffix).
+
+        e.g. ``"chemical plant"`` -> ``"ExxonMobil Chemical Plant"``; ``"coke oven"`` ->
+        ``"Industrial Coke Oven"``. Picks the shortest such name (fewest extra words) for
+        determinism, so a plan's generic name matches a flavor-prefixed in-game one; ``None`` if
+        nothing matches.
+        """
+        suffix = " " + query_norm
+        candidates = [n for n in self._mte_by_norm if n.endswith(suffix)]
+        if not candidates:
+            return None
+        return self._mte_by_norm[min(candidates, key=lambda n: (len(n), n))]
 
 
 def load_multiblock_docs(data_dir: str | Path) -> dict[str, MultiblockDoc]:
@@ -364,6 +420,7 @@ def texturize_scene(
     *,
     multiblocks_dir: str | Path | None = None,
     manifest_path: str | Path | None = None,
+    version: str | None = None,
     png_provider: PngProvider | None = None,
 ) -> TextureSummary:
     """Expand every resolvable machine into per-block textured cubes, in place, and embed the PNGs.
@@ -382,8 +439,16 @@ def texturize_scene(
     rest and running. The default display stays idle.
     """
     all_types = tuple(sorted({m["type"] for m in scene["machines"]}))
-    mb_dir = DEFAULT_MULTIBLOCKS_DIR if multiblocks_dir is None else Path(multiblocks_dir)
-    mf_path = DEFAULT_MANIFEST_PATH if manifest_path is None else Path(manifest_path)
+    mb_dir = (
+        resolve_dataset_path("multiblocks", version=version)
+        if multiblocks_dir is None
+        else Path(multiblocks_dir)
+    )
+    mf_path = (
+        resolve_dataset_path("textures/manifest.json", version=version)
+        if manifest_path is None
+        else Path(manifest_path)
+    )
 
     scene.setdefault("blocks", [])
     scene.setdefault("textures", {})
