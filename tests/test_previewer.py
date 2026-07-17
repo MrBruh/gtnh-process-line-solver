@@ -189,6 +189,23 @@ def test_render_html_wires_the_requested_viewer_features() -> None:
     assert "t.thickness" in html  # leads sized from the scene's terminal thickness (#6)
 
 
+def test_render_html_auto_output_arrow_draws_on_top_of_the_machine() -> None:
+    # GitHub #30: the front-face auto-output arrow (#20) was buried - a placeholder machine's opaque
+    # name plate drew over it, and a machine that bakes textures renders as full-size (1.0) block cubes
+    # that swallowed an arrow tucked against the 0.92-scaled box. The arrow is now lifted just outside
+    # the machine's actual rendered surface (expansion-aware), so it draws on top of both the casing
+    # texture and the label, which keeps its opaque high-contrast backing. The WebGL result is eye-
+    # validated, so assert the two mechanisms on their own code: the arrow offset is expansion-aware,
+    # and the name decal still fills an opaque backing.
+    html = render_html(_sand_scene())
+    arrows = html[
+        html.index("for (const ac of SCENE.autoConnections)") : html.index("const layer =")
+    ]
+    assert "expandedById" in arrows  # arrow clears full-size textured cubes, not just the flat box
+    front = html[html.index("function frontFace(") : html.index("const TEXTURES")]
+    assert "fillRect(0, 0, W, H)" in front  # ...and the name keeps its opaque, readable backing
+
+
 def test_scene_route_segments_and_terminals_drive_node_and_arm_drawing() -> None:
     # Routes are drawn GT-style: a cube at each cell centre with a uniform arm out per connection -
     # an adjacent route cell or a docked machine face (GitHub #31). That rendering is a JS detail,
