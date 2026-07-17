@@ -87,6 +87,36 @@ def test_cli_guide_and_preview_together(tmp_path: Path) -> None:
     assert "<!doctype html>" in preview_file.read_text(encoding="utf-8")
 
 
+def test_cli_list_dataset_versions(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        cli_module, "list_versions", lambda: [Path("data/2.9.0"), Path("data/2.8.4")]
+    )
+    code = main(["--list-dataset-versions"])
+    assert code == 0
+    assert capsys.readouterr().out.split() == ["2.9.0", "2.8.4"]  # newest first, folder names
+
+
+def test_cli_list_dataset_versions_empty(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(cli_module, "list_versions", list)  # no versions present -> []
+    code = main(["--list-dataset-versions"])
+    assert code == 0
+    out = capsys.readouterr()
+    assert out.out == ""
+    assert "no generated dataset versions" in out.err
+
+
+def test_cli_dataset_version_unknown_falls_back(capsys: pytest.CaptureFixture[str]) -> None:
+    # An unknown version resolves to an absent data/<v>/multiblocks; the load warns and falls back
+    # to 1x1x1 footprints, so the sand line still solves.
+    code = main([_SAND, "--dataset-version", "does-not-exist"])
+    assert code == 0
+    assert "physical multiblock dataset unavailable" in capsys.readouterr().err
+
+
 def test_cli_partial_invalid_returns_1(capsys: pytest.CaptureFixture[str]) -> None:
     # nitrobenzene's multiblocks overflow crude 1x1x1 faces -> partial_invalid, reported on stderr
     code = main([_NITROBENZENE])

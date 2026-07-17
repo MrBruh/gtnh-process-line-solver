@@ -432,8 +432,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   per-version folders (`data/<version>/{multiblocks,textures}/`), so several pack versions coexist
   without overwriting. The repo ships only the two multiblock fixtures and a ~120 KB texture manifest
   scoped to the example lines' machines (down from ~6 MB), so `gtnh-solve --preview examples/*.json`
-  still skins out of the box; the full manifest is now local. Reverses the earlier "texture manifest
-  is committed" policy.
+  still skins out of the box; the full manifest is now local. The loader resolves the newest local
+  `data/<version>/` that provides each of multiblocks/textures, else the committed fixtures, with
+  `gtnh-solve --dataset-version <v>` to pin one and `--list-dataset-versions` to list them; the jar
+  for texture PNGs is fetched at the GT5-Unofficial version the resolved manifest records, so its
+  icons match. Reverses the earlier "texture manifest is committed" policy.
 - **Previewer wire->machine leads take the connecting cable's thickness (GitHub #6).** Each route
   terminal in the scene now carries the thickness of the fattest route segment incident to its
   cell (a mid-trunk tap touches several; the fattest is what visually meets the block), and the

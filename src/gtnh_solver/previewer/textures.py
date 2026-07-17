@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from gtnh_solver.dataset.roots import resolve_dataset_path
 from gtnh_solver.dataset.schema import MultiblockDoc, Variant, load_multiblock_doc
 
 from .bake import BakeUnavailableError, bake_layers
@@ -364,6 +365,7 @@ def texturize_scene(
     *,
     multiblocks_dir: str | Path | None = None,
     manifest_path: str | Path | None = None,
+    version: str | None = None,
     png_provider: PngProvider | None = None,
 ) -> TextureSummary:
     """Expand every resolvable machine into per-block textured cubes, in place, and embed the PNGs.
@@ -382,8 +384,16 @@ def texturize_scene(
     rest and running. The default display stays idle.
     """
     all_types = tuple(sorted({m["type"] for m in scene["machines"]}))
-    mb_dir = DEFAULT_MULTIBLOCKS_DIR if multiblocks_dir is None else Path(multiblocks_dir)
-    mf_path = DEFAULT_MANIFEST_PATH if manifest_path is None else Path(manifest_path)
+    mb_dir = (
+        resolve_dataset_path("multiblocks", version=version)
+        if multiblocks_dir is None
+        else Path(multiblocks_dir)
+    )
+    mf_path = (
+        resolve_dataset_path("textures/manifest.json", version=version)
+        if manifest_path is None
+        else Path(manifest_path)
+    )
 
     scene.setdefault("blocks", [])
     scene.setdefault("textures", {})
