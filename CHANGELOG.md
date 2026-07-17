@@ -594,6 +594,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
 
 ### Fixed
+- **Super Tank / Super Chest output glyph faced the wrong way (`previewer/`).** A boundary-storage
+  block auto-outputs from its front face, but the previewer oriented its output glyph (OVERLAY_STANK /
+  OVERLAY_SCHEST) to the placer's `front`, which defaults every machine to north and does not track
+  the eject face, so the glyph pointed away from where the block actually outputs (glyph north while
+  the auto-output ejected east). A storage block with a horizontal auto-output now orients its glyph
+  to that direction, so the glyph and the cyan auto-output arrow agree. Machines whose front overlay
+  is a GUI/identity face rather than an output, and a storage block with a vertical eject (which a
+  side glyph cannot point at), keep their placed front.
 - **Basic single-block machines rendered without their front-face overlay (`tools/gtnh-extractor`,
   `previewer`, GitHub #3).** A basic machine (Forge Hammer, Macerator, Alloy Smelter, ...) drew as a
   plain steel box because its per-machine glyph never reached the manifest: the textured `mTextures`

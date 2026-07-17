@@ -20,6 +20,7 @@ import pytest
 from gtnh_solver.dataset.schema import MultiblockDoc
 from gtnh_solver.previewer.bake import bake_layers
 from gtnh_solver.previewer.textures import (
+    _GT_SIDE_TO_THREE_SLOT,
     TextureManifest,
     expand_machine,
     primary_variant,
@@ -604,6 +605,59 @@ def test_generic_single_block_machine_textures_via_tier(dataset: tuple[Path, Pat
     assert scene["blocks"][0]["block"] == "gregtech:gt.blockmachines"
     assert scene["blocks"][0]["meta"] == 611  # Basic Test Hammer, resolved from generic name + LV
     assert "Test Hammer" in summary.textured_types
+
+
+def test_storage_glyph_faces_auto_output_direction(dataset: tuple[Path, Path]) -> None:
+    """A boundary-storage block auto-outputs from its front, so its output glyph rotates to face the
+    auto-output direction (EAST here), not the placer's default 'north' - the Super Tank/Chest fix."""
+    mb, manifest = dataset
+    scene = {
+        "version": 1,
+        "machines": [{**_machine("s1", "Test Macerator", [0, 0, 0], [1, 1, 1]), "role": "storage"}],
+        "autoConnections": [
+            {
+                "netId": "n",
+                "source": "s1",
+                "target": "x",
+                "sourceFace": "east",
+                "targetFace": "west",
+            }
+        ],
+    }
+    texturize_scene(scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider)
+    # the world EAST face now samples the machine's NORTH glyph, so the glyph points where it ejects
+    assert (
+        scene["blocks"][0]["texture"][_GT_SIDE_TO_THREE_SLOT[5]]
+        == "gregtech:gt.blockmachines|5|NORTH|inactive"
+    )
+
+
+def test_non_storage_glyph_keeps_placed_front(dataset: tuple[Path, Path]) -> None:
+    """A non-storage machine ignores the auto-output face: its front glyph stays on its placed front,
+    so only Super Tank/Chest-style storage blocks are reoriented."""
+    mb, manifest = dataset
+    scene = {
+        "version": 1,
+        "machines": [_machine("m1", "Test Macerator", [0, 0, 0], [1, 1, 1])],  # role 'machine'
+        "autoConnections": [
+            {
+                "netId": "n",
+                "source": "m1",
+                "target": "x",
+                "sourceFace": "east",
+                "targetFace": "west",
+            }
+        ],
+    }
+    texturize_scene(scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider)
+    block = scene["blocks"][0]
+    assert (
+        block["texture"][
+            _GT_SIDE_TO_THREE_SLOT[2]
+        ]  # world NORTH (the placed front) keeps the glyph
+        == "gregtech:gt.blockmachines|5|NORTH|inactive"
+    )
+    assert block["texture"][_GT_SIDE_TO_THREE_SLOT[5]] is None  # nothing rotated onto EAST
 
 
 def test_docless_multiblock_keeps_placeholder_not_a_lone_cube(dataset: tuple[Path, Path]) -> None:

@@ -364,8 +364,28 @@ def expand_machine(machine: Mapping[str, Any], doc: MultiblockDoc) -> list[Block
     return [c for c in cubes if _within_footprint(c.cell, cell, size)]
 
 
+def _glyph_steps(machine: Mapping[str, Any], auto_out_face: Mapping[str, str] | None) -> int:
+    """Clockwise yaw turns that orient a single-block machine's front glyph to the manifest NORTH.
+
+    A boundary-storage block (Super Tank / Super Chest) auto-outputs *from its front face*, so its
+    output glyph (``OVERLAY_STANK`` / ``OVERLAY_SCHEST``) should face the auto-output direction. The
+    placer's ``front`` does not track the eject face (it defaults every machine to NORTH), which
+    would leave that glyph pointing away from where the block actually ejects, so a storage block
+    with a *horizontal* auto-output orients to that face instead. Every other machine (and a storage
+    block with a vertical eject, which a side glyph can't point at) keeps its placed front.
+    """
+    if machine.get("role") == "storage" and auto_out_face:
+        face = auto_out_face.get(str(machine.get("id")))
+        if face in _FRONT_CW_STEPS:  # horizontal eject only
+            return _FRONT_CW_STEPS[face]
+    return _FRONT_CW_STEPS.get(str(machine.get("front", "north")), 0)
+
+
 def _machine_cubes(
-    machine: Mapping[str, Any], docs: Mapping[str, MultiblockDoc], manifest: TextureManifest
+    machine: Mapping[str, Any],
+    docs: Mapping[str, MultiblockDoc],
+    manifest: TextureManifest,
+    auto_out_face: Mapping[str, str] | None = None,
 ) -> list[BlockCube]:
     """The per-block cubes for a machine: its multiblock doc if committed, else a single-block cube.
 
@@ -375,6 +395,9 @@ def _machine_cubes(
     A doc-less MULTIblock (a bigger footprint whose structure failed extraction, e.g.
     the dynamic-height Distillation Tower) must NOT collapse to a lone controller cube - it yields
     nothing and keeps its placeholder box, so its true reserved footprint still shows.
+
+    ``auto_out_face`` (machine id -> auto-output face) lets a boundary-storage block point its output
+    glyph the way it actually ejects rather than its placed front (see :func:`_glyph_steps`).
     """
     doc = docs.get(machine["type"])
     if doc is not None:
@@ -383,7 +406,7 @@ def _machine_cubes(
     if single is not None and tuple(machine.get("size", (1, 1, 1))) == (1, 1, 1):
         block, meta = single
         cell = machine["cell"]
-        steps = _FRONT_CW_STEPS.get(str(machine.get("front", "north")), 0)
+        steps = _glyph_steps(machine, auto_out_face)
         return [BlockCube((cell[0], cell[1], cell[2]), block, meta, steps)]
     return []
 
@@ -460,6 +483,13 @@ def texturize_scene(
 
     manifest = TextureManifest.load(mf_path)
 
+    # A boundary-storage block's output glyph should face the way it auto-outputs, not the placer's
+    # default front (see _glyph_steps). First auto-output per source machine wins (storage blocks
+    # have a single output).
+    auto_out_face: dict[str, str] = {}
+    for ac in scene.get("autoConnections", []):
+        auto_out_face.setdefault(ac["source"], ac["sourceFace"])
+
     # Expand every machine with a committed doc (or a single-block manifest entry) into per-block
     # cubes. A cube whose faces do not resolve is kept anyway - it renders as a neutral placeholder
     # block - so the machine's full structure shows; the plan forbids collapsing to one stretched box
@@ -471,7 +501,7 @@ def texturize_scene(
     # texture - are collected here (a plain casing is identical in both states and skipped).
     key_layers_active: dict[str, list[dict[str, Any]]] = {}
     for machine in scene["machines"]:
-        machine_cubes = _machine_cubes(machine, docs, manifest)
+        machine_cubes = _machine_cubes(machine, docs, manifest, auto_out_face)
         if not machine_cubes:
             continue  # no doc and not a known single-block machine -> keep the placeholder box
         machine["expanded"] = True
