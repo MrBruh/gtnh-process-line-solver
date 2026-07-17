@@ -7,6 +7,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Previewer resolves more single-block machines by name (`previewer/`, GitHub #3).** Building on
+  the voltage-tier prefix match, `TextureManifest.mte_block` now also resolves two naming shapes the
+  plan's generic names previously missed: tiered-storage families keyed by numeral in the manifest
+  (`Super Tank` -> the lowest `Super Tank I`, likewise `Super Chest`), and flavor-prefixed in-game
+  names where the generic name is a whole-word suffix (`Chemical Plant` -> `ExxonMobil Chemical
+  Plant`, `Coke Oven` -> `Industrial Coke Oven`). On the two example lines this takes single-block
+  texture resolution from 8 to 25 machines; only the solver-synthesized Power Sources stay
+  placeholders. The new strategies run after the exact/normalized/tier-prefix ones, so nothing that
+  resolved before changes, and a genuinely unknown machine still resolves to nothing (kept on its
+  placeholder box, never mis-mapped).
 - **Real multiblock footprints wired into the solve path (`cli`, `adapter`, GAP A / the overlap
   fix).** `gtnh-solve` now loads the committed physical dataset (`data/multiblocks/`) and passes it
   to the adapter, so a machine whose type the dataset knows (Electric Blast Furnace, Vacuum Freezer)
