@@ -139,21 +139,21 @@ function track(obj, minY, maxY) { layered.push({ obj, minY, maxY }); scene.add(o
 function cc(c) { return new THREE.Vector3(c[0] + 0.5, c[1] + 0.5, c[2] + 0.5); }
 
 // A square-cross-section bar from a to b (cables, pipes, leads are rectangular, not round).
-function bar(a, b, cross, color) {
+function bar(a, b, cross, color, mat) {
   const d = new THREE.Vector3().subVectors(b, a);
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(cross, d.length() || 0.001, cross),
-    new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.1 }));
+    mat || new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.1 }));
   mesh.position.copy(a).add(b).multiplyScalar(0.5);
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.clone().normalize());
   return mesh;
 }
 
 // A small cube at a cell centre - the node a route's connection arms fan out from.
-function node(pos, size, color) {
+function node(pos, size, color, mat) {
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(size, size, size),
-    new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.1 }));
+    mat || new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.1 }));
   mesh.position.copy(pos);
   return mesh;
 }
@@ -336,8 +336,16 @@ for (const b of (SCENE.blocks || [])) {
 // A route is drawn GT-style: a small cube at each cell centre, with a UNIFORM cross-section arm from
 // that cube out to the block edge for every connection - an adjacent route cell, or a docked machine
 // face. One node per cell keeps the run readable however tightly the routes are packed.
+const ROUTE_TEX = SCENE.routeTextures || {};   // spike #4: netId (or commodity) -> baked sprite data URI
 for (const r of SCENE.routes) {
   const isPower = r.commodity === 'power';
+  // Spike (#4): wrap the route's nodes+arms in a baked pipe/cable sprite when the scene supplies one
+  // (keyed by netId, e.g. "power:LV", so a per-tier cable skin is possible), else keep the flat colour
+  // - the same graceful-degradation contract the machine cubes use for an unbaked face.
+  const _ruri = ROUTE_TEX[r.netId] || ROUTE_TEX[r.commodity];
+  const routeMat = _ruri
+    ? new THREE.MeshStandardMaterial({ map: loadTex(_ruri), roughness: 0.5, metalness: 0.1 })
+    : null;
   const cells = new Map();   // "x,y,z" -> { cell, dirs: Set of "dx,dy,dz", thick }
   const touch = (c, thick) => {
     const k = c.join(',');
@@ -360,11 +368,11 @@ for (const r of SCENE.routes) {
   for (const e of cells.values()) {
     const cross = isPower ? 0.09 * Math.sqrt(e.thick) : 0.07;
     const c = cc(e.cell);
-    track(node(c, cross, r.color), e.cell[1], e.cell[1]);
+    track(node(c, cross, r.color, routeMat), e.cell[1], e.cell[1]);
     for (const dk of e.dirs) {
       const d = dk.split(',').map(Number);
       const end = c.clone().add(new THREE.Vector3(d[0] * 0.5, d[1] * 0.5, d[2] * 0.5));
-      track(bar(c, end, cross, r.color), e.cell[1], e.cell[1]);
+      track(bar(c, end, cross, r.color, routeMat), e.cell[1], e.cell[1]);
     }
   }
 }
