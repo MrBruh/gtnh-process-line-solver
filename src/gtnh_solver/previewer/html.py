@@ -64,6 +64,7 @@ _TEMPLATE = (
   <button id="reset">reset camera</button>
   <button id="rateUnit" title="toggle throughput units">rate: per tick</button>
   <button id="stateToggle" title="toggle machine idle / running skins">state: idle</button>
+  <button id="arrowToggle" title="show / hide the auto-output arrows">arrows: on</button>
 </div>
 
 <script type="importmap">
@@ -356,6 +357,8 @@ for (const r of SCENE.routes) {
 // direction - the two side faces perpendicular to it plus the top and bottom. (The output face and
 // its opposite can't show an in-plane arrow.) At least one is visible from any angle, however
 // tightly the machines are packed together, so the flow direction is never fully occluded.
+const arrows = [];   // the auto-output arrow decals, shown/hidden by #arrowToggle
+let arrowsOn = true;
 for (const ac of SCENE.autoConnections) {
   const src = centerById[ac.source], n = FACE_NORMAL[ac.sourceFace];
   if (!src || !n) continue;
@@ -379,6 +382,7 @@ for (const ac of SCENE.autoConnections) {
     deco.quaternion.setFromRotationMatrix(
       new THREE.Matrix4().makeBasis(nv, new THREE.Vector3().crossVectors(mv, nv), mv));
     track(deco, cellY, cellY + size[1] - 1);
+    arrows.push(deco);
   }
 }
 
@@ -392,6 +396,7 @@ function applyLayer() {
   const all = v < bmin.y;
   layerVal.textContent = all ? 'all' : String(v);
   for (const it of layered) it.obj.visible = all || (it.minY <= v && v <= it.maxY);
+  if (!arrowsOn) for (const a of arrows) a.visible = false;   // #arrowToggle overrides the layer filter
 }
 layer.addEventListener('input', applyLayer);
 document.getElementById('reset').addEventListener('click', resetCamera);
@@ -409,6 +414,20 @@ if (stateMaterials.length === 0) {
     running = !running;
     stateToggle.textContent = 'state: ' + (running ? 'running' : 'idle');
     for (const s of stateMaterials) { s.mat.map = running ? s.active : s.idle; s.mat.needsUpdate = true; }
+  });
+}
+
+// Auto-output arrow show/hide. Disabled when the layout has no auto-output connections. When on, the
+// arrows still obey the layer slider (they are layer-tracked); when off, applyLayer forces them hidden.
+const arrowToggle = document.getElementById('arrowToggle');
+if (arrows.length === 0) {
+  arrowToggle.disabled = true;
+  arrowToggle.title = 'no auto-output arrows in this layout';
+} else {
+  arrowToggle.addEventListener('click', () => {
+    arrowsOn = !arrowsOn;
+    arrowToggle.textContent = 'arrows: ' + (arrowsOn ? 'on' : 'off');
+    applyLayer();
   });
 }
 

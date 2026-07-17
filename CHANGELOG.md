@@ -7,6 +7,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Previewer: toggle the auto-output arrows (`previewer/`).** The controls bar gains an
+  `arrows: on/off` button that shows or hides the cyan auto-output direction arrows, so a builder can
+  declutter the view. When on, the arrows still follow the layer slider; the button disables itself
+  for a layout with no auto-output connections.
 - **Previewer resolves more single-block machines by name (`previewer/`, GitHub #3).** Building on
   the voltage-tier prefix match, `TextureManifest.mte_block` now also resolves two naming shapes the
   plan's generic names previously missed: tiered-storage families keyed by numeral in the manifest
