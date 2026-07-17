@@ -7,6 +7,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Previewer: hover a block to see its machine name (`previewer/html.py`).** A textured cube carries
+  no readable label (the front-face name plate is drawn only on the flat placeholder box), so once
+  every machine is skinned it was hard to tell which is which. Moving the pointer over any block now
+  floats that block's machine name above it (a raycast pick, reprojected each frame so it stays glued
+  to the block while the camera orbits) and clears when the pointer leaves. Hovering any sub-block of
+  an expanded multiblock shows its parent machine's name.
 - **Previewer: toggle the auto-output arrows (`previewer/`).** The controls bar gains an
   `arrows: on/off` button that shows or hides the cyan auto-output direction arrows, so a builder can
   declutter the view. When on, the arrows still follow the layer slider; the button disables itself
@@ -594,13 +600,34 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
 
 ### Fixed
+- **Super Tank / Super Chest output glyph faced the wrong way (`previewer/`).** A boundary-storage
+  block auto-outputs from its front face, but the previewer oriented its output glyph (OVERLAY_STANK /
+  OVERLAY_SCHEST) to the placer's `front`, which defaults every machine to north and does not track
+  the eject face, so the glyph pointed away from where the block actually outputs (glyph north while
+  the auto-output ejected east). A storage block with a horizontal auto-output now orients its glyph
+  to that direction, so the glyph and the cyan auto-output arrow agree. Machines whose front overlay
+  is a GUI/identity face rather than an output, and a storage block with a vertical eject (which a
+  side glyph cannot point at), keep their placed front.
+- **Basic single-block machines rendered without their front-face overlay (`tools/gtnh-extractor`,
+  `previewer`, GitHub #3).** A basic machine (Forge Hammer, Macerator, Alloy Smelter, ...) drew as a
+  plain steel box because its per-machine glyph never reached the manifest: the textured `mTextures`
+  stack that carries the overlay is built `@SideOnly(CLIENT)` and is null on the dedicated server the
+  extractor runs, and the `getXxxFacing…(byte)` accessors return the base casing layer only. The
+  extractor now reconstructs the glyph from its deterministic asset path,
+  `basicmachines/<folder>/OVERLAY_<FACE>[_ACTIVE][_GLOW]`, deriving `<folder>` from the machine's
+  server-side `mName` (`basicmachine.<token>.tier.NN`) matched against the real folder set it
+  enumerates from the GT5U jar, and appends it (plus a separate `_GLOW` emissive layer where a sibling
+  PNG exists) above the casing, only for faces whose PNG actually exists so nothing is invented. On the
+  committed example manifest this drops casing-only single-block fronts from 677 to 197, and the Forge
+  Hammers in the sand preview now show their hammer glyph. The steel casing tint (`[210,220,255]`) and
+  the multiblock hull overlays are unchanged.
 - **Basic single-block machines were extracted painted black (`tools/gtnh-extractor`, `previewer`).**
   `TextureDumper.basicMachineLayers` read each machine's texture through the `getXxxFacing…(byte)`
   accessors with colour index `0`, which is the black dye, so the base casing came out tinted
   `[32,32,32]` (near-black gray) instead of the default `MACHINE_METAL` steel. Passing `-1`
   (unpainted) fixes it, and the committed example manifest was regenerated from a fresh extractor
   run, so the Forge Hammers (and every other basic machine) now render steel-blue rather than gray.
-  (Their front-face overlay icon is a separate, still-open extraction gap.)
+  (Their front-face overlay icon is captured separately; see the entry above.)
 - **Auto-output arrow draws on top of the machine in the previewer (`previewer/html.py`, GitHub
   #30).** The per-face auto-output arrows (#20) render on every source face perpendicular to the
   ejecting direction, but the arrow sat a hair off the 0.92-scaled placeholder box, so it was buried

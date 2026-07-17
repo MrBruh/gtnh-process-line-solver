@@ -20,6 +20,7 @@ import pytest
 from gtnh_solver.dataset.schema import MultiblockDoc
 from gtnh_solver.previewer.bake import bake_layers
 from gtnh_solver.previewer.textures import (
+    _GT_SIDE_TO_THREE_SLOT,
     TextureManifest,
     expand_machine,
     primary_variant,
@@ -606,6 +607,59 @@ def test_generic_single_block_machine_textures_via_tier(dataset: tuple[Path, Pat
     assert "Test Hammer" in summary.textured_types
 
 
+def test_storage_glyph_faces_auto_output_direction(dataset: tuple[Path, Path]) -> None:
+    """A boundary-storage block auto-outputs from its front, so its output glyph rotates to face the
+    auto-output direction (EAST here), not the placer's default 'north' - the Super Tank/Chest fix."""
+    mb, manifest = dataset
+    scene = {
+        "version": 1,
+        "machines": [{**_machine("s1", "Test Macerator", [0, 0, 0], [1, 1, 1]), "role": "storage"}],
+        "autoConnections": [
+            {
+                "netId": "n",
+                "source": "s1",
+                "target": "x",
+                "sourceFace": "east",
+                "targetFace": "west",
+            }
+        ],
+    }
+    texturize_scene(scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider)
+    # the world EAST face now samples the machine's NORTH glyph, so the glyph points where it ejects
+    assert (
+        scene["blocks"][0]["texture"][_GT_SIDE_TO_THREE_SLOT[5]]
+        == "gregtech:gt.blockmachines|5|NORTH|inactive"
+    )
+
+
+def test_non_storage_glyph_keeps_placed_front(dataset: tuple[Path, Path]) -> None:
+    """A non-storage machine ignores the auto-output face: its front glyph stays on its placed front,
+    so only Super Tank/Chest-style storage blocks are reoriented."""
+    mb, manifest = dataset
+    scene = {
+        "version": 1,
+        "machines": [_machine("m1", "Test Macerator", [0, 0, 0], [1, 1, 1])],  # role 'machine'
+        "autoConnections": [
+            {
+                "netId": "n",
+                "source": "m1",
+                "target": "x",
+                "sourceFace": "east",
+                "targetFace": "west",
+            }
+        ],
+    }
+    texturize_scene(scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider)
+    block = scene["blocks"][0]
+    assert (
+        block["texture"][
+            _GT_SIDE_TO_THREE_SLOT[2]
+        ]  # world NORTH (the placed front) keeps the glyph
+        == "gregtech:gt.blockmachines|5|NORTH|inactive"
+    )
+    assert block["texture"][_GT_SIDE_TO_THREE_SLOT[5]] is None  # nothing rotated onto EAST
+
+
 def test_docless_multiblock_keeps_placeholder_not_a_lone_cube(dataset: tuple[Path, Path]) -> None:
     """A doc-less MULTIblock must not collapse to one controller cube (the Distillation Tower case)."""
     mb, manifest = dataset
@@ -732,3 +786,38 @@ def test_active_override_skipped_when_idle_face_did_not_bake(dataset: tuple[Path
     assert not any(k.startswith("gregtech:gt.blockmachines|9|NORTH") for k in scene["textures"])
     assert scene["texturesActive"] == {}  # ...and no orphan active override is emitted for it
     assert summary.embedded_active_icons == 0
+
+
+# --------------------------------------------------------------------------------------------------
+# Committed-manifest golden guard - basic single-block machine front overlays (issue #3)
+# --------------------------------------------------------------------------------------------------
+
+_COMMITTED_MANIFEST = Path(__file__).resolve().parents[1] / "data" / "textures" / "manifest.json"
+
+
+def test_committed_basic_machine_front_carries_overlay() -> None:
+    """Golden guard (issue #3): a basic single-block machine's front face in the SHIPPED manifest
+    carries its per-machine ``OVERLAY_FRONT`` glyph on top of the casing.
+
+    Basic machines' textured stack is built ``@SideOnly(CLIENT)`` and is null on the dedicated
+    server the extractor runs, so the overlay is reconstructed from its deterministic
+    ``basicmachines/<folder>/`` asset path. Before the fix these fronts were casing-only (a plain
+    steel box); this pins the Basic Forge Hammer (meta 611) so a future extractor change cannot
+    silently drop basic-machine overlays again.
+    """
+    manifest = json.loads(_COMMITTED_MANIFEST.read_text(encoding="utf-8"))
+    m = TextureManifest(manifest)
+    icons = [layer["icon"] for layer in m.layers("gregtech:gt.blockmachines", 611, "NORTH")]
+
+    assert icons, "the Basic Forge Hammer must be present in the committed manifest"
+    assert icons[0] == "gregtech:iconsets/MACHINE_LV_SIDE", (
+        "the LV steel casing stays the base layer"
+    )
+    assert "gregtech:basicmachines/hammer/OVERLAY_FRONT" in icons, (
+        "the Forge Hammer's front glyph overlay must sit above the casing, not be dropped"
+    )
+    # the overlay name resolves to its real jar asset path (a deobf-rename / dropped-icon guard).
+    assert (
+        manifest["icons"]["gregtech:basicmachines/hammer/OVERLAY_FRONT"]
+        == "assets/gregtech/textures/blocks/basicmachines/hammer/OVERLAY_FRONT.png"
+    )

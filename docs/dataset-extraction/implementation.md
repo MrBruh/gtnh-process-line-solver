@@ -79,9 +79,17 @@ captured during the hint pass.
 Two mechanisms, composed:
 
 - **MTE reflection** for machines, hatches, buses, and controller hulls. Basic single-block
-  machines read their `ITexture[]` via the `getXxxFacingInactive/Active(byte)` accessors (no tile
-  entity needed); hulls and hatches are placed once and read via
+  machines read their casing `ITexture[]` via the `getXxxFacingInactive/Active(byte)` accessors (no
+  tile entity needed); hulls and hatches are placed once and read via
   `getTexture(base, side, facing, colour, active, redstone)`.
+  - *Basic-machine per-face overlays (issue #3):* a basic machine's per-machine glyph is not
+    reachable server-side (its `mTextures` stack is built `@SideOnly(CLIENT)` and is null on the
+    dedicated server; the accessors return the casing layer only). It is reconstructed from the
+    deterministic asset path `basicmachines/<folder>/OVERLAY_<FACE>[_ACTIVE][_GLOW]`, with `<folder>`
+    derived from the machine's server-side `mName` (`basicmachine.<token>.tier.NN`) matched (case- and
+    underscore-insensitively) against the real folder set enumerated from the GT5U jar. Only faces
+    whose PNG exists get the overlay (plus a separate `_GLOW` layer when present); nothing is invented,
+    and a machine without a `basicmachines` folder stays casing-only.
 - **Block-icon reflection** for the plain structure blocks (casings, coils, glass): one un-tinted
   iconset layer per meta.
 
