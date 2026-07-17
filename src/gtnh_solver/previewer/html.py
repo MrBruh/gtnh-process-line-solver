@@ -5,7 +5,9 @@ clickable ``.html`` that pulls three.js from a CDN and draws the layout. The cam
 pans (right-drag / arrow keys), and a layer-by-layer slider isolates each y-level. Machines are
 solid boxes skinned with their real GT casing texture where ``scene.textures`` supplies one (the
 six per-face icons ride ``machine.texture``; missing icons fall back to the flat type colour), with
-the machine name on the front face; a state control swaps every machine between its idle and running
+the machine name on the front face and, since a textured cube shows no name, a hover name tag that
+floats a block's machine name above it (raycast pick); a state control swaps every machine between
+its idle and running
 skin where the two differ (the running faces ride ``scene.texturesActive``, default idle); routes
 (cables and
 pipes) are drawn GT-style, a small cube at each cell centre with a uniform arm out to the block edge
@@ -53,10 +55,14 @@ _TEMPLATE = (
   b { color: #aab2bd; font-weight: 600; }
   button { font: inherit; color: #e8eaed; background: #2a2f37; border: 1px solid #3a4150;
            border-radius: 4px; padding: 3px 8px; cursor: pointer; }
+  #nametag { position: fixed; z-index: 20; left: 0; top: 0; display: none; pointer-events: none;
+             transform: translate(-50%, -100%); background: rgba(20,22,28,0.92);
+             border: 1px solid #3a4150; border-radius: 4px; padding: 2px 7px; white-space: nowrap;
+             font-weight: 600; box-shadow: 0 2px 6px rgba(0,0,0,0.45); }
 </style>
 </head>
 <body>
-<div id="hud">loading...<div id="hint">drag: rotate &middot; right-drag / arrows: pan &middot; scroll: zoom</div></div>
+<div id="hud">loading...<div id="hint">drag: rotate &middot; right-drag / arrows: pan &middot; scroll: zoom &middot; hover: name</div></div>
 <div id="legend"></div>
 <div id="controls">
   <span>layer <b id="layerVal">all</b></span>
@@ -66,6 +72,7 @@ _TEMPLATE = (
   <button id="stateToggle" title="toggle machine idle / running skins">state: idle</button>
   <button id="arrowToggle" title="show / hide the auto-output arrows">arrows: on</button>
 </div>
+<div id="nametag"></div>
 
 <script type="importmap">
 { "imports": {
@@ -277,6 +284,11 @@ function blockMaterials(faces) {
 }
 
 const centerById = {}, sizeById = {}, expandedById = {};
+// Hover identification (#): every machine box and every per-block cube is a raycast target tagged
+// with its machine id, so hovering any block floats that machine's name above it - the textures
+// alone don't say which machine is which. nameById maps the id to the label to show.
+const hoverables = [];
+const nameById = Object.fromEntries(SCENE.machines.map((m) => [m.id, m.type]));
 for (const m of SCENE.machines) {
   const [sx, sy, sz] = m.size;
   const pos = new THREE.Vector3(m.cell[0] + sx / 2, m.cell[1] + sy / 2, m.cell[2] + sz / 2);
@@ -292,6 +304,8 @@ for (const m of SCENE.machines) {
   const geo = new THREE.BoxGeometry(sx * 0.92, sy * 0.92, sz * 0.92);
   const box = new THREE.Mesh(geo, flatMaterial(m));
   box.position.copy(pos);
+  box.userData.machineId = m.id;   // hover -> name tag
+  hoverables.push(box);
   track(box, minY, maxY);
   const edges = new THREE.LineSegments(
     new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: '#11141a' }));
@@ -314,6 +328,8 @@ for (const b of (SCENE.blocks || [])) {
   const geo = new THREE.BoxGeometry(1, 1, 1);
   const cube = new THREE.Mesh(geo, blockMaterials(b.texture));
   cube.position.set(b.cell[0] + 0.5, b.cell[1] + 0.5, b.cell[2] + 0.5);
+  cube.userData.machineId = b.machine;   // hover any block -> its parent machine's name tag
+  hoverables.push(cube);
   track(cube, b.cell[1], b.cell[1]);
 }
 
@@ -484,7 +500,41 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-function animate() { requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); }
+// Hover name tag: raycast the pointer against the machine boxes + block cubes and float the hovered
+// machine's name above its centre. Only VISIBLE targets count (the layer slider hides blocks), and
+// the tag reprojects every frame so it stays glued to the block while the camera orbits.
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+const nametag = document.getElementById('nametag');
+let hoverId = null;
+renderer.domElement.addEventListener('pointermove', (ev) => {
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const hit = raycaster.intersectObjects(hoverables, false).find((h) => h.object.visible);
+  hoverId = hit ? hit.object.userData.machineId : null;
+});
+renderer.domElement.addEventListener('pointerleave', () => { hoverId = null; });
+const _tagPos = new THREE.Vector3();
+function updateNametag() {
+  const c = hoverId != null ? centerById[hoverId] : null;
+  if (!c || !nameById[hoverId]) { nametag.style.display = 'none'; return; }
+  const s = sizeById[hoverId] || [1, 1, 1];
+  _tagPos.set(c.x, c.y + s[1] / 2 + 0.15, c.z).project(camera);
+  if (_tagPos.z >= 1) { nametag.style.display = 'none'; return; }   // behind the camera
+  nametag.style.left = ((_tagPos.x * 0.5 + 0.5) * window.innerWidth) + 'px';
+  nametag.style.top = ((-_tagPos.y * 0.5 + 0.5) * window.innerHeight) + 'px';
+  nametag.textContent = nameById[hoverId];
+  nametag.style.display = 'block';
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  updateNametag();
+  renderer.render(scene, camera);
+}
 applyLayer();
 animate();
 </script>

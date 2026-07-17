@@ -7,6 +7,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Previewer: hover a block to see its machine name (`previewer/html.py`).** A textured cube carries
+  no readable label (the front-face name plate is drawn only on the flat placeholder box), so once
+  every machine is skinned it was hard to tell which is which. Moving the pointer over any block now
+  floats that block's machine name above it (a raycast pick, reprojected each frame so it stays glued
+  to the block while the camera orbits) and clears when the pointer leaves. Hovering any sub-block of
+  an expanded multiblock shows its parent machine's name.
 - **Previewer: toggle the auto-output arrows (`previewer/`).** The controls bar gains an
   `arrows: on/off` button that shows or hides the cyan auto-output direction arrows, so a builder can
   declutter the view. When on, the arrows still follow the layer slider; the button disables itself

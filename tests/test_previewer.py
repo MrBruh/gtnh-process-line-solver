@@ -187,6 +187,8 @@ def test_render_html_wires_the_requested_viewer_features() -> None:
     assert "PlaneGeometry" in html  # machine names live on the front face (#3)
     assert "faceArrow" in html  # per-face auto-output direction arrows (#4)
     assert "t.thickness" in html  # leads sized from the scene's terminal thickness (#6)
+    assert "Raycaster" in html  # hover a block -> its machine name tag
+    assert 'id="nametag"' in html  # ...shown in the floating name-tag element
 
 
 def test_render_html_auto_output_arrow_draws_on_top_of_the_machine() -> None:
