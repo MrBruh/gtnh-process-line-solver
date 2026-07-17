@@ -8,7 +8,7 @@ import org.apache.logging.log4j.Logger;
 
 /**
  * Collects per-controller failures so one broken multiblock never kills the run (design
- * principle 5 of {@code DATASET_EXTRACTION_PLAN.md}: "fail loud, per-controller"). Every entry
+ * principle 5 of {@code docs/dataset-extraction/plan.md}: "fail loud, per-controller"). Every entry
  * lands in {@code _meta.json.failures} as {@code {registry_name, reason}}, turning a version bump
  * that breaks extraction of some multiblock into a visible coverage regression in the PR diff
  * rather than a silent absence.

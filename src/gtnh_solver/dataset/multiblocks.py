@@ -1,6 +1,6 @@
 """Adapter: schema-v1 multiblock facts -> the solver's physical-rules dataset.
 
-Design principle 3 of ``DATASET_EXTRACTION_PLAN.md`` (section 2): the extractor emits raw facts
+Design principle 3 of ``docs/dataset-extraction/plan.md``: the extractor emits raw facts
 (blocks, hints, variants, substitutions); **all interpretation lives here**, in Python, where
 the IR contracts and the tests are. Footprint bounding boxes, hint-derived face constraints, and
 coil-tier semantics are computed from those facts and re-expressed as IR-shaped types

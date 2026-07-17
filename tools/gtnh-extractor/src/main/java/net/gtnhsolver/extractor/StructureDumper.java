@@ -38,7 +38,7 @@ import gregtech.common.misc.GTStructureChannels;
  * construct themselves into a scratch region of a real server world, read back the placed blocks
  * and hint dots, and hand the raw facts to {@link JsonWriter}. No game logic beyond coordinate
  * collection lives here - footprint math, faces, and tier semantics are the Python adapter's job
- * (design principle 3 of {@code DATASET_EXTRACTION_PLAN.md}).
+ * (design principle 3 of {@code docs/dataset-extraction/plan.md}).
  *
  * <p>
  * Because we execute the very {@code construct(...)} the in-game hologram projector runs, the

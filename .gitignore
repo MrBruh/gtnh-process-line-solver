@@ -27,7 +27,7 @@ out/
 *.litematic
 *.schematic
 
-# Structure dump is local-only (see gtnh-worktrees/DATASET_EXTRACTION_PLAN.md): the extractor
+# Structure dump is local-only (see docs/dataset-extraction/plan.md): the extractor
 # regenerates ~190 multiblock docs on demand; only the two curated fixtures are committed.
 data/multiblocks/*.json
 !data/multiblocks/_meta.json

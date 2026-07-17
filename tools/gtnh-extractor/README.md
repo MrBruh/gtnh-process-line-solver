@@ -8,8 +8,8 @@ runs it, it only reads the JSON the tool emits.
 The tool boots a **headless dedicated server** with GT5-Unofficial + StructureLib loaded,
 builds every multiblock controller into a void world, scans the result, and dumps JSON.
 Because it executes the same `construct(...)` code the in-game hologram projector runs, the
-output matches in-game behaviour by construction. See `DATASET_EXTRACTION_PLAN.md` (section
-1.3 and 4) for the full rationale.
+output matches in-game behaviour by construction. See `docs/dataset-extraction/` (requirements.md,
+implementation.md, plan.md) for the full rationale.
 
 ## Status
 
