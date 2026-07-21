@@ -7,6 +7,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Distillation Towers are sized to their recipe, not to the maximum
+  (`dataset/multiblocks.py`, `adapter/`, `previewer/`, GitHub #98).** A GT Distillation Tower routes
+  the recipe's fluid output `i` to structure layer `i` and nowhere else, so a tower shorter than the
+  recipe's fluid-output count is a *legal* build that silently voids the remainder. `MachinePhysical`
+  now carries every built form with its routable-output capacity and picks the smallest that fits:
+  on the nitrobenzene line the Distilled Water tower (1 fluid out) reserves 3x3x3 and the Creosote
+  Oil tower (5 out) reserves 3x6x3, where both previously reserved 3x12x3. Selection applies only to
+  a family that adds exactly one layer and one routable output per step; anything else (a Mega
+  Distillation Tower, whose output layer is a 5-block band, or a pre-v2 dump) falls back to the
+  largest form, which over-reserves but can never lose product.
 - **Multiblocks resolve by controller block, not just by name (`adapter/`, `dataset/`, `previewer/`,
   `ir/`, GitHub #98).** gtnh-factory-flow names a machine by its localized `RecipeMap`, which for a
   GT++ machine is not the controller block's own name the structure dump is keyed by (`Chemical

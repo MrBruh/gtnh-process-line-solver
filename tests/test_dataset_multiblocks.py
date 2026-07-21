@@ -12,6 +12,7 @@ Two layers:
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 
 import pytest
@@ -135,6 +136,125 @@ def test_lookup_without_a_block_key_is_unchanged(dataset: PhysicalDataset) -> No
         "Electric Blast Furnace", block_key=None
     )
     assert dataset.get("Nonexistent Machine", block_key=None) is None
+
+
+# ------------------------------------------------- layer-indexed height selection (GitHub #98)
+#
+# A Distillation Tower routes the recipe's fluid output i to structure layer i and nowhere else, so
+# a tower with fewer output layers than the recipe has fluid outputs is still a LEGAL build that
+# silently voids the remainder. Sizing it to the recipe is therefore a correctness matter, not
+# cosmetics - and mis-sizing DOWNWARD is the dangerous direction.
+
+
+def _tower_doc(heights: Iterable[int], *, output_layers_per_step: int = 1) -> MultiblockDoc:
+    """A synthetic parametric tower: one variant per height, 3x3 base, hatch slots up each layer.
+
+    ``output_layers_per_step`` models a machine whose "output layer" spans several block layers (the
+    Mega Distillation Tower's is a 5-block band), which is what must NOT be selected on.
+    """
+    variants = []
+    for h in heights:
+        blocks = [
+            {"d": [x, y, z], "block": "casing", "meta": 0}
+            for y in range(h)
+            for x in range(3)
+            for z in range(3)
+        ]
+        slots = [
+            {"d": [1, y, 1], "kinds": ["OutputHatch"]}
+            for y in range(1, h)
+            if (y - 1) % output_layers_per_step == 0 or output_layers_per_step == 1
+        ]
+        variants.append(
+            {"trigger_stack_size": h, "blocks": blocks, "hatch_slots": slots, "bbox": [3, h, 3]}
+        )
+    return MultiblockDoc.model_validate(
+        {
+            "schema": 2,
+            "controller": {
+                "registry_name": "r",
+                "meta": 0,
+                "display_name": "Tower",
+                "source_class": "C",
+            },
+            "variants": variants,
+        }
+    )
+
+
+def test_layer_indexed_tower_is_sized_to_the_recipe() -> None:
+    record = to_physical(_tower_doc(range(3, 13)))  # heights 3..12 -> 2..11 output layers
+    assert record.is_layer_indexed
+    assert record.footprint_for(1) == CellBox(sx=3, sy=3, sz=3)  # one output: the minimum tower
+    assert record.footprint_for(5) == CellBox(sx=3, sy=6, sz=3)  # H = max(3, N+1)
+    assert record.footprint_for(11) == CellBox(sx=3, sy=12, sz=3)
+
+
+def test_a_recipe_needing_more_outputs_than_any_form_takes_the_largest() -> None:
+    # Over-reserving is safe; under-reserving voids product. An impossible ask must not silently
+    # land on a small tower.
+    record = to_physical(_tower_doc(range(3, 13)))
+    assert record.footprint_for(99) == CellBox(sx=3, sy=12, sz=3)
+
+
+def test_a_banded_tower_declines_selection_and_takes_the_largest() -> None:
+    """The Mega Distillation Tower case: its output layer is a 5-block band.
+
+    Its per-layer hatch count runs ahead of its routable-output count, so selecting on it would pick
+    a tower several times too short and void fluids. An unreadable growth pattern must fall back.
+    """
+    record = to_physical(_tower_doc([11, 16, 21], output_layers_per_step=5))
+    assert not record.is_layer_indexed
+    assert record.footprint_for(2) == record.footprint  # the largest form, not a guess
+
+
+def test_a_fixed_shape_machine_ignores_the_recipe() -> None:
+    doc = MultiblockDoc.model_validate(
+        {
+            "schema": 2,
+            "controller": {
+                "registry_name": "r",
+                "meta": 0,
+                "display_name": "Fixed",
+                "source_class": "C",
+            },
+            "variants": [{"trigger_stack_size": 1, "blocks": _cube_blocks(3), "bbox": [3, 3, 3]}],
+        }
+    )
+    record = to_physical(doc)
+    assert not record.is_layer_indexed  # a single form is not a family
+    assert record.footprint_for(7) == CellBox(sx=3, sy=3, sz=3)
+
+
+def test_a_dump_without_hatch_slots_keeps_the_old_behaviour() -> None:
+    # A pre-v2 dump records no hatch data; every machine must keep resolving to its largest form
+    # rather than collapsing to the smallest because capacity reads as zero.
+    doc = _tower_doc(range(3, 6))
+    for variant in doc.variants:
+        variant.hatch_slots.clear()
+    record = to_physical(doc)
+    assert not record.is_layer_indexed
+    assert record.footprint_for(4) == CellBox(sx=3, sy=5, sz=3)  # the largest form
+
+
+def test_adapter_sizes_a_tower_from_the_recipes_fluid_outputs() -> None:
+    """End to end: two recipes on the same machine type get different reserved heights."""
+    dataset = PhysicalDataset(
+        meta=load_physical_dataset(_DATA_DIR).meta,
+        machines={"Tower": to_physical(_tower_doc(range(3, 13)))},
+    )
+    for fluids, expected_height in ((1, 3), (5, 6)):
+        outputs = [Resource(kind="fluid", id=f"fluid:{i}", amount=1.0) for i in range(fluids)]
+        recipe = Recipe(
+            id="r", machine_type="Tower", eut=480.0, duration_ticks=100.0, outputs=outputs
+        )
+        plan = Plan(
+            schema_version=1,
+            recipes=[recipe],
+            nodes=[Node(id="n", recipe_id="r", overclock_tier="MV")],
+        )
+        machine = next(m for m in to_input_ir(plan, physical=dataset).machines if m.id == "n")
+        assert machine.footprint.sy == expected_height, f"{fluids} fluid outputs"
 
 
 # --------------------------------------------------------------- interpretation branches

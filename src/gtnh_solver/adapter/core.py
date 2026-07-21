@@ -105,8 +105,20 @@ def _block_key_for(recipe: Recipe, resolved: ResolvedMachine | None) -> str | No
     return None
 
 
+def _fluid_output_count(recipe: Recipe) -> int:
+    """How many distinct fluids the recipe outputs.
+
+    Sizes a layer-indexed multiblock: a Distillation Tower needs one structure layer per fluid
+    output because output ``i`` routes to layer ``i`` (see ``dataset.multiblocks.VariantShape``).
+    """
+    return sum(1 for out in recipe.outputs if out.kind == "fluid")
+
+
 def _footprint_for(
-    machine_type: str, physical: PhysicalDataset | None, block_key: str | None = None
+    machine_type: str,
+    physical: PhysicalDataset | None,
+    block_key: str | None = None,
+    fluid_outputs: int = 0,
 ) -> CellBox:
     """The footprint for a machine type: the dataset's real one if known, else the 1x1x1 default.
 
@@ -119,7 +131,7 @@ def _footprint_for(
     if physical is not None:
         record = physical.get(machine_type, block_key=block_key)
         if record is not None:
-            return record.footprint
+            return record.footprint_for(fluid_outputs)
     return _DEFAULT_FOOTPRINT
 
 
@@ -168,7 +180,9 @@ def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> Input
                 f"Split it into single-machine nodes in the export."
             )
         block_key = _block_key_for(recipe, resolved_machines.get(node.id))
-        footprint = _footprint_for(recipe.machine_type, physical, block_key)
+        footprint = _footprint_for(
+            recipe.machine_type, physical, block_key, _fluid_output_count(recipe)
+        )
         machines.append(
             Machine(
                 id=node.id,

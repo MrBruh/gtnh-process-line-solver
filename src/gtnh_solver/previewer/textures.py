@@ -25,7 +25,7 @@ import base64
 import json
 import logging
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -295,6 +295,24 @@ def primary_variant(doc: MultiblockDoc) -> Variant:
     return max(doc.variants, key=lambda v: (len(v.blocks), v.trigger_stack_size))
 
 
+def variant_for_size(doc: MultiblockDoc, size: Sequence[int] | None) -> Variant:
+    """The variant whose bbox is exactly ``size``, else :func:`primary_variant`.
+
+    A parametric machine has many forms and the adapter already chose one, sizing it to the recipe
+    (``MachinePhysical.footprint_for``). The reserved ``size`` on the scene machine IS that choice,
+    so matching it here is what keeps the two passes in agreement without threading the decision
+    through the IR. Getting this wrong is silent, not loud: ``expand_machine`` clamps every cube to
+    the reserved box, so rendering a taller form than was reserved would quietly draw a truncated
+    tower rather than fail.
+    """
+    if size is not None:
+        want = tuple(size)
+        for variant in doc.variants:
+            if tuple(variant.bbox) == want:
+                return variant
+    return primary_variant(doc)
+
+
 def _rotate(dx: int, dz: int, steps: int) -> tuple[int, int]:
     """Rotate a horizontal offset ``steps`` clockwise 90-degree turns (viewed from +Y)."""
     for _ in range(steps % 4):
@@ -320,10 +338,16 @@ class BlockCube:
     steps: int  # clockwise yaw turns applied to orient the machine to its placed front
 
 
-def _place_blocks(doc: MultiblockDoc, cell: list[int], steps: int) -> list[BlockCube]:
-    """Rotate the primary variant's blocks by ``steps`` and land the min corner on ``cell``."""
+def _place_blocks(
+    doc: MultiblockDoc, cell: list[int], steps: int, size: Sequence[int] | None = None
+) -> list[BlockCube]:
+    """Rotate the chosen variant's blocks by ``steps`` and land the min corner on ``cell``.
+
+    ``size`` selects WHICH form to place (see :func:`variant_for_size`); without it the largest one
+    stands, as before.
+    """
     placed: list[tuple[tuple[int, int, int], str, int]] = []
-    for b in primary_variant(doc).blocks:
+    for b in variant_for_size(doc, size).blocks:
         dx, dy, dz = b.d
         rx, rz = _rotate(dx, dz, steps)
         placed.append(((rx, dy, rz), b.block, b.meta))
@@ -364,10 +388,10 @@ def expand_machine(machine: Mapping[str, Any], doc: MultiblockDoc) -> list[Block
     cell = machine["cell"]
     size = machine.get("size", [1, 1, 1])
     steps = _FRONT_CW_STEPS.get(str(machine.get("front", "north")), 0)
-    cubes = _place_blocks(doc, cell, steps)
+    cubes = _place_blocks(doc, cell, steps, size)
     if steps and not all(_within_footprint(c.cell, cell, size) for c in cubes):
         cubes = _place_blocks(
-            doc, cell, 0
+            doc, cell, 0, size
         )  # native orientation fits the reserved footprint exactly
     return [c for c in cubes if _within_footprint(c.cell, cell, size)]
 

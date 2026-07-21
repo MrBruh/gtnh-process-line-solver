@@ -662,6 +662,58 @@ def test_non_storage_glyph_keeps_placed_front(dataset: tuple[Path, Path]) -> Non
     assert block["texture"][_GT_SIDE_TO_THREE_SLOT[5]] is None  # nothing rotated onto EAST
 
 
+def _tower_doc() -> MultiblockDoc:
+    """A two-form parametric tower: 3x3x3 and 3x5x3, so a size choice is observable."""
+    variants = []
+    for h in (3, 5):
+        variants.append(
+            {
+                "trigger_stack_size": h,
+                "channels": {},
+                "blocks": [
+                    {"d": [x, y, z], "block": "gregtech:gt.blockcasings", "meta": 11}
+                    for y in range(h)
+                    for x in range(3)
+                    for z in range(3)
+                ],
+                "hints": [],
+                "bbox": [3, h, 3],
+            }
+        )
+    return MultiblockDoc.model_validate(
+        {
+            "schema": 2,
+            "controller": {
+                "registry_name": "gregtech:gt.blockmachines",
+                "meta": 1126,
+                "display_name": "Test Tower",
+                "source_class": "test.MTETestTower",
+            },
+            "variants": variants,
+        }
+    )
+
+
+def test_expansion_renders_the_variant_the_adapter_reserved() -> None:
+    """The rendered form must match the reserved footprint, not simply the largest form.
+
+    ``expand_machine`` clamps to the reserved box, so picking the taller form for a machine reserved
+    at 3x3x3 would silently draw a truncated tower instead of failing.
+    """
+    doc = _tower_doc()
+    short = expand_machine(_machine("m1", "Test Tower", [0, 0, 0], [3, 3, 3]), doc)
+    tall = expand_machine(_machine("m2", "Test Tower", [0, 0, 0], [3, 5, 3]), doc)
+    assert len(short) == 27  # 3x3x3, the small form rendered whole
+    assert len(tall) == 45  # 3x5x3
+    assert max(c.cell[1] for c in short) == 2  # and the short one is genuinely 3 tall
+
+
+def test_expansion_falls_back_to_the_largest_form_for_an_unmatched_size() -> None:
+    # A size no variant reports (a machine reserved before selection existed) keeps the old choice.
+    cubes = expand_machine(_machine("m1", "Test Tower", [0, 0, 0], [3, 9, 3]), _tower_doc())
+    assert len(cubes) == 45  # the 3x5x3 form, clamped into the larger reservation
+
+
 def test_block_key_expands_a_machine_whose_type_does_not_match(dataset: tuple[Path, Path]) -> None:
     """The GT++ case (GitHub #98): the plan's type is the recipe-map name, so only the key matches.
 
