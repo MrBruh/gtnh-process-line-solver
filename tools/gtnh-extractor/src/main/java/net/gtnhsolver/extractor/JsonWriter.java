@@ -75,7 +75,14 @@ final class JsonWriter {
         // tiered block (coil, glass, ...) without changing the shape, keyed by channel name. Keys and
         // entries are sorted so a regenerated dataset diffs minimally rather than reshuffling.
         root.add("substitutions", substitutionsJson(doc.substitutions));
-        root.add("failures", new JsonArray());
+
+        // Per-doc caveats (e.g. a variant family the stack sweep could not exhaust). Sorted so a
+        // regenerated dataset diffs minimally, matching the substitution table above.
+        JsonArray failures = new JsonArray();
+        doc.failures.stream()
+            .sorted()
+            .forEach(f -> failures.add(new JsonPrimitive(f)));
+        root.add("failures", failures);
 
         write(new File(multiblocksDir, fileName(doc.controller)), root);
     }

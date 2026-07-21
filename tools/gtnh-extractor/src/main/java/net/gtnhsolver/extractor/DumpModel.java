@@ -115,6 +115,13 @@ final class DumpModel {
         final List<Variant> variants = new ArrayList<>();
         /** Identity-only channel effects keyed by channel name (e.g. {@code "coil"}); may be empty. */
         final Map<String, List<Substitution>> substitutions = new LinkedHashMap<>();
+        /**
+         * Caveats about THIS controller's dump that a consumer must not mistake for completeness -
+         * chiefly a variant family larger than the trigger-stack sweep could reach. The doc is still
+         * emitted (a truncated family is useful; a missing controller is not), so the note is the
+         * only thing standing between a partial dump and a consumer that believes it is total.
+         */
+        final List<String> failures = new ArrayList<>();
 
         MultiblockDoc(Controller controller) {
             this.controller = controller;

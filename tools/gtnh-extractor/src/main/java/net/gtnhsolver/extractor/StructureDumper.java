@@ -126,8 +126,18 @@ final class StructureDumper {
 
     // Hard caps (plan risk 9.2): bound the trigger-stack sweep and the per-controller variant count
     // so a dynamic/explosive structure lands on the failure list rather than running away.
+    //
+    // MAX_VARIANTS was 6, which rejected the whole controller for 16 of 191 machines (GitHub #98).
+    // That was the wrong instrument: 14 of those 16 are legitimately parametric families (a base
+    // plus a repeated slice, driven by a StructureLib STRUCTURE_HEIGHT / STRUCTURE_LENGTH channel
+    // that falls back to the trigger stack size), so a low variant count discarded real machines
+    // rather than catching runaway ones. It was also redundant - the sweep cannot produce more than
+    // MAX_STACK_SWEEP forms, and per-variant blowup is already bounded by MAX_CELLS + MAX_SCAN_DIM,
+    // which cap the thing that actually costs (cells scanned), not the count of shapes. Pinning it
+    // to MAX_STACK_SWEEP keeps the constant as documentation of that ceiling while making it
+    // non-binding; the sweep's own stabilisation break is what ends a well-behaved family.
     private static final int MAX_STACK_SWEEP = 16;
-    private static final int MAX_VARIANTS = 6;
+    private static final int MAX_VARIANTS = MAX_STACK_SWEEP;
     private static final int MAX_CELLS = 20000;
     private static final int MAX_SCAN_DIM = 80;
     private static final int DEFAULT_SCAN_RADIUS = 12;
@@ -297,16 +307,23 @@ final class StructureDumper {
 
         LinkedHashMap<String, DumpModel.Variant> distinct = new LinkedHashMap<>();
         String previousSignature = null;
+        // Whether the sweep ENDED ON ITS OWN (the shape stopped changing, or the controller stopped
+        // building) rather than simply running out of stack sizes. A family whose range outruns
+        // MAX_STACK_SWEEP - the Lapotronic Supercapacitor spans heights 4..50, the Power Station
+        // Control Node 4..18 - leaves this false, and what we dumped is a PREFIX of the real family.
+        boolean stabilised = false;
         for (int n = 1; n <= MAX_STACK_SWEEP; n++) {
             DumpModel.Variant variant = buildVariant(imte, id, machineBlock, registryName, n);
             if (variant.blocks.size() < 2) {
                 if (n == 1) {
                     throw new DumpException("empty scan (no structure built in the void world)");
                 }
+                stabilised = true;
                 break; // stopped producing a structure at this stack size
             }
             String signature = signature(variant);
             if (signature.equals(previousSignature)) {
+                stabilised = true;
                 break; // occupied cell set stopped changing -> the sweep has stabilised
             }
             if (!distinct.containsKey(signature)) {
@@ -319,6 +336,15 @@ final class StructureDumper {
         }
         if (distinct.isEmpty()) {
             throw new DumpException("empty scan (no structure built in the void world)");
+        }
+        if (!stabilised) {
+            // Record rather than throw: a prefix of a parametric family still renders and still
+            // reserves a legal footprint, which beats dropping the controller entirely. But a
+            // consumer picking "the largest form" would otherwise silently believe it had found the
+            // maximum, so the truncation has to be visible in the doc.
+            doc.failures.add(
+                "variant family truncated: the shape was still changing at the trigger-stack ceiling of "
+                    + MAX_STACK_SWEEP + ", so forms beyond " + distinct.size() + " were not swept");
         }
         doc.variants.addAll(distinct.values());
         // The first variant is the smallest stack size (1), i.e. the structure at its default tiers;

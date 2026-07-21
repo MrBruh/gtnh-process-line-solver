@@ -600,6 +600,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
 
 ### Fixed
+- **The extractor no longer discards legitimately parametric multiblocks
+  (`tools/gtnh-extractor/`, GitHub #98).** `MAX_VARIANTS = 6` rejected 16 of 191 controllers
+  outright, including the Distillation Tower, Assembly Line, Cleanroom and Lapotronic
+  Supercapacitor. It was the wrong instrument: the sweep cannot produce more forms than
+  `MAX_STACK_SWEEP`, and per-variant blowup is already bounded by `MAX_CELLS`/`MAX_SCAN_DIM`, so a
+  low variant cap only discarded real machines. Pinned to `MAX_STACK_SWEEP`, taking a local dump from
+  191 controllers / 18 failures to 208 / 1 with no change to any previously extracted machine. A
+  family still growing at the sweep ceiling (the Lapotronic Supercapacitor spans heights 4..50) now
+  records that truncation in its own `failures` list rather than presenting a prefix as complete.
 - **Super Tank / Super Chest output glyph faced the wrong way (`previewer/`).** A boundary-storage
   block auto-outputs from its front face, but the previewer oriented its output glyph (OVERLAY_STANK /
   OVERLAY_SCHEST) to the placer's `front`, which defaults every machine to north and does not track
