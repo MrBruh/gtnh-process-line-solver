@@ -260,7 +260,14 @@ class TextureManifest:
 
 
 def load_multiblock_docs(data_dir: str | Path) -> dict[str, MultiblockDoc]:
-    """Load every ``data/multiblocks/<name>.json`` under ``data_dir``, keyed by display name.
+    """Load every ``data/multiblocks/<name>.json`` under ``data_dir``, keyed for lookup.
+
+    Each doc is indexed under BOTH its controller display name and its controller block key
+    (``"<registry_name>@<meta>"``), because a plan can name a machine either way: an export from
+    before gtnh-factory-flow #25 only has the localized recipe-map name, while a newer one carries
+    the exact block id (see :func:`_machine_cubes`, which prefers the block key). The two key spaces
+    cannot collide - a block key always ends in ``@<int>`` after a registry path, which no GT
+    display name is - so one flat dict serves both without an ambiguity guard.
 
     Skips ``_meta.json`` and returns ``{}`` if the directory is absent, so a checkout without a
     committed dump texturizes nothing rather than failing. If two files claim one display name
@@ -275,6 +282,7 @@ def load_multiblock_docs(data_dir: str | Path) -> dict[str, MultiblockDoc]:
             continue
         doc = load_multiblock_doc(path)
         docs.setdefault(doc.controller.display_name, doc)
+        docs.setdefault(f"{doc.controller.registry_name}@{doc.controller.meta}", doc)
     return docs
 
 
@@ -389,6 +397,14 @@ def _machine_cubes(
 ) -> list[BlockCube]:
     """The per-block cubes for a machine: its multiblock doc if committed, else a single-block cube.
 
+    The doc is looked up by the machine's ``block_key`` FIRST and by its ``type`` only as a
+    fallback, mirroring :meth:`~gtnh_solver.dataset.multiblocks.PhysicalDataset.get`: the block key
+    is an exact controller identity, while ``type`` is the exporter's localized recipe-map name that
+    for a GT++ machine never matches the dump's controller-block name. Both resolve through the same
+    dict (see :func:`load_multiblock_docs`). Keeping the two lookups in the same precedence order is
+    load-bearing - the adapter reserved the footprint via ``PhysicalDataset.get``, so if this pass
+    resolved a *different* doc the rendered cubes would not match the reserved box.
+
     A machine whose type has a dumped :class:`MultiblockDoc` expands to that structure. A genuine
     single-block machine (a 1x1x1 footprint) is the trivial one-cube case, resolved by its plan name
     plus voltage tier against the manifest's tier-prefixed keys (see :meth:`TextureManifest.mte_block`).
@@ -399,7 +415,7 @@ def _machine_cubes(
     ``auto_out_face`` (machine id -> auto-output face) lets a boundary-storage block point its output
     glyph the way it actually ejects rather than its placed front (see :func:`_glyph_steps`).
     """
-    doc = docs.get(machine["type"])
+    doc = docs.get(machine.get("block_key") or "") or docs.get(machine["type"])
     if doc is not None:
         return expand_machine(machine, doc)
     single = manifest.mte_block(machine["type"], machine.get("voltage_tier"))

@@ -126,4 +126,12 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   `system_io` + the previewer use it to surface boundary input/output rates - notably a dangling
 #   OUTPUT port, whose product rate lives nowhere else (no consuming net). Existing consumers
 #   default to None. (GitHub #16.)
+#
+# InputIR v2 (additive, no version bump) - added `Machine.block_key: str | None`, the GT controller
+#   block as "<registry_name>@<meta>". `Machine.type` is the exporter's localized recipe-map name,
+#   which for GT++ machines is NOT the controller block's name the structure dataset is keyed by
+#   ("Chemical Plant" vs "ExxonMobil Chemical Plant"), so name-only lookups silently missed and
+#   those machines fell back to a 1x1x1 footprint. The adapter sets it from the export's
+#   `recipe.source.machineBlock` (gtnh-factory-flow #25); consumers that have it join exactly and
+#   fall back to `type` when it is None, so pre-#25 plans behave exactly as before. (GitHub #98.)
 # ---------------------------------------------------------------------------

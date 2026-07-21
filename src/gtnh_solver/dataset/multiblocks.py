@@ -90,6 +90,16 @@ class MachinePhysical:
     #: How many distinct built forms the controller has (trigger-stack / shape variants).
     variant_count: int
 
+    @property
+    def block_key(self) -> str:
+        """This machine's controller block as ``"<registry_name>@<meta>"``.
+
+        The exact join key an export carries in ``recipe.source.machineBlock.id``
+        (gtnh-factory-flow #25), and the one identity that survives the naming-world gap between
+        the exporter's recipe-map names and this dump's controller-block names.
+        """
+        return f"{self.registry_name}@{self.meta}"
+
 
 @dataclass(frozen=True)
 class PhysicalDataset:
@@ -98,8 +108,30 @@ class PhysicalDataset:
     meta: DatasetMeta
     machines: Mapping[str, MachinePhysical]
 
-    def get(self, key: str) -> MachinePhysical | None:
-        """The physical record for a machine by display name, or ``None`` if the dump lacks it."""
+    @property
+    def by_block_key(self) -> Mapping[str, MachinePhysical]:
+        """Every machine indexed by :attr:`MachinePhysical.block_key` (``"<registry>@<meta>"``).
+
+        Derived rather than stored so it cannot drift from ``machines``; the dump is ~200 entries,
+        so rebuilding it per lookup is not worth caching.
+        """
+        return {m.block_key: m for m in self.machines.values()}
+
+    def get(self, key: str, block_key: str | None = None) -> MachinePhysical | None:
+        """The physical record for a machine, or ``None`` if the dump lacks it.
+
+        ``block_key`` (the export's controller-block id) is tried FIRST and is authoritative: it is
+        an exact identity, whereas ``key`` is the exporter's localized recipe-map name, which for a
+        GT++ machine differs from the controller block's own name this dump is keyed by
+        ("Chemical Plant" vs "ExxonMobil Chemical Plant"). Falling back to ``key`` keeps every
+        pre-#25 plan resolving exactly as it did. A ``block_key`` the dump does not know falls back
+        too, rather than failing: the dump is a partial snapshot (controllers whose extraction
+        failed are simply absent), so an unknown block is a miss, not an error.
+        """
+        if block_key is not None:
+            record = self.by_block_key.get(block_key)
+            if record is not None:
+                return record
         return self.machines.get(key)
 
 

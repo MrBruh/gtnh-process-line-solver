@@ -288,10 +288,12 @@ def _machine(
     size: list[int],
     front: str = "north",
     voltage_tier: str = "LV",
+    block_key: str | None = None,
 ) -> dict[str, Any]:
     return {
         "id": mid,
         "type": mtype,
+        "block_key": block_key,
         "cell": cell,
         "size": size,
         "front": front,
@@ -658,6 +660,47 @@ def test_non_storage_glyph_keeps_placed_front(dataset: tuple[Path, Path]) -> Non
         == "gregtech:gt.blockmachines|5|NORTH|inactive"
     )
     assert block["texture"][_GT_SIDE_TO_THREE_SLOT[5]] is None  # nothing rotated onto EAST
+
+
+def test_block_key_expands_a_machine_whose_type_does_not_match(dataset: tuple[Path, Path]) -> None:
+    """The GT++ case (GitHub #98): the plan's type is the recipe-map name, so only the key matches.
+
+    Mirrors ``PhysicalDataset.get``'s precedence. If these two lookups ever disagreed, the adapter
+    would reserve one machine's footprint while the previewer drew another's structure.
+    """
+    mb, manifest = dataset
+    scene = _scene(
+        [
+            _machine(
+                "m1",
+                "A Recipe Map Name No Doc Uses",
+                [0, 0, 0],
+                [2, 2, 2],
+                block_key="gregtech:gt.blockmachines@1000",  # the committed "Test EBF" doc
+            )
+        ]
+    )
+    summary = texturize_scene(
+        scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider
+    )
+    assert summary.block_cubes == 5  # the full structure, not a placeholder
+    assert scene["machines"][0]["expanded"] is True
+
+
+def test_block_key_miss_falls_back_to_the_type(dataset: tuple[Path, Path]) -> None:
+    # A block key the dump lacks must not shadow a type that resolves - the dump is partial.
+    mb, manifest = dataset
+    scene = _scene(
+        [
+            _machine(
+                "m1", "Test EBF", [0, 0, 0], [2, 2, 2], block_key="gregtech:gt.blockmachines@404"
+            )
+        ]
+    )
+    summary = texturize_scene(
+        scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider
+    )
+    assert summary.block_cubes == 5
 
 
 def test_docless_multiblock_keeps_placeholder_not_a_lone_cube(dataset: tuple[Path, Path]) -> None:

@@ -89,7 +89,25 @@ def adapt_file(path: str | Path, *, physical: PhysicalDataset | None = None) -> 
     return to_input_ir(load_plan(path), physical=physical)
 
 
-def _footprint_for(machine_type: str, physical: PhysicalDataset | None) -> CellBox:
+def _block_key_for(recipe: Recipe, resolved: ResolvedMachine | None) -> str | None:
+    """The recipe's GT controller-block id (``"<registry_name>@<meta>"``), if the export carries it.
+
+    Prefers the recipe's own ``source.machineBlock`` and falls back to the ``resolved`` block's
+    mirror of it, since gtnh-factory-flow #25 emits it in both places. None for any plan exported
+    before that landed - every such plan keeps matching the dataset on machine-type name.
+    """
+    for block in (
+        recipe.source.machine_block if recipe.source is not None else None,
+        resolved.machine_block if resolved is not None else None,
+    ):
+        if block is not None and block.id:
+            return block.id
+    return None
+
+
+def _footprint_for(
+    machine_type: str, physical: PhysicalDataset | None, block_key: str | None = None
+) -> CellBox:
     """The footprint for a machine type: the dataset's real one if known, else the 1x1x1 default.
 
     Opt-in by design - with no dataset every machine stays single-block (the Phase 1 behaviour), so
@@ -99,7 +117,7 @@ def _footprint_for(machine_type: str, physical: PhysicalDataset | None) -> CellB
     *not* square is pinned to one orientation by :func:`_orientations_for` until that TODO lands.
     """
     if physical is not None:
-        record = physical.get(machine_type)
+        record = physical.get(machine_type, block_key=block_key)
         if record is not None:
             return record.footprint
     return _DEFAULT_FOOTPRINT
@@ -149,11 +167,13 @@ def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> Input
                 f"are not supported yet (instance-aware routing is Phase 2 - see docs/ROADMAP.md). "
                 f"Split it into single-machine nodes in the export."
             )
-        footprint = _footprint_for(recipe.machine_type, physical)
+        block_key = _block_key_for(recipe, resolved_machines.get(node.id))
+        footprint = _footprint_for(recipe.machine_type, physical, block_key)
         machines.append(
             Machine(
                 id=node.id,
                 type=recipe.machine_type,
+                block_key=block_key,
                 footprint=footprint,
                 faces=FaceSpec(ports=_recipe_ports(recipe, node)),
                 voltage_tier=node.overclock_tier,

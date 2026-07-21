@@ -16,7 +16,18 @@ from pathlib import Path
 
 import pytest
 
-from gtnh_solver.adapter import Edge, Node, Plan, Recipe, Resource, to_input_ir
+from gtnh_solver.adapter import (
+    Edge,
+    MachineBlock,
+    Node,
+    Plan,
+    Recipe,
+    RecipeSource,
+    ResolvedBlock,
+    ResolvedMachine,
+    Resource,
+    to_input_ir,
+)
 from gtnh_solver.dataset import (
     DatasetError,
     MultiblockDoc,
@@ -81,6 +92,49 @@ def test_default_data_dir_resolves_to_the_committed_dump() -> None:
     # No explicit directory -> the source-relative default; proves the packaged path resolves.
     ds = load_physical_dataset()
     assert ds.get("Electric Blast Furnace") is not None
+
+
+# ------------------------------------------------- controller-block join (gtnh-factory-flow #25)
+#
+# The exporter names a machine by its localized recipe-map name, which for a GT++ machine is NOT
+# the controller block's own name this dump is keyed by ("Chemical Plant" vs "ExxonMobil Chemical
+# Plant"). A plan carrying `recipe.source.machineBlock` joins on the block identity instead.
+
+
+def test_block_key_is_registry_name_at_meta(dataset: PhysicalDataset) -> None:
+    ebf = dataset.get("Electric Blast Furnace")
+    assert ebf is not None
+    assert ebf.block_key == "gregtech:gt.blockmachines@1000"
+    assert set(dataset.by_block_key) == {
+        "gregtech:gt.blockmachines@1000",
+        "gregtech:gt.blockmachines@1001",
+    }
+
+
+def test_block_key_resolves_a_machine_whose_name_does_not_match(dataset: PhysicalDataset) -> None:
+    # The whole point: the name is wrong (as it is for every GT++ machine) and the lookup still
+    # lands on the right controller, because the block key is an exact identity.
+    record = dataset.get(
+        "Some Localized Recipe Map Name", block_key="gregtech:gt.blockmachines@1000"
+    )
+    assert record is not None
+    assert record.key == "Electric Blast Furnace"
+
+
+def test_unknown_block_key_falls_back_to_the_name(dataset: PhysicalDataset) -> None:
+    # The dump is a partial snapshot (failed controllers are simply absent), so a block key it does
+    # not know must degrade to the name lookup rather than turn a resolvable machine into a miss.
+    record = dataset.get("Electric Blast Furnace", block_key="gregtech:gt.blockmachines@99999")
+    assert record is not None
+    assert record.key == "Electric Blast Furnace"
+
+
+def test_lookup_without_a_block_key_is_unchanged(dataset: PhysicalDataset) -> None:
+    # Every pre-#25 plan takes this path; it must behave exactly as it did before the join existed.
+    assert dataset.get("Electric Blast Furnace") is dataset.get(
+        "Electric Blast Furnace", block_key=None
+    )
+    assert dataset.get("Nonexistent Machine", block_key=None) is None
 
 
 # --------------------------------------------------------------- interpretation branches
@@ -199,7 +253,7 @@ def test_duplicate_machine_key_raises(tmp_path: Path) -> None:
 # ---------------------------------------------------------- opt-in gtnh-factory-flow wiring
 
 
-def _one_machine_plan(machine_type: str) -> Plan:
+def _one_machine_plan(machine_type: str, block_key: str | None = None) -> Plan:
     recipe = Recipe(
         id="r",
         machine_type=machine_type,
@@ -207,6 +261,11 @@ def _one_machine_plan(machine_type: str) -> Plan:
         duration_ticks=100.0,
         inputs=[Resource(kind="item", id="minecraft:iron_ingot", amount=1.0)],
         outputs=[Resource(kind="item", id="minecraft:iron_block", amount=1.0)],
+        source=(
+            RecipeSource(machine_block=MachineBlock(id=block_key))
+            if block_key is not None
+            else None
+        ),
     )
     node = Node(id="n", recipe_id="r", overclock_tier="MV")
     return Plan(schema_version=1, recipes=[recipe], nodes=[node])
@@ -230,6 +289,57 @@ def test_adapter_falls_back_for_a_type_the_dataset_lacks(dataset: PhysicalDatase
     ir = to_input_ir(_one_machine_plan("Some Unknown Machine"), physical=dataset)
     machine = next(m for m in ir.machines if m.id == "n")
     assert machine.footprint == CellBox()  # 1x1x1 fallback
+
+
+def test_adapter_resolves_the_footprint_from_the_exported_controller_block(
+    dataset: PhysicalDataset,
+) -> None:
+    """A GT++-style plan: the machine type does not match the dump, the block key does.
+
+    This is the Chemical Plant / Coke Oven case from GitHub #98 in miniature. Without the block key
+    this machine silently reserves 1x1x1 and renders as a lone cube; with it, the real multiblock
+    footprint lands and the previewer expands the full structure.
+    """
+    plan = _one_machine_plan(
+        "A Recipe Map Name The Dump Never Heard Of",
+        block_key="gregtech:gt.blockmachines@1000",
+    )
+    machine = next(m for m in to_input_ir(plan, physical=dataset).machines if m.id == "n")
+    assert machine.footprint == CellBox(sx=3, sy=4, sz=3)  # the EBF's real shape
+    assert machine.block_key == "gregtech:gt.blockmachines@1000"
+
+
+def test_adapter_reads_the_controller_block_from_the_resolved_block(
+    dataset: PhysicalDataset,
+) -> None:
+    # gtnh-factory-flow #25 mirrors machineBlock into `resolved.machines[]`; accept it from there
+    # too, so a plan whose resolved block is richer than its recipes still joins.
+    plan = _one_machine_plan("Unmatched Name")
+    plan = plan.model_copy(
+        update={
+            "resolved": ResolvedBlock(
+                machines=[
+                    ResolvedMachine(
+                        node_id="n",
+                        machine_block=MachineBlock(id="gregtech:gt.blockmachines@1001"),
+                        total_eut=480.0,  # matches the recipe, so no EU/t-mismatch warning fires
+                    )
+                ]
+            )
+        }
+    )
+    machine = next(m for m in to_input_ir(plan, physical=dataset).machines if m.id == "n")
+    assert machine.footprint == CellBox(sx=3, sy=3, sz=3)  # the Vacuum Freezer's real shape
+
+
+def test_adapter_leaves_block_key_none_for_a_pre_25_plan(dataset: PhysicalDataset) -> None:
+    machine = next(
+        m
+        for m in to_input_ir(_one_machine_plan("Electric Blast Furnace"), physical=dataset).machines
+        if m.id == "n"
+    )
+    assert machine.block_key is None
+    assert machine.footprint == CellBox(sx=3, sy=4, sz=3)  # still resolved, by name
 
 
 # ---------------------------------------------- real footprints solve to a non-overlapping layout

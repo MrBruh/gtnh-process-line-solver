@@ -31,6 +31,32 @@ class Resource(BaseModel):
     amount: float = 0.0
 
 
+class MachineBlock(BaseModel):
+    """The GT controller *block* a machine is, as distinct from its recipe-map name.
+
+    gtnh-factory-flow names a machine by its localized ``RecipeMap`` ("Chemical Plant"), which for
+    GT++ machines is NOT the controller block's own name ("ExxonMobil Chemical Plant") - and the
+    block name is what the structure dataset is keyed by, so the two never join on name alone.
+    This carries the block's canonical ``registry@meta`` id ("gregtech:gt.blockmachines@998"),
+    which the dump records as ``controller.registry_name`` + ``controller.meta``, making the join
+    exact. Optional: only plans exported after gtnh-factory-flow #25 carry it, and a plan without
+    it falls back to the machine-type name (see ``dataset.multiblocks.PhysicalDataset.get``).
+    """
+
+    model_config = _CFG
+
+    id: str = ""  # "<registry_name>@<meta>", e.g. "gregtech:gt.blockmachines@998"
+    display_name: str = ""
+
+
+class RecipeSource(BaseModel):
+    """Provenance for a recipe. Only ``machine_block`` is consumed; the rest is ignored."""
+
+    model_config = _CFG
+
+    machine_block: MachineBlock | None = None
+
+
 class Recipe(BaseModel):
     """A placed recipe: its machine type, power/time, and item/fluid I/O."""
 
@@ -42,6 +68,7 @@ class Recipe(BaseModel):
     duration_ticks: float = 0.0
     inputs: list[Resource] = Field(default_factory=list)
     outputs: list[Resource] = Field(default_factory=list)
+    source: RecipeSource | None = None
 
 
 class Node(BaseModel):
@@ -112,6 +139,9 @@ class ResolvedMachine(BaseModel):
     node_id: str
     machine_key: str = ""
     machine_type: str = ""
+    # The same controller-block id the recipe's ``source`` carries, mirrored here by the exporter.
+    # Consumed as a fallback when a plan's ``resolved`` block is richer than its recipes.
+    machine_block: MachineBlock | None = None
     tier: str = ""
     machine_count: int = 1
     parallel: int = 1

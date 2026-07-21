@@ -7,6 +7,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Multiblocks resolve by controller block, not just by name (`adapter/`, `dataset/`, `previewer/`,
+  `ir/`, GitHub #98).** gtnh-factory-flow names a machine by its localized `RecipeMap`, which for a
+  GT++ machine is not the controller block's own name the structure dump is keyed by (`Chemical
+  Plant` vs `ExxonMobil Chemical Plant`). Those machines therefore missed the structure lookup
+  entirely and silently fell back to a 1x1x1 footprint and a lone cube, even though the dump had
+  them. A plan exported after gtnh-factory-flow #25 now carries `recipe.source.machineBlock.id`
+  (`"<registry_name>@<meta>"`), which `InputIR.Machine.block_key` plumbs to both consumers:
+  `PhysicalDataset.get` and the previewer's doc lookup try the block key first and fall back to the
+  name, so the join is exact where the export supports it and every pre-#25 plan behaves exactly as
+  before. The Chemical Plant now resolves its real 7x7x7 footprint instead of 1x1x1.
 - **Dataset schema v2: `variants[].hatch_slots` (`dataset/schema.py`, `tools/gtnh-extractor/`,
   GitHub #98).** Geometry alone cannot say which cells are I/O slots or what they accept, and for a
   layer-indexed machine that is load-bearing. The extractor now records, per cell, the

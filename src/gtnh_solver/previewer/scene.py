@@ -57,6 +57,10 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
         {
             "id": pl.machine_id,
             "type": machines[pl.machine_id].type,
+            # The controller block ("<registry>@<meta>") when the export carried one: the exact key
+            # the texture pass joins to the structure dump on, since `type` is the exporter's
+            # recipe-map name and the dump is keyed by the controller block's own name.
+            "block_key": machines[pl.machine_id].block_key,
             "cell": [pl.cell.x, pl.cell.y, pl.cell.z],
             "size": [
                 machines[pl.machine_id].footprint.sx,
