@@ -75,6 +75,31 @@ final class DumpModel {
         }
     }
 
+    /**
+     * One cell that accepts a hatch, and the hatch kinds it accepts.
+     *
+     * <p>
+     * Geometry alone cannot say which cells are I/O slots, and for a layer-indexed machine that is
+     * load-bearing: a Distillation Tower sends the recipe's fluid output {@code i} to layer {@code i}
+     * and nowhere else, so "how many layers accept an output hatch" decides the tower height a recipe
+     * needs. {@code kinds} holds {@code gregtech.api.enums.HatchElement} names (e.g. {@code
+     * OutputHatch}); it is never empty, since a cell that accepts nothing is simply not recorded.
+     */
+    static final class HatchSlot {
+
+        final int dx;
+        final int dy;
+        final int dz;
+        final List<String> kinds;
+
+        HatchSlot(int dx, int dy, int dz, List<String> kinds) {
+            this.dx = dx;
+            this.dy = dy;
+            this.dz = dz;
+            this.kinds = kinds;
+        }
+    }
+
     /** One distinct built form of a controller (a trigger-stack / channel selection). */
     static final class Variant {
 
@@ -82,6 +107,7 @@ final class DumpModel {
         final Map<String, Integer> channels = new LinkedHashMap<>();
         final List<PlacedBlock> blocks = new ArrayList<>();
         final List<HintDot> hints = new ArrayList<>();
+        final List<HatchSlot> hatchSlots = new ArrayList<>();
         int[] bbox = new int[] { 0, 0, 0 };
 
         Variant(int triggerStackSize) {

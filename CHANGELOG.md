@@ -7,6 +7,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Dataset schema v2: `variants[].hatch_slots` (`dataset/schema.py`, `tools/gtnh-extractor/`,
+  GitHub #98).** Geometry alone cannot say which cells are I/O slots or what they accept, and for a
+  layer-indexed machine that is load-bearing. The extractor now records, per cell, the
+  `gregtech.api.enums.HatchElement` kinds it accepts, using StructureLib's element-visit
+  instrumentation (`StructureLibAPI.enableInstrument` + `StructureElementVisitedEvent`) during the
+  block pass. Two things this replaces: hint metadata is NOT hatch data (it is `dot - 1`, with
+  13/14/15 reserved as StructureLib's `AIR`/`NOT_AIR`/`ERROR` - a meta-13 cell is a hollow interior,
+  which is why the EBF's coil layers looked like I/O slots), and re-running the block pass without
+  `gt_no_hatch` recovers nothing, since GT's hatch element returns an unconditional `false` from
+  `placeBlock` and the channel is read only by the survival autobuild path.
 - **Previewer: hover a block to see its machine name (`previewer/html.py`).** A textured cube carries
   no readable label (the front-face name plate is drawn only on the flat placeholder box), so once
   every machine is skinned it was hard to tell which is which. Moving the pointer over any block now
