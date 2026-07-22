@@ -61,8 +61,12 @@ doc as intent and reconcile.
   recipe-dataset version; Phase 1 just tolerates the current export shape via the committed
   `examples/` fixtures.)*
 - **dataset/** - the GT **physical** rules (footprints, faces, pipe/wire physical tiers,
-  multiblocks), keyed to gtnh-factory-flow's machine IDs. Recipes/throughput/identity come from
-  its dataset; you author only the physical half. Still substantial, but smaller than before.
+  multiblocks) plus the extracted **texture manifest** the previewer skins blocks with, keyed to
+  gtnh-factory-flow's machine IDs. Recipes/throughput/identity come from its dataset; you author
+  only the physical half. Still substantial, but smaller than before.
+  Generated data is local and version-namespaced (`data/<version>/`) with committed fixtures as the
+  fallback (`dataset/roots.py`); how the extractor resolves a block's sprite is in
+  [`dataset-extraction/texture-resolution.md`](dataset-extraction/texture-resolution.md).
 - **placement/** - simulated annealing + LNS ruin-and-recreate over a coarse cell grid;
   orientation is a placement variable; cost = per-net wirelength (HPWL) + an auto-output reward
   + an **objective-weighted compactness** term (floor footprint and/or bounding-box volume, the
@@ -89,7 +93,10 @@ doc as intent and reconcile.
   render surfaces cannot drift on what crosses the line's edge.
 - **validator/** - independent geometric + rule checks (shares rule *data* with the router,
   not its *logic*). The only automated correctness gate.
-- **buildguide/**, **previewer/**, **cli.py** - outputs and entry point.
+- **buildguide/**, **previewer/**, **cli.py** - outputs and entry point. The previewer skins each
+  block with its extracted GT sprite; a face that resolves none renders Minecraft's magenta/black
+  missing-texture checkerboard, **not** a neutral grey, because so many GT casings are plain grey
+  that a gap was indistinguishable from a correct render (`previewer/html.py`, `_MISSING`).
 
 ## Engineering decisions (from the review)
 

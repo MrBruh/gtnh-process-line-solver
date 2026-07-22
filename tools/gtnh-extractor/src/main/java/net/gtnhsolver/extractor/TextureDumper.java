@@ -659,7 +659,7 @@ final class TextureDumper {
      * The icon a block NAMES in its own server-readable state, or null if it names none.
      *
      * <p>
-     * The fourth route, and the cheapest. A great many blocks put the {@code @SideOnly} on the
+     * The fifth route, and the cheapest. A great many blocks put the {@code @SideOnly} on the
      * <b>resolved</b> icon array while the strings that NAME those icons are un-annotated and
      * survive on a dedicated server untouched:
      *

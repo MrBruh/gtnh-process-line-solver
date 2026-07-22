@@ -59,7 +59,7 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
   Net on the local 208-multiblock dump: unresolved `(block, meta)` pairs 330 to 91, multiblocks
   carrying at least one grey block 177 to 40. Both shipped example lines (sand, nitrobenzene) now
-  resolve every constituent block, so the `render grey` warning is silent on each.
+  resolve every constituent block, so the unresolved-block warning is silent on each.
 - **Texture gaps name the block that has one (`tools/gtnh-extractor/`, GitHub #98).** A multiblock
   controller whose layer stack resolved empty was dropped from the manifest with *nothing recorded
   under its name*: the flattener files its complaint under the offending `ITexture` class instead, so

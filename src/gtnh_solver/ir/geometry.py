@@ -34,7 +34,7 @@ class CellBox(FrozenModel):
 
     Used for both a machine ``footprint`` (1x1x1 single-block, or the cell-rounded
     bounding box of a multiblock) and the IR's overall ``bounding_region`` (called
-    ``Box`` in docs/IR.md - same type here).
+    ``CellBox`` in docs/IR.md - same type here).
     """
 
     sx: int = Field(default=1, ge=1)

@@ -4,7 +4,8 @@
 clickable ``.html`` that pulls three.js from a CDN and draws the layout. The camera orbits AND
 pans (right-drag / arrow keys), and a layer-by-layer slider isolates each y-level. Machines are
 solid boxes skinned with their real GT casing texture where ``scene.textures`` supplies one (the
-six per-face icons ride ``machine.texture``; missing icons fall back to the flat type colour), with
+six per-face icons ride ``machine.texture``; a face with no resolved icon draws the missing-texture
+checkerboard, while a machine with no doc at all keeps a flat type-coloured box), with
 the machine name on the front face and, since a textured cube shows no name, a hover name tag that
 floats a block's machine name above it (raycast pick); a state control swaps every machine between
 its idle and running

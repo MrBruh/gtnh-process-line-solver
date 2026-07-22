@@ -11,8 +11,8 @@ member annotated `@SideOnly(Side.CLIENT)` at class-load time. Block textures are
 most of the obvious API is simply not there at runtime.
 
 That single fact produces **five unrelated failure modes**. They look identical from the outside (the
-previewer draws a grey cube) and need five different fixes. Recognising which one you are looking at
-is most of the work.
+previewer draws the missing-texture checkerboard) and need five different fixes. Recognising which one
+you are looking at is most of the work.
 
 | Mode | What happens | Symptom in `gaps` | Route that fixes it |
 |---|---|---|---|
@@ -46,9 +46,9 @@ constructor, and the only thing that ever drains that queue is
 and never run, leaving every `mIcon` null.
 
 That public list is therefore a **complete server-side registry of every custom icon container**.
-Injecting a named icon into all 11,766 of them fixes GT++, kekztech and others at once, reaches
-instances held in private statics that walking any single holder class would miss, and needs no
-per-mod knowledge. Prefer this shape of fix to a per-mod table whenever one exists.
+Injecting a named icon into the 11,766 of them that name one fixes GT++, kekztech and others at
+once, reaches instances held in private statics that walking any single holder class would miss,
+and needs no per-mod knowledge. Prefer this shape of fix to a per-mod table whenever one exists.
 
 ### Texture-name fields (fixes most of mode A, without a table)
 
@@ -86,8 +86,8 @@ Ordered by how much time each one cost.
    coil block**, whose accessor answers any meta through its `default` arm. Widen only where the
    block's own indexing calls for it: frames are keyed by GT material id, werkstoff casings by
    werkstoff id (five digits, so taken from the registry rather than scanned).
-5. **A grey block is recoverable; a plausible wrong sprite is not.** Nothing downstream can detect the
-   latter. When a route cannot resolve something, it must record a gap, never guess.
+5. **A checkerboarded block is recoverable; a plausible wrong sprite is not.** Nothing downstream can
+   detect the latter. When a route cannot resolve something, it must record a gap, never guess.
 6. **Measure against what multiblocks reference, not the raw gap count.** The `gaps` list is dominated
    by fluid and ore blocks nothing ever places. Ranking families by how many dumped multiblocks touch
    them is what surfaced frames and bartworks glass as the two biggest wins.
@@ -164,7 +164,7 @@ Verified against the artifacts on this machine, not reasoned about:
 - **Deobfuscation is a non-question.** Both mods are pinned with the `:dev` classifier and `runServer`
   runs from `build/classes`, never a reobfuscated jar. `javap -c` on the shipped `BlockCasings8.class`
   emits `GETSTATIC ...BlockIcons.MACHINE_CASING_CHEMICALLY_INERT` verbatim.
-- **The code shapes are uniform.** All nine mode-A classes use a single `tableswitch`, zero
+- **The code shapes are uniform.** All ten mode-A classes use a single `tableswitch`, zero
   `lookupswitch`, zero if/else chains, four instruction shapes, no nesting beyond one level.
   Estimated ~250-300 lines including tests.
 
@@ -206,9 +206,9 @@ Then install and measure:
 cp out/textures-run/manifest.json data/2.8.4/textures/manifest.json
 python tools/derive_small_manifest.py     # refresh the committed example-scoped manifest
 
-# silence is success
+# silence is success. Match "no sprite": the rest of that warning has been reworded before.
 python -m gtnh_solver.cli examples/gtnh-nitrobenzene.json \
-  --preview out/nitrobenzene.html 2>&1 | grep "render grey"
+  --preview out/nitrobenzene.html 2>&1 | grep "no sprite"
 ```
 
 For the wider local dump, diff the manifest's `blocks` against the `(block, meta)` pairs that

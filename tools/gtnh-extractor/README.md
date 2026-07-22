@@ -9,7 +9,7 @@ The tool boots a **headless dedicated server** with GT5-Unofficial + StructureLi
 builds every multiblock controller into a void world, scans the result, and dumps JSON.
 Because it executes the same `construct(...)` code the in-game hologram projector runs, the
 output matches in-game behaviour by construction. See `docs/dataset-extraction/` (requirements.md,
-implementation.md, plan.md) for the full rationale.
+implementation.md, plan.md, texture-resolution.md) for the full rationale.
 
 ## Status
 
@@ -41,7 +41,7 @@ with a populated `coil` table (14 tiers), so the adapter counts its 2 coil layer
 **Lane 2 (issue #45): the core dump loop.** On top of the lane 1 scaffold
 (the `ExampleMod1.7.10` buildscript wiring, `dependencies.gradle` pins, and the
 `DumperMod` boot/exit plumbing), the tool builds every multiblock and emits the
-schema-v1 dataset:
+schema-v2 dataset:
 
 - `DumperMod` hooks `FMLServerStartedEvent`, resolves the run config, runs the dump, and
   exits the JVM (0 on success, nonzero on failure) so a `runServer` boot is a pass/fail gate.
@@ -54,9 +54,12 @@ schema-v1 dataset:
   `gt_no_hatch` channel so real hatches stay out and the casing shell plus hint positions
   are what get recorded.
 - `RecordingProxy` captures hint particles headlessly (the server's normal proxy no-ops
-  them); `JsonWriter` serialises the raw facts to schema-v1 JSON (Gson, stable key +
-  variant ordering); `ErrorCollector` sends any exception, non-terminating/explosive sweep,
-  or empty scan to `_meta.json.failures` so one broken multiblock never kills the run.
+  them); `ElementRecorder` + `HatchProbe` ask each visited `IStructureElement` which hatch
+  kinds it accepts, so a slot carries its `HatchElement` names (this is what schema v2 added:
+  `variants[].hatch_slots`); `JsonWriter` serialises the raw facts to schema-v2 JSON (Gson,
+  stable key + variant ordering); `ErrorCollector` sends any exception,
+  non-terminating/explosive sweep, or empty scan to `_meta.json.failures` so one broken
+  multiblock never kills the run.
 
 Output: one `<datasetOut>/multiblocks/<name>.json` per controller plus a `_meta.json` run
 summary, both validating against `src/gtnh_solver/dataset/schema.py`. Channel handling and
@@ -90,7 +93,8 @@ build multiblocks, so `dependencies.gradle` drops that one optional subtree; eve
 GT5U hard dependency still resolves and loads on the dev server.
 
 To bump: rewrite the two coordinates in `dependencies.gradle` and the entry in
-`gtnh.lock.json` from a newer manifest. Lane 4 (issue #47) automates this in CI.
+`gtnh.lock.json` from a newer manifest. The pin is hand-maintained: lane 4 (a structure-dump
+CI) was dropped, because the dump is local-only (see `docs/dataset-extraction/plan.md`).
 
 ## GT5U / StructureLib API surface
 
@@ -109,7 +113,9 @@ actually touches:
 | `GTStructureChannels` | `gregtech.common.misc` | The enum of GT's structure channels; `values()` + `get()` give the channel names the lane 3 probe sweeps (coil, glass, pipe, ...) so the tool never hard-codes them and a GT5U bump that adds a channel is picked up automatically. |
 | `IHeatingCoil` | `gregtech.api.interfaces` | Identifies a placed block as a heating coil (`block instanceof IHeatingCoil`) so the coil substitution table can be built from a stack-size sweep, since the classic coil element is stack-size driven rather than coil-channel driven. |
 | `IAlignment` / `ExtendedFacing` | `com.gtnewhorizon.structurelib.alignment[.enumerable]` | Point the controller front at a fixed direction so the offset frame is deterministic. |
-| `StructureLibAPI.getBlockHint()` | `com.gtnewhorizon.structurelib` | Identify hint-block dots while scanning (a hatch/DOF slot vs. a solid casing cell). |
+| `StructureLibAPI.getBlockHint()`, `enableInstrument()` / `disableInstrument()` | `com.gtnewhorizon.structurelib` | Identify hint-block dots while scanning (a hatch/DOF slot vs. a solid casing cell); the instrument brackets a build so `StructureEvent` reports which element visited each cell. |
+| `IStructureElement` / `IStructureElementChain` (+ `StructureEvent`) | `com.gtnewhorizon.structurelib[.structure]` | `ElementRecorder` maps cell -> visiting element; `HatchProbe` flattens a chain and asks `getBlocksToPlace` what each leaf accepts, which is where a slot's hatch kinds come from. |
+| `HatchElement` (+ `mteClasses()`) | `gregtech.api.enums` | The GT hatch-kind enum whose names a slot's `kinds` list holds (`InputBus`, `OutputHatch`, ...). One probe stack per kind (the first registered MTE of the classes the kind declares) is tested against the element's predicate, so a GT bump that renumbers hatches is picked up automatically. |
 | `StructureLib.proxy` (reflected) + `CommonProxy` (subclassed) | `com.gtnewhorizon.structurelib` | Temporarily swap in `RecordingProxy` to capture hint particles headlessly (the server's proxy no-ops them). The one reflective touch of a StructureLib internal; a bump that moves it fails loudly and locally. |
 
 One extra reflective touch, on the Minecraft side: StructureLib's hint walk is client-only
@@ -126,59 +132,76 @@ autoplace. Texture reflection (`Textures.BlockIcons`) is lane 6, in `TextureDump
 
 ## Texture manifest (lane 6, issue #49)
 
-`TextureDumper` emits the texture manifest so the previewer can skin machines and casings. It is a
-**separate pass** gated by `-PtextureOut` and written into the local, version-namespaced
+`TextureDumper` emits the texture manifest (schema 2, `TextureDumper.SCHEMA_VERSION`) so the previewer
+can skin machines and casings. It is a **separate pass** gated by `-PtextureOut`, which writes
+`<textureOut>/manifest.json`; the maintainer installs it locally at the version-namespaced
 `data/<version>/textures/manifest.json` (gitignored; only a small example-scoped manifest is
 committed, see `docs/dataset-extraction/`). PNGs are never committed (LGPL), only the icon **name**
 and the asset **path inside the mod jar**, which the previewer fetches from the GTNH Nexus jar at
-preview time.
+preview time. The manifest is regenerated locally on demand (no CI: `update-textures.yml` was retired
+2026-07-17, see `docs/dataset-extraction/plan.md`).
 
-**Option A (implemented): server-side icon reflection.** In 1.7.10 `Block.getIcon(side, meta)`
-returns an `IIcon` that is only populated by client-side texture registration, so on a dedicated
-server it is normally `null` - and the register itself
+**What it emits.** Per MetaTileEntity and per `(block, meta)`: the ordered bottom-to-top `ITexture`
+layer stack for each side and active state, every layer resolved to an iconset name + RGBA tint +
+glow flag. An `ITexture` is flattened recursively (`describe`): a sided or multi wrapper is unwrapped
+via its `mTextures` (length 6 means sided, so pick this side), a rendered leaf resolves to
+`{icon, rgba, glow}` from `mIconContainer` + `getRGBA()`, and a copied-block leaf resolves through the
+block-icon path. Shapes the flattener does not know are recorded in the manifest's `gaps` (with the
+offending instance's runtime field values), never guessed.
+
+**How a sprite gets named.** Everything here is server-safe reflection: the icon register
 (`net.minecraft.client.renderer.texture.IIconRegister`) is a `@SideOnly(CLIENT)` class FML's
-`SideTransformer` **refuses to load on the server** (`invalid side SERVER`), even in the dev
-workspace, so we cannot register icons the client way at all. But GT wires every casing texture
-through a `Textures.BlockIcons` enum constant whose name **is** the PNG filename: every constant's
-`run()` registers `"gregtech:iconsets/" + name()`, with the PNG at
-`assets/gregtech/textures/blocks/iconsets/<NAME>.png` (the constant's own `getTextureFile()` is
-unusable here - it dereferences the client-only `TextureMap` class the `SideTransformer` blocks). So
-the pass skips the register entirely: it **reflectively sets each constant's
-package-private `mIcon` field** (of the server-safe `net.minecraft.util.IIcon` type) to a `NamedIcon`
-carrying the name, then invokes each block's own `getIcon(side, meta)` **reflectively**
-(via `MethodHandles.findVirtual`, no compile-time reference to the possibly client-only method). When
-the block's per-meta wiring references the icon constant directly, `getIcon` hands back our
-`NamedIcon` and we read the name; no client, no icon register, and no reimplementing the per-family
-switch.
+`SideTransformer` refuses to load on a server, and `getTextureFile()` throws for the same reason, so
+the pass never registers icons and never stubs the register. (Feeding the blocks a fake
+`IIconRegister` that records the names they ask for is the obvious idea and is **impossible**: a
+class cannot implement an interface that does not exist on this side. It was measured and removed;
+texture-resolution.md records it as a dead end so it is not retried.) Icon *names* are taken instead
+from the `Textures.BlockIcons` enum constants' `name()` (or a custom container's `mIconName` plus
+`mModID`), which map 1:1 to the PNGs under `assets/<modid>/textures/blocks/`. Up front,
+`populateIconNames()` injects a name-carrying `NamedIcon` into every `BlockIcons.mIcon` field **and**
+into every custom icon container queued in `GregTechAPI.sGTBlockIconload` (the queue GT drains
+client-side and never runs on a server, which is why those blocks answer `getIcon` with null), so any
+block that answers `getIcon` at all hands back a named icon. Then:
 
-**What Option A can and cannot name (the documented gap).** A meta resolves when its `getIcon`
-references the constant **directly** - `invokevirtual` on the concrete `Textures$BlockIcons` enum,
-whose `getIcon()` is *not* side-stripped - e.g. the Electric Blast Furnace's heat-proof machine
-casing (`gt.blockcasings` meta 11 -> `MACHINE_HEATPROOFCASING`). A meta does **not** resolve when
-`getIcon` reaches its sprite through the `IIconContainer` *interface* (a shared `MACHINECASINGS_*`
-array, or a switch result typed as `IIconContainer`): `IIconContainer.getIcon()` is itself
-`@SideOnly(CLIENT)`, so FML strips it from the interface on the server and the `invokeinterface`
-throws `NoSuchMethodError`. The heating coils (`gt.blockcasings5`) hit exactly this. Those metas, plus
-families with no server-side `getIcon` override (GT's newer client-only `ITexture` render path) and
-the composite tile-entity `gt.blockmachines` controller hulls, are recorded in the manifest's `gaps`
-with the reason - never invented - pointing at **Option B (fallback, not implemented): a client-mode
-`runClient` dump under `xvfb-run`** whose main-menu tick handler reads
-`getIcon(side, meta).getIconName()` for the gap blocks. Textures only feed the previewer, so this lane
-can slip a pack version without blocking the solver. The manifest is regenerated locally on demand
-(no CI: `update-textures.yml` was retired 2026-07-17, see `docs/dataset-extraction/plan.md`). (In the
-verified 2.8.4 boot: 9 casing blocks / 150 `(block,meta,side)` assignments resolved, 28 families/metas
-recorded as Option-B gaps.)
+- **MetaTileEntities** (machines, hatches, buses, controller hulls) are placed once at a scratch
+  origin and read via `getTexture(base, side, facing, colour, active, redstone)`. Basic single-block
+  machines need no tile entity and use the `getXxxFacing{Inactive,Active}(byte)` accessors instead;
+  those return the casing layer only (the machine's own `mTextures` stack is built
+  `@SideOnly(CLIENT)` and is null here), so the per-machine glyph is rebuilt from the deterministic
+  `basicmachines/<folder>/OVERLAY_<FACE>[_ACTIVE][_GLOW]` asset path, enumerated from the GT5U jar.
+  Only faces whose PNG actually exists get an overlay; nothing is invented.
+- **Plain blocks** (casings, coils, glass, frames) try five routes per meta, in this order:
+  a server-safe `getTextures(int)` / `getTexture(int)` `ITexture` accessor; the transcribed
+  `CASING_ICON_TABLE` for the families whose `getIcon` the `SideTransformer` deleted outright; the
+  block's own (now injected) `getIcon`; a formula over the bartworks werkstoff registry for material
+  casings, which store neither icon nor name; and the block's un-annotated texture-**name** fields
+  (`textureNames`, `textureName`, or `textureSide` + `textureTopAndDown`). A meta that survives all
+  five records a gap carrying the reason.
+
+**Why five routes are needed, and what is still unreachable:** see
+[`docs/dataset-extraction/texture-resolution.md`](../../docs/dataset-extraction/texture-resolution.md).
+It holds the deep treatment: the distinct `@SideOnly` failure modes each route answers, the traps,
+the maintenance hazard in the hand-transcribed casing table, and the current unresolved set. No
+coverage count is quoted here, because it moves with every run and every pack bump. Textures only
+feed the previewer, so gaps never block the solver.
 
 Extra GT5U / Minecraft API surface this pass touches (all server-safe: `IIconRegister` and the
 client-only render path are deliberately avoided):
 
 | Symbol | Package | Used for |
 | ------ | ------- | -------- |
-| `Textures.BlockIcons` (enum + `mIcon` field, reflected) | `gregtech.api.enums` | Enumerate every casing icon constant; inject a `NamedIcon` into its `mIcon` so `getIcon` returns a named icon on the server. The constant's `name()` gives the iconset name (`gregtech:iconsets/NAME`) + jar path. |
-| `IHasIndexedTexture` | `gregtech.api.interfaces` | Filter the block registry to the indexed-texture (casing/coil) families. |
-| `IIcon` | `net.minecraft.util` | The name-carrying `NamedIcon` injected as `mIcon` (a server-safe type, unlike the client-only `IIconRegister`). |
+| `Textures.BlockIcons` (enum + `mIcon` field + the tiered `MACHINECASINGS_*` array fields, reflected) | `gregtech.api.enums` | Enumerate every casing icon constant; inject a `NamedIcon` into its `mIcon` so `getIcon` returns a named icon on the server. The constant's `name()` gives the iconset name (`gregtech:iconsets/NAME`) + jar path. The array fields back the casing table's indexed entries, read at runtime rather than transcribed. |
+| `GregTechAPI.sGTBlockIconload` | `gregtech.api` | The queue every custom `IIconContainer` self-registers into from its constructor, and so the complete server-side registry of them; walked once to inject a `NamedIcon` into each one's `mIcon`. |
+| `GregTechAPI.sGeneratedMaterials` | `gregtech.api` | Meta bound for the material-indexed blocks (`gt.blockframes`), whose sub-blocks are keyed by GT material id rather than by 0..15 world metadata. |
+| `ITexture` / `IIconContainer` | `gregtech.api.interfaces` | The layer objects themselves: flattened via their `mTextures` / `mIconContainer` / `mRGBa` / `glow` fields, and named via the container's enum `name()` or `mIconName` + `mModID`. |
+| `IMetaTileEntity.getTexture(...)`, `getStackForm`, `newMetaEntity`, `getLocalName` | `gregtech.api.interfaces.metatileentity` | The MTE layer stack, plus the block form, placement, and display name each manifest entry is keyed and labelled by. |
+| `BaseMetaTileEntity` / `IGregTechTileEntity` | `gregtech.api.metatileentity` / `.interfaces.tileentity` | Place a hull or hatch at the scratch origin (`setMetaTileID`, `setMetaTileEntity`, `setFrontFacing`) so its `getTexture` can be queried live. |
+| `MTEBasicMachine.getXxxFacing{Inactive,Active}(byte)` (reflected) | `gregtech.api.metatileentity.implementations` | A basic single-block machine's casing layers without placing it; also the `mName` field the overlay folder is derived from. |
+| `getTextures(int)` / `getTexture(int)` (resolved by name, not compiled against) | declared by `IBlockWithTextures` (`gregtech.api.interfaces`) and `BlockFrameBox` | The preferred plain-block route: no `@SideOnly`, never dereferences the icon, and carries per-layer tint and glow that `getIcon` drops. |
 | `Block.getIcon(int, int)` (reflected) | `net.minecraft.block` | The block's own per-meta/side icon lookup, invoked reflectively so there is no compile-time client dependency. |
-| `GameData.getBlockRegistry()` | `cpw.mods.fml.common.registry` | Iterate every registered block and get its `modid:name`. |
+| `IIcon` | `net.minecraft.util` | The name-carrying `NamedIcon` injected as `mIcon` (a server-safe type, unlike the client-only `IIconRegister`). |
+| `GameData.getBlockRegistry()` / `FMLControlledNamespacedRegistry` | `cpw.mods.fml.common.registry` | Iterate every registered block and get its `modid:name`. |
+| `bartworks.system.material.Werkstoff` (`Class.forName`, never linked) | `bartworks.system.material` | The werkstoff registry, texture set, and RGBA behind the material-casing formula. Reflective, so a pack without bartworks degrades to a recorded gap instead of failing the pass. |
 
 Forge/FML symbols the scaffold uses today:
 
@@ -186,18 +209,29 @@ Forge/FML symbols the scaffold uses today:
 | ------ | ------- | -------- |
 | `FMLServerStartedEvent` | `cpw.mods.fml.common.event` | Entrypoint hook: fires after the dedicated server has fully started. |
 | `FMLCommonHandler.exitJava(int, boolean)` | `cpw.mods.fml.common` | Terminate the JVM with a shell exit code once the dump finishes. |
+| `Loader.instance().getIndexedModList()` / `ModContainer.getVersion()` | `cpw.mods.fml.common` | Dev fallback for the tracked-mod versions in `_meta.json` / the manifest provenance, when `-PmodVersions` is not passed (GT5U's own container reports the uninformative `MC1710`). |
 
 ## Build & run
 
 Prerequisites:
 
-- **A full JDK 25 installed locally.** The Gradle daemon runs on Java 25 (pinned by
-  `gradle/gradle-daemon-jvm.properties`). Its auto-provision is unreliable: on Windows the
-  template's pinned foojay URL resolves to a *JRE* (no `javac`/`javadoc`/`jar`), which
-  Gradle rejects with "doesn't satisfy the specification", so the daemon fails to start.
-  Install a real JDK 25 (e.g. Temurin) into a standard location and Gradle auto-detects it
-  and skips the broken download. Verified working: Temurin `jdk-25` under the user Adoptium
-  install dir.
+- **A full JDK 25 installed locally, and `JAVA_HOME` set to it.** The Gradle daemon runs on
+  Java 25 (pinned by `gradle/gradle-daemon-jvm.properties`). **`JAVA_HOME` is required for
+  every `./gradlew` invocation in this tool**: Gradle does *not* auto-detect the locally
+  installed JDK 25. Measured on this machine, with Temurin `jdk-25.0.3+9` installed under the
+  user Adoptium dir and `JAVA_HOME` unset, `./gradlew compileJava` fails (exit 1); the same
+  command with `JAVA_HOME` exported succeeds.
+
+  ```sh
+  export JAVA_HOME="/c/Users/<you>/AppData/Local/Programs/Eclipse Adoptium/jdk-25.0.3+9"
+  ```
+
+  Worth documenting because the failure does not say "no JDK". Auto-detection misses the
+  install, the build falls straight through to foojay auto-provision, and on Windows the
+  template's pinned foojay URL resolves to a *JRE* (no `javac`/`javadoc`/`jar`), so what you
+  actually get is a confusing provisioning error: `Unable to download toolchain matching the
+  requirements ... Toolchain provisioned ... doesn't satisfy the specification ... must have
+  the executable 'javac'`.
 - **Leave toolchain auto-download enabled** (the default). The `gtnhconvention` plugin
   compiles its injected interfaces with an **Azul Zulu JDK 17** and the 1.7.10 mod with a
   **Java 8** toolchain; both download from foojay on first build. Do *not* pass
@@ -213,24 +247,39 @@ Commands (run from `tools/gtnh-extractor/`):
 # One-time: decompile Minecraft + fetch deps into the dev workspace.
 # Interactive/IDE use:
 ./gradlew setupDecompWorkspace
-# Headless CI (what jitpack.yml / the lane-4 workflow use):
+# Headless:
 ./gradlew setupCIWorkspace
 
 # Boot a dedicated server with GT5U + StructureLib + hard deps, run the dump, and exit.
 # Exit code 0 == success. runServer transitively triggers the setup above.
 ./gradlew runServer -PdatasetOut=../../_dump_out
+
+# Texture-only run (skips the structure dump entirely). -PmodVersions is not optional here:
+# see below.
+printf 'n\ny\n' | ./gradlew runServer \
+  -PtextureOut=../../out/textures-run \
+  -PpackVersion=2.8.4 \
+  "-PmodVersions=GT5-Unofficial=5.09.51.482,StructureLib=1.4.23"
 ```
 
-Run properties (`build.gradle.kts` forwards them into the server JVM as system properties):
+Run properties (`build.gradle.kts` forwards them into the server JVM as `gtnhextractor.*` system
+properties, which `DumperMod` reads):
 
-- `-PdatasetOut=<dir>` where to emit `<dir>/multiblocks/` (resolved against the project dir;
-  defaults to `<cwd>/dataset-out` if unset). The lane 4 workflow copies `<dir>/multiblocks/`
-  into `data/`.
-- `-PpackVersion=<ver>` / `-PextractorSha=<sha>` recorded in `_meta.json` (default `unknown-dev` /
-  the `GITHUB_SHA` env var / `unknown`).
+- `-PdatasetOut=<dir>` where to emit `<dir>/multiblocks/` + `_meta.json` (resolved against the
+  project dir; defaults to `<cwd>/dataset-out` when the structure dump runs without it).
+- `-PtextureOut=<dir>` where to emit `<dir>/manifest.json` (the texture pass). Setting it *without*
+  `-PdatasetOut` is a texture-only run, the only way to skip the structure dump; with neither
+  property set, the structure dump still runs, into the default directory.
+- `-PpackVersion=<ver>` / `-PextractorSha=<sha>` recorded in `_meta.json` and in the manifest
+  provenance (default `unknown-dev` / the `GITHUB_SHA` env var / `unknown`).
+- `-PmodVersions=<label>=<ver>,...` the pinned tracked-mod versions from the repo-root
+  `gtnh.lock.json`, recorded as provenance. **Required for a usable texture manifest.** Without it
+  the manifest records GT5U's self-reported `"MC1710"`, `previewer/jar.py` then tries to download a
+  jar version that does not exist, and the previewer silently falls back to placeholder boxes for
+  *everything*. It looks like a catastrophic regression and is a one-flag mistake.
 - `-PdebugMeta=<id>` diagnostics: log what the hint pass captured for one controller meta id.
 
-Headless notes for CI (lane 4 wires these up; they are not committed here):
+Headless notes:
 
 - `runServer` prompts on **stdin** for online-mode and Minecraft EULA acceptance. With no
   stdin attached (a background or CI run) the prompts read EOF and the task fails with
@@ -247,10 +296,11 @@ Headless notes for CI (lane 4 wires these up; they are not committed here):
 
 The `runServer` boot-and-exit has been **verified end to end**: the dedicated server starts
 with GT5U + StructureLib + their hard dependencies loaded, `DumperMod` fires on
-`FMLServerStartedEvent`, logs its scaffold-OK line, and calls `exitJava(0)`, yielding
+`FMLServerStartedEvent`, runs the requested pass(es), and calls `exitJava(0)`, yielding
 `BUILD SUCCESSFUL`. On a fresh machine the wall-clock is dominated by the one-time Minecraft
 decompile and the multi-GB dependency/toolchain download; once cached, a boot is about a
-minute. From lane 4 onward CI runs this as the gating check.
+minute. Nothing in CI runs it: both passes are local-only, so `BUILD SUCCESSFUL` (the real
+exit status, not a piped `tail`'s) is the gate.
 
 ## Licensing
 
