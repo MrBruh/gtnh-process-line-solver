@@ -38,7 +38,6 @@ import cpw.mods.fml.common.registry.FMLControlledNamespacedRegistry;
 import cpw.mods.fml.common.registry.GameData;
 import gregtech.api.GregTechAPI;
 import gregtech.api.enums.Textures;
-import gregtech.api.interfaces.IHasIndexedTexture;
 import gregtech.api.interfaces.IIconContainer;
 import gregtech.api.interfaces.ITexture;
 import gregtech.api.interfaces.metatileentity.IMetaTileEntity;
@@ -634,7 +633,14 @@ final class TextureDumper {
         FMLControlledNamespacedRegistry<Block> registry = GameData.getBlockRegistry();
         int stacks = 0;
         for (Object obj : registry) {
-            if (!(obj instanceof IHasIndexedTexture) || !(obj instanceof Block)) {
+            // Every block, not only the GT-indexed ones. The old `instanceof IHasIndexedTexture`
+            // filter was a proxy for "a casing/coil a multiblock might place", but it is not one:
+            // 75 registry names a dumped multiblock actually uses do not implement it - GT's own
+            // gt.blockcasings5 and gt.blockframes among them, plus every bartworks/tectech/kekztech
+            // casing and the vanilla blocks some structures include. They were dropped BEFORE the
+            // gap branch below, so they went missing silently. Blocks that cannot answer getIcon
+            // still cost only a failed lookup, and now say so.
+            if (!(obj instanceof Block)) {
                 continue;
             }
             Block block = (Block) obj;
@@ -646,8 +652,18 @@ final class TextureDumper {
                 continue;
             }
             for (int meta : realMetas(block)) {
+                // An array-backed casing family is emitted per side, since its bottom, top and wall
+                // are three different sprites - a detail the single "all" side below would flatten.
+                if (emitArrayCasing(blocks, block, registryName, meta)) {
+                    stacks++;
+                    continue;
+                }
                 NamedIcon icon = iconAt(block, getIcon, 2, meta); // side 2 (north) as the representative face
                 if (icon == null) {
+                    // Was a bare `continue`, which is how ~37 pairs (the tiered machine casings among
+                    // them) went missing with nothing recorded anywhere. lastIconError says whether
+                    // getIcon returned null, threw, or handed back an icon this dumper never named.
+                    gaps.add(new Gap(registryName, meta, "all", "no icon for meta (" + lastIconError + ")"));
                     continue;
                 }
                 icons.putIfAbsent(icon.iconName, icon.assetPath);
@@ -690,6 +706,96 @@ final class TextureDumper {
             }
         }
         LOG.info("gtnh-extractor: named {} BlockIcons constants", ok);
+    }
+
+    /**
+     * Casing families whose per-meta icons are unreachable through {@code block.getIcon}, mapped to
+     * the {@code Textures.BlockIcons} arrays that hold them, indexed {@code [DOWN, UP, SIDE]}.
+     *
+     * <p>
+     * {@code IIconContainer.getIcon()} is {@code @SideOnly(CLIENT)}, so FML's SideTransformer strips
+     * it from the INTERFACE on a dedicated server. A block that reaches its icon with
+     * {@code invokevirtual BlockIcons.getIcon()} still resolves (the enum keeps its concrete method),
+     * but one that goes through {@code invokeinterface IIconContainer.getIcon()} dies with
+     * NoSuchMethodError. That is the whole difference between {@code gt.blockcasings} metas 10-15,
+     * which have always worked, and metas 0-9 - the tiered machine casings that make up the bulk of
+     * an ExxonMobil Chemical Plant - which have always been grey.
+     *
+     * <p>
+     * The arrays themselves are plain static fields holding {@code BlockIcons} ENUM constants, so we
+     * can read the constant for a meta directly and name it exactly as {@link #populateIconNames}
+     * does, never touching the stripped method. This is GT-specific knowledge in a pass that is
+     * already GT-specific reflection, and it is verified per family against the block's own
+     * {@code getIcon} bytecode rather than guessed - a family whose arrays are named differently
+     * simply is not listed here and keeps its recorded gap.
+     */
+    // A HashMap rather than Map.of: this targets Java 8 bytecode (Jabel gives modern syntax, not the
+    // modern stdlib), so the Java 9 factory methods are not on the classpath here.
+    private static final Map<String, String[]> ARRAY_BACKED_CASINGS = new LinkedHashMap<>();
+
+    static {
+        ARRAY_BACKED_CASINGS.put(
+            "gregtech:gt.blockcasings",
+            new String[] { "MACHINECASINGS_BOTTOM", "MACHINECASINGS_TOP", "MACHINECASINGS_SIDE" });
+    }
+
+    /**
+     * Emit one array-backed casing meta as per-side layers. Returns whether it was handled, so the
+     * caller can fall through to the normal {@code getIcon} path (and its gap) for everything else.
+     */
+    private boolean emitArrayCasing(Map<String, Entry> blocks, Block block, String registryName, int meta) {
+        if (!ARRAY_BACKED_CASINGS.containsKey(registryName)) {
+            return false;
+        }
+        Map<String, Map<String, List<Layer>>> sides = new TreeMap<>();
+        for (int side = 0; side < SIDE_NAMES.length; side++) {
+            NamedIcon icon = arrayCasingIcon(registryName, side, meta);
+            if (icon == null) {
+                return false; // a partially resolvable meta is not worth half-emitting; keep the gap
+            }
+            icons.putIfAbsent(icon.iconName, icon.assetPath);
+            Map<String, List<Layer>> perState = new TreeMap<>();
+            List<Layer> layers = new ArrayList<>();
+            layers.add(new Layer(icon.iconName, new int[] { 255, 255, 255, 255 }, false));
+            perState.put("inactive", layers);
+            sides.put(SIDE_NAMES[side], perState);
+        }
+        Entry entry = blocks.computeIfAbsent(
+            registryName + "|" + meta,
+            k -> new Entry("block", null, block.getClass().getName()));
+        entry.sides.putAll(sides);
+        return true;
+    }
+
+    /**
+     * The icon for one side of an array-backed casing meta, or {@code null} if this block is not one
+     * (or the arrays no longer hold what we expect, in which case the caller's gap still records it).
+     */
+    private NamedIcon arrayCasingIcon(String registryName, int side, int meta) {
+        String[] fields = ARRAY_BACKED_CASINGS.get(registryName);
+        if (fields == null) {
+            return null;
+        }
+        String fieldName = fields[side == 0 ? 0 : side == 1 ? 1 : 2];
+        try {
+            Field field = Textures.BlockIcons.class.getDeclaredField(fieldName);
+            field.setAccessible(true);
+            Object array = field.get(null);
+            if (array == null || meta < 0 || meta >= java.lang.reflect.Array.getLength(array)) {
+                return null;
+            }
+            Object element = java.lang.reflect.Array.get(array, meta);
+            if (!(element instanceof Textures.BlockIcons)) {
+                return null;
+            }
+            String shortName = "iconsets/" + ((Textures.BlockIcons) element).name();
+            return new NamedIcon(
+                ICON_DOMAIN + ":" + shortName,
+                "assets/" + ICON_DOMAIN + "/textures/blocks/" + shortName + ".png");
+        } catch (Throwable t) {
+            LOG.debug("gtnh-extractor: array casing lookup failed for {}|{}: {}", registryName, meta, t.toString());
+            return null;
+        }
     }
 
     private NamedIcon iconAt(Block block, MethodHandle getIcon, int side, int meta) {

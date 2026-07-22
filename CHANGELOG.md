@@ -7,6 +7,25 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Multiblock casings: tiered machine casings render, and missing sprites are reported
+  (`tools/gtnh-extractor/`, `previewer/`, GitHub #98).** `IIconContainer.getIcon()` is
+  `@SideOnly(CLIENT)`, so FML strips it from the interface on a dedicated server: a casing reaching
+  its icon via `invokevirtual BlockIcons.getIcon()` resolves, but one going through
+  `invokeinterface IIconContainer.getIcon()` dies with `NoSuchMethodError`. That is the whole reason
+  `gt.blockcasings` metas 10-15 always rendered while metas 0-9 - the tiered machine casings that
+  are most of an ExxonMobil Chemical Plant - were always grey. Those metas are now read straight
+  from the `MACHINECASINGS_BOTTOM/TOP/SIDE` arrays that hold them, per side rather than flattened to
+  one face. The block scan also no longer pre-filters on `IHasIndexedTexture`, which silently
+  dropped 75 registry names a dumped multiblock actually uses. Families whose icons remain
+  unreachable server-side (`gt.blockcasings8`, the coil families) still need the client-side route
+  of #78.
+- **Untextured blocks are now loud (`previewer/textures.py`, GitHub #98).** A block with no manifest
+  entry renders neutral grey inside an otherwise-expanded multiblock, where it is indistinguishable
+  from a deliberately plain casing - nothing surfaced it, since the machine keeps no placeholder
+  label. `TextureSummary` gains `unskinned_blocks` and the pass warns with the exact
+  `<block>|<meta>` list. The extractor likewise records the two skips that previously `continue`d in
+  silence, taking the manifest's own recorded gaps from 1846 to 5370: the shortfall was never
+  measured before because most of it was invisible.
 - **Distillation Towers are sized to their recipe, not to the maximum
   (`dataset/multiblocks.py`, `adapter/`, `previewer/`, GitHub #98).** A GT Distillation Tower routes
   the recipe's fluid output `i` to structure layer `i` and nowhere else, so a tower shorter than the

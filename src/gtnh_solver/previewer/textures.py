@@ -145,6 +145,13 @@ class TextureSummary:
     block_cubes: int
     embedded_icons: int
     embedded_active_icons: int = 0
+    #: ``"<block>|<meta>"`` for every constituent block that resolved NO face at all, so its cubes
+    #: render as neutral grey. Reported rather than swallowed because a grey cube inside an expanded
+    #: multiblock is otherwise indistinguishable from a deliberately plain casing - the machine is
+    #: still flagged ``expanded`` and keeps no placeholder label, so nothing else surfaces the gap
+    #: (GitHub #98). A non-empty list means the texture manifest needs a re-dump, not that the
+    #: structure is wrong.
+    unskinned_blocks: tuple[str, ...] = ()
 
 
 class TextureManifest:
@@ -540,6 +547,8 @@ def texturize_scene(
     # Only faces whose running stack differs from idle - the ones that can bake a distinct active
     # texture - are collected here (a plain casing is identical in both states and skipped).
     key_layers_active: dict[str, list[dict[str, Any]]] = {}
+    # Constituent blocks that resolve no face at all - they will render grey (see TextureSummary).
+    unskinned: set[str] = set()
     for machine in scene["machines"]:
         machine_cubes = _machine_cubes(machine, docs, manifest, auto_out_face)
         if not machine_cubes:
@@ -547,6 +556,8 @@ def texturize_scene(
         machine["expanded"] = True
         for cube in machine_cubes:
             faces, needed = _face_icons(cube, manifest)
+            if all(face is None for face in faces):
+                unskinned.add(f"{cube.block}|{cube.meta}")
             needed_icons |= needed
             for key in faces:
                 if key is not None and key not in key_layers:
@@ -613,6 +624,7 @@ def texturize_scene(
         block_cubes=len(cubes),
         embedded_icons=len(pool),
         embedded_active_icons=len(pool_active),
+        unskinned_blocks=tuple(sorted(unskinned)),
     )
     _log.info(
         "textures: %d/%d machine types expanded to %d textured cubes (%s); placeholder: %s; "
@@ -625,4 +637,12 @@ def texturize_scene(
         summary.embedded_icons,
         summary.embedded_active_icons,
     )
+    if summary.unskinned_blocks:
+        # A grey cube inside an expanded multiblock looks like a plain casing, so this is the only
+        # place the gap becomes visible. Warn, not info: it means the manifest needs a re-dump.
+        _log.warning(
+            "textures: %d constituent block type(s) have no sprite and render grey: %s",
+            len(summary.unskinned_blocks),
+            ", ".join(summary.unskinned_blocks),
+        )
     return summary

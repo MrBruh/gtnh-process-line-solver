@@ -739,6 +739,41 @@ def test_block_key_expands_a_machine_whose_type_does_not_match(dataset: tuple[Pa
     assert scene["machines"][0]["expanded"] is True
 
 
+def test_a_block_with_no_sprite_is_reported_not_swallowed(dataset: tuple[Path, Path]) -> None:
+    """A constituent block with no manifest entry renders grey; the summary must say which.
+
+    Nothing else surfaces it: the machine is still flagged ``expanded``, so it keeps no placeholder
+    label, and a grey cube inside a multiblock is indistinguishable from a deliberately plain casing.
+    That is how the tiered machine casings stayed invisibly broken (GitHub #98).
+    """
+    mb, manifest = dataset
+    # A doc placing a casing the manifest has never heard of - the real shape of the GT casing
+    # families whose icons are unreachable server-side.
+    doc = _ebf_doc()
+    doc["controller"]["display_name"] = "Test Unskinned"
+    doc["variants"][0]["blocks"].append(
+        {"d": [1, 1, 0], "block": "gregtech:gt.blockcasings8", "meta": 0}
+    )
+    doc["variants"][0]["bbox"] = [2, 2, 2]
+    (mb / "test_unskinned.json").write_text(json.dumps(doc), encoding="utf-8")
+
+    scene = _scene([_machine("m1", "Test Unskinned", [0, 0, 0], [2, 2, 2])])
+    summary = texturize_scene(
+        scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider
+    )
+    assert "gregtech:gt.blockcasings8|0" in summary.unskinned_blocks
+    assert summary.block_cubes  # the structure still renders; only that one sprite is missing
+
+
+def test_a_fully_skinned_machine_reports_nothing_unskinned(dataset: tuple[Path, Path]) -> None:
+    mb, manifest = dataset
+    scene = _scene([_machine("m1", "Test Macerator", [0, 0, 0], [1, 1, 1])])
+    summary = texturize_scene(
+        scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider
+    )
+    assert summary.unskinned_blocks == ()
+
+
 def test_block_key_miss_falls_back_to_the_type(dataset: tuple[Path, Path]) -> None:
     # A block key the dump lacks must not shadow a type that resolves - the dump is partial.
     mb, manifest = dataset
