@@ -50,8 +50,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `getColor(int)` dereferences the stripped `IIcon[]` and dies with `NoSuchFieldError` - so both must
   be read as fields, never through their accessors.
 
-  Net on the local 208-multiblock dump: unresolved `(block, meta)` pairs 330 to 98, multiblocks
-  carrying at least one grey block 177 to 43. Both shipped example lines (sand, nitrobenzene) now
+  A sixth route covers bartworks' werkstoff material casings, which store neither an icon nor a name:
+  their sprite is recomputed from the werkstoff registry plus its texture set. Their metas are
+  werkstoff ids running to five digits, so they are enumerated from that registry rather than scanned.
+  Deliberately not bug-compatible with GT here: upstream derives the texture-set name in a way that
+  yields a nonexistent directory for the nine custom sets, so GT itself renders those as a missing
+  texture; reading `mSetName` gives a path that exists.
+
+  Net on the local 208-multiblock dump: unresolved `(block, meta)` pairs 330 to 91, multiblocks
+  carrying at least one grey block 177 to 40. Both shipped example lines (sand, nitrobenzene) now
   resolve every constituent block, so the `render grey` warning is silent on each.
 - **Texture gaps name the block that has one (`tools/gtnh-extractor/`, GitHub #98).** A multiblock
   controller whose layer stack resolved empty was dropped from the manifest with *nothing recorded

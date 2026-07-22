@@ -784,6 +784,123 @@ final class TextureDumper {
         return true;
     }
 
+    /**
+     * Every werkstoff id, as the meta set of a werkstoff casing block.
+     *
+     * <p>
+     * Taken from the registry rather than scanned. These blocks are keyed by werkstoff id, which
+     * runs to five digits (31850, 32083, ...), so neither the 0..15 block-metadata range nor even
+     * the material-id range frames use would ever reach them - and probing 32k metas per block to
+     * find a handful is not a scan worth doing when the exact set is one map lookup away.
+     */
+    private static int[] werkstoffMetas() {
+        try {
+            Class<?> werkstoffClass = Class.forName("bartworks.system.material.Werkstoff");
+            Field mapField = werkstoffClass.getDeclaredField("werkstoffHashMap");
+            mapField.setAccessible(true);
+            Object map = mapField.get(null);
+            if (!(map instanceof Map)) {
+                return null;
+            }
+            TreeSet<Integer> ids = new TreeSet<>();
+            for (Object key : ((Map<?, ?>) map).keySet()) {
+                if (key instanceof Number) {
+                    ids.add(((Number) key).intValue());
+                }
+            }
+            if (ids.isEmpty()) {
+                return null;
+            }
+            int[] out = new int[ids.size()];
+            int i = 0;
+            for (int id : ids) {
+                out[i++] = id;
+            }
+            return out;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** Registry-name prefix of the bartworks werkstoff casings, whose icon is computed, not stored. */
+    private static final String WERKSTOFF_CASING_PREFIX = "bartworks:bw.werkstoffblockscasing";
+
+    /**
+     * The icon a bartworks werkstoff casing shows, recomputed from server-readable material state.
+     *
+     * <p>
+     * These blocks store no icon and no name. The sprite is picked at render time from
+     * {@code PrefixTextureLinker}, which is {@code @SideOnly(Side.CLIENT)} <b>wholesale</b> and so is
+     * simply absent here. But the map it would have built is a pure formula over state that does
+     * survive - the werkstoff registry, its texture set, and the ore prefix - so the same name can be
+     * derived directly:
+     *
+     * <pre>gregtech:materialicons/&lt;texture set&gt;/blockCasing[Advanced]</pre>
+     *
+     * <p>
+     * Reflective rather than a compile-time dependency, so a pack without bartworks degrades to a
+     * recorded gap instead of failing the whole pass.
+     *
+     * <p>
+     * <b>Deliberately not bug-compatible with GT.</b> {@code PrefixTextureLinker} derives the set
+     * name as {@code SET.getName().substring(4)}, which for the nine custom sets yields e.g.
+     * {@code DARKSTEEL} - a directory that does not exist, so GT itself renders a missing texture for
+     * those. Reading {@code mSetName} gives {@code CUSTOM/darksteel}, which does exist. Reproducing
+     * the upstream bug would only put a knowingly-wrong sprite in the manifest.
+     */
+    private NamedIcon werkstoffCasingIcon(String registryName, int meta) {
+        if (!registryName.startsWith(WERKSTOFF_CASING_PREFIX)) {
+            return null;
+        }
+        String prefix = registryName.contains("casingadvanced") ? "blockCasingAdvanced" : "blockCasing";
+        try {
+            Class<?> werkstoffClass = Class.forName("bartworks.system.material.Werkstoff");
+            Field mapField = werkstoffClass.getDeclaredField("werkstoffHashMap");
+            mapField.setAccessible(true);
+            Object map = mapField.get(null);
+            if (!(map instanceof Map)) {
+                return null;
+            }
+            Object werkstoff = ((Map<?, ?>) map).get((short) meta);
+            if (werkstoff == null) {
+                return null;
+            }
+            Object texSet = werkstoffClass.getMethod("getTexSet").invoke(werkstoff);
+            Object setName = texSet == null ? null : readField(texSet, "mSetName");
+            if (!(setName instanceof String) || ((String) setName).isEmpty()) {
+                return null;
+            }
+            String rel = "materialicons/" + setName + "/" + prefix;
+            return new NamedIcon(ICON_DOMAIN + ":" + rel, assetPath(ICON_DOMAIN, rel));
+        } catch (Throwable t) {
+            LOG.debug("gtnh-extractor: werkstoff casing lookup failed for {}|{}: {}", registryName, meta, t.toString());
+            return null;
+        }
+    }
+
+    /** A werkstoff's own RGBA multiply, so a material casing keeps its colour. */
+    private int[] werkstoffTint(int meta) {
+        try {
+            Class<?> werkstoffClass = Class.forName("bartworks.system.material.Werkstoff");
+            Field mapField = werkstoffClass.getDeclaredField("werkstoffHashMap");
+            mapField.setAccessible(true);
+            Object map = mapField.get(null);
+            Object werkstoff = map instanceof Map ? ((Map<?, ?>) map).get((short) meta) : null;
+            Object rgba = werkstoff == null ? null : werkstoffClass.getMethod("getRGBA").invoke(werkstoff);
+            if (rgba instanceof short[]) {
+                short[] s = (short[]) rgba;
+                int[] out = { 255, 255, 255, 255 };
+                for (int i = 0; i < 4 && i < s.length; i++) {
+                    out[i] = s[i] & 0xFFFF;
+                }
+                return out;
+            }
+        } catch (Throwable ignored) {
+            // untinted is a safe answer; the icon still resolves
+        }
+        return null;
+    }
+
     /** The mod domain of a registry name ({@code "bartworks:BW_GlasBlocks"} -> {@code "bartworks"}). */
     private static String registryDomain(String registryName) {
         int colon = registryName.indexOf(':');
@@ -913,6 +1030,16 @@ final class TextureDumper {
                     ? "no server-side getIcon override (" + getIconError + ")"
                     : "no icon for meta (" + lastIconError + ")";
                 if (icon == null) {
+                    // A werkstoff casing stores neither icon nor name; its sprite is recomputed.
+                    NamedIcon computed = werkstoffCasingIcon(registryName, meta);
+                    if (computed != null) {
+                        blocks.computeIfAbsent(
+                            registryName + "|" + meta,
+                            k -> new Entry("block", null, block.getClass().getName()))
+                            .sides.put("all", singleLayerState(computed, werkstoffTint(meta)));
+                        stacks++;
+                        continue;
+                    }
                     // Last resort: the block's own texture-name fields, which survive side-stripping
                     // even where every callable route into its icons has been deleted.
                     if (emitNamedTexture(blocks, block, registryName, meta)) {
@@ -1527,6 +1654,12 @@ final class TextureDumper {
      * even once their ITexture accessor worked.
      */
     private int[] realMetas(Block block, String registryName) {
+        if (registryName.startsWith(WERKSTOFF_CASING_PREFIX)) {
+            int[] ids = werkstoffMetas();
+            if (ids != null) {
+                return ids;
+            }
+        }
         Item item = Item.getItemFromBlock(block);
         TreeSet<Integer> metas = new TreeSet<>();
         if (item != null) {

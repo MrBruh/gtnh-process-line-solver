@@ -7,7 +7,7 @@
       "GT5-Unofficial": "5.09.51.482",
       "StructureLib": "1.4.23"
     },
-    "generated_at": "2026-07-22T20:41:18.759Z",
+    "generated_at": "2026-07-22T21:05:21.062Z",
     "extractor_sha": "unknown",
     "note": "SMALL committed manifest: only the blocks the shipped example lines and the two multiblock fixtures need, so `gtnh-solve --preview examples/*.json` skins out of the box. The full dump is local and version-namespaced (data/<version>/textures/manifest.json), never committed. Regenerate with tools/derive_small_manifest.py.",
     "coverage": {
