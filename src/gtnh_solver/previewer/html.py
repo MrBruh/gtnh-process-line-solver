@@ -270,12 +270,30 @@ function flatMaterial(m) {
   return mm;
 }
 // A per-block cube's six materials from its baked-face pool keys (three.js material order). A face
-// with no baked texture falls back to a neutral casing grey so the cube still reads as a block.
-const _UNBAKED = new THREE.MeshStandardMaterial({ color: '#6b7280', roughness: 0.8, metalness: 0.05 });
+// with no baked texture gets Minecraft's own missing-texture checkerboard - magenta and black, 2x2 -
+// instead of a neutral grey. Grey was actively misleading: a great many GT casings ARE plain grey,
+// so an unresolved sprite was indistinguishable from a correctly rendered one and the gap stayed
+// invisible in the very view meant to reveal it (GitHub #98 asks for gaps to be loud, not silent).
+// The CLI still names every unskinned block; this is the same signal in the render.
+const _MISSING = (() => {
+  const S = 16, cnv = document.createElement('canvas');   // one sprite-sized tile, nearest-filtered
+  cnv.width = S; cnv.height = S;
+  const ctx = cnv.getContext('2d');
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, S, S);
+  ctx.fillStyle = '#f800f8';                              // MC's missing-texture magenta
+  ctx.fillRect(0, 0, S / 2, S / 2);
+  ctx.fillRect(S / 2, S / 2, S / 2, S / 2);
+  const tex = new THREE.CanvasTexture(cnv);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, metalness: 0.05 });
+})();
 function blockMaterials(faces) {
   return faces.map((key) => {
     const tex = faceTexture(key);
-    if (!tex) return _UNBAKED;
+    if (!tex) return _MISSING;
     const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, metalness: 0.03 });
     const active = faceTextureActive(key);
     if (active) stateMaterials.push({ mat, idle: tex, active });   // swappable by #stateToggle

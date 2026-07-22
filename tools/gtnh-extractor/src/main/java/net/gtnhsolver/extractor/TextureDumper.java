@@ -165,6 +165,7 @@ final class TextureDumper {
         throws IOException {
         textureOut.mkdirs();
         populateIconNames();
+        verifyCasingTable();
         enumerateBasicMachineOverlays();
 
         Map<String, Entry> blocks = new TreeMap<>();
@@ -333,10 +334,7 @@ final class TextureDumper {
 
     /** One overlay layer for a {@code <folder>/OVERLAY_...} asset, registering its icon -> jar path. */
     private Layer overlayLayer(String rel, boolean glow) {
-        String iconRel = "basicmachines/" + rel;
-        String iconName = ICON_DOMAIN + ":" + iconRel;
-        icons.putIfAbsent(iconName, "assets/" + ICON_DOMAIN + "/textures/blocks/" + iconRel + ".png");
-        return new Layer(iconName, new int[] { 255, 255, 255, 0 }, glow);
+        return new Layer(registerIcon(ICON_DOMAIN, "basicmachines/" + rel), new int[] { 255, 255, 255, 0 }, glow);
     }
 
     // ------------------------------------------------------------------------------------------
@@ -528,24 +526,73 @@ final class TextureDumper {
         gaps.add(new Gap(t.getClass().getName(), -1, SIDE_NAMES[renderSide], "unknown ITexture class"));
     }
 
-    /** An {@code IIconContainer}'s iconset name: enum {@code name()}, else a custom {@code mIconName}. */
+    /**
+     * An {@code IIconContainer}'s domain-qualified iconset name: the {@code BlockIcons} enum
+     * {@code name()} (always the {@code gregtech} domain), else a custom container's
+     * {@code mIconName}.
+     *
+     * <p>
+     * The two custom-container families answer {@code mIconName} differently, and assuming either
+     * one is {@code gregtech}-relative is what put 46 unfetchable paths in the shipped manifest:
+     * <ul>
+     * <li>GT's own {@code Textures.BlockIcons.CustomIcon} stores an <b>already domain-qualified</b>
+     * name ({@code "gregtech:icons/NeutronActivator_Off"}), because its constructor runs a bare name
+     * through {@code GregTech.getResourcePath} first. Prefixing that again produced
+     * {@code gregtech:gregtech:icons/...}, an asset path with a literal colon in it (29 icons).
+     * <li>GT++'s {@code TexturesGtBlock.CustomIcon} stores a <b>bare</b> name next to a separate
+     * {@code mModID} field ({@code "miscutils"} for its single-arg constructor). Assuming
+     * {@code gregtech} pointed 17 icons at {@code assets/gregtech/textures/blocks/TileEntities/},
+     * a directory GT5U does not have (17 icons).
+     * </ul>
+     * One jar still serves both: GT5-Unofficial is a monorepo and ships all 20 asset domains.
+     */
     private String iconName(IIconContainer c) {
-        String rel = null;
-        if (c instanceof Enum) {
-            rel = "iconsets/" + ((Enum<?>) c).name();
-        } else {
-            Object mIconName = readField(c, "mIconName");
-            if (mIconName instanceof String && !((String) mIconName).isEmpty()) {
-                rel = (String) mIconName;
-            }
-        }
-        if (rel == null) {
+        String[] ref = iconRef(c);
+        if (ref == null) {
             gaps.add(new Gap(c.getClass().getName(), -1, "all", "unresolvable IIconContainer"));
             return null;
         }
-        String name = ICON_DOMAIN + ":" + rel;
-        icons.putIfAbsent(name, "assets/" + ICON_DOMAIN + "/textures/blocks/" + rel + ".png");
+        return registerIcon(ref[0], ref[1]);
+    }
+
+    /**
+     * The {@code {domain, relative-path}} an icon container names, or null if it names nothing.
+     *
+     * <p>
+     * A {@code BlockIcons} enum constant is its own name under {@code gregtech:iconsets/}. Every
+     * other container carries an {@code mIconName}, and the two families spell it differently - see
+     * {@link #iconName} for what assuming either one cost the shipped manifest.
+     */
+    private static String[] iconRef(Object container) {
+        if (container instanceof Enum) {
+            return new String[] { ICON_DOMAIN, "iconsets/" + ((Enum<?>) container).name() };
+        }
+        Object mIconName = readField(container, "mIconName");
+        if (!(mIconName instanceof String) || ((String) mIconName).isEmpty()) {
+            return null;
+        }
+        String rel = (String) mIconName;
+        int colon = rel.indexOf(':');
+        if (colon >= 0) {
+            // Already qualified. Mirror GT's own getResourceLocation: a one-character prefix is a
+            // Windows drive letter, not a domain, so it falls back to minecraft rather than "c".
+            return new String[] { colon > 1 ? rel.substring(0, colon) : "minecraft", rel.substring(colon + 1) };
+        }
+        Object modId = readField(container, "mModID");
+        String domain = modId instanceof String && !((String) modId).isEmpty() ? (String) modId : ICON_DOMAIN;
+        return new String[] { domain, rel };
+    }
+
+    /** Register {@code <domain>:<rel>} against its jar asset path and return the icon name. */
+    private String registerIcon(String domain, String rel) {
+        String name = domain + ":" + rel;
+        icons.putIfAbsent(name, assetPath(domain, rel));
         return name;
+    }
+
+    /** The path a {@code <domain>:<rel>} block icon occupies inside its mod jar. */
+    private static String assetPath(String domain, String rel) {
+        return "assets/" + domain + "/textures/blocks/" + rel + ".png";
     }
 
     /** Resolve a copied casing block's icon (its base layer) via the injected {@code getIcon}. */
@@ -645,17 +692,34 @@ final class TextureDumper {
             }
             Block block = (Block) obj;
             String registryName = String.valueOf(registry.getNameForObject(block));
+            // The ITexture accessor is tried FIRST wherever a block has one: it cannot hit the
+            // @SideOnly cliff getIcon dies on, and it carries per-layer tint and glow that the
+            // single-icon path drops. getIcon stays the fallback for everything else.
+            TextureAccessor accessor = findTextureAccessor(block);
             MethodHandle getIcon = findGetIcon(block);
-            if (getIcon == null) {
+            String getIconError = lastGetIconError;
+            // A tabled family has NO callable getIcon by definition - that is why it is tabled - so
+            // the block-level bail-out must not fire before the table gets a chance at it.
+            boolean tabled = CASING_ICON_TABLE.containsKey(registryName);
+            if (accessor == null && getIcon == null && !tabled) {
                 gaps.add(new Gap(registryName, -1, "all",
-                    "no server-side getIcon override (" + lastGetIconError + ")"));
+                    "no server-side getIcon override (" + getIconError + ")"));
                 continue;
             }
-            for (int meta : realMetas(block)) {
-                // An array-backed casing family is emitted per side, since its bottom, top and wall
-                // are three different sprites - a detail the single "all" side below would flatten.
-                if (emitArrayCasing(blocks, block, registryName, meta)) {
+            for (int meta : realMetas(block, registryName)) {
+                if (accessor != null && emitTextureAccessor(blocks, block, accessor, registryName, meta)) {
                     stacks++;
+                    continue;
+                }
+                // A tabled casing family: its getIcon cannot be called server-side at all, so the
+                // meta-to-constant mapping comes from the transcribed table instead.
+                if (emitTableCasing(blocks, block, registryName, meta)) {
+                    stacks++;
+                    continue;
+                }
+                if (getIcon == null) {
+                    gaps.add(new Gap(registryName, meta, "all",
+                        "no server-side getIcon override (" + getIconError + ")"));
                     continue;
                 }
                 NamedIcon icon = iconAt(block, getIcon, 2, meta); // side 2 (north) as the representative face
@@ -681,6 +745,153 @@ final class TextureDumper {
     }
 
     // ------------------------------------------------------------------------------------------
+    // Server-safe ITexture accessors (the preferred plain-block route)
+    // ------------------------------------------------------------------------------------------
+    //
+    // `block.getIcon(side, meta)` is the fragile route, and it fails three different ways on a
+    // dedicated server. Some blocks also expose an ITexture accessor that carries NO @SideOnly and
+    // never dereferences the icon - it only passes IIconContainers into TextureFactory, which stores
+    // them without calling the stripped getIcon(). Those hand back exactly the GTRenderedTexture
+    // leaves describe() already reads, so they need no naming logic of their own, AND they carry the
+    // per-layer tint and glow flags the single-icon getIcon route throws away. Two shapes exist:
+    //
+    //   ITexture[][] getTextures(int meta)  one stack per ForgeDirection ordinal  (IBlockWithTextures)
+    //   ITexture[]   getTexture(int meta)   one stack shared by all six faces     (BlockFrameBox)
+    //
+    // Preferred over getIcon wherever present, since it is strictly more information from a route
+    // that cannot hit the @SideOnly cliff.
+
+    /**
+     * The client-only render meta a coil block adds to reach its lit form ({@code ACTIVE_OFFSET} in
+     * {@code BlockCasings5}). It is never stored in world metadata - {@code getClientMeta} synthesizes
+     * it - so the inactive stack is dumped at {@code meta} and the active one at {@code meta + 16}.
+     */
+    private static final int ACTIVE_META_OFFSET = 16;
+
+    /** A block's resolved server-safe ITexture accessor: the handle plus which of the two shapes it is. */
+    private static final class TextureAccessor {
+
+        final MethodHandle handle;
+        /** {@code getTextures} returns {@code ITexture[][]} (per side); {@code getTexture} one stack. */
+        final boolean perSide;
+
+        TextureAccessor(MethodHandle handle, boolean perSide) {
+            this.handle = handle;
+            this.perSide = perSide;
+        }
+    }
+
+    /** Resolve {@code getTextures(int)} then {@code getTexture(int)} on {@code block}, or null. */
+    private TextureAccessor findTextureAccessor(Block block) {
+        MethodHandles.Lookup priv = MethodHandles.lookup();
+        for (boolean perSide : new boolean[] { true, false }) {
+            String name = perSide ? "getTextures" : "getTexture";
+            Class<?> want = perSide ? ITexture[][].class : ITexture[].class;
+            for (Class<?> c = block.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+                try {
+                    java.lang.reflect.Method m = c.getDeclaredMethod(name, int.class);
+                    if (!want.isAssignableFrom(m.getReturnType())) {
+                        break; // a same-named method of another shape; do not keep walking into it
+                    }
+                    m.setAccessible(true);
+                    return new TextureAccessor(priv.unreflect(m), perSide);
+                } catch (NoSuchMethodException e) {
+                    // keep walking up the hierarchy
+                } catch (Throwable t) {
+                    break;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Side name -> layer stack for one meta via {@code accessor}, or null if it resolved nothing. */
+    private Map<String, List<Layer>> textureAccessorLayers(Block block, TextureAccessor accessor, int meta) {
+        Object result;
+        try {
+            result = accessor.handle.invoke(block, meta);
+        } catch (Throwable t) {
+            lastIconError = (accessor.perSide ? "getTextures" : "getTexture") + " threw "
+                + t.getClass().getSimpleName();
+            return null;
+        }
+        Map<String, List<Layer>> out = new TreeMap<>();
+        if (accessor.perSide && result instanceof ITexture[][]) {
+            ITexture[][] perSide = (ITexture[][]) result;
+            for (int side = 0; side < SIDE_NAMES.length && side < perSide.length; side++) {
+                if (perSide[side] == null) {
+                    continue;
+                }
+                List<Layer> layers = describeAll(perSide[side], side);
+                if (!layers.isEmpty()) {
+                    out.put(SIDE_NAMES[side], layers);
+                }
+            }
+        } else if (!accessor.perSide && result instanceof ITexture[]) {
+            // One stack for every face: emit it under "all", which the previewer already falls back
+            // to, rather than duplicating identical layers across six side keys.
+            List<Layer> layers = describeAll((ITexture[]) result, 2);
+            if (!layers.isEmpty()) {
+                out.put("all", layers);
+            }
+        }
+        if (out.isEmpty()) {
+            lastIconError = (accessor.perSide ? "getTextures" : "getTexture") + " resolved no layer";
+            return null;
+        }
+        return out;
+    }
+
+    /**
+     * Emit one meta through the ITexture accessor, with its active stack when the block has one.
+     * Returns whether it was handled, so the caller falls through to {@code getIcon} for the rest.
+     *
+     * <p>
+     * The active probe re-queries at {@code meta + 16} and keeps the result only when it actually
+     * differs from the inactive stack, so a block that does not use the coil render-meta convention
+     * (every block but {@code BlockCasings5} today) simply contributes no active state rather than
+     * mislabelling an unrelated meta's texture as "running".
+     */
+    private boolean emitTextureAccessor(Map<String, Entry> blocks, Block block, TextureAccessor accessor,
+        String registryName, int meta) {
+        Map<String, List<Layer>> inactive = textureAccessorLayers(block, accessor, meta);
+        if (inactive == null) {
+            return false;
+        }
+        Map<String, List<Layer>> active = accessor.perSide
+            ? textureAccessorLayers(block, accessor, meta + ACTIVE_META_OFFSET)
+            : null;
+        Entry entry = blocks.computeIfAbsent(
+            registryName + "|" + meta,
+            k -> new Entry("block", null, block.getClass().getName()));
+        for (Map.Entry<String, List<Layer>> side : inactive.entrySet()) {
+            Map<String, List<Layer>> perState = new TreeMap<>();
+            perState.put("inactive", side.getValue());
+            List<Layer> lit = active == null ? null : active.get(side.getKey());
+            if (lit != null && !sameLayers(lit, side.getValue())) {
+                perState.put("active", lit);
+            }
+            entry.sides.put(side.getKey(), perState);
+        }
+        return true;
+    }
+
+    /** Whether two layer stacks name the same icons with the same tint and glow, in the same order. */
+    private static boolean sameLayers(List<Layer> a, List<Layer> b) {
+        if (a.size() != b.size()) {
+            return false;
+        }
+        for (int i = 0; i < a.size(); i++) {
+            Layer x = a.get(i);
+            Layer y = b.get(i);
+            if (!x.icon.equals(y.icon) || x.glow != y.glow || !java.util.Arrays.equals(x.rgba, y.rgba)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // ------------------------------------------------------------------------------------------
     // Shared reflection helpers (from v1)
     // ------------------------------------------------------------------------------------------
 
@@ -696,69 +907,296 @@ final class TextureDumper {
         int ok = 0;
         for (Textures.BlockIcons icon : Textures.BlockIcons.values()) {
             try {
-                String shortName = "iconsets/" + icon.name();
-                String name = ICON_DOMAIN + ":" + shortName;
-                String path = "assets/" + ICON_DOMAIN + "/textures/blocks/" + shortName + ".png";
-                mIconField.set(icon, new NamedIcon(name, path));
+                String rel = "iconsets/" + icon.name();
+                mIconField.set(icon, new NamedIcon(ICON_DOMAIN + ":" + rel, assetPath(ICON_DOMAIN, rel)));
                 ok++;
             } catch (Throwable t) {
                 LOG.debug("gtnh-extractor: cannot name BlockIcons.{}: {}", icon.name(), t.toString());
             }
         }
         LOG.info("gtnh-extractor: named {} BlockIcons constants", ok);
+        injectQueuedIconContainers();
     }
 
     /**
-     * Casing families whose per-meta icons are unreachable through {@code block.getIcon}, mapped to
-     * the {@code Textures.BlockIcons} arrays that hold them, indexed {@code [DOWN, UP, SIDE]}.
+     * Inject a {@link NamedIcon} into every custom icon CONTAINER GT queued for client-side icon
+     * registration, so the blocks holding them answer {@code getIcon} on the server too.
      *
      * <p>
-     * {@code IIconContainer.getIcon()} is {@code @SideOnly(CLIENT)}, so FML's SideTransformer strips
-     * it from the INTERFACE on a dedicated server. A block that reaches its icon with
-     * {@code invokevirtual BlockIcons.getIcon()} still resolves (the enum keeps its concrete method),
-     * but one that goes through {@code invokeinterface IIconContainer.getIcon()} dies with
-     * NoSuchMethodError. That is the whole difference between {@code gt.blockcasings} metas 10-15,
-     * which have always worked, and metas 0-9 - the tiered machine casings that make up the bulk of
-     * an ExxonMobil Chemical Plant - which have always been grey.
+     * {@link #populateIconNames} covers the {@code BlockIcons} <b>enum constants</b>. It cannot reach
+     * the container <b>classes</b> - GT++'s {@code TexturesGtBlock.CustomIcon} (315 statics), GT's own
+     * {@code Textures.BlockIcons.CustomIcon}, and every addon's holder - whose {@code mIcon} field is
+     * assigned only inside their {@code run()}, and the only thing that drains those Runnables is
+     * {@code BlockMachines.registerBlockIcons}, which is {@code @SideOnly(CLIENT)}. Server-side the
+     * queue is fully populated and simply never run, which is why those blocks answer {@code getIcon}
+     * with <i>null</i> rather than throwing - the "getIcon returned null" gap reason.
      *
      * <p>
-     * The arrays themselves are plain static fields holding {@code BlockIcons} ENUM constants, so we
-     * can read the constant for a meta directly and name it exactly as {@link #populateIconNames}
-     * does, never touching the stripped method. This is GT-specific knowledge in a pass that is
-     * already GT-specific reflection, and it is verified per family against the block's own
-     * {@code getIcon} bytecode rather than guessed - a family whose arrays are named differently
-     * simply is not listed here and keeps its recorded gap.
+     * Every such container self-registers into {@code GregTechAPI.sGTBlockIconload} from its own
+     * constructor, so that public list <b>is</b> the complete server-side registry of them. Walking it
+     * beats enumerating any single holder class's fields: it also catches instances kept in private
+     * statics elsewhere (kekztech's, and {@code TexturesGrinderMultiblock}'s 18) and any mod's holder
+     * we have never heard of, with no per-class knowledge and no hand-maintained list.
      */
-    // A HashMap rather than Map.of: this targets Java 8 bytecode (Jabel gives modern syntax, not the
-    // modern stdlib), so the Java 9 factory methods are not on the classpath here.
-    private static final Map<String, String[]> ARRAY_BACKED_CASINGS = new LinkedHashMap<>();
+    private void injectQueuedIconContainers() {
+        List<Runnable> queue = GregTechAPI.sGTBlockIconload;
+        if (queue == null) {
+            LOG.warn("gtnh-extractor: GregTechAPI.sGTBlockIconload is null; custom icon containers stay unnamed");
+            return;
+        }
+        int ok = 0;
+        int skipped = 0;
+        for (Runnable r : new ArrayList<>(queue)) {
+            if (r == null || r instanceof Enum) {
+                continue; // enum constants are already named by populateIconNames
+            }
+            String[] ref = iconRef(r);
+            if (ref == null) {
+                skipped++;
+                continue;
+            }
+            if (writeField(r, "mIcon", new NamedIcon(ref[0] + ":" + ref[1], assetPath(ref[0], ref[1])))) {
+                ok++;
+            } else {
+                skipped++;
+            }
+        }
+        LOG.info("gtnh-extractor: named {} queued icon containers ({} unnameable)", ok, skipped);
+    }
+
+    /**
+     * Per-family {@code meta -> Textures.BlockIcons constant} tables for the casing blocks whose own
+     * {@code getIcon} cannot be called on a dedicated server, transcribed from GT source at the
+     * pinned version.
+     *
+     * <p>
+     * <b>Why a table at all.</b> These families fail two different ways, neither recoverable by
+     * reflection. Most declare {@code getIcon(int,int)} {@code @SideOnly(CLIENT)}, so FML's
+     * SideTransformer <i>deletes the method</i> and there is nothing left to call. The rest survive
+     * but reach the sprite through {@code invokeinterface IIconContainer.getIcon()}, and that
+     * interface method IS {@code @SideOnly}, so the call dies with NoSuchMethodError. Either way the
+     * meta-to-constant mapping exists only in a method body we cannot execute, and the constants
+     * themselves are perfectly readable static fields - so we name them directly and never touch the
+     * stripped method.
+     *
+     * <p>
+     * <b>Shape of a value.</b> One element means one constant on all six faces; three mean
+     * {@code [DOWN, UP, SIDE]}, for the families that texture their bottom and top differently. A
+     * constant prefixed {@link #ARRAY_MARKER} names a {@code BlockIcons} <i>array</i> field to be
+     * indexed by the meta rather than a constant - the tiered {@code MACHINECASINGS_*} arrays, whose
+     * 45 elements are read at runtime rather than transcribed, so a GT tier addition cannot silently
+     * shift them.
+     *
+     * <p>
+     * <b>This is an allowlist on purpose.</b> It would be easy to generalise to "any block with a
+     * stripped getIcon", and that would be actively harmful: {@code BlockMachines.getIcon} is a
+     * vestigial stub returning {@code MACHINE_LV_SIDE} for <i>every</i> meta, so a generic rule would
+     * confidently skin every GT machine hull as an LV casing side. A plausible wrong sprite is worse
+     * than a grey one, because nothing flags it. A family not listed here keeps its recorded gap.
+     *
+     * <p>
+     * <b>The maintenance hazard, stated plainly.</b> A GT5U bump that inserts a meta shifts every
+     * later entry in that family, and the result still validates and still renders - it is just
+     * wrong. {@link #verifyCasingTable} exists to catch exactly that: it checks every constant named
+     * here still resolves, and logs loudly when one does not.
+     */
+    // A LinkedHashMap rather than Map.of: this targets Java 8 bytecode (Jabel gives modern syntax,
+    // not the modern stdlib), so the Java 9 factory methods are not on the classpath here.
+    private static final Map<String, Map<Integer, String[]>> CASING_ICON_TABLE = new LinkedHashMap<>();
+
+    /** Prefix marking a table entry as a {@code BlockIcons} array field indexed by the meta. */
+    private static final String ARRAY_MARKER = "[";
+
+    /** Record {@code meta} of {@code registryName} as one constant shown on all six faces. */
+    private static void flat(String registryName, int meta, String constant) {
+        CASING_ICON_TABLE.computeIfAbsent(registryName, k -> new LinkedHashMap<>())
+            .put(meta, new String[] { constant });
+    }
+
+    /** Record {@code meta} of {@code registryName} as distinct bottom / top / wall constants. */
+    private static void sided(String registryName, int meta, String down, String up, String side) {
+        CASING_ICON_TABLE.computeIfAbsent(registryName, k -> new LinkedHashMap<>())
+            .put(meta, new String[] { down, up, side });
+    }
+
+    private static final String TIER_BOTTOM = ARRAY_MARKER + "MACHINECASINGS_BOTTOM";
+    private static final String TIER_TOP = ARRAY_MARKER + "MACHINECASINGS_TOP";
+    private static final String TIER_SIDE = ARRAY_MARKER + "MACHINECASINGS_SIDE";
 
     static {
-        ARRAY_BACKED_CASINGS.put(
-            "gregtech:gt.blockcasings",
-            new String[] { "MACHINECASINGS_BOTTOM", "MACHINECASINGS_TOP", "MACHINECASINGS_SIDE" });
+        // gt.blockcasings - the tiered machine casings. Metas 10-15 always worked through getIcon;
+        // 0-9 never did, which is why an ExxonMobil Chemical Plant rendered mostly grey.
+        for (int meta = 0; meta < 15; meta++) {
+            sided("gregtech:gt.blockcasings", meta, TIER_BOTTOM, TIER_TOP, TIER_SIDE);
+        }
+
+        // gt.blockcasings6 - tiered bottom/top over a per-meta tank wall. Meta 0 reaches the wall
+        // constant through the switch `default` arm, so it is a real mapping, not a fallback.
+        for (int meta = 0; meta < 15; meta++) {
+            sided("gregtech:gt.blockcasings6", meta, TIER_BOTTOM, TIER_TOP, "MACHINE_CASING_TANK_" + meta);
+        }
+
+        // gt.blockcasings8 - the Large Chemical Reactor's family (metas 0 and 1). Meta 9 has a
+        // switch arm but is never registered, so it is deliberately absent here.
+        flat("gregtech:gt.blockcasings8", 0, "MACHINE_CASING_CHEMICALLY_INERT");
+        flat("gregtech:gt.blockcasings8", 1, "MACHINE_CASING_PIPE_POLYTETRAFLUOROETHYLENE");
+        flat("gregtech:gt.blockcasings8", 2, "MACHINE_CASING_MINING_NEUTRONIUM");
+        flat("gregtech:gt.blockcasings8", 3, "MACHINE_CASING_MINING_BLACKPLUTONIUM");
+        flat("gregtech:gt.blockcasings8", 4, "MACHINE_CASING_EXTREME_ENGINE_INTAKE");
+        flat("gregtech:gt.blockcasings8", 5, "MACHINE_CASING_ADVANCEDRADIATIONPROOF");
+        flat("gregtech:gt.blockcasings8", 6, "MACHINE_CASING_RHODIUM_PALLADIUM");
+        flat("gregtech:gt.blockcasings8", 7, "MACHINE_CASING_IRIDIUM");
+        flat("gregtech:gt.blockcasings8", 8, "MACHINE_CASING_MAGICAL");
+        flat("gregtech:gt.blockcasings8", 10, "MACHINE_CASING_RADIANT_NAQUADAH_ALLOY");
+        flat("gregtech:gt.blockcasings8", 11, "MACHINE_CASING_PCB_TIER_1");
+        flat("gregtech:gt.blockcasings8", 12, "MACHINE_CASING_PCB_TIER_2");
+        flat("gregtech:gt.blockcasings8", 13, "MACHINE_CASING_PCB_TIER_3");
+        flat("gregtech:gt.blockcasings8", 14, "INFINITY_COOLED_CASING");
+
+        // gt.blockcasings9 - flat except meta 2, whose bottom/top differ from its walls.
+        flat("gregtech:gt.blockcasings9", 0, "MACHINE_CASING_PIPE_POLYBENZIMIDAZOLE");
+        flat("gregtech:gt.blockcasings9", 1, "MACHINE_CASING_VENT_T2");
+        sided("gregtech:gt.blockcasings9", 2, "TEXTURE_METAL_PANEL_E_A", "TEXTURE_METAL_PANEL_E_A",
+            "TEXTURE_METAL_PANEL_E");
+        flat("gregtech:gt.blockcasings9", 3, "INDUSTRIAL_STRENGTH_CONCRETE");
+        flat("gregtech:gt.blockcasings9", 4, "MACHINE_CASING_INDUSTRIAL_WATER_PLANT");
+        flat("gregtech:gt.blockcasings9", 5, "WATER_PLANT_CONCRETE_CASING");
+        flat("gregtech:gt.blockcasings9", 6, "MACHINE_CASING_FLOCCULATION");
+        flat("gregtech:gt.blockcasings9", 7, "MACHINE_CASING_NAQUADAH_REINFORCED_WATER_PLANT");
+        flat("gregtech:gt.blockcasings9", 8, "MACHINE_CASING_EXTREME_CORROSION_RESISTANT");
+        flat("gregtech:gt.blockcasings9", 9, "MACHINE_CASING_HIGH_PRESSURE_RESISTANT");
+        flat("gregtech:gt.blockcasings9", 10, "MACHINE_CASING_OZONE");
+        flat("gregtech:gt.blockcasings9", 11, "MACHINE_CASING_PLASMA_HEATER");
+        flat("gregtech:gt.blockcasings9", 12, "NAQUADRIA_REINFORCED_WATER_PLANT_CASING");
+        flat("gregtech:gt.blockcasings9", 13, "UV_BACKLIGHT_STERILIZER_CASING");
+        flat("gregtech:gt.blockcasings9", 14, "BLOCK_QUARK_PIPE");
+        flat("gregtech:gt.blockcasings9", 15, "BLOCK_QUARK_RELEASE_CHAMBER");
+
+        // gt.blockcasings10 - flat except meta 15 (reinforced wood, distinct top/bottom).
+        flat("gregtech:gt.blockcasings10", 0, "MACHINE_CASING_EMS");
+        flat("gregtech:gt.blockcasings10", 1, "MACHINE_CASING_LASER");
+        flat("gregtech:gt.blockcasings10", 2, "BLOCK_QUARK_CONTAINMENT_CASING");
+        flat("gregtech:gt.blockcasings10", 3, "MACHINE_CASING_AUTOCLAVE");
+        flat("gregtech:gt.blockcasings10", 4, "COMPRESSOR_CASING");
+        flat("gregtech:gt.blockcasings10", 5, "COMPRESSOR_PIPE_CASING");
+        flat("gregtech:gt.blockcasings10", 6, "NEUTRONIUM_CASING");
+        flat("gregtech:gt.blockcasings10", 7, "NEUTRONIUM_ACTIVE_CASING");
+        flat("gregtech:gt.blockcasings10", 8, "NEUTRONIUM_STABLE_CASING");
+        flat("gregtech:gt.blockcasings10", 9, "COOLANT_DUCT_CASING");
+        flat("gregtech:gt.blockcasings10", 10, "HEATING_DUCT_CASING");
+        flat("gregtech:gt.blockcasings10", 11, "EXTREME_DENSITY_CASING");
+        flat("gregtech:gt.blockcasings10", 12, "RADIATION_ABSORBENT_CASING");
+        flat("gregtech:gt.blockcasings10", 13, "MACHINE_CASING_MS160");
+        flat("gregtech:gt.blockcasings10", 14, "RADIATOR_MS160");
+        sided("gregtech:gt.blockcasings10", 15, "CASING_REINFORCED_WOOD_TOP", "CASING_REINFORCED_WOOD_TOP",
+            "CASING_REINFORCED_WOOD");
+
+        // gt.blockcasings11 - item pipe casings. Meta 0 reaches TIN through the `default` arm.
+        flat("gregtech:gt.blockcasings11", 0, "MACHINE_CASING_ITEM_PIPE_TIN");
+        flat("gregtech:gt.blockcasings11", 1, "MACHINE_CASING_ITEM_PIPE_BRASS");
+        flat("gregtech:gt.blockcasings11", 2, "MACHINE_CASING_ITEM_PIPE_ELECTRUM");
+        flat("gregtech:gt.blockcasings11", 3, "MACHINE_CASING_ITEM_PIPE_PLATINUM");
+        flat("gregtech:gt.blockcasings11", 4, "MACHINE_CASING_ITEM_PIPE_OSMIUM");
+        flat("gregtech:gt.blockcasings11", 5, "MACHINE_CASING_ITEM_PIPE_QUANTIUM");
+        flat("gregtech:gt.blockcasings11", 6, "MACHINE_CASING_ITEM_PIPE_FLUXED_ELECTRUM");
+        flat("gregtech:gt.blockcasings11", 7, "MACHINE_CASING_ITEM_PIPE_BLACK_PLUTONIUM");
+
+        // gt.blockcasings12 - starts at meta 10; 0-9 are unregistered.
+        flat("gregtech:gt.blockcasings12", 10, "MACHINE_CASING_THAUMIUM");
+        flat("gregtech:gt.blockcasings12", 11, "MACHINE_CASING_VOID");
+        flat("gregtech:gt.blockcasings12", 12, "MACHINE_CASING_ICHORIUM");
+
+        // gt.blockcasings13 - constant names are offset from the metas and unrelated to item names.
+        flat("gregtech:gt.blockcasings13", 5, "NANO_FORGE_CASING_1");
+        flat("gregtech:gt.blockcasings13", 6, "NANO_FORGE_CASING_2");
+        flat("gregtech:gt.blockcasings13", 7, "NANO_FORGE_CASING_3");
+        flat("gregtech:gt.blockcasings13", 8, "NANO_FORGE_CASING_4");
+        flat("gregtech:gt.blockcasings13", 9, "NANITE_CORE");
+
+        // gt.blockcasingsNH - metas 0-6 flat, 10-14 tiered arrays (the per-side logic lives inside
+        // this family's `default` arm, so it applies only above meta 6). Meta 2 really does use the
+        // tiered MACHINE_ULV_SIDE constant as a flat casing; that is not a transcription slip.
+        flat("gregtech:gt.blockcasingsNH", 0, "MACHINE_CASING_TURBINE_STEEL");
+        flat("gregtech:gt.blockcasingsNH", 1, "MACHINE_CASING_PIPE_STEEL");
+        flat("gregtech:gt.blockcasingsNH", 2, "MACHINE_ULV_SIDE");
+        flat("gregtech:gt.blockcasingsNH", 3, "MACHINE_CASING_STABLE_TITANIUM");
+        flat("gregtech:gt.blockcasingsNH", 4, "MACHINE_CASING_PIPE_TITANIUM");
+        flat("gregtech:gt.blockcasingsNH", 5, "MACHINE_CASING_ROBUST_TUNGSTENSTEEL");
+        flat("gregtech:gt.blockcasingsNH", 6, "MACHINE_CASING_PIPE_TUNGSTENSTEEL");
+        for (int meta = 10; meta < 15; meta++) {
+            sided("gregtech:gt.blockcasingsNH", meta, TIER_BOTTOM, TIER_TOP, TIER_SIDE);
+        }
+
+        // gt.blockglass1 - meta 5's constant says FRAME though the item is "Nanite Shielding Glass".
+        flat("gregtech:gt.blockglass1", 0, "GLASS_PH_RESISTANT");
+        flat("gregtech:gt.blockglass1", 1, "NEUTRONIUM_COATED_UV_RESISTANT_GLASS");
+        flat("gregtech:gt.blockglass1", 2, "OMNI_PURPOSE_INFINITY_FUSED_GLASS");
+        flat("gregtech:gt.blockglass1", 3, "GLASS_QUARK_CONTAINMENT");
+        flat("gregtech:gt.blockglass1", 4, "HAWKING_GLASS");
+        flat("gregtech:gt.blockglass1", 5, "NANITE_SHIELDING_FRAME");
     }
 
     /**
-     * Emit one array-backed casing meta as per-side layers. Returns whether it was handled, so the
-     * caller can fall through to the normal {@code getIcon} path (and its gap) for everything else.
+     * Check every constant the table names still resolves, and log the ones that do not.
+     *
+     * <p>
+     * This is the guard against the table's one real failure mode. A hand-transcribed mapping cannot
+     * detect that GT renamed or removed a constant - the dump just emits a wrong or missing sprite
+     * and everything downstream believes it. Resolving each name once at startup turns a silent
+     * regression after a GT5U bump into a loud line in the run log.
      */
-    private boolean emitArrayCasing(Map<String, Entry> blocks, Block block, String registryName, int meta) {
-        if (!ARRAY_BACKED_CASINGS.containsKey(registryName)) {
+    private void verifyCasingTable() {
+        List<String> broken = new ArrayList<>();
+        for (Map.Entry<String, Map<Integer, String[]>> family : CASING_ICON_TABLE.entrySet()) {
+            for (Map.Entry<Integer, String[]> entry : family.getValue().entrySet()) {
+                for (String constant : entry.getValue()) {
+                    if (tableIcon(constant, entry.getKey()) == null) {
+                        broken.add(family.getKey() + "|" + entry.getKey() + " -> " + constant);
+                    }
+                }
+            }
+        }
+        if (broken.isEmpty()) {
+            LOG.info("gtnh-extractor: casing icon table verified ({} families)", CASING_ICON_TABLE.size());
+        } else {
+            LOG.error(
+                "gtnh-extractor: {} casing table entries no longer resolve - GT constants moved, "
+                    + "the table needs re-transcribing: {}",
+                broken.size(),
+                broken);
+        }
+    }
+
+    /**
+     * Emit one tabled casing meta. Returns whether it was handled, so the caller falls through to
+     * the {@code getIcon} path (and its gap) for everything else.
+     */
+    private boolean emitTableCasing(Map<String, Entry> blocks, Block block, String registryName, int meta) {
+        Map<Integer, String[]> family = CASING_ICON_TABLE.get(registryName);
+        if (family == null) {
+            return false;
+        }
+        String[] spec = family.get(meta);
+        if (spec == null) {
             return false;
         }
         Map<String, Map<String, List<Layer>>> sides = new TreeMap<>();
-        for (int side = 0; side < SIDE_NAMES.length; side++) {
-            NamedIcon icon = arrayCasingIcon(registryName, side, meta);
+        if (spec.length == 1) {
+            // One sprite everywhere: emit the single "all" side the previewer already falls back to,
+            // rather than six identical entries.
+            NamedIcon icon = tableIcon(spec[0], meta);
             if (icon == null) {
-                return false; // a partially resolvable meta is not worth half-emitting; keep the gap
+                return false;
             }
-            icons.putIfAbsent(icon.iconName, icon.assetPath);
-            Map<String, List<Layer>> perState = new TreeMap<>();
-            List<Layer> layers = new ArrayList<>();
-            layers.add(new Layer(icon.iconName, new int[] { 255, 255, 255, 255 }, false));
-            perState.put("inactive", layers);
-            sides.put(SIDE_NAMES[side], perState);
+            sides.put("all", singleLayerState(icon));
+        } else {
+            for (int side = 0; side < SIDE_NAMES.length; side++) {
+                NamedIcon icon = tableIcon(spec[side == 0 ? 0 : side == 1 ? 1 : 2], meta);
+                if (icon == null) {
+                    return false; // a half-resolvable meta is not worth half-emitting; keep the gap
+                }
+                sides.put(SIDE_NAMES[side], singleLayerState(icon));
+            }
         }
         Entry entry = blocks.computeIfAbsent(
             registryName + "|" + meta,
@@ -767,33 +1205,42 @@ final class TextureDumper {
         return true;
     }
 
+    /** A one-layer, un-tinted {@code {"inactive": [icon]}} state, registering the icon's jar path. */
+    private Map<String, List<Layer>> singleLayerState(NamedIcon icon) {
+        icons.putIfAbsent(icon.iconName, icon.assetPath);
+        Map<String, List<Layer>> perState = new TreeMap<>();
+        List<Layer> layers = new ArrayList<>();
+        layers.add(new Layer(icon.iconName, new int[] { 255, 255, 255, 255 }, false));
+        perState.put("inactive", layers);
+        return perState;
+    }
+
     /**
-     * The icon for one side of an array-backed casing meta, or {@code null} if this block is not one
-     * (or the arrays no longer hold what we expect, in which case the caller's gap still records it).
+     * Resolve one table entry to its icon: a {@code BlockIcons} constant by name, or - behind
+     * {@link #ARRAY_MARKER} - the {@code meta}-th element of a {@code BlockIcons} array field.
+     * {@code null} if the field is gone or holds something unexpected, which
+     * {@link #verifyCasingTable} reports and the caller records as a gap.
      */
-    private NamedIcon arrayCasingIcon(String registryName, int side, int meta) {
-        String[] fields = ARRAY_BACKED_CASINGS.get(registryName);
-        if (fields == null) {
-            return null;
-        }
-        String fieldName = fields[side == 0 ? 0 : side == 1 ? 1 : 2];
+    private NamedIcon tableIcon(String constant, int meta) {
+        boolean indexed = constant.startsWith(ARRAY_MARKER);
+        String fieldName = indexed ? constant.substring(ARRAY_MARKER.length()) : constant;
         try {
             Field field = Textures.BlockIcons.class.getDeclaredField(fieldName);
             field.setAccessible(true);
-            Object array = field.get(null);
-            if (array == null || meta < 0 || meta >= java.lang.reflect.Array.getLength(array)) {
+            Object value = field.get(null);
+            if (indexed) {
+                if (value == null || meta < 0 || meta >= java.lang.reflect.Array.getLength(value)) {
+                    return null;
+                }
+                value = java.lang.reflect.Array.get(value, meta);
+            }
+            if (!(value instanceof Textures.BlockIcons)) {
                 return null;
             }
-            Object element = java.lang.reflect.Array.get(array, meta);
-            if (!(element instanceof Textures.BlockIcons)) {
-                return null;
-            }
-            String shortName = "iconsets/" + ((Textures.BlockIcons) element).name();
-            return new NamedIcon(
-                ICON_DOMAIN + ":" + shortName,
-                "assets/" + ICON_DOMAIN + "/textures/blocks/" + shortName + ".png");
+            String rel = "iconsets/" + ((Textures.BlockIcons) value).name();
+            return new NamedIcon(ICON_DOMAIN + ":" + rel, assetPath(ICON_DOMAIN, rel));
         } catch (Throwable t) {
-            LOG.debug("gtnh-extractor: array casing lookup failed for {}|{}: {}", registryName, meta, t.toString());
+            LOG.debug("gtnh-extractor: casing table lookup failed for {}|{}: {}", constant, meta, t.toString());
             return null;
         }
     }
@@ -847,14 +1294,41 @@ final class TextureDumper {
     private String lastGetIconError;
 
     /**
+     * Registry names whose sub-blocks are keyed by GT <b>material id</b> (an index into
+     * {@code GregTechAPI.sGeneratedMaterials}, up to 1000) rather than by world block metadata.
+     *
+     * <p>
+     * An allowlist rather than a blanket wide scan, for the same reason
+     * {@link #CASING_ICON_TABLE} is one. A block's meta space is only as wide as its own indexing,
+     * and the display-name test is not a reliable bound above 15: scanning every block to 1000
+     * emitted <b>876 metas for the coil block</b>, whose {@code getTextures} answers any meta at all
+     * through its {@code default} arm - 862 confident, wrong, Cupronickel-skinned entries the
+     * previewer would have trusted. Widening only where the indexing genuinely calls for it keeps
+     * that impossible.
+     */
+    private static final TreeSet<String> MATERIAL_INDEXED_BLOCKS = new TreeSet<>();
+
+    static {
+        MATERIAL_INDEXED_BLOCKS.add("gregtech:gt.blockframes");
+    }
+
+    /**
      * The block's real sub-block metas (mirrors GT's creative-list test: an unnamed meta's display
      * name still contains {@code ".name"}). Falls back to the full 0..15 range if names are absent.
+     *
+     * <p>
+     * The range is 0..15 - world block metadata - except for the {@link #MATERIAL_INDEXED_BLOCKS},
+     * which key their sub-blocks by an index into {@code GregTechAPI.sGeneratedMaterials} instead, so
+     * a dumped structure legitimately references {@code gt.blockframes|316}. Scanning only 0..15 left
+     * every one of those unresolved, which is why frames stayed grey in 50 of 208 dumped multiblocks
+     * even once their ITexture accessor worked.
      */
-    private int[] realMetas(Block block) {
+    private int[] realMetas(Block block, String registryName) {
         Item item = Item.getItemFromBlock(block);
         TreeSet<Integer> metas = new TreeSet<>();
         if (item != null) {
-            for (int meta = 0; meta < 16; meta++) {
+            int limit = MATERIAL_INDEXED_BLOCKS.contains(registryName) ? GregTechAPI.sGeneratedMaterials.length : 16;
+            for (int meta = 0; meta < limit; meta++) {
                 try {
                     String name = new ItemStack(item, 1, meta).getDisplayName();
                     if (name != null && !name.contains(".name")) {
@@ -895,6 +1369,23 @@ final class TextureDumper {
             }
         }
         return null;
+    }
+
+    /** Set {@code owner.name = value}, walking up the hierarchy; whether the write landed. */
+    private static boolean writeField(Object owner, String name, Object value) {
+        for (Class<?> c = owner.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+            try {
+                Field f = c.getDeclaredField(name);
+                f.setAccessible(true);
+                f.set(owner, value);
+                return true;
+            } catch (NoSuchFieldException e) {
+                // keep walking up
+            } catch (Throwable t) {
+                return false;
+            }
+        }
+        return false;
     }
 
     private static boolean boolField(Object owner, String name) {

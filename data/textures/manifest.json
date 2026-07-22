@@ -7,26 +7,984 @@
       "GT5-Unofficial": "5.09.51.482",
       "StructureLib": "1.4.23"
     },
-    "generated_at": "2026-07-17T17:12:35.907Z",
-    "extractor_sha": "7e33f330548beb0590439e039f1be9897e381710",
+    "generated_at": "2026-07-22T19:51:09.651Z",
+    "extractor_sha": "unknown",
     "note": "SMALL committed manifest: only the blocks the shipped example lines and the two multiblock fixtures need, so `gtnh-solve --preview examples/*.json` skins out of the box. The full dump is local and version-namespaced (data/<version>/textures/manifest.json), never committed. Regenerate with tools/derive_small_manifest.py.",
     "coverage": {
-      "blocks": 26,
+      "blocks": 30,
       "mte": 24,
-      "icons": 84,
+      "icons": 97,
       "gaps": 0
     }
   },
   "asset_root": "assets/{modid}/textures/blocks/",
   "blocks": {
+    "gregtech:gt.blockcasings5|0": {
+      "kind": "block",
+      "source_class": "gregtech.common.blocks.BlockCasings5",
+      "sides": {
+        "DOWN": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_CUPRONICKEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_CUPRONICKEL_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_CUPRONICKEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "EAST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_CUPRONICKEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_CUPRONICKEL_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_CUPRONICKEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "NORTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_CUPRONICKEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_CUPRONICKEL_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_CUPRONICKEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "SOUTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_CUPRONICKEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_CUPRONICKEL_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_CUPRONICKEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "UP": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_CUPRONICKEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_CUPRONICKEL_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_CUPRONICKEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "WEST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_CUPRONICKEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_CUPRONICKEL_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_CUPRONICKEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      }
+    },
+    "gregtech:gt.blockcasings5|1": {
+      "kind": "block",
+      "source_class": "gregtech.common.blocks.BlockCasings5",
+      "sides": {
+        "DOWN": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_KANTHAL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_KANTHAL_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_KANTHAL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "EAST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_KANTHAL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_KANTHAL_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_KANTHAL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "NORTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_KANTHAL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_KANTHAL_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_KANTHAL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "SOUTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_KANTHAL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_KANTHAL_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_KANTHAL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "UP": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_KANTHAL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_KANTHAL_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_KANTHAL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "WEST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_KANTHAL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_KANTHAL_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_KANTHAL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      }
+    },
+    "gregtech:gt.blockcasings5|2": {
+      "kind": "block",
+      "source_class": "gregtech.common.blocks.BlockCasings5",
+      "sides": {
+        "DOWN": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_NICHROME_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_NICHROME_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_NICHROME_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "EAST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_NICHROME_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_NICHROME_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_NICHROME_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "NORTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_NICHROME_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_NICHROME_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_NICHROME_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "SOUTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_NICHROME_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_NICHROME_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_NICHROME_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "UP": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_NICHROME_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_NICHROME_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_NICHROME_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "WEST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_NICHROME_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_NICHROME_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_NICHROME_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      }
+    },
+    "gregtech:gt.blockcasings5|3": {
+      "kind": "block",
+      "source_class": "gregtech.common.blocks.BlockCasings5",
+      "sides": {
+        "DOWN": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_TUNGSTENSTEEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_TUNGSTENSTEEL_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_TUNGSTENSTEEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "EAST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_TUNGSTENSTEEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_TUNGSTENSTEEL_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_TUNGSTENSTEEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "NORTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_TUNGSTENSTEEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_TUNGSTENSTEEL_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_TUNGSTENSTEEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "SOUTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_TUNGSTENSTEEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_TUNGSTENSTEEL_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_TUNGSTENSTEEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "UP": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_TUNGSTENSTEEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_TUNGSTENSTEEL_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_TUNGSTENSTEEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "WEST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_TUNGSTENSTEEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_TUNGSTENSTEEL_FOREGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": true
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_COIL_TUNGSTENSTEEL_BACKGROUND",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      }
+    },
     "gregtech:gt.blockcasings|11": {
       "kind": "block",
       "source_class": "gregtech.common.blocks.BlockCasings1",
       "sides": {
-        "all": {
+        "DOWN": {
           "inactive": [
             {
-              "icon": "gregtech:iconsets/MACHINE_HEATPROOFCASING",
+              "icon": "gregtech:iconsets/MACHINE_UIV_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "EAST": {
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UIV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "NORTH": {
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UIV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "SOUTH": {
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UIV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "UP": {
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UIV_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "WEST": {
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UIV_SIDE",
               "rgba": [
                 255,
                 255,
@@ -43,10 +1001,80 @@
       "kind": "block",
       "source_class": "gregtech.common.blocks.BlockCasings1",
       "sides": {
-        "all": {
+        "DOWN": {
           "inactive": [
             {
-              "icon": "gregtech:iconsets/MACHINE_DIM_TRANS_CASING",
+              "icon": "gregtech:iconsets/MACHINE_UMV_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "EAST": {
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UMV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "NORTH": {
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UMV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "SOUTH": {
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UMV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "UP": {
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UMV_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "WEST": {
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UMV_SIDE",
               "rgba": [
                 255,
                 255,
@@ -6280,10 +7308,72 @@
       "display_name": "Industrial Coke Oven",
       "source_class": "gtPlusPlus.xmod.gregtech.common.tileentities.machines.multi.processing.MTEIndustrialCokeOven",
       "sides": {
+        "DOWN": {
+          "active": [
+            {
+              "icon": "miscutils:TileEntities/MACHINE_CASING_STABLE_TANTALLOY61",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "miscutils:TileEntities/MACHINE_CASING_STABLE_TANTALLOY61",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "EAST": {
+          "active": [
+            {
+              "icon": "miscutils:TileEntities/MACHINE_CASING_STABLE_TANTALLOY61",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "miscutils:TileEntities/MACHINE_CASING_STABLE_TANTALLOY61",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        },
         "NORTH": {
           "active": [
             {
-              "icon": "gregtech:iconsets/controllerFaces/cokeOvenActive",
+              "icon": "miscutils:TileEntities/MACHINE_CASING_STABLE_TANTALLOY61",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            },
+            {
+              "icon": "miscutils:iconsets/controllerFaces/cokeOvenActive",
               "rgba": [
                 255,
                 255,
@@ -6293,7 +7383,7 @@
               "glow": false
             },
             {
-              "icon": "gregtech:iconsets/controllerFaces/cokeOvenActiveGlow",
+              "icon": "miscutils:iconsets/controllerFaces/cokeOvenActiveGlow",
               "rgba": [
                 255,
                 255,
@@ -6305,7 +7395,17 @@
           ],
           "inactive": [
             {
-              "icon": "gregtech:iconsets/controllerFaces/cokeOven",
+              "icon": "miscutils:TileEntities/MACHINE_CASING_STABLE_TANTALLOY61",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            },
+            {
+              "icon": "miscutils:iconsets/controllerFaces/cokeOven",
               "rgba": [
                 255,
                 255,
@@ -6315,7 +7415,7 @@
               "glow": false
             },
             {
-              "icon": "gregtech:iconsets/controllerFaces/cokeOvenGlow",
+              "icon": "miscutils:iconsets/controllerFaces/cokeOvenGlow",
               "rgba": [
                 255,
                 255,
@@ -6323,6 +7423,84 @@
                 0
               ],
               "glow": true
+            }
+          ]
+        },
+        "SOUTH": {
+          "active": [
+            {
+              "icon": "miscutils:TileEntities/MACHINE_CASING_STABLE_TANTALLOY61",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "miscutils:TileEntities/MACHINE_CASING_STABLE_TANTALLOY61",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "UP": {
+          "active": [
+            {
+              "icon": "miscutils:TileEntities/MACHINE_CASING_STABLE_TANTALLOY61",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "miscutils:TileEntities/MACHINE_CASING_STABLE_TANTALLOY61",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "WEST": {
+          "active": [
+            {
+              "icon": "miscutils:TileEntities/MACHINE_CASING_STABLE_TANTALLOY61",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "miscutils:TileEntities/MACHINE_CASING_STABLE_TANTALLOY61",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
             }
           ]
         }
@@ -6398,7 +7576,7 @@
               "glow": false
             },
             {
-              "icon": "gregtech:iconsets/controllerFaces/chemicalPlantActive",
+              "icon": "miscutils:iconsets/controllerFaces/chemicalPlantActive",
               "rgba": [
                 255,
                 255,
@@ -6408,7 +7586,7 @@
               "glow": false
             },
             {
-              "icon": "gregtech:iconsets/controllerFaces/chemicalPlantActiveGlow",
+              "icon": "miscutils:iconsets/controllerFaces/chemicalPlantActiveGlow",
               "rgba": [
                 255,
                 255,
@@ -6430,7 +7608,7 @@
               "glow": false
             },
             {
-              "icon": "gregtech:iconsets/controllerFaces/chemicalPlant",
+              "icon": "miscutils:iconsets/controllerFaces/chemicalPlant",
               "rgba": [
                 255,
                 255,
@@ -6440,7 +7618,7 @@
               "glow": false
             },
             {
-              "icon": "gregtech:iconsets/controllerFaces/chemicalPlantGlow",
+              "icon": "miscutils:iconsets/controllerFaces/chemicalPlantGlow",
               "rgba": [
                 255,
                 255,
@@ -6554,11 +7732,17 @@
     "gregtech:iconsets/MACHINE_BRONZE_SIDE": "assets/gregtech/textures/blocks/iconsets/MACHINE_BRONZE_SIDE.png",
     "gregtech:iconsets/MACHINE_BRONZE_TOP": "assets/gregtech/textures/blocks/iconsets/MACHINE_BRONZE_TOP.png",
     "gregtech:iconsets/MACHINE_CASING_CLEAN_STAINLESSSTEEL": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_CLEAN_STAINLESSSTEEL.png",
-    "gregtech:iconsets/MACHINE_DIM_TRANS_CASING": "assets/gregtech/textures/blocks/iconsets/MACHINE_DIM_TRANS_CASING.png",
+    "gregtech:iconsets/MACHINE_COIL_CUPRONICKEL_BACKGROUND": "assets/gregtech/textures/blocks/iconsets/MACHINE_COIL_CUPRONICKEL_BACKGROUND.png",
+    "gregtech:iconsets/MACHINE_COIL_CUPRONICKEL_FOREGROUND": "assets/gregtech/textures/blocks/iconsets/MACHINE_COIL_CUPRONICKEL_FOREGROUND.png",
+    "gregtech:iconsets/MACHINE_COIL_KANTHAL_BACKGROUND": "assets/gregtech/textures/blocks/iconsets/MACHINE_COIL_KANTHAL_BACKGROUND.png",
+    "gregtech:iconsets/MACHINE_COIL_KANTHAL_FOREGROUND": "assets/gregtech/textures/blocks/iconsets/MACHINE_COIL_KANTHAL_FOREGROUND.png",
+    "gregtech:iconsets/MACHINE_COIL_NICHROME_BACKGROUND": "assets/gregtech/textures/blocks/iconsets/MACHINE_COIL_NICHROME_BACKGROUND.png",
+    "gregtech:iconsets/MACHINE_COIL_NICHROME_FOREGROUND": "assets/gregtech/textures/blocks/iconsets/MACHINE_COIL_NICHROME_FOREGROUND.png",
+    "gregtech:iconsets/MACHINE_COIL_TUNGSTENSTEEL_BACKGROUND": "assets/gregtech/textures/blocks/iconsets/MACHINE_COIL_TUNGSTENSTEEL_BACKGROUND.png",
+    "gregtech:iconsets/MACHINE_COIL_TUNGSTENSTEEL_FOREGROUND": "assets/gregtech/textures/blocks/iconsets/MACHINE_COIL_TUNGSTENSTEEL_FOREGROUND.png",
     "gregtech:iconsets/MACHINE_EV_BOTTOM": "assets/gregtech/textures/blocks/iconsets/MACHINE_EV_BOTTOM.png",
     "gregtech:iconsets/MACHINE_EV_SIDE": "assets/gregtech/textures/blocks/iconsets/MACHINE_EV_SIDE.png",
     "gregtech:iconsets/MACHINE_EV_TOP": "assets/gregtech/textures/blocks/iconsets/MACHINE_EV_TOP.png",
-    "gregtech:iconsets/MACHINE_HEATPROOFCASING": "assets/gregtech/textures/blocks/iconsets/MACHINE_HEATPROOFCASING.png",
     "gregtech:iconsets/MACHINE_HV_BOTTOM": "assets/gregtech/textures/blocks/iconsets/MACHINE_HV_BOTTOM.png",
     "gregtech:iconsets/MACHINE_HV_SIDE": "assets/gregtech/textures/blocks/iconsets/MACHINE_HV_SIDE.png",
     "gregtech:iconsets/MACHINE_HV_TOP": "assets/gregtech/textures/blocks/iconsets/MACHINE_HV_TOP.png",
@@ -6577,6 +7761,12 @@
     "gregtech:iconsets/MACHINE_STEEL_BOTTOM": "assets/gregtech/textures/blocks/iconsets/MACHINE_STEEL_BOTTOM.png",
     "gregtech:iconsets/MACHINE_STEEL_SIDE": "assets/gregtech/textures/blocks/iconsets/MACHINE_STEEL_SIDE.png",
     "gregtech:iconsets/MACHINE_STEEL_TOP": "assets/gregtech/textures/blocks/iconsets/MACHINE_STEEL_TOP.png",
+    "gregtech:iconsets/MACHINE_UIV_BOTTOM": "assets/gregtech/textures/blocks/iconsets/MACHINE_UIV_BOTTOM.png",
+    "gregtech:iconsets/MACHINE_UIV_SIDE": "assets/gregtech/textures/blocks/iconsets/MACHINE_UIV_SIDE.png",
+    "gregtech:iconsets/MACHINE_UIV_TOP": "assets/gregtech/textures/blocks/iconsets/MACHINE_UIV_TOP.png",
+    "gregtech:iconsets/MACHINE_UMV_BOTTOM": "assets/gregtech/textures/blocks/iconsets/MACHINE_UMV_BOTTOM.png",
+    "gregtech:iconsets/MACHINE_UMV_SIDE": "assets/gregtech/textures/blocks/iconsets/MACHINE_UMV_SIDE.png",
+    "gregtech:iconsets/MACHINE_UMV_TOP": "assets/gregtech/textures/blocks/iconsets/MACHINE_UMV_TOP.png",
     "gregtech:iconsets/MACHINE_ZPM_BOTTOM": "assets/gregtech/textures/blocks/iconsets/MACHINE_ZPM_BOTTOM.png",
     "gregtech:iconsets/MACHINE_ZPM_SIDE": "assets/gregtech/textures/blocks/iconsets/MACHINE_ZPM_SIDE.png",
     "gregtech:iconsets/MACHINE_ZPM_TOP": "assets/gregtech/textures/blocks/iconsets/MACHINE_ZPM_TOP.png",
@@ -6609,14 +7799,15 @@
     "gregtech:iconsets/OVERLAY_TOP_STEAM_HAMMER_ACTIVE": "assets/gregtech/textures/blocks/iconsets/OVERLAY_TOP_STEAM_HAMMER_ACTIVE.png",
     "gregtech:iconsets/OVERLAY_TOP_STEAM_HAMMER_ACTIVE_GLOW": "assets/gregtech/textures/blocks/iconsets/OVERLAY_TOP_STEAM_HAMMER_ACTIVE_GLOW.png",
     "gregtech:iconsets/OVERLAY_TOP_STEAM_HAMMER_GLOW": "assets/gregtech/textures/blocks/iconsets/OVERLAY_TOP_STEAM_HAMMER_GLOW.png",
-    "gregtech:iconsets/controllerFaces/chemicalPlant": "assets/gregtech/textures/blocks/iconsets/controllerFaces/chemicalPlant.png",
-    "gregtech:iconsets/controllerFaces/chemicalPlantActive": "assets/gregtech/textures/blocks/iconsets/controllerFaces/chemicalPlantActive.png",
-    "gregtech:iconsets/controllerFaces/chemicalPlantActiveGlow": "assets/gregtech/textures/blocks/iconsets/controllerFaces/chemicalPlantActiveGlow.png",
-    "gregtech:iconsets/controllerFaces/chemicalPlantGlow": "assets/gregtech/textures/blocks/iconsets/controllerFaces/chemicalPlantGlow.png",
-    "gregtech:iconsets/controllerFaces/cokeOven": "assets/gregtech/textures/blocks/iconsets/controllerFaces/cokeOven.png",
-    "gregtech:iconsets/controllerFaces/cokeOvenActive": "assets/gregtech/textures/blocks/iconsets/controllerFaces/cokeOvenActive.png",
-    "gregtech:iconsets/controllerFaces/cokeOvenActiveGlow": "assets/gregtech/textures/blocks/iconsets/controllerFaces/cokeOvenActiveGlow.png",
-    "gregtech:iconsets/controllerFaces/cokeOvenGlow": "assets/gregtech/textures/blocks/iconsets/controllerFaces/cokeOvenGlow.png"
+    "miscutils:TileEntities/MACHINE_CASING_STABLE_TANTALLOY61": "assets/miscutils/textures/blocks/TileEntities/MACHINE_CASING_STABLE_TANTALLOY61.png",
+    "miscutils:iconsets/controllerFaces/chemicalPlant": "assets/miscutils/textures/blocks/iconsets/controllerFaces/chemicalPlant.png",
+    "miscutils:iconsets/controllerFaces/chemicalPlantActive": "assets/miscutils/textures/blocks/iconsets/controllerFaces/chemicalPlantActive.png",
+    "miscutils:iconsets/controllerFaces/chemicalPlantActiveGlow": "assets/miscutils/textures/blocks/iconsets/controllerFaces/chemicalPlantActiveGlow.png",
+    "miscutils:iconsets/controllerFaces/chemicalPlantGlow": "assets/miscutils/textures/blocks/iconsets/controllerFaces/chemicalPlantGlow.png",
+    "miscutils:iconsets/controllerFaces/cokeOven": "assets/miscutils/textures/blocks/iconsets/controllerFaces/cokeOven.png",
+    "miscutils:iconsets/controllerFaces/cokeOvenActive": "assets/miscutils/textures/blocks/iconsets/controllerFaces/cokeOvenActive.png",
+    "miscutils:iconsets/controllerFaces/cokeOvenActiveGlow": "assets/miscutils/textures/blocks/iconsets/controllerFaces/cokeOvenActiveGlow.png",
+    "miscutils:iconsets/controllerFaces/cokeOvenGlow": "assets/miscutils/textures/blocks/iconsets/controllerFaces/cokeOvenGlow.png"
   },
   "gaps": []
 }

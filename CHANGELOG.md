@@ -7,6 +7,47 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Every block the shipped example lines place now renders with its real GT sprite
+  (`tools/gtnh-extractor/`, `previewer/`, GitHub #98).** Four mechanisms, because the single symptom
+  ("the block is grey") had four unrelated causes, each needing its own fix:
+  - *Icon domain.* `iconName()` hardcoded the `gregtech` domain, which put 46 unfetchable paths in
+    the shipped manifest: 17 GT++ icons pointed at `assets/gregtech/.../TileEntities/` (a directory
+    GT5U does not have - they live under `assets/miscutils/`), and 29 came out double-prefixed as
+    `gregtech:gregtech:icons/...`, a path with a literal colon in it. The domain now comes from the
+    container's own `mModID`, or from an already-qualified `mIconName`. One jar still serves all of
+    them: GT5-Unofficial is a monorepo and ships all 20 asset domains.
+  - *Custom icon containers.* GT's client-only icon-load hook is what populates every custom
+    `IIconContainer`'s `mIcon`, so on a server they answer `getIcon` with null. Since each one
+    self-registers into `GregTechAPI.sGTBlockIconload`, that public list is a complete server-side
+    registry of them, and injecting a named icon into all 11,766 fixes GT++, kekztech and the rest
+    generically - no per-mod table, and it reaches instances held in private statics that walking any
+    one holder class would miss.
+  - *ITexture accessors.* Some blocks expose a `getTextures(int)` / `getTexture(int)` that carries no
+    `@SideOnly` and never dereferences the icon. Preferred over `getIcon` wherever present: it cannot
+    hit the side-stripping cliff, and it carries the per-layer tint and glow that the single-icon path
+    discards. This is what makes coils render, with their real active/inactive pair, and frames carry
+    their per-material tint.
+  - *Casing table.* The rest declare `getIcon` `@SideOnly(CLIENT)`, so the method is deleted outright
+    and no reflection can reach the mapping. Ten families are transcribed from GT source, verified at
+    startup against the live constants (a GT bump that moves one is now a loud log line rather than a
+    silently wrong sprite), and kept an explicit allowlist: a generic "any block with a stripped
+    getIcon" rule would have skinned every GT machine hull as an LV casing side, since
+    `BlockMachines.getIcon` is a vestigial stub returning one constant for every meta.
+
+  Frames additionally needed the meta scan widened: they are keyed by GT material id (up to 1000),
+  not by world block metadata, so `gt.blockframes|316` was never probed at all - which is why the
+  single most-referenced family in the dump stayed grey. That widening is allowlisted too, after a
+  blanket version emitted 876 metas for the coil block, whose accessor answers any meta through its
+  `default` arm.
+
+  Net on the local 208-multiblock dump: unresolved `(block, meta)` pairs 330 to 167, multiblocks
+  carrying at least one grey block 177 to 101. Both shipped example lines (sand, nitrobenzene) now
+  resolve every constituent block, so the `render grey` warning is silent on each.
+- **An unresolved block face draws Minecraft's missing-texture checkerboard (`previewer/html.py`,
+  GitHub #98).** It used to fall back to a neutral casing grey, which was actively misleading: a
+  great many GT casings genuinely are plain grey, so a missing sprite was indistinguishable from a
+  correctly rendered one and the gap stayed invisible in the very view meant to reveal it. Magenta
+  and black, matching the convention every Minecraft player already reads as "no texture here".
 - **Multiblock casings: tiered machine casings render, and missing sprites are reported
   (`tools/gtnh-extractor/`, `previewer/`, GitHub #98).** `IIconContainer.getIcon()` is
   `@SideOnly(CLIENT)`, so FML strips it from the interface on a dedicated server: a casing reaching
@@ -16,9 +57,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   are most of an ExxonMobil Chemical Plant - were always grey. Those metas are now read straight
   from the `MACHINECASINGS_BOTTOM/TOP/SIDE` arrays that hold them, per side rather than flattened to
   one face. The block scan also no longer pre-filters on `IHasIndexedTexture`, which silently
-  dropped 75 registry names a dumped multiblock actually uses. Families whose icons remain
-  unreachable server-side (`gt.blockcasings8`, the coil families) still need the client-side route
-  of #78.
+  dropped 75 registry names a dumped multiblock actually uses. (The families still unreachable at
+  that point - `gt.blockcasings8`, the coils, the GT++ casings - are closed by the entry below,
+  without needing the client-side route of #78.)
 - **Untextured blocks are now loud (`previewer/textures.py`, GitHub #98).** A block with no manifest
   entry renders neutral grey inside an otherwise-expanded multiblock, where it is indistinguishable
   from a deliberately plain casing - nothing surfaced it, since the machine keeps no placeholder
