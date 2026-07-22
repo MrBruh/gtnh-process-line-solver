@@ -408,6 +408,14 @@ final class TextureDumper {
         }
         if (!entry.sides.isEmpty()) {
             blocks.put(key, entry);
+        } else {
+            // getTexture answered, but nothing in it resolved to a layer - so this MTE is dropped.
+            // Without this the drop was SILENT: describe() files its complaint under the offending
+            // ITexture CLASS name, so nothing anywhere named the block, and 29 multiblock controller
+            // hulls (Eye of Harmony, Forge of the Gods, the Space Modules) went missing from the
+            // manifest with no recorded reason. A gap keyed by the block is what makes them findable.
+            gaps.add(new Gap(nameObj.toString(), id, "all",
+                "resolved no layer on any side (" + safeName(imte) + "; last: " + lastIconError + ")"));
         }
         return stacks;
     }
@@ -522,8 +530,51 @@ final class TextureDumper {
             }
             return;
         }
-        // Unknown ITexture implementation (exotic ISBRH renderer): record it, do not guess.
-        gaps.add(new Gap(t.getClass().getName(), -1, SIDE_NAMES[renderSide], "unknown ITexture class"));
+        // An ITexture shape this flattener does not know. Record it, never guess - but record it
+        // with enough detail to act on. "unknown ITexture class" alone cost a source dive to
+        // diagnose and still left GT's OWN GTRenderedTexture unexplained, so the gap now carries the
+        // instance fields that were actually present: that names the field this code should be
+        // reading, straight out of the run log, without another archaeology pass. Deduped by class,
+        // since one unhandled shape otherwise files the same complaint hundreds of times.
+        if (unknownTextures.add(t.getClass().getName())) {
+            gaps.add(new Gap(t.getClass().getName(), -1, SIDE_NAMES[renderSide],
+                "unknown ITexture class (instance fields: " + instanceFields(t) + ")"));
+        }
+    }
+
+    /** Classes already reported as an unknown {@code ITexture} shape, so each is recorded once. */
+    private final TreeSet<String> unknownTextures = new TreeSet<>();
+
+    /**
+     * Every instance field on {@code o} and its ancestors as {@code name=<runtime value class>}, for
+     * diagnosing an unknown shape.
+     *
+     * <p>
+     * Reports the VALUE's class, not the declared type: the field names alone said both unhandled
+     * shapes carry a perfectly ordinary {@code mIconContainer:IIconContainer}, which tells you the
+     * flattener looked in the right place and still came away with nothing. Whether that is a null,
+     * or an object of some class that does not implement the interface we compile against, is the
+     * whole question - and only the runtime value answers it.
+     */
+    private static String instanceFields(Object o) {
+        TreeSet<String> out = new TreeSet<>();
+        for (Class<?> c = o.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+            for (Field f : c.getDeclaredFields()) {
+                if (java.lang.reflect.Modifier.isStatic(f.getModifiers())) {
+                    continue;
+                }
+                String value;
+                try {
+                    f.setAccessible(true);
+                    Object v = f.get(o);
+                    value = v == null ? "null" : v.getClass().getName();
+                } catch (Throwable t) {
+                    value = "<unreadable: " + t.getClass().getSimpleName() + ">";
+                }
+                out.add(f.getName() + "=" + value);
+            }
+        }
+        return String.join(", ", out);
     }
 
     /**
@@ -571,16 +622,25 @@ final class TextureDumper {
         if (!(mIconName instanceof String) || ((String) mIconName).isEmpty()) {
             return null;
         }
-        String rel = (String) mIconName;
-        int colon = rel.indexOf(':');
-        if (colon >= 0) {
-            // Already qualified. Mirror GT's own getResourceLocation: a one-character prefix is a
-            // Windows drive letter, not a domain, so it falls back to minecraft rather than "c".
-            return new String[] { colon > 1 ? rel.substring(0, colon) : "minecraft", rel.substring(colon + 1) };
-        }
         Object modId = readField(container, "mModID");
-        String domain = modId instanceof String && !((String) modId).isEmpty() ? (String) modId : ICON_DOMAIN;
-        return new String[] { domain, rel };
+        String fallback = modId instanceof String && !((String) modId).isEmpty() ? (String) modId : ICON_DOMAIN;
+        return splitIconName((String) mIconName, fallback);
+    }
+
+    /**
+     * Split a raw icon name into {@code {domain, relative-path}}, falling back to
+     * {@code fallbackDomain} when the name carries no domain of its own.
+     *
+     * <p>
+     * Mirrors GT's own {@code getResourceLocation}: a one-character prefix is a Windows drive
+     * letter, not a mod domain, so it resolves to {@code minecraft} rather than to {@code "c"}.
+     */
+    private static String[] splitIconName(String raw, String fallbackDomain) {
+        int colon = raw.indexOf(':');
+        if (colon >= 0) {
+            return new String[] { colon > 1 ? raw.substring(0, colon) : "minecraft", raw.substring(colon + 1) };
+        }
+        return new String[] { fallbackDomain, raw };
     }
 
     /** Register {@code <domain>:<rel>} against its jar asset path and return the icon name. */
@@ -593,6 +653,141 @@ final class TextureDumper {
     /** The path a {@code <domain>:<rel>} block icon occupies inside its mod jar. */
     private static String assetPath(String domain, String rel) {
         return "assets/" + domain + "/textures/blocks/" + rel + ".png";
+    }
+
+    /**
+     * The icon a block NAMES in its own server-readable state, or null if it names none.
+     *
+     * <p>
+     * The fourth route, and the cheapest. A great many blocks put the {@code @SideOnly} on the
+     * <b>resolved</b> icon array while the strings that NAME those icons are un-annotated and
+     * survive on a dedicated server untouched:
+     *
+     * <pre>
+     * &#64;SideOnly(Side.CLIENT) protected IIcon[] texture;   // stripped
+     * String[] textureNames;                             // survives, set from the constructor
+     * </pre>
+     *
+     * That is bartworks' shape (its {@code textureNames} hold fully-qualified paths like
+     * {@code "bartworks:BoronSilicateGlassBlock"}), and GoodGenerator uses the same field name.
+     * Vanilla does the equivalent one level up: {@code Block.setBlockTextureName} and the
+     * {@code textureName} field it writes are both un-annotated, which is how gtnhlanth's casings
+     * name themselves.
+     *
+     * <p>
+     * <b>Read the field, never the getter.</b> {@code Block.getTextureName()} <i>is</i>
+     * {@code @SideOnly} and is deleted server-side, so going through it fails while the field behind
+     * it sits there perfectly readable. Getting that backwards costs a whole dump run to notice.
+     *
+     * <p>
+     * A name that carries no domain of its own is resolved against the block's own registry domain,
+     * which is right by construction: a mod's block names a texture in its own assets.
+     */
+    private NamedIcon namedTextureIcon(Block block, String registryName, int meta, int side) {
+        String raw = rawTextureName(block, meta, side);
+        if (raw == null) {
+            return null;
+        }
+        // The domain is lower-cased because a mod id need not be: GoodGenerator's is literally
+        // "GoodGenerator", while its assets live under assets/goodgenerator/. GT resolves the same
+        // way (Mods.resourceDomain lower-cases), so following it keeps every path fetchable.
+        String[] ref = splitIconName(raw, registryDomain(registryName));
+        String domain = ref[0].toLowerCase(java.util.Locale.ROOT);
+        return new NamedIcon(domain + ":" + ref[1], assetPath(domain, ref[1]));
+    }
+
+    /**
+     * The raw name a block gives its {@code (meta, side)} texture, or null if it names none.
+     *
+     * <p>
+     * Three field shapes, all un-annotated and so all readable server-side. The per-side pair comes
+     * first because a block that has it also inherits an unset {@code textureNames}, so checking the
+     * single array first would read a null and give up on a block that does name itself.
+     */
+    private static String rawTextureName(Block block, int meta, int side) {
+        Object topDown = readField(block, "textureTopAndDown");
+        Object walls = readField(block, "textureSide");
+        if (topDown instanceof String[] && walls instanceof String[]) {
+            return clampedName((String[]) (side < 2 ? topDown : walls), meta);
+        }
+        Object perMeta = readField(block, "textureNames");
+        if (perMeta instanceof String[]) {
+            return clampedName((String[]) perMeta, meta);
+        }
+        Object single = readField(block, "textureName");
+        return single instanceof String && !((String) single).isEmpty() ? (String) single : null;
+    }
+
+    /**
+     * {@code names[meta]}, falling back to index 0 when the meta is past the end - which mirrors the
+     * {@code meta < length ? meta : 0} clamp the stripped {@code getIcon} bodies themselves use, so a
+     * family that names one texture for many metas resolves them all instead of only meta 0.
+     */
+    private static String clampedName(String[] names, int meta) {
+        if (names.length == 0) {
+            return null;
+        }
+        String name = names[meta >= 0 && meta < names.length ? meta : 0];
+        return name == null || name.isEmpty() ? null : name;
+    }
+
+    /**
+     * The per-meta RGB tint a block carries alongside its texture names, or null for untinted.
+     *
+     * <p>
+     * Read off the {@code color} FIELD, never the {@code getColor(int)} accessor: that method is
+     * un-annotated and looks callable, but its body dereferences the {@code @SideOnly IIcon[]} and so
+     * dies with NoSuchFieldError on a server. The field holds the same values with none of the risk.
+     * A null row is legitimate (bartworks' fake glasses pass one), and means untinted.
+     */
+    private static int[] namedTextureTint(Block block, int meta) {
+        Object colors = readField(block, "color");
+        if (!(colors instanceof short[][])) {
+            return null;
+        }
+        short[][] rows = (short[][]) colors;
+        if (rows.length == 0) {
+            return null;
+        }
+        short[] rgb = rows[meta >= 0 && meta < rows.length ? meta : 0];
+        if (rgb == null || rgb.length < 3) {
+            return null;
+        }
+        return new int[] { rgb[0] & 0xFFFF, rgb[1] & 0xFFFF, rgb[2] & 0xFFFF, 255 };
+    }
+
+    /**
+     * Emit one meta from the block's own texture-name fields, per side when those differ. Returns
+     * whether it was handled, so the caller records its gap for everything else.
+     */
+    private boolean emitNamedTexture(Map<String, Entry> blocks, Block block, String registryName, int meta) {
+        int[] tint = namedTextureTint(block, meta);
+        NamedIcon[] perSide = new NamedIcon[SIDE_NAMES.length];
+        boolean uniform = true;
+        for (int side = 0; side < SIDE_NAMES.length; side++) {
+            perSide[side] = namedTextureIcon(block, registryName, meta, side);
+            if (perSide[side] == null) {
+                return false;
+            }
+            uniform &= perSide[side].iconName.equals(perSide[0].iconName);
+        }
+        Entry entry = blocks.computeIfAbsent(
+            registryName + "|" + meta,
+            k -> new Entry("block", null, block.getClass().getName()));
+        if (uniform) {
+            entry.sides.put("all", singleLayerState(perSide[0], tint));
+        } else {
+            for (int side = 0; side < SIDE_NAMES.length; side++) {
+                entry.sides.put(SIDE_NAMES[side], singleLayerState(perSide[side], tint));
+            }
+        }
+        return true;
+    }
+
+    /** The mod domain of a registry name ({@code "bartworks:BW_GlasBlocks"} -> {@code "bartworks"}). */
+    private static String registryDomain(String registryName) {
+        int colon = registryName.indexOf(':');
+        return colon > 0 ? registryName.substring(0, colon) : ICON_DOMAIN;
     }
 
     /** Resolve a copied casing block's icon (its base layer) via the injected {@code getIcon}. */
@@ -698,14 +893,9 @@ final class TextureDumper {
             TextureAccessor accessor = findTextureAccessor(block);
             MethodHandle getIcon = findGetIcon(block);
             String getIconError = lastGetIconError;
-            // A tabled family has NO callable getIcon by definition - that is why it is tabled - so
-            // the block-level bail-out must not fire before the table gets a chance at it.
-            boolean tabled = CASING_ICON_TABLE.containsKey(registryName);
-            if (accessor == null && getIcon == null && !tabled) {
-                gaps.add(new Gap(registryName, -1, "all",
-                    "no server-side getIcon override (" + getIconError + ")"));
-                continue;
-            }
+            // No block-level bail-out on a missing getIcon: a block that cannot answer it may still
+            // resolve through the table or through its own texture-name fields, and bailing early is
+            // exactly what skipped those routes before they were ever tried.
             for (int meta : realMetas(block, registryName)) {
                 if (accessor != null && emitTextureAccessor(blocks, block, accessor, registryName, meta)) {
                     stacks++;
@@ -717,27 +907,28 @@ final class TextureDumper {
                     stacks++;
                     continue;
                 }
-                if (getIcon == null) {
-                    gaps.add(new Gap(registryName, meta, "all",
-                        "no server-side getIcon override (" + getIconError + ")"));
-                    continue;
-                }
-                NamedIcon icon = iconAt(block, getIcon, 2, meta); // side 2 (north) as the representative face
+                // side 2 (north) as the representative face
+                NamedIcon icon = getIcon == null ? null : iconAt(block, getIcon, 2, meta);
+                String why = getIcon == null
+                    ? "no server-side getIcon override (" + getIconError + ")"
+                    : "no icon for meta (" + lastIconError + ")";
                 if (icon == null) {
+                    // Last resort: the block's own texture-name fields, which survive side-stripping
+                    // even where every callable route into its icons has been deleted.
+                    if (emitNamedTexture(blocks, block, registryName, meta)) {
+                        stacks++;
+                        continue;
+                    }
                     // Was a bare `continue`, which is how ~37 pairs (the tiered machine casings among
                     // them) went missing with nothing recorded anywhere. lastIconError says whether
                     // getIcon returned null, threw, or handed back an icon this dumper never named.
-                    gaps.add(new Gap(registryName, meta, "all", "no icon for meta (" + lastIconError + ")"));
+                    gaps.add(new Gap(registryName, meta, "all", why));
                     continue;
                 }
-                icons.putIfAbsent(icon.iconName, icon.assetPath);
-                String key = registryName + "|" + meta;
-                Entry entry = blocks.computeIfAbsent(key, k -> new Entry("block", null, block.getClass().getName()));
-                Map<String, List<Layer>> perState = new TreeMap<>();
-                List<Layer> layers = new ArrayList<>();
-                layers.add(new Layer(icon.iconName, new int[] { 255, 255, 255, 255 }, false));
-                perState.put("inactive", layers);
-                entry.sides.put("all", perState);
+                Entry entry = blocks.computeIfAbsent(
+                    registryName + "|" + meta,
+                    k -> new Entry("block", null, block.getClass().getName()));
+                entry.sides.put("all", singleLayerState(icon));
                 stacks++;
             }
         }
@@ -1127,6 +1318,13 @@ final class TextureDumper {
             sided("gregtech:gt.blockcasingsNH", meta, TIER_BOTTOM, TIER_TOP, TIER_SIDE);
         }
 
+        // gt.blocktintedglass - no String field and no callable getIcon, so the table is the only
+        // route left. Its four metas are plain BlockIcons constants, verified by verifyCasingTable.
+        flat("gregtech:gt.blocktintedglass", 0, "GLASS_TINTED_INDUSTRIAL_WHITE");
+        flat("gregtech:gt.blocktintedglass", 1, "GLASS_TINTED_INDUSTRIAL_LIGHT_GRAY");
+        flat("gregtech:gt.blocktintedglass", 2, "GLASS_TINTED_INDUSTRIAL_GRAY");
+        flat("gregtech:gt.blocktintedglass", 3, "GLASS_TINTED_INDUSTRIAL_BLACK");
+
         // gt.blockglass1 - meta 5's constant says FRAME though the item is "Nanite Shielding Glass".
         flat("gregtech:gt.blockglass1", 0, "GLASS_PH_RESISTANT");
         flat("gregtech:gt.blockglass1", 1, "NEUTRONIUM_COATED_UV_RESISTANT_GLASS");
@@ -1207,10 +1405,15 @@ final class TextureDumper {
 
     /** A one-layer, un-tinted {@code {"inactive": [icon]}} state, registering the icon's jar path. */
     private Map<String, List<Layer>> singleLayerState(NamedIcon icon) {
+        return singleLayerState(icon, null);
+    }
+
+    /** As {@link #singleLayerState(NamedIcon)}, with an optional RGBA multiply ({@code null} = none). */
+    private Map<String, List<Layer>> singleLayerState(NamedIcon icon, int[] tint) {
         icons.putIfAbsent(icon.iconName, icon.assetPath);
         Map<String, List<Layer>> perState = new TreeMap<>();
         List<Layer> layers = new ArrayList<>();
-        layers.add(new Layer(icon.iconName, new int[] { 255, 255, 255, 255 }, false));
+        layers.add(new Layer(icon.iconName, tint == null ? new int[] { 255, 255, 255, 255 } : tint, false));
         perState.put("inactive", layers);
         return perState;
     }

@@ -40,9 +40,27 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   blanket version emitted 876 metas for the coil block, whose accessor answers any meta through its
   `default` arm.
 
-  Net on the local 208-multiblock dump: unresolved `(block, meta)` pairs 330 to 167, multiblocks
-  carrying at least one grey block 177 to 101. Both shipped example lines (sand, nitrobenzene) now
+  A fifth mechanism covers the third-party tail: many blocks put the `@SideOnly` on the *resolved*
+  `IIcon[]` while the strings that NAME those icons are un-annotated and survive untouched
+  (bartworks' and GoodGenerator's `textureNames`, vanilla's `textureName` behind
+  `setBlockTextureName`). Reading those recovers bartworks glass, the whole GoodGenerator casing
+  family, gtnhlanth and kekztech without any table at all, carrying the per-meta glass tints with
+  them. Two traps worth naming, since both look callable and are not: `Block.getTextureName()` *is*
+  `@SideOnly` while the `textureName` field behind it is not, and bartworks' un-annotated
+  `getColor(int)` dereferences the stripped `IIcon[]` and dies with `NoSuchFieldError` - so both must
+  be read as fields, never through their accessors.
+
+  Net on the local 208-multiblock dump: unresolved `(block, meta)` pairs 330 to 98, multiblocks
+  carrying at least one grey block 177 to 43. Both shipped example lines (sand, nitrobenzene) now
   resolve every constituent block, so the `render grey` warning is silent on each.
+- **Texture gaps name the block that has one (`tools/gtnh-extractor/`, GitHub #98).** A multiblock
+  controller whose layer stack resolved empty was dropped from the manifest with *nothing recorded
+  under its name*: the flattener files its complaint under the offending `ITexture` class instead, so
+  29 controller hulls (Eye of Harmony, Forge of the Gods, the Space Modules) went missing with no
+  discoverable reason. They now record a gap keyed by the block. The unresolved-shape gap also
+  carries the runtime field state that produced it and is deduped per class, which turned a
+  212-entry dead end into two lines that named the root cause directly: `mIconContainer=null`,
+  because those icon holders are assigned only inside client-only `registerIcons` methods.
 - **An unresolved block face draws Minecraft's missing-texture checkerboard (`previewer/html.py`,
   GitHub #98).** It used to fall back to a neutral casing grey, which was actively misleading: a
   great many GT casings genuinely are plain grey, so a missing sprite was indistinguishable from a
