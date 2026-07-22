@@ -13,7 +13,7 @@ layout readable.
 The pipeline is pure and unit-tested end to end given PNG *bytes*; the 135 MB jar fetch is the one
 untested shim (:mod:`.jar`), injected as ``png_provider``. **Graceful degradation is the contract**:
 a machine with no committed doc, or whose blocks all fail to resolve, keeps its flat placeholder box;
-a single unresolved face on an otherwise-textured cube falls back to the flat colour there. Nothing
+a single unresolved face on an otherwise-textured cube draws the missing-texture checkerboard. Nothing
 here raises on a miss, and a Pillow-less install (no ``preview`` extra) degrades the whole pass to
 placeholders rather than failing. PNGs are LGPL and never committed; they are fetched at preview
 time and embedded only in the emitted HTML.
@@ -146,8 +146,8 @@ class TextureSummary:
     embedded_icons: int
     embedded_active_icons: int = 0
     #: ``"<block>|<meta>"`` for every constituent block that resolved NO face at all, so its cubes
-    #: render as neutral grey. Reported rather than swallowed because a grey cube inside an expanded
-    #: multiblock is otherwise indistinguishable from a deliberately plain casing - the machine is
+    #: draw the missing-texture checkerboard. Reported rather than swallowed because the CLI is where
+    #: a gap is actionable: the machine is
     #: still flagged ``expanded`` and keeps no placeholder label, so nothing else surfaces the gap
     #: (GitHub #98). A non-empty list means the texture manifest needs a re-dump, not that the
     #: structure is wrong.
@@ -439,9 +439,9 @@ def _machine_cubes(
     A machine whose type has a dumped :class:`MultiblockDoc` expands to that structure. A genuine
     single-block machine (a 1x1x1 footprint) is the trivial one-cube case, resolved by its plan name
     plus voltage tier against the manifest's tier-prefixed keys (see :meth:`TextureManifest.mte_block`).
-    A doc-less MULTIblock (a bigger footprint whose structure failed extraction, e.g.
-    the dynamic-height Distillation Tower) must NOT collapse to a lone controller cube - it yields
-    nothing and keeps its placeholder box, so its true reserved footprint still shows.
+    A doc-less MULTIblock (a bigger footprint whose structure failed extraction) must NOT collapse to
+    a lone controller cube - it yields nothing and keeps its placeholder box, so its true reserved
+    footprint still shows.
 
     ``auto_out_face`` (machine id -> auto-output face) lets a boundary-storage block point its output
     glyph the way it actually ejects rather than its placed front (see :func:`_glyph_steps`).
@@ -547,7 +547,7 @@ def texturize_scene(
     # Only faces whose running stack differs from idle - the ones that can bake a distinct active
     # texture - are collected here (a plain casing is identical in both states and skipped).
     key_layers_active: dict[str, list[dict[str, Any]]] = {}
-    # Constituent blocks that resolve no face at all - they will render grey (see TextureSummary).
+    # Constituent blocks that resolve no face at all (see TextureSummary).
     unskinned: set[str] = set()
     for machine in scene["machines"]:
         machine_cubes = _machine_cubes(machine, docs, manifest, auto_out_face)
@@ -638,10 +638,11 @@ def texturize_scene(
         summary.embedded_active_icons,
     )
     if summary.unskinned_blocks:
-        # A grey cube inside an expanded multiblock looks like a plain casing, so this is the only
-        # place the gap becomes visible. Warn, not info: it means the manifest needs a re-dump.
+        # The checkerboard makes the gap visible in the render; this warning is what makes it
+        # actionable in a build log. Warn, not info: it means the manifest needs a re-dump.
         _log.warning(
-            "textures: %d constituent block type(s) have no sprite and render grey: %s",
+            "textures: %d constituent block type(s) have no sprite and draw the missing-texture "
+            "checkerboard: %s",
             len(summary.unskinned_blocks),
             ", ".join(summary.unskinned_blocks),
         )

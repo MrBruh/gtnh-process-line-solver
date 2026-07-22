@@ -22,6 +22,7 @@ diverge, the doc records the intent, so reconcile one to the other and say which
 |-----|----------|
 | [requirements.md](dataset-extraction/requirements.md) | What the extraction pipeline must achieve: its outputs, constraints, and acceptance criteria (the *what*). |
 | [implementation.md](dataset-extraction/implementation.md) | How the code achieves it: the Java extractor and the Python consumer, mechanism by mechanism (the *how*). |
+| [texture-resolution.md](dataset-extraction/texture-resolution.md) | Deep dive on the texture pass: the routes `TextureDumper` tries to turn a `(block, meta)` into a sprite name, why a headless dedicated server needs more than one, and what is still unreachable. |
 | [plan.md](dataset-extraction/plan.md) | The working extraction plan. **Temporary**: a roadmap that requirements.md and implementation.md gradually absorb; delete it once they have. |
 
 ## Keeping this current

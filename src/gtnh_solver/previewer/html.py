@@ -4,7 +4,8 @@
 clickable ``.html`` that pulls three.js from a CDN and draws the layout. The camera orbits AND
 pans (right-drag / arrow keys), and a layer-by-layer slider isolates each y-level. Machines are
 solid boxes skinned with their real GT casing texture where ``scene.textures`` supplies one (the
-six per-face icons ride ``machine.texture``; missing icons fall back to the flat type colour), with
+six per-face icons ride ``machine.texture``; a face with no resolved icon draws the missing-texture
+checkerboard, while a machine with no doc at all keeps a flat type-coloured box), with
 the machine name on the front face and, since a textured cube shows no name, a hover name tag that
 floats a block's machine name above it (raycast pick); a state control swaps every machine between
 its idle and running
@@ -270,12 +271,30 @@ function flatMaterial(m) {
   return mm;
 }
 // A per-block cube's six materials from its baked-face pool keys (three.js material order). A face
-// with no baked texture falls back to a neutral casing grey so the cube still reads as a block.
-const _UNBAKED = new THREE.MeshStandardMaterial({ color: '#6b7280', roughness: 0.8, metalness: 0.05 });
+// with no baked texture gets Minecraft's own missing-texture checkerboard - magenta and black, 2x2 -
+// instead of a neutral grey. Grey was actively misleading: a great many GT casings ARE plain grey,
+// so an unresolved sprite was indistinguishable from a correctly rendered one and the gap stayed
+// invisible in the very view meant to reveal it (GitHub #98 asks for gaps to be loud, not silent).
+// The CLI still names every unskinned block; this is the same signal in the render.
+const _MISSING = (() => {
+  const S = 16, cnv = document.createElement('canvas');   // one sprite-sized tile, nearest-filtered
+  cnv.width = S; cnv.height = S;
+  const ctx = cnv.getContext('2d');
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, S, S);
+  ctx.fillStyle = '#f800f8';                              // MC's missing-texture magenta
+  ctx.fillRect(0, 0, S / 2, S / 2);
+  ctx.fillRect(S / 2, S / 2, S / 2, S / 2);
+  const tex = new THREE.CanvasTexture(cnv);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, metalness: 0.05 });
+})();
 function blockMaterials(faces) {
   return faces.map((key) => {
     const tex = faceTexture(key);
-    if (!tex) return _UNBAKED;
+    if (!tex) return _MISSING;
     const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, metalness: 0.03 });
     const active = faceTextureActive(key);
     if (active) stateMaterials.push({ mat, idle: tex, active });   // swappable by #stateToggle

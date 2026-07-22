@@ -76,7 +76,7 @@ public class DumperMod {
      * properties (a local {@code ./gradlew runServer -PdatasetOut=... -PtextureOut=...} passes them;
      * the structure dump is local-only with no CI, so the texture manifest is the only pass a
      * workflow drives). The structure pass builds every constructable controller with
-     * {@link StructureDumper} and writes the schema-v1 dataset to {@code <datasetOut>/multiblocks/};
+     * {@link StructureDumper} and writes the schema-v2 dataset to {@code <datasetOut>/multiblocks/};
      * the texture pass writes the schema-2 manifest. Throws if a requested pass produced nothing, so
      * an extractor that silently emits an empty dataset fails loudly rather than being trusted.
      */
