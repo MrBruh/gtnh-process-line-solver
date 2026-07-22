@@ -1,4 +1,4 @@
-"""Schema-v1 validation tests for the committed ``data/multiblocks/`` dataset.
+"""Schema-v2 validation tests for the committed ``data/multiblocks/`` dataset.
 
 Proves the extractor contract holds for every committed file (schema.py) and that the loader
 fails loud on a malformed one - the "entries load + validate; bad footprint raises clearly" gate
@@ -75,6 +75,37 @@ def test_missing_required_field_fails_loud() -> None:
     del payload["variants"][0]["bbox"]
     with pytest.raises(ValidationError):
         MultiblockDoc.model_validate(payload)
+
+
+# ------------------------------------------------------------------ hatch slots (schema v2)
+
+
+def test_hatch_slots_parse_with_their_kinds() -> None:
+    payload = json.loads((_DATA_DIR / "gregtech_machine_1000.json").read_text(encoding="utf-8"))
+    payload["variants"][0]["hatch_slots"] = [{"d": [0, 1, 1], "kinds": ["OutputHatch", "InputBus"]}]
+    doc = MultiblockDoc.model_validate(payload)
+    slot = doc.variants[0].hatch_slots[0]
+    assert slot.d == (0, 1, 1)
+    assert slot.kinds == ["OutputHatch", "InputBus"]
+
+
+def test_hatch_slot_with_no_kinds_fails_loud() -> None:
+    # A slot that accepts nothing is not a slot; the extractor omits the cell entirely rather than
+    # emitting an empty list, so an empty one means the dump is malformed.
+    payload = json.loads((_DATA_DIR / "gregtech_machine_1000.json").read_text(encoding="utf-8"))
+    payload["variants"][0]["hatch_slots"] = [{"d": [0, 1, 1], "kinds": []}]
+    with pytest.raises(ValidationError):
+        MultiblockDoc.model_validate(payload)
+
+
+def test_a_file_without_hatch_slots_still_parses() -> None:
+    # The field defaults, so a pre-v2 body loads in-process; it is the `schema` version, not a parse
+    # error, that identifies a stale dump. Guards against making the field required by accident.
+    payload = json.loads((_DATA_DIR / "gregtech_machine_1000.json").read_text(encoding="utf-8"))
+    for variant in payload["variants"]:
+        variant.pop("hatch_slots", None)
+    doc = MultiblockDoc.model_validate(payload)
+    assert doc.variants[0].hatch_slots == []
 
 
 def test_schema_field_loads_by_alias_and_by_name() -> None:

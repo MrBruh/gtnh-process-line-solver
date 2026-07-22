@@ -15,6 +15,7 @@ import net.minecraft.init.Blocks;
 import net.minecraft.item.ItemStack;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.world.World;
+import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.util.ForgeDirection;
 
 import org.apache.logging.log4j.LogManager;
@@ -26,6 +27,7 @@ import com.gtnewhorizon.structurelib.alignment.IAlignment;
 import com.gtnewhorizon.structurelib.alignment.constructable.ChannelDataAccessor;
 import com.gtnewhorizon.structurelib.alignment.constructable.IConstructable;
 import com.gtnewhorizon.structurelib.alignment.enumerable.ExtendedFacing;
+import com.gtnewhorizon.structurelib.structure.IStructureElement;
 
 import gregtech.api.GregTechAPI;
 import gregtech.api.interfaces.IHeatingCoil;
@@ -126,8 +128,18 @@ final class StructureDumper {
 
     // Hard caps (plan risk 9.2): bound the trigger-stack sweep and the per-controller variant count
     // so a dynamic/explosive structure lands on the failure list rather than running away.
+    //
+    // MAX_VARIANTS was 6, which rejected the whole controller for 16 of 191 machines (GitHub #98).
+    // That was the wrong instrument: 14 of those 16 are legitimately parametric families (a base
+    // plus a repeated slice, driven by a StructureLib STRUCTURE_HEIGHT / STRUCTURE_LENGTH channel
+    // that falls back to the trigger stack size), so a low variant count discarded real machines
+    // rather than catching runaway ones. It was also redundant - the sweep cannot produce more than
+    // MAX_STACK_SWEEP forms, and per-variant blowup is already bounded by MAX_CELLS + MAX_SCAN_DIM,
+    // which cap the thing that actually costs (cells scanned), not the count of shapes. Pinning it
+    // to MAX_STACK_SWEEP keeps the constant as documentation of that ceiling while making it
+    // non-binding; the sweep's own stabilisation break is what ends a well-behaved family.
     private static final int MAX_STACK_SWEEP = 16;
-    private static final int MAX_VARIANTS = 6;
+    private static final int MAX_VARIANTS = MAX_STACK_SWEEP;
     private static final int MAX_CELLS = 20000;
     private static final int MAX_SCAN_DIM = 80;
     private static final int DEFAULT_SCAN_RADIUS = 12;
@@ -141,6 +153,10 @@ final class StructureDumper {
     private final World world;
     private final ErrorCollector errors = new ErrorCollector();
     private final Block hintBlock = StructureLibAPI.getBlockHint();
+    /** Built lazily on first use (needs GT's MTE registry populated); null until then. */
+    private HatchProbe hatchProbe;
+    /** Set once the probe fails to build, so we do not retry it per controller. */
+    private boolean hatchProbeFailed;
 
     // Set -PdebugMeta=<id> to dump what the hint pass captured for one controller (diagnostics only).
     private final int debugMeta = parseIntProp("gtnhextractor.debugMeta", -1);
@@ -297,16 +313,23 @@ final class StructureDumper {
 
         LinkedHashMap<String, DumpModel.Variant> distinct = new LinkedHashMap<>();
         String previousSignature = null;
+        // Whether the sweep ENDED ON ITS OWN (the shape stopped changing, or the controller stopped
+        // building) rather than simply running out of stack sizes. A family whose range outruns
+        // MAX_STACK_SWEEP - the Lapotronic Supercapacitor spans heights 4..50, the Power Station
+        // Control Node 4..18 - leaves this false, and what we dumped is a PREFIX of the real family.
+        boolean stabilised = false;
         for (int n = 1; n <= MAX_STACK_SWEEP; n++) {
             DumpModel.Variant variant = buildVariant(imte, id, machineBlock, registryName, n);
             if (variant.blocks.size() < 2) {
                 if (n == 1) {
                     throw new DumpException("empty scan (no structure built in the void world)");
                 }
+                stabilised = true;
                 break; // stopped producing a structure at this stack size
             }
             String signature = signature(variant);
             if (signature.equals(previousSignature)) {
+                stabilised = true;
                 break; // occupied cell set stopped changing -> the sweep has stabilised
             }
             if (!distinct.containsKey(signature)) {
@@ -319,6 +342,15 @@ final class StructureDumper {
         }
         if (distinct.isEmpty()) {
             throw new DumpException("empty scan (no structure built in the void world)");
+        }
+        if (!stabilised) {
+            // Record rather than throw: a prefix of a parametric family still renders and still
+            // reserves a legal footprint, which beats dropping the controller entirely. But a
+            // consumer picking "the largest form" would otherwise silently believe it had found the
+            // maximum, so the truncation has to be visible in the doc.
+            doc.failures.add(
+                "variant family truncated: the shape was still changing at the trigger-stack ceiling of "
+                    + MAX_STACK_SWEEP + ", so forms beyond " + distinct.size() + " were not swept");
         }
         doc.variants.addAll(distinct.values());
         // The first variant is the smallest stack size (1), i.e. the structure at its default tiers;
@@ -339,8 +371,15 @@ final class StructureDumper {
      */
     private DumpModel.Variant buildVariant(IMetaTileEntity imte, int id, Block machineBlock, String registryName, int n)
         throws DumpException {
-        // Hint pass runs with a plain trigger so the hologram shows its hatch dots; the block pass
-        // runs with gt_no_hatch so no real hatch tile entity is auto-placed (leaving the casing shell).
+        // Hint pass runs with a plain trigger so the hologram shows its dots.
+        //
+        // The block pass sets gt_no_hatch, but NOT because it suppresses hatch placement: GT's hatch
+        // element returns an unconditional false from placeBlock (HatchElementBuilder$2), so
+        // construct(...) never places a hatch either way, and the channel is read only by the
+        // player-driven survival autobuild path. The casing shell we scan is what construct always
+        // builds. It stays set so the recorded channel state matches what a survival build of the
+        // same shape would use, and so a future GT that does place hatches here cannot silently
+        // change what this dump means.
         ItemStack hintTrigger = imte.getStackForm(n);
         if (hintTrigger == null) {
             hintTrigger = imte.getStackForm(1);
@@ -360,7 +399,7 @@ final class StructureDumper {
 
             safeWipe(cube);
             controller = placeController(imte, id);
-            controller.construct(blockTrigger, false);
+            ElementRecorder recorder = instrumentedConstruct(controller, blockTrigger);
 
             DumpModel.Variant variant = new DumpModel.Variant(n);
             variant.channels.put(NO_HATCH_CHANNEL, 1);
@@ -369,11 +408,105 @@ final class StructureDumper {
                 fallbackBlocksFromHints(particles, registryName, variant);
             }
             collectHints(particles, variant);
+            collectHatchSlots(recorder, controller, blockTrigger, cube, variant);
             computeBbox(variant);
             return variant;
         } finally {
             safeWipe(cube);
         }
+    }
+
+    /**
+     * Run the block pass with StructureLib's element instrumentation on, so we learn which structure
+     * element governs each cell (not just which block landed there).
+     *
+     * <p>
+     * Instrumentation is a process-wide ThreadLocal keyed by an identity token, and
+     * {@code enableInstrument} throws if it is already on - so enable/disable is strictly paired in a
+     * finally, and so is the event-bus registration. A failure to instrument must not cost us the
+     * variant: the build still runs, we just record no hatch slots for it.
+     */
+    private ElementRecorder instrumentedConstruct(IConstructable controller, ItemStack blockTrigger) {
+        Object token = new Object();
+        ElementRecorder recorder = new ElementRecorder(token);
+        boolean instrumented = false;
+        try {
+            StructureLibAPI.enableInstrument(token);
+            instrumented = true;
+            MinecraftForge.EVENT_BUS.register(recorder);
+        } catch (Exception | LinkageError e) {
+            LOG.warn("gtnh-extractor: element instrumentation unavailable ({}); hatch slots skipped", e.toString());
+        }
+        try {
+            controller.construct(blockTrigger, false);
+        } finally {
+            if (instrumented) {
+                try {
+                    MinecraftForge.EVENT_BUS.unregister(recorder);
+                } catch (Exception | LinkageError ignored) {
+                    // Unregistering a listener that never registered is harmless; never mask the build.
+                }
+                try {
+                    StructureLibAPI.disableInstrument();
+                } catch (Exception | LinkageError ignored) {
+                    // Same: leaving instrumentation on would break the NEXT controller, but throwing
+                    // here would lose THIS one. The next enable's throw is caught above either way.
+                }
+            }
+        }
+        return recorder;
+    }
+
+    /**
+     * Turn the recorded cell -> element map into the variant's hatch slots, in the controller-relative
+     * frame the rest of the dump uses.
+     *
+     * <p>
+     * Only cells inside the scanned cube are considered, so a stray visit outside the region cannot
+     * enter the dump. A cell whose element accepts no hatch is omitted entirely, which keeps the
+     * common case (a solid casing shell) free of noise.
+     */
+    private void collectHatchSlots(ElementRecorder recorder, IConstructable controller, ItemStack blockTrigger,
+        int[] cube, DumpModel.Variant variant) {
+        if (recorder.size() == 0) {
+            return;
+        }
+        HatchProbe probe = hatchProbe();
+        if (probe == null) {
+            return;
+        }
+        for (int x = cube[0]; x <= cube[3]; x++) {
+            for (int y = cube[1]; y <= cube[4]; y++) {
+                for (int z = cube[2]; z <= cube[5]; z++) {
+                    @SuppressWarnings("unchecked")
+                    IStructureElement<Object> element = (IStructureElement<Object>) recorder.at(x, y, z);
+                    if (element == null) {
+                        continue;
+                    }
+                    Set<String> kinds = probe.kindsAt(element, controller, world, x, y, z, blockTrigger);
+                    if (!kinds.isEmpty()) {
+                        variant.hatchSlots
+                            .add(new DumpModel.HatchSlot(x - OX, y - OY, z - OZ, new ArrayList<>(kinds)));
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * The shared hatch probe, built on first use. It enumerates {@code GregTechAPI.METATILEENTITIES},
+     * so it cannot be built before GT has registered them - hence lazily rather than in the ctor.
+     */
+    private HatchProbe hatchProbe() {
+        if (hatchProbe == null && !hatchProbeFailed) {
+            try {
+                hatchProbe = new HatchProbe();
+            } catch (Exception | LinkageError e) {
+                hatchProbeFailed = true;
+                LOG.warn("gtnh-extractor: hatch probe unavailable ({}); hatch slots skipped", e.toString());
+            }
+        }
+        return hatchProbe;
     }
 
     /** One scanned cell's identity, keyed by position in a block map. Equality is (block, meta). */

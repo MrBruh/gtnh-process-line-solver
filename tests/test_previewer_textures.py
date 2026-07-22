@@ -288,10 +288,12 @@ def _machine(
     size: list[int],
     front: str = "north",
     voltage_tier: str = "LV",
+    block_key: str | None = None,
 ) -> dict[str, Any]:
     return {
         "id": mid,
         "type": mtype,
+        "block_key": block_key,
         "cell": cell,
         "size": size,
         "front": front,
@@ -658,6 +660,134 @@ def test_non_storage_glyph_keeps_placed_front(dataset: tuple[Path, Path]) -> Non
         == "gregtech:gt.blockmachines|5|NORTH|inactive"
     )
     assert block["texture"][_GT_SIDE_TO_THREE_SLOT[5]] is None  # nothing rotated onto EAST
+
+
+def _tower_doc() -> MultiblockDoc:
+    """A two-form parametric tower: 3x3x3 and 3x5x3, so a size choice is observable."""
+    variants = []
+    for h in (3, 5):
+        variants.append(
+            {
+                "trigger_stack_size": h,
+                "channels": {},
+                "blocks": [
+                    {"d": [x, y, z], "block": "gregtech:gt.blockcasings", "meta": 11}
+                    for y in range(h)
+                    for x in range(3)
+                    for z in range(3)
+                ],
+                "hints": [],
+                "bbox": [3, h, 3],
+            }
+        )
+    return MultiblockDoc.model_validate(
+        {
+            "schema": 2,
+            "controller": {
+                "registry_name": "gregtech:gt.blockmachines",
+                "meta": 1126,
+                "display_name": "Test Tower",
+                "source_class": "test.MTETestTower",
+            },
+            "variants": variants,
+        }
+    )
+
+
+def test_expansion_renders_the_variant_the_adapter_reserved() -> None:
+    """The rendered form must match the reserved footprint, not simply the largest form.
+
+    ``expand_machine`` clamps to the reserved box, so picking the taller form for a machine reserved
+    at 3x3x3 would silently draw a truncated tower instead of failing.
+    """
+    doc = _tower_doc()
+    short = expand_machine(_machine("m1", "Test Tower", [0, 0, 0], [3, 3, 3]), doc)
+    tall = expand_machine(_machine("m2", "Test Tower", [0, 0, 0], [3, 5, 3]), doc)
+    assert len(short) == 27  # 3x3x3, the small form rendered whole
+    assert len(tall) == 45  # 3x5x3
+    assert max(c.cell[1] for c in short) == 2  # and the short one is genuinely 3 tall
+
+
+def test_expansion_falls_back_to_the_largest_form_for_an_unmatched_size() -> None:
+    # A size no variant reports (a machine reserved before selection existed) keeps the old choice.
+    cubes = expand_machine(_machine("m1", "Test Tower", [0, 0, 0], [3, 9, 3]), _tower_doc())
+    assert len(cubes) == 45  # the 3x5x3 form, clamped into the larger reservation
+
+
+def test_block_key_expands_a_machine_whose_type_does_not_match(dataset: tuple[Path, Path]) -> None:
+    """The GT++ case (GitHub #98): the plan's type is the recipe-map name, so only the key matches.
+
+    Mirrors ``PhysicalDataset.get``'s precedence. If these two lookups ever disagreed, the adapter
+    would reserve one machine's footprint while the previewer drew another's structure.
+    """
+    mb, manifest = dataset
+    scene = _scene(
+        [
+            _machine(
+                "m1",
+                "A Recipe Map Name No Doc Uses",
+                [0, 0, 0],
+                [2, 2, 2],
+                block_key="gregtech:gt.blockmachines@1000",  # the committed "Test EBF" doc
+            )
+        ]
+    )
+    summary = texturize_scene(
+        scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider
+    )
+    assert summary.block_cubes == 5  # the full structure, not a placeholder
+    assert scene["machines"][0]["expanded"] is True
+
+
+def test_a_block_with_no_sprite_is_reported_not_swallowed(dataset: tuple[Path, Path]) -> None:
+    """A constituent block with no manifest entry renders grey; the summary must say which.
+
+    Nothing else surfaces it: the machine is still flagged ``expanded``, so it keeps no placeholder
+    label, and a grey cube inside a multiblock is indistinguishable from a deliberately plain casing.
+    That is how the tiered machine casings stayed invisibly broken (GitHub #98).
+    """
+    mb, manifest = dataset
+    # A doc placing a casing the manifest has never heard of - the real shape of the GT casing
+    # families whose icons are unreachable server-side.
+    doc = _ebf_doc()
+    doc["controller"]["display_name"] = "Test Unskinned"
+    doc["variants"][0]["blocks"].append(
+        {"d": [1, 1, 0], "block": "gregtech:gt.blockcasings8", "meta": 0}
+    )
+    doc["variants"][0]["bbox"] = [2, 2, 2]
+    (mb / "test_unskinned.json").write_text(json.dumps(doc), encoding="utf-8")
+
+    scene = _scene([_machine("m1", "Test Unskinned", [0, 0, 0], [2, 2, 2])])
+    summary = texturize_scene(
+        scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider
+    )
+    assert "gregtech:gt.blockcasings8|0" in summary.unskinned_blocks
+    assert summary.block_cubes  # the structure still renders; only that one sprite is missing
+
+
+def test_a_fully_skinned_machine_reports_nothing_unskinned(dataset: tuple[Path, Path]) -> None:
+    mb, manifest = dataset
+    scene = _scene([_machine("m1", "Test Macerator", [0, 0, 0], [1, 1, 1])])
+    summary = texturize_scene(
+        scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider
+    )
+    assert summary.unskinned_blocks == ()
+
+
+def test_block_key_miss_falls_back_to_the_type(dataset: tuple[Path, Path]) -> None:
+    # A block key the dump lacks must not shadow a type that resolves - the dump is partial.
+    mb, manifest = dataset
+    scene = _scene(
+        [
+            _machine(
+                "m1", "Test EBF", [0, 0, 0], [2, 2, 2], block_key="gregtech:gt.blockmachines@404"
+            )
+        ]
+    )
+    summary = texturize_scene(
+        scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider
+    )
+    assert summary.block_cubes == 5
 
 
 def test_docless_multiblock_keeps_placeholder_not_a_lone_cube(dataset: tuple[Path, Path]) -> None:

@@ -12,11 +12,23 @@ Two layers:
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 
 import pytest
 
-from gtnh_solver.adapter import Edge, Node, Plan, Recipe, Resource, to_input_ir
+from gtnh_solver.adapter import (
+    Edge,
+    MachineBlock,
+    Node,
+    Plan,
+    Recipe,
+    RecipeSource,
+    ResolvedBlock,
+    ResolvedMachine,
+    Resource,
+    to_input_ir,
+)
 from gtnh_solver.dataset import (
     DatasetError,
     MultiblockDoc,
@@ -81,6 +93,168 @@ def test_default_data_dir_resolves_to_the_committed_dump() -> None:
     # No explicit directory -> the source-relative default; proves the packaged path resolves.
     ds = load_physical_dataset()
     assert ds.get("Electric Blast Furnace") is not None
+
+
+# ------------------------------------------------- controller-block join (gtnh-factory-flow #25)
+#
+# The exporter names a machine by its localized recipe-map name, which for a GT++ machine is NOT
+# the controller block's own name this dump is keyed by ("Chemical Plant" vs "ExxonMobil Chemical
+# Plant"). A plan carrying `recipe.source.machineBlock` joins on the block identity instead.
+
+
+def test_block_key_is_registry_name_at_meta(dataset: PhysicalDataset) -> None:
+    ebf = dataset.get("Electric Blast Furnace")
+    assert ebf is not None
+    assert ebf.block_key == "gregtech:gt.blockmachines@1000"
+    assert set(dataset.by_block_key) == {
+        "gregtech:gt.blockmachines@1000",
+        "gregtech:gt.blockmachines@1001",
+    }
+
+
+def test_block_key_resolves_a_machine_whose_name_does_not_match(dataset: PhysicalDataset) -> None:
+    # The whole point: the name is wrong (as it is for every GT++ machine) and the lookup still
+    # lands on the right controller, because the block key is an exact identity.
+    record = dataset.get(
+        "Some Localized Recipe Map Name", block_key="gregtech:gt.blockmachines@1000"
+    )
+    assert record is not None
+    assert record.key == "Electric Blast Furnace"
+
+
+def test_unknown_block_key_falls_back_to_the_name(dataset: PhysicalDataset) -> None:
+    # The dump is a partial snapshot (failed controllers are simply absent), so a block key it does
+    # not know must degrade to the name lookup rather than turn a resolvable machine into a miss.
+    record = dataset.get("Electric Blast Furnace", block_key="gregtech:gt.blockmachines@99999")
+    assert record is not None
+    assert record.key == "Electric Blast Furnace"
+
+
+def test_lookup_without_a_block_key_is_unchanged(dataset: PhysicalDataset) -> None:
+    # Every pre-#25 plan takes this path; it must behave exactly as it did before the join existed.
+    assert dataset.get("Electric Blast Furnace") is dataset.get(
+        "Electric Blast Furnace", block_key=None
+    )
+    assert dataset.get("Nonexistent Machine", block_key=None) is None
+
+
+# ------------------------------------------------- layer-indexed height selection (GitHub #98)
+#
+# A Distillation Tower routes the recipe's fluid output i to structure layer i and nowhere else, so
+# a tower with fewer output layers than the recipe has fluid outputs is still a LEGAL build that
+# silently voids the remainder. Sizing it to the recipe is therefore a correctness matter, not
+# cosmetics - and mis-sizing DOWNWARD is the dangerous direction.
+
+
+def _tower_doc(heights: Iterable[int], *, output_layers_per_step: int = 1) -> MultiblockDoc:
+    """A synthetic parametric tower: one variant per height, 3x3 base, hatch slots up each layer.
+
+    ``output_layers_per_step`` models a machine whose "output layer" spans several block layers (the
+    Mega Distillation Tower's is a 5-block band), which is what must NOT be selected on.
+    """
+    variants = []
+    for h in heights:
+        blocks = [
+            {"d": [x, y, z], "block": "casing", "meta": 0}
+            for y in range(h)
+            for x in range(3)
+            for z in range(3)
+        ]
+        slots = [
+            {"d": [1, y, 1], "kinds": ["OutputHatch"]}
+            for y in range(1, h)
+            if (y - 1) % output_layers_per_step == 0 or output_layers_per_step == 1
+        ]
+        variants.append(
+            {"trigger_stack_size": h, "blocks": blocks, "hatch_slots": slots, "bbox": [3, h, 3]}
+        )
+    return MultiblockDoc.model_validate(
+        {
+            "schema": 2,
+            "controller": {
+                "registry_name": "r",
+                "meta": 0,
+                "display_name": "Tower",
+                "source_class": "C",
+            },
+            "variants": variants,
+        }
+    )
+
+
+def test_layer_indexed_tower_is_sized_to_the_recipe() -> None:
+    record = to_physical(_tower_doc(range(3, 13)))  # heights 3..12 -> 2..11 output layers
+    assert record.is_layer_indexed
+    assert record.footprint_for(1) == CellBox(sx=3, sy=3, sz=3)  # one output: the minimum tower
+    assert record.footprint_for(5) == CellBox(sx=3, sy=6, sz=3)  # H = max(3, N+1)
+    assert record.footprint_for(11) == CellBox(sx=3, sy=12, sz=3)
+
+
+def test_a_recipe_needing_more_outputs_than_any_form_takes_the_largest() -> None:
+    # Over-reserving is safe; under-reserving voids product. An impossible ask must not silently
+    # land on a small tower.
+    record = to_physical(_tower_doc(range(3, 13)))
+    assert record.footprint_for(99) == CellBox(sx=3, sy=12, sz=3)
+
+
+def test_a_banded_tower_declines_selection_and_takes_the_largest() -> None:
+    """The Mega Distillation Tower case: its output layer is a 5-block band.
+
+    Its per-layer hatch count runs ahead of its routable-output count, so selecting on it would pick
+    a tower several times too short and void fluids. An unreadable growth pattern must fall back.
+    """
+    record = to_physical(_tower_doc([11, 16, 21], output_layers_per_step=5))
+    assert not record.is_layer_indexed
+    assert record.footprint_for(2) == record.footprint  # the largest form, not a guess
+
+
+def test_a_fixed_shape_machine_ignores_the_recipe() -> None:
+    doc = MultiblockDoc.model_validate(
+        {
+            "schema": 2,
+            "controller": {
+                "registry_name": "r",
+                "meta": 0,
+                "display_name": "Fixed",
+                "source_class": "C",
+            },
+            "variants": [{"trigger_stack_size": 1, "blocks": _cube_blocks(3), "bbox": [3, 3, 3]}],
+        }
+    )
+    record = to_physical(doc)
+    assert not record.is_layer_indexed  # a single form is not a family
+    assert record.footprint_for(7) == CellBox(sx=3, sy=3, sz=3)
+
+
+def test_a_dump_without_hatch_slots_keeps_the_old_behaviour() -> None:
+    # A pre-v2 dump records no hatch data; every machine must keep resolving to its largest form
+    # rather than collapsing to the smallest because capacity reads as zero.
+    doc = _tower_doc(range(3, 6))
+    for variant in doc.variants:
+        variant.hatch_slots.clear()
+    record = to_physical(doc)
+    assert not record.is_layer_indexed
+    assert record.footprint_for(4) == CellBox(sx=3, sy=5, sz=3)  # the largest form
+
+
+def test_adapter_sizes_a_tower_from_the_recipes_fluid_outputs() -> None:
+    """End to end: two recipes on the same machine type get different reserved heights."""
+    dataset = PhysicalDataset(
+        meta=load_physical_dataset(_DATA_DIR).meta,
+        machines={"Tower": to_physical(_tower_doc(range(3, 13)))},
+    )
+    for fluids, expected_height in ((1, 3), (5, 6)):
+        outputs = [Resource(kind="fluid", id=f"fluid:{i}", amount=1.0) for i in range(fluids)]
+        recipe = Recipe(
+            id="r", machine_type="Tower", eut=480.0, duration_ticks=100.0, outputs=outputs
+        )
+        plan = Plan(
+            schema_version=1,
+            recipes=[recipe],
+            nodes=[Node(id="n", recipe_id="r", overclock_tier="MV")],
+        )
+        machine = next(m for m in to_input_ir(plan, physical=dataset).machines if m.id == "n")
+        assert machine.footprint.sy == expected_height, f"{fluids} fluid outputs"
 
 
 # --------------------------------------------------------------- interpretation branches
@@ -199,7 +373,7 @@ def test_duplicate_machine_key_raises(tmp_path: Path) -> None:
 # ---------------------------------------------------------- opt-in gtnh-factory-flow wiring
 
 
-def _one_machine_plan(machine_type: str) -> Plan:
+def _one_machine_plan(machine_type: str, block_key: str | None = None) -> Plan:
     recipe = Recipe(
         id="r",
         machine_type=machine_type,
@@ -207,6 +381,11 @@ def _one_machine_plan(machine_type: str) -> Plan:
         duration_ticks=100.0,
         inputs=[Resource(kind="item", id="minecraft:iron_ingot", amount=1.0)],
         outputs=[Resource(kind="item", id="minecraft:iron_block", amount=1.0)],
+        source=(
+            RecipeSource(machine_block=MachineBlock(id=block_key))
+            if block_key is not None
+            else None
+        ),
     )
     node = Node(id="n", recipe_id="r", overclock_tier="MV")
     return Plan(schema_version=1, recipes=[recipe], nodes=[node])
@@ -230,6 +409,57 @@ def test_adapter_falls_back_for_a_type_the_dataset_lacks(dataset: PhysicalDatase
     ir = to_input_ir(_one_machine_plan("Some Unknown Machine"), physical=dataset)
     machine = next(m for m in ir.machines if m.id == "n")
     assert machine.footprint == CellBox()  # 1x1x1 fallback
+
+
+def test_adapter_resolves_the_footprint_from_the_exported_controller_block(
+    dataset: PhysicalDataset,
+) -> None:
+    """A GT++-style plan: the machine type does not match the dump, the block key does.
+
+    This is the Chemical Plant / Coke Oven case from GitHub #98 in miniature. Without the block key
+    this machine silently reserves 1x1x1 and renders as a lone cube; with it, the real multiblock
+    footprint lands and the previewer expands the full structure.
+    """
+    plan = _one_machine_plan(
+        "A Recipe Map Name The Dump Never Heard Of",
+        block_key="gregtech:gt.blockmachines@1000",
+    )
+    machine = next(m for m in to_input_ir(plan, physical=dataset).machines if m.id == "n")
+    assert machine.footprint == CellBox(sx=3, sy=4, sz=3)  # the EBF's real shape
+    assert machine.block_key == "gregtech:gt.blockmachines@1000"
+
+
+def test_adapter_reads_the_controller_block_from_the_resolved_block(
+    dataset: PhysicalDataset,
+) -> None:
+    # gtnh-factory-flow #25 mirrors machineBlock into `resolved.machines[]`; accept it from there
+    # too, so a plan whose resolved block is richer than its recipes still joins.
+    plan = _one_machine_plan("Unmatched Name")
+    plan = plan.model_copy(
+        update={
+            "resolved": ResolvedBlock(
+                machines=[
+                    ResolvedMachine(
+                        node_id="n",
+                        machine_block=MachineBlock(id="gregtech:gt.blockmachines@1001"),
+                        total_eut=480.0,  # matches the recipe, so no EU/t-mismatch warning fires
+                    )
+                ]
+            )
+        }
+    )
+    machine = next(m for m in to_input_ir(plan, physical=dataset).machines if m.id == "n")
+    assert machine.footprint == CellBox(sx=3, sy=3, sz=3)  # the Vacuum Freezer's real shape
+
+
+def test_adapter_leaves_block_key_none_for_a_pre_25_plan(dataset: PhysicalDataset) -> None:
+    machine = next(
+        m
+        for m in to_input_ir(_one_machine_plan("Electric Blast Furnace"), physical=dataset).machines
+        if m.id == "n"
+    )
+    assert machine.block_key is None
+    assert machine.footprint == CellBox(sx=3, sy=4, sz=3)  # still resolved, by name
 
 
 # ---------------------------------------------- real footprints solve to a non-overlapping layout

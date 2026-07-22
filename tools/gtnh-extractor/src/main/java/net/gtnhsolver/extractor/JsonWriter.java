@@ -34,8 +34,15 @@ import com.google.gson.JsonPrimitive;
  */
 final class JsonWriter {
 
-    /** Dataset schema version emitted; must match {@code SCHEMA_VERSION} in {@code schema.py}. */
-    static final int SCHEMA_VERSION = 1;
+    /**
+     * Dataset schema version emitted; must match {@code SCHEMA_VERSION} in {@code schema.py}.
+     *
+     * <p>
+     * v2 added {@code variants[].hatch_slots}. The Python models are {@code extra="forbid"}, so an
+     * old loader rejects a new file outright rather than quietly ignoring the field - which is why
+     * this is a bump rather than an additive no-op.
+     */
+    static final int SCHEMA_VERSION = 2;
 
     private static final Comparator<DumpModel.PlacedBlock> BLOCK_ORDER = Comparator
         .comparingInt((DumpModel.PlacedBlock b) -> b.dy)
@@ -43,6 +50,11 @@ final class JsonWriter {
         .thenComparingInt(b -> b.dx)
         .thenComparing(b -> b.block)
         .thenComparingInt(b -> b.meta);
+
+    private static final Comparator<DumpModel.HatchSlot> HATCH_SLOT_ORDER = Comparator
+        .comparingInt((DumpModel.HatchSlot s) -> s.dy)
+        .thenComparingInt(s -> s.dz)
+        .thenComparingInt(s -> s.dx);
 
     private static final Comparator<DumpModel.HintDot> HINT_ORDER = Comparator
         .comparingInt((DumpModel.HintDot h) -> h.dy)
@@ -75,7 +87,14 @@ final class JsonWriter {
         // tiered block (coil, glass, ...) without changing the shape, keyed by channel name. Keys and
         // entries are sorted so a regenerated dataset diffs minimally rather than reshuffling.
         root.add("substitutions", substitutionsJson(doc.substitutions));
-        root.add("failures", new JsonArray());
+
+        // Per-doc caveats (e.g. a variant family the stack sweep could not exhaust). Sorted so a
+        // regenerated dataset diffs minimally, matching the substitution table above.
+        JsonArray failures = new JsonArray();
+        doc.failures.stream()
+            .sorted()
+            .forEach(f -> failures.add(new JsonPrimitive(f)));
+        root.add("failures", failures);
 
         write(new File(multiblocksDir, fileName(doc.controller)), root);
     }
@@ -151,6 +170,21 @@ final class JsonWriter {
                 hints.add(hj);
             });
         o.add("hints", hints);
+
+        // Cells that accept a hatch, with the kinds each accepts. Sorted on the same (y, z, x) key as
+        // blocks and hints so a regenerated dataset diffs minimally.
+        JsonArray hatchSlots = new JsonArray();
+        v.hatchSlots.stream()
+            .sorted(HATCH_SLOT_ORDER)
+            .forEach(s -> {
+                JsonObject sj = new JsonObject();
+                sj.add("d", offset(s.dx, s.dy, s.dz));
+                JsonArray kinds = new JsonArray();
+                s.kinds.forEach(k -> kinds.add(new JsonPrimitive(k)));
+                sj.add("kinds", kinds);
+                hatchSlots.add(sj);
+            });
+        o.add("hatch_slots", hatchSlots);
 
         o.add("bbox", offset(v.bbox[0], v.bbox[1], v.bbox[2]));
         return o;

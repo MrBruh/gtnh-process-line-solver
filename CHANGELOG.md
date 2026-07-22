@@ -7,6 +7,55 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Multiblock casings: tiered machine casings render, and missing sprites are reported
+  (`tools/gtnh-extractor/`, `previewer/`, GitHub #98).** `IIconContainer.getIcon()` is
+  `@SideOnly(CLIENT)`, so FML strips it from the interface on a dedicated server: a casing reaching
+  its icon via `invokevirtual BlockIcons.getIcon()` resolves, but one going through
+  `invokeinterface IIconContainer.getIcon()` dies with `NoSuchMethodError`. That is the whole reason
+  `gt.blockcasings` metas 10-15 always rendered while metas 0-9 - the tiered machine casings that
+  are most of an ExxonMobil Chemical Plant - were always grey. Those metas are now read straight
+  from the `MACHINECASINGS_BOTTOM/TOP/SIDE` arrays that hold them, per side rather than flattened to
+  one face. The block scan also no longer pre-filters on `IHasIndexedTexture`, which silently
+  dropped 75 registry names a dumped multiblock actually uses. Families whose icons remain
+  unreachable server-side (`gt.blockcasings8`, the coil families) still need the client-side route
+  of #78.
+- **Untextured blocks are now loud (`previewer/textures.py`, GitHub #98).** A block with no manifest
+  entry renders neutral grey inside an otherwise-expanded multiblock, where it is indistinguishable
+  from a deliberately plain casing - nothing surfaced it, since the machine keeps no placeholder
+  label. `TextureSummary` gains `unskinned_blocks` and the pass warns with the exact
+  `<block>|<meta>` list. The extractor likewise records the two skips that previously `continue`d in
+  silence, taking the manifest's own recorded gaps from 1846 to 5370: the shortfall was never
+  measured before because most of it was invisible.
+- **Distillation Towers are sized to their recipe, not to the maximum
+  (`dataset/multiblocks.py`, `adapter/`, `previewer/`, GitHub #98).** A GT Distillation Tower routes
+  the recipe's fluid output `i` to structure layer `i` and nowhere else, so a tower shorter than the
+  recipe's fluid-output count is a *legal* build that silently voids the remainder. `MachinePhysical`
+  now carries every built form with its routable-output capacity and picks the smallest that fits:
+  on the nitrobenzene line the Distilled Water tower (1 fluid out) reserves 3x3x3 and the Creosote
+  Oil tower (5 out) reserves 3x6x3, where both previously reserved 3x12x3. Selection applies only to
+  a family that adds exactly one layer and one routable output per step; anything else (a Mega
+  Distillation Tower, whose output layer is a 5-block band, or a pre-v2 dump) falls back to the
+  largest form, which over-reserves but can never lose product.
+- **Multiblocks resolve by controller block, not just by name (`adapter/`, `dataset/`, `previewer/`,
+  `ir/`, GitHub #98).** gtnh-factory-flow names a machine by its localized `RecipeMap`, which for a
+  GT++ machine is not the controller block's own name the structure dump is keyed by (`Chemical
+  Plant` vs `ExxonMobil Chemical Plant`). Those machines therefore missed the structure lookup
+  entirely and silently fell back to a 1x1x1 footprint and a lone cube, even though the dump had
+  them. A plan exported after gtnh-factory-flow #25 now carries `recipe.source.machineBlock.id`
+  (`"<registry_name>@<meta>"`), which `InputIR.Machine.block_key` plumbs to both consumers:
+  `PhysicalDataset.get` and the previewer's doc lookup try the block key first and fall back to the
+  name, so the join is exact where the export supports it and every pre-#25 plan behaves exactly as
+  before. The Chemical Plant now resolves its real 7x7x7 footprint instead of 1x1x1.
+- **Dataset schema v2: `variants[].hatch_slots` (`dataset/schema.py`, `tools/gtnh-extractor/`,
+  GitHub #98).** Geometry alone cannot say which cells are I/O slots or what they accept, and for a
+  layer-indexed machine that is load-bearing. The extractor now records, per cell, the
+  `gregtech.api.enums.HatchElement` kinds it accepts, using StructureLib's element-visit
+  instrumentation (`StructureLibAPI.enableInstrument` + `StructureElementVisitedEvent`) during the
+  block pass. Two things this replaces: hint metadata is NOT hatch data (it is `dot - 1`, with
+  13/14/15 reserved as StructureLib's `AIR`/`NOT_AIR`/`ERROR` - a meta-13 cell is a hollow interior,
+  which is why the EBF's coil layers looked like I/O slots), and re-running the block pass without
+  `gt_no_hatch` recovers nothing, since GT's hatch element returns an unconditional `false` from
+  `placeBlock` and the channel is read only by the survival autobuild path.
 - **Previewer: hover a block to see its machine name (`previewer/html.py`).** A textured cube carries
   no readable label (the front-face name plate is drawn only on the flat placeholder box), so once
   every machine is skinned it was hard to tell which is which. Moving the pointer over any block now
@@ -600,6 +649,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
 
 ### Fixed
+- **The extractor no longer discards legitimately parametric multiblocks
+  (`tools/gtnh-extractor/`, GitHub #98).** `MAX_VARIANTS = 6` rejected 16 of 191 controllers
+  outright, including the Distillation Tower, Assembly Line, Cleanroom and Lapotronic
+  Supercapacitor. It was the wrong instrument: the sweep cannot produce more forms than
+  `MAX_STACK_SWEEP`, and per-variant blowup is already bounded by `MAX_CELLS`/`MAX_SCAN_DIM`, so a
+  low variant cap only discarded real machines. Pinned to `MAX_STACK_SWEEP`, taking a local dump from
+  191 controllers / 18 failures to 208 / 1 with no change to any previously extracted machine. A
+  family still growing at the sweep ceiling (the Lapotronic Supercapacitor spans heights 4..50) now
+  records that truncation in its own `failures` list rather than presenting a prefix as complete.
 - **Super Tank / Super Chest output glyph faced the wrong way (`previewer/`).** A boundary-storage
   block auto-outputs from its front face, but the previewer oriented its output glyph (OVERLAY_STANK /
   OVERLAY_SCHEST) to the placer's `front`, which defaults every machine to north and does not track

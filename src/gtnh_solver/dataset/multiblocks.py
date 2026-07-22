@@ -62,6 +62,26 @@ class DatasetError(ValueError):
     """
 
 
+#: A hatch kind that receives one of a recipe's fluid OUTPUTS (``gregtech.api.enums.HatchElement``).
+_OUTPUT_HATCH = "OutputHatch"
+
+
+@dataclass(frozen=True)
+class VariantShape:
+    """One built form of a machine: how big it is and how many fluid outputs it can route.
+
+    ``output_layers`` counts the distinct y-layers carrying a cell that accepts an ``OutputHatch``.
+    For a layer-indexed machine that IS its routable-output capacity: a Distillation Tower sends the
+    recipe's fluid output ``i`` to layer ``i`` and nowhere else, so a tower with fewer layers than
+    the recipe has fluid outputs silently voids the remainder (it is still a legal build, which is
+    why nothing catches it at runtime). 0 when the dump recorded no hatch slots (a pre-v2 dump, or a
+    machine whose adders expose no item filter) - which reads as "unknown", not "cannot output".
+    """
+
+    footprint: CellBox
+    output_layers: int
+
+
 @dataclass(frozen=True)
 class MachinePhysical:
     """The physical-rules record for one machine, in IR-shaped terms.
@@ -89,6 +109,59 @@ class MachinePhysical:
     coil_layer_count: int
     #: How many distinct built forms the controller has (trigger-stack / shape variants).
     variant_count: int
+    #: Every built form, smallest first. One entry for a fixed-shape machine; a parametric one (a
+    #: tower that grows a layer per trigger-stack step) has the whole family, which is what lets
+    #: :meth:`footprint_for` size it to a recipe instead of always reserving the maximum.
+    variants: tuple[VariantShape, ...] = ()
+
+    @property
+    def is_layer_indexed(self) -> bool:
+        """Whether each successive form adds exactly one layer AND exactly one routable output.
+
+        Only then does ``output_layers`` mean "fluid outputs this form can route", and only then may
+        :meth:`footprint_for` pick a smaller form. A Distillation Tower qualifies (heights 3..12 carry
+        2..11 output layers, one per step). A Mega Distillation Tower does NOT: its "output layer" is
+        a 5-block band whose whole ring accepts an output hatch, so the layer count runs 5x ahead of
+        the routable count. Selecting on that would pick a tower ~5x too short and silently void
+        fluids, so an unrecognised growth pattern falls back to the largest form - which over-reserves
+        but can never lose product. Erring toward the big shape is the only safe direction here.
+        """
+        if len(self.variants) < 2:
+            return False
+        # strict=False: pairing a sequence with its own tail is deliberately ragged by one.
+        for smaller, larger in zip(self.variants, self.variants[1:], strict=False):
+            if larger.output_layers - smaller.output_layers != 1:
+                return False
+            if larger.footprint.sy - smaller.footprint.sy != 1:
+                return False
+        return self.variants[0].output_layers > 0
+
+    def footprint_for(self, fluid_outputs: int = 0) -> CellBox:
+        """The smallest built form that can route ``fluid_outputs`` fluids, else the largest form.
+
+        For a layer-indexed machine this is the difference between telling a builder to raise a
+        3-tall tower and a 12-tall one. Everything else - a fixed-shape machine, a growth pattern we
+        cannot read, or a pre-v2 dump with no hatch data - keeps the previous behaviour of the
+        largest form.
+        """
+        if not self.variants:
+            return self.footprint
+        if not self.is_layer_indexed:
+            return self.footprint
+        for shape in self.variants:  # smallest first
+            if shape.output_layers >= fluid_outputs:
+                return shape.footprint
+        return self.variants[-1].footprint
+
+    @property
+    def block_key(self) -> str:
+        """This machine's controller block as ``"<registry_name>@<meta>"``.
+
+        The exact join key an export carries in ``recipe.source.machineBlock.id``
+        (gtnh-factory-flow #25), and the one identity that survives the naming-world gap between
+        the exporter's recipe-map names and this dump's controller-block names.
+        """
+        return f"{self.registry_name}@{self.meta}"
 
 
 @dataclass(frozen=True)
@@ -98,8 +171,30 @@ class PhysicalDataset:
     meta: DatasetMeta
     machines: Mapping[str, MachinePhysical]
 
-    def get(self, key: str) -> MachinePhysical | None:
-        """The physical record for a machine by display name, or ``None`` if the dump lacks it."""
+    @property
+    def by_block_key(self) -> Mapping[str, MachinePhysical]:
+        """Every machine indexed by :attr:`MachinePhysical.block_key` (``"<registry>@<meta>"``).
+
+        Derived rather than stored so it cannot drift from ``machines``; the dump is ~200 entries,
+        so rebuilding it per lookup is not worth caching.
+        """
+        return {m.block_key: m for m in self.machines.values()}
+
+    def get(self, key: str, block_key: str | None = None) -> MachinePhysical | None:
+        """The physical record for a machine, or ``None`` if the dump lacks it.
+
+        ``block_key`` (the export's controller-block id) is tried FIRST and is authoritative: it is
+        an exact identity, whereas ``key`` is the exporter's localized recipe-map name, which for a
+        GT++ machine differs from the controller block's own name this dump is keyed by
+        ("Chemical Plant" vs "ExxonMobil Chemical Plant"). Falling back to ``key`` keeps every
+        pre-#25 plan resolving exactly as it did. A ``block_key`` the dump does not know falls back
+        too, rather than failing: the dump is a partial snapshot (controllers whose extraction
+        failed are simply absent), so an unknown block is a miss, not an error.
+        """
+        if block_key is not None:
+            record = self.by_block_key.get(block_key)
+            if record is not None:
+                return record
         return self.machines.get(key)
 
 
@@ -185,7 +280,30 @@ def to_physical(doc: MultiblockDoc) -> MachinePhysical:
         hint_layers=frozenset(hint_layers),
         coil_layer_count=len(coil_layers),
         variant_count=len(doc.variants),
+        variants=_variant_shapes(doc),
     )
+
+
+def _variant_shapes(doc: MultiblockDoc) -> tuple[VariantShape, ...]:
+    """Every built form as ``(footprint, output_layers)``, smallest first.
+
+    Sized from the blocks each form actually spans (the same derivation the primary variant gets, so
+    a form's footprint here always agrees with :attr:`MachinePhysical.footprint` for the largest).
+    Ordered by volume so :meth:`MachinePhysical.footprint_for` can take the first form that fits.
+    """
+    shapes = []
+    for variant in doc.variants:
+        min_corner, size = _extent(b.d for b in variant.blocks)
+        output_layers = {
+            slot.d[1] - min_corner[1] for slot in variant.hatch_slots if _OUTPUT_HATCH in slot.kinds
+        }
+        shapes.append(
+            VariantShape(
+                footprint=CellBox(sx=size[0], sy=size[1], sz=size[2]),
+                output_layers=len(output_layers),
+            )
+        )
+    return tuple(sorted(shapes, key=lambda s: s.footprint.sx * s.footprint.sy * s.footprint.sz))
 
 
 def load_physical_dataset(

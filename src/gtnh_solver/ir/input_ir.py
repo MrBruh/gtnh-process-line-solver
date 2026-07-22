@@ -79,6 +79,12 @@ class Machine(StrictModel):
 
     id: str = Field(min_length=1)
     type: str = Field(min_length=1)  # GT machine id; keys into the physical-rules dataset
+    #: The GT controller block this machine is, as ``"<registry_name>@<meta>"``
+    #: ("gregtech:gt.blockmachines@998"). ``type`` is the exporter's localized recipe-map name,
+    #: which for GT++ machines differs from the controller block's name that the structure dataset
+    #: is keyed by - this is the exact join key when the export supplies it, and the dataset falls
+    #: back to matching on ``type`` when it is None (a pre-#25 plan).
+    block_key: str | None = None
     footprint: CellBox = Field(default_factory=CellBox)
     faces: FaceSpec = Field(default_factory=FaceSpec)
     voltage_tier: str = Field(min_length=1)  # LV/MV/HV/... - sets cable voltage rating

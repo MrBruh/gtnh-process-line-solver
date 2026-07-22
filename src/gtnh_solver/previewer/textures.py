@@ -25,7 +25,7 @@ import base64
 import json
 import logging
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -145,6 +145,13 @@ class TextureSummary:
     block_cubes: int
     embedded_icons: int
     embedded_active_icons: int = 0
+    #: ``"<block>|<meta>"`` for every constituent block that resolved NO face at all, so its cubes
+    #: render as neutral grey. Reported rather than swallowed because a grey cube inside an expanded
+    #: multiblock is otherwise indistinguishable from a deliberately plain casing - the machine is
+    #: still flagged ``expanded`` and keeps no placeholder label, so nothing else surfaces the gap
+    #: (GitHub #98). A non-empty list means the texture manifest needs a re-dump, not that the
+    #: structure is wrong.
+    unskinned_blocks: tuple[str, ...] = ()
 
 
 class TextureManifest:
@@ -260,7 +267,14 @@ class TextureManifest:
 
 
 def load_multiblock_docs(data_dir: str | Path) -> dict[str, MultiblockDoc]:
-    """Load every ``data/multiblocks/<name>.json`` under ``data_dir``, keyed by display name.
+    """Load every ``data/multiblocks/<name>.json`` under ``data_dir``, keyed for lookup.
+
+    Each doc is indexed under BOTH its controller display name and its controller block key
+    (``"<registry_name>@<meta>"``), because a plan can name a machine either way: an export from
+    before gtnh-factory-flow #25 only has the localized recipe-map name, while a newer one carries
+    the exact block id (see :func:`_machine_cubes`, which prefers the block key). The two key spaces
+    cannot collide - a block key always ends in ``@<int>`` after a registry path, which no GT
+    display name is - so one flat dict serves both without an ambiguity guard.
 
     Skips ``_meta.json`` and returns ``{}`` if the directory is absent, so a checkout without a
     committed dump texturizes nothing rather than failing. If two files claim one display name
@@ -275,6 +289,7 @@ def load_multiblock_docs(data_dir: str | Path) -> dict[str, MultiblockDoc]:
             continue
         doc = load_multiblock_doc(path)
         docs.setdefault(doc.controller.display_name, doc)
+        docs.setdefault(f"{doc.controller.registry_name}@{doc.controller.meta}", doc)
     return docs
 
 
@@ -285,6 +300,24 @@ def primary_variant(doc: MultiblockDoc) -> Variant:
     deterministic tie-break), so the expanded cubes match the footprint the solver reserved.
     """
     return max(doc.variants, key=lambda v: (len(v.blocks), v.trigger_stack_size))
+
+
+def variant_for_size(doc: MultiblockDoc, size: Sequence[int] | None) -> Variant:
+    """The variant whose bbox is exactly ``size``, else :func:`primary_variant`.
+
+    A parametric machine has many forms and the adapter already chose one, sizing it to the recipe
+    (``MachinePhysical.footprint_for``). The reserved ``size`` on the scene machine IS that choice,
+    so matching it here is what keeps the two passes in agreement without threading the decision
+    through the IR. Getting this wrong is silent, not loud: ``expand_machine`` clamps every cube to
+    the reserved box, so rendering a taller form than was reserved would quietly draw a truncated
+    tower rather than fail.
+    """
+    if size is not None:
+        want = tuple(size)
+        for variant in doc.variants:
+            if tuple(variant.bbox) == want:
+                return variant
+    return primary_variant(doc)
 
 
 def _rotate(dx: int, dz: int, steps: int) -> tuple[int, int]:
@@ -312,10 +345,16 @@ class BlockCube:
     steps: int  # clockwise yaw turns applied to orient the machine to its placed front
 
 
-def _place_blocks(doc: MultiblockDoc, cell: list[int], steps: int) -> list[BlockCube]:
-    """Rotate the primary variant's blocks by ``steps`` and land the min corner on ``cell``."""
+def _place_blocks(
+    doc: MultiblockDoc, cell: list[int], steps: int, size: Sequence[int] | None = None
+) -> list[BlockCube]:
+    """Rotate the chosen variant's blocks by ``steps`` and land the min corner on ``cell``.
+
+    ``size`` selects WHICH form to place (see :func:`variant_for_size`); without it the largest one
+    stands, as before.
+    """
     placed: list[tuple[tuple[int, int, int], str, int]] = []
-    for b in primary_variant(doc).blocks:
+    for b in variant_for_size(doc, size).blocks:
         dx, dy, dz = b.d
         rx, rz = _rotate(dx, dz, steps)
         placed.append(((rx, dy, rz), b.block, b.meta))
@@ -356,10 +395,10 @@ def expand_machine(machine: Mapping[str, Any], doc: MultiblockDoc) -> list[Block
     cell = machine["cell"]
     size = machine.get("size", [1, 1, 1])
     steps = _FRONT_CW_STEPS.get(str(machine.get("front", "north")), 0)
-    cubes = _place_blocks(doc, cell, steps)
+    cubes = _place_blocks(doc, cell, steps, size)
     if steps and not all(_within_footprint(c.cell, cell, size) for c in cubes):
         cubes = _place_blocks(
-            doc, cell, 0
+            doc, cell, 0, size
         )  # native orientation fits the reserved footprint exactly
     return [c for c in cubes if _within_footprint(c.cell, cell, size)]
 
@@ -389,6 +428,14 @@ def _machine_cubes(
 ) -> list[BlockCube]:
     """The per-block cubes for a machine: its multiblock doc if committed, else a single-block cube.
 
+    The doc is looked up by the machine's ``block_key`` FIRST and by its ``type`` only as a
+    fallback, mirroring :meth:`~gtnh_solver.dataset.multiblocks.PhysicalDataset.get`: the block key
+    is an exact controller identity, while ``type`` is the exporter's localized recipe-map name that
+    for a GT++ machine never matches the dump's controller-block name. Both resolve through the same
+    dict (see :func:`load_multiblock_docs`). Keeping the two lookups in the same precedence order is
+    load-bearing - the adapter reserved the footprint via ``PhysicalDataset.get``, so if this pass
+    resolved a *different* doc the rendered cubes would not match the reserved box.
+
     A machine whose type has a dumped :class:`MultiblockDoc` expands to that structure. A genuine
     single-block machine (a 1x1x1 footprint) is the trivial one-cube case, resolved by its plan name
     plus voltage tier against the manifest's tier-prefixed keys (see :meth:`TextureManifest.mte_block`).
@@ -399,7 +446,7 @@ def _machine_cubes(
     ``auto_out_face`` (machine id -> auto-output face) lets a boundary-storage block point its output
     glyph the way it actually ejects rather than its placed front (see :func:`_glyph_steps`).
     """
-    doc = docs.get(machine["type"])
+    doc = docs.get(machine.get("block_key") or "") or docs.get(machine["type"])
     if doc is not None:
         return expand_machine(machine, doc)
     single = manifest.mte_block(machine["type"], machine.get("voltage_tier"))
@@ -500,6 +547,8 @@ def texturize_scene(
     # Only faces whose running stack differs from idle - the ones that can bake a distinct active
     # texture - are collected here (a plain casing is identical in both states and skipped).
     key_layers_active: dict[str, list[dict[str, Any]]] = {}
+    # Constituent blocks that resolve no face at all - they will render grey (see TextureSummary).
+    unskinned: set[str] = set()
     for machine in scene["machines"]:
         machine_cubes = _machine_cubes(machine, docs, manifest, auto_out_face)
         if not machine_cubes:
@@ -507,6 +556,8 @@ def texturize_scene(
         machine["expanded"] = True
         for cube in machine_cubes:
             faces, needed = _face_icons(cube, manifest)
+            if all(face is None for face in faces):
+                unskinned.add(f"{cube.block}|{cube.meta}")
             needed_icons |= needed
             for key in faces:
                 if key is not None and key not in key_layers:
@@ -573,6 +624,7 @@ def texturize_scene(
         block_cubes=len(cubes),
         embedded_icons=len(pool),
         embedded_active_icons=len(pool_active),
+        unskinned_blocks=tuple(sorted(unskinned)),
     )
     _log.info(
         "textures: %d/%d machine types expanded to %d textured cubes (%s); placeholder: %s; "
@@ -585,4 +637,12 @@ def texturize_scene(
         summary.embedded_icons,
         summary.embedded_active_icons,
     )
+    if summary.unskinned_blocks:
+        # A grey cube inside an expanded multiblock looks like a plain casing, so this is the only
+        # place the gap becomes visible. Warn, not info: it means the manifest needs a re-dump.
+        _log.warning(
+            "textures: %d constituent block type(s) have no sprite and render grey: %s",
+            len(summary.unskinned_blocks),
+            ", ".join(summary.unskinned_blocks),
+        )
     return summary

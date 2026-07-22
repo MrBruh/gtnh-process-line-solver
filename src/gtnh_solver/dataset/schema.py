@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 #: The dataset schema version these models implement. Every ``data/multiblocks`` file (and the
 #: run's ``_meta.json``) carries a matching top-level ``schema`` field; a breaking change bumps
 #: this and the files in the same PR (mirrors the IR ``*_VERSION`` discipline, docs/IR.md).
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Unknown fields are an error: the extractor contract must fail loud, never silently drop a key
 # (mirrors the IR bases in ``ir/_base.py`` and the plan adapter's ``_CFG`` in ``adapter/plan.py``).
@@ -62,14 +62,40 @@ class Block(BaseModel):
 class Hint(BaseModel):
     """A hint-dot position: a legal hatch/degree-of-freedom slot the projector shows.
 
-    The extractor captures these (via the ``gt_no_hatch`` channel) as the raw positions where
-    the player may place an I/O hatch; the adapter turns them into face constraints.
+    The extractor captures these as the raw positions the projector marks; the adapter turns them
+    into face constraints. NOTE that a hint says only "the hologram drew a dot here" - it carries no
+    hatch semantics. ``hint`` is the StructureLib hint-block metadata, which for a GT element is
+    ``dot - 1`` (a machine-local index its author chose), while 13/14/15 are StructureLib's reserved
+    ``AIR``/``NOT_AIR``/``ERROR`` markers - so a meta-13 cell is a hollow interior, not an I/O slot.
+    For "what may actually go here", use :class:`HatchSlot`.
     """
 
     model_config = _STRICT
 
     d: Offset
-    hint: int  # StructureLib hint colour/index; opaque to the solver, kept for fidelity
+    hint: int  # StructureLib hint-block metadata (see the class docstring); kept for fidelity
+
+
+class HatchSlot(BaseModel):
+    """A cell that accepts a hatch, and the hatch kinds it accepts.
+
+    Recorded by asking the structure element itself what stacks it would accept (StructureLib's
+    element-visit instrumentation during the block pass), so unlike :class:`Hint` this carries real
+    semantics. It exists because some machines bind an I/O slot to a POSITION: a Distillation Tower
+    routes the recipe's fluid output ``i`` to structure layer ``i`` and nowhere else, so the count of
+    layers accepting an ``OutputHatch`` is what decides the tower height a recipe needs (and too
+    short a tower is a legal build that silently voids the fluids it has no layer for).
+
+    ``kinds`` holds ``gregtech.api.enums.HatchElement`` names (``OutputHatch``, ``InputBus``, ...)
+    and is never empty - a cell accepting nothing is simply not recorded. A hatch adder built from a
+    bare method reference exposes no item filter, so its cell is absent rather than wrong; treat this
+    list as a lower bound on what a cell permits.
+    """
+
+    model_config = _STRICT
+
+    d: Offset
+    kinds: list[str] = Field(min_length=1)
 
 
 class Variant(BaseModel):
@@ -81,6 +107,9 @@ class Variant(BaseModel):
     channels: dict[str, int] = Field(default_factory=dict)  # StructureLib channels applied
     blocks: list[Block] = Field(min_length=1)
     hints: list[Hint] = Field(default_factory=list)
+    #: Schema v2. Defaulted so a v1 file still parses in-process; the version gate is what actually
+    #: rejects a stale dump, and an empty list means "not recorded", not "accepts no hatches".
+    hatch_slots: list[HatchSlot] = Field(default_factory=list)
     bbox: Offset  # [sx, sy, sz]; extractor-derived convenience, re-derived + checked by the adapter
 
 

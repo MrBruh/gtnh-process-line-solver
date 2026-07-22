@@ -75,6 +75,31 @@ final class DumpModel {
         }
     }
 
+    /**
+     * One cell that accepts a hatch, and the hatch kinds it accepts.
+     *
+     * <p>
+     * Geometry alone cannot say which cells are I/O slots, and for a layer-indexed machine that is
+     * load-bearing: a Distillation Tower sends the recipe's fluid output {@code i} to layer {@code i}
+     * and nowhere else, so "how many layers accept an output hatch" decides the tower height a recipe
+     * needs. {@code kinds} holds {@code gregtech.api.enums.HatchElement} names (e.g. {@code
+     * OutputHatch}); it is never empty, since a cell that accepts nothing is simply not recorded.
+     */
+    static final class HatchSlot {
+
+        final int dx;
+        final int dy;
+        final int dz;
+        final List<String> kinds;
+
+        HatchSlot(int dx, int dy, int dz, List<String> kinds) {
+            this.dx = dx;
+            this.dy = dy;
+            this.dz = dz;
+            this.kinds = kinds;
+        }
+    }
+
     /** One distinct built form of a controller (a trigger-stack / channel selection). */
     static final class Variant {
 
@@ -82,6 +107,7 @@ final class DumpModel {
         final Map<String, Integer> channels = new LinkedHashMap<>();
         final List<PlacedBlock> blocks = new ArrayList<>();
         final List<HintDot> hints = new ArrayList<>();
+        final List<HatchSlot> hatchSlots = new ArrayList<>();
         int[] bbox = new int[] { 0, 0, 0 };
 
         Variant(int triggerStackSize) {
@@ -115,6 +141,13 @@ final class DumpModel {
         final List<Variant> variants = new ArrayList<>();
         /** Identity-only channel effects keyed by channel name (e.g. {@code "coil"}); may be empty. */
         final Map<String, List<Substitution>> substitutions = new LinkedHashMap<>();
+        /**
+         * Caveats about THIS controller's dump that a consumer must not mistake for completeness -
+         * chiefly a variant family larger than the trigger-stack sweep could reach. The doc is still
+         * emitted (a truncated family is useful; a missing controller is not), so the note is the
+         * only thing standing between a partial dump and a consumer that believes it is total.
+         */
+        final List<String> failures = new ArrayList<>();
 
         MultiblockDoc(Controller controller) {
             this.controller = controller;

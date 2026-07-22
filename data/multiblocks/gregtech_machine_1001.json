@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "controller": {
     "registry_name": "gregtech:gt.blockmachines",
     "meta": 1001,
@@ -15,167 +15,410 @@
       },
       "blocks": [
         {
-          "d": [0, 0, 0],
+          "d": [
+            0,
+            0,
+            0
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [1, 0, 0],
+          "d": [
+            1,
+            0,
+            0
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [2, 0, 0],
+          "d": [
+            2,
+            0,
+            0
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [0, 0, 1],
+          "d": [
+            0,
+            0,
+            1
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [1, 0, 1],
+          "d": [
+            1,
+            0,
+            1
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [2, 0, 1],
+          "d": [
+            2,
+            0,
+            1
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [0, 0, 2],
+          "d": [
+            0,
+            0,
+            2
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [1, 0, 2],
+          "d": [
+            1,
+            0,
+            2
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [2, 0, 2],
+          "d": [
+            2,
+            0,
+            2
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [0, 1, 0],
+          "d": [
+            0,
+            1,
+            0
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [1, 1, 0],
+          "d": [
+            1,
+            1,
+            0
+          ],
           "block": "gregtech:gt.blockmachines",
           "meta": 1001
         },
         {
-          "d": [2, 1, 0],
+          "d": [
+            2,
+            1,
+            0
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [0, 1, 1],
+          "d": [
+            0,
+            1,
+            1
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [2, 1, 1],
+          "d": [
+            2,
+            1,
+            1
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [0, 1, 2],
+          "d": [
+            0,
+            1,
+            2
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [1, 1, 2],
+          "d": [
+            1,
+            1,
+            2
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [2, 1, 2],
+          "d": [
+            2,
+            1,
+            2
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [0, 2, 0],
+          "d": [
+            0,
+            2,
+            0
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [1, 2, 0],
+          "d": [
+            1,
+            2,
+            0
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [2, 2, 0],
+          "d": [
+            2,
+            2,
+            0
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [0, 2, 1],
+          "d": [
+            0,
+            2,
+            1
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [1, 2, 1],
+          "d": [
+            1,
+            2,
+            1
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [2, 2, 1],
+          "d": [
+            2,
+            2,
+            1
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [0, 2, 2],
+          "d": [
+            0,
+            2,
+            2
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [1, 2, 2],
+          "d": [
+            1,
+            2,
+            2
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         },
         {
-          "d": [2, 2, 2],
+          "d": [
+            2,
+            2,
+            2
+          ],
           "block": "gregtech:gt.blockcasings",
           "meta": 12
         }
       ],
       "hints": [
         {
-          "d": [0, 1, 0],
+          "d": [
+            0,
+            1,
+            0
+          ],
           "hint": 1
         },
         {
-          "d": [2, 1, 0],
+          "d": [
+            2,
+            1,
+            0
+          ],
           "hint": 1
         },
         {
-          "d": [0, 1, 1],
+          "d": [
+            0,
+            1,
+            1
+          ],
           "hint": 1
         },
         {
-          "d": [2, 1, 1],
+          "d": [
+            2,
+            1,
+            1
+          ],
           "hint": 1
         },
         {
-          "d": [0, 1, 2],
+          "d": [
+            0,
+            1,
+            2
+          ],
           "hint": 1
         },
         {
-          "d": [1, 1, 2],
+          "d": [
+            1,
+            1,
+            2
+          ],
           "hint": 1
         },
         {
-          "d": [2, 1, 2],
+          "d": [
+            2,
+            1,
+            2
+          ],
           "hint": 1
         }
       ],
-      "bbox": [3, 3, 3]
+      "hatch_slots": [
+        {
+          "d": [
+            0,
+            1,
+            0
+          ],
+          "kinds": [
+            "Energy",
+            "InputBus",
+            "InputHatch",
+            "Maintenance",
+            "OutputBus",
+            "OutputHatch"
+          ]
+        },
+        {
+          "d": [
+            2,
+            1,
+            0
+          ],
+          "kinds": [
+            "Energy",
+            "InputBus",
+            "InputHatch",
+            "Maintenance",
+            "OutputBus",
+            "OutputHatch"
+          ]
+        },
+        {
+          "d": [
+            0,
+            1,
+            1
+          ],
+          "kinds": [
+            "Energy",
+            "InputBus",
+            "InputHatch",
+            "Maintenance",
+            "OutputBus",
+            "OutputHatch"
+          ]
+        },
+        {
+          "d": [
+            2,
+            1,
+            1
+          ],
+          "kinds": [
+            "Energy",
+            "InputBus",
+            "InputHatch",
+            "Maintenance",
+            "OutputBus",
+            "OutputHatch"
+          ]
+        },
+        {
+          "d": [
+            0,
+            1,
+            2
+          ],
+          "kinds": [
+            "Energy",
+            "InputBus",
+            "InputHatch",
+            "Maintenance",
+            "OutputBus",
+            "OutputHatch"
+          ]
+        },
+        {
+          "d": [
+            1,
+            1,
+            2
+          ],
+          "kinds": [
+            "Energy",
+            "InputBus",
+            "InputHatch",
+            "Maintenance",
+            "OutputBus",
+            "OutputHatch"
+          ]
+        },
+        {
+          "d": [
+            2,
+            1,
+            2
+          ],
+          "kinds": [
+            "Energy",
+            "InputBus",
+            "InputHatch",
+            "Maintenance",
+            "OutputBus",
+            "OutputHatch"
+          ]
+        }
+      ],
+      "bbox": [
+        3,
+        3,
+        3
+      ]
     }
   ],
   "substitutions": {},
