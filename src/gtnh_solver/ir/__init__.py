@@ -12,6 +12,7 @@ validator lanes. Only the value types (``CellCoord``, ``CellBox``) surface here.
 - ``geometry``   - CellCoord, CellBox (integer cell-grid value types)
 - ``input_ir``   - Port, FaceSpec, Machine, MachineFaceRef, Net, METoggles, PinnedIO,
                    InputIR  (+ INPUT_IR_VERSION)
+- ``nets``       - net helpers shared by the router and the system-IO summary
 - ``output``     - Placement, Segment, Terminal, Route, LayoutMetrics, Infeasibility,
                    LayoutResult  (+ LAYOUT_RESULT_VERSION)
 

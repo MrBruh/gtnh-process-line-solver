@@ -1,4 +1,4 @@
-"""Adapter: schema-v1 multiblock facts -> the solver's physical-rules dataset.
+"""Adapter: schema-v2 multiblock facts -> the solver's physical-rules dataset.
 
 Design principle 3 of ``docs/dataset-extraction/plan.md``: the extractor emits raw facts
 (blocks, hints, variants, substitutions); **all interpretation lives here**, in Python, where

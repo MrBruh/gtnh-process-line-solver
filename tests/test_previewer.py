@@ -208,6 +208,21 @@ def test_render_html_auto_output_arrow_draws_on_top_of_the_machine() -> None:
     assert "fillRect(0, 0, W, H)" in front  # ...and the name keeps its opaque, readable backing
 
 
+def test_render_html_marks_an_unresolved_block_face_as_missing_not_grey() -> None:
+    # GitHub #98 asks for texture gaps to be loud, not silent. A face with no baked texture used to
+    # fall back to a neutral casing grey, which was actively misleading: plenty of GT casings ARE
+    # plain grey, so an unresolved sprite looked exactly like a correctly rendered one and the gap
+    # stayed invisible in the very view meant to reveal it. It now draws Minecraft's own
+    # missing-texture checkerboard. The WebGL result is eye-validated, so assert the mechanism: the
+    # fallback material is built from a magenta/black canvas and is what an unbaked face resolves to.
+    html = render_html(_sand_scene())
+    missing = html[html.index("const _MISSING = ") : html.index("function blockMaterials(")]
+    assert "#f800f8" in missing  # MC's missing-texture magenta...
+    assert "#000000" in missing  # ...checkered against black
+    assert "NearestFilter" in missing  # crisp pixel art, consistent with every other sprite
+    assert "return _MISSING;" in html  # ...and an unbaked face actually falls back to it
+
+
 def test_scene_route_segments_and_terminals_drive_node_and_arm_drawing() -> None:
     # Routes are drawn GT-style: a cube at each cell centre with a uniform arm out per connection -
     # an adjacent route cell or a docked machine face (GitHub #31). That rendering is a JS detail,

@@ -16,7 +16,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 
 /**
- * Serialises the dumped facts to schema-v1 JSON with Gson (already on the 1.7.10 classpath). One
+ * Serialises the dumped facts to schema-v2 JSON with Gson (already on the 1.7.10 classpath). One
  * file per controller plus a {@code _meta.json} run summary, both under {@code <out>/multiblocks/}.
  *
  * <p>

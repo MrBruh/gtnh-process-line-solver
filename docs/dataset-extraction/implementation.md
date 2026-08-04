@@ -10,7 +10,7 @@ contracts, and policy are in requirements.md and are not restated here. The livi
 tools/gtnh-extractor/   Forge 1.7.10 dedicated-server mod (JDK 25 daemon + JDK 8 toolchain)
    runServer, gated by -PdatasetOut and/or -PtextureOut (write into data/<version>/)
         |
-        |-- structure dump  --> data/<version>/multiblocks/<controller>.json + _meta.json  (v1)
+        |-- structure dump  --> data/<version>/multiblocks/<controller>.json + _meta.json  (v2)
         '-- texture manifest --> data/<version>/textures/manifest.json                      (v2)
                                           |  (local, gitignored; committed fixtures live at data/)
                                           v
@@ -65,10 +65,18 @@ controller:
   size*, not the `coil` channel, so coils get their own stack-size sweep that identifies coil
   blocks by the `IHeatingCoil` interface the block itself implements (covering both the classic
   furnaces and the channel-bound mega furnaces).
+- **Hatch kinds per slot (schema v2).** Geometry alone cannot say what a slot accepts, and for the
+  Distillation Tower that is load-bearing (fluid output `i` goes to layer `i` and nowhere else, so
+  the count of output-hatch layers decides how tall a tower a recipe needs). `ElementRecorder`
+  brackets the build with `StructureLibAPI.enableInstrument` to map each cell to the
+  `IStructureElement` that visited it; `HatchProbe` then tests one probe stack per `HatchElement`
+  kind against that element's `getBlocksToPlace` predicate, and records the kinds it accepts. An
+  element that exposes no item filter reports no kinds rather than a guess.
 - **Robustness.** `preloadRegion()` force-loads the scratch chunks up front to dodge a re-entrant
   `"Already decorating!!"` decorator cascade; hard caps bound the stack sweep (16), variant count
-  (6), hinted cells (20000), scan dimension (80), and substitution entries (128) so a pathological
-  controller lands on the failure list instead of running away.
+  (also 16, pinned to the sweep so it is non-binding: at 6 it rejected 16 of 191 legitimately
+  parametric controllers), hinted cells (20000), scan dimension (80), and substitution entries (128)
+  so a pathological controller lands on the failure list instead of running away.
 
 ### RecordingProxy: headless hint capture
 A `CommonProxy` subclass whose `hintParticle*` overrides forward each hinted cell (coordinate,
@@ -76,8 +84,15 @@ block, meta) to a sink, so the hint dots that the server's no-op proxy would oth
 captured during the hint pass.
 
 ### TextureDumper: the layered manifest (schema v2)
-Two mechanisms, composed:
+Two families of block to skin, and one up-front injection both depend on.
 
+- **Injection, once, before anything else.** Icon *names* come from the `Textures.BlockIcons` enum
+  `name()` (or a custom container's `mIconName` + `mModID`), which map 1:1 to the PNG under
+  `assets/<modid>/textures/blocks/`, because the client-only `getTextureFile()` throws on the server.
+  `populateIconNames()` writes a server-safe `NamedIcon` into each `BlockIcons.mIcon` field **and**
+  into every custom icon container queued in `GregTechAPI.sGTBlockIconload` (that queue is drained
+  only by an `@SideOnly(CLIENT)` registrar, so server-side it stays full and every `mIcon` stays
+  null). After it, a block that answers `getIcon` at all hands back a named icon.
 - **MTE reflection** for machines, hatches, buses, and controller hulls. Basic single-block
   machines read their casing `ITexture[]` via the `getXxxFacingInactive/Active(byte)` accessors (no
   tile entity needed); hulls and hatches are placed once and read via
@@ -90,24 +105,30 @@ Two mechanisms, composed:
     underscore-insensitively) against the real folder set enumerated from the GT5U jar. Only faces
     whose PNG exists get the overlay (plus a separate `_GLOW` layer when present); nothing is invented,
     and a machine without a `basicmachines` folder stays casing-only.
-- **Block-icon reflection** for the plain structure blocks (casings, coils, glass): one un-tinted
-  iconset layer per meta.
+- **Five routes, in order,** for the plain structure blocks a multiblock places (casings, coils,
+  glass, frames), because no single one survives FML's `SideTransformer` everywhere:
+  a server-safe `getTextures(int)` / `getTexture(int)` `ITexture` accessor (preferred: it cannot hit
+  the side-stripping cliff and it keeps per-layer tint and glow); the hand-transcribed
+  `CASING_ICON_TABLE` for the families whose `getIcon` was deleted outright; the block's own
+  `getIcon`; a formula over the bartworks werkstoff registry for material casings, which store
+  neither icon nor name; and the block's un-annotated texture-**name** fields (`textureNames`,
+  `textureName`, `textureSide` + `textureTopAndDown`). Whatever survives all five is a recorded gap.
 
 Each `ITexture` is **recursively flattened** into an ordered layer list: a sided/multi wrapper is
 unwrapped via its `mTextures` (length 6 means sided, pick this side; otherwise composite all), a
 rendered leaf resolves to `{ icon, rgba, glow }` from `mIconContainer` + `getRGBA()`/`mRGBa` +
-`glow`, and a copied-block leaf resolves via the block-icon path. Icon *names* come from the
-`Textures.BlockIcons` enum `name()` (which maps 1:1 to the PNG under
-`assets/<modid>/textures/blocks/`) because the client-only `getTextureFile()` throws on the
-server; `populateIconNames()` injects a server-safe `NamedIcon` into each `BlockIcons.mIcon` field
-so a block's own `getIcon` hands back a named icon. Unknown `ITexture` implementations are recorded
-as `gaps`, never guessed.
+`glow`, and a copied-block leaf resolves via the block-icon path. Unknown `ITexture` implementations
+are recorded as `gaps` (carrying the offending instance's runtime field values), never guessed.
+
+The routes are only summarised here. [texture-resolution.md](texture-resolution.md) is the reference:
+which `@SideOnly` failure mode each route answers, the traps that cost the most time, how to maintain
+the casing table safely, and what is currently unreachable.
 
 ### JsonWriter and ErrorCollector
-`JsonWriter` serialises schema v1 with Gson, every list sorted and every key order fixed (blocks
-and hints by `(dy, dz, dx)` then identity), so a regenerated dump is a minimal, reviewable diff;
-field order mirrors `schema.py` exactly so it loads without a translation step. `ErrorCollector`
-gathers per-controller failures into `_meta.json.failures`.
+`JsonWriter` serialises schema v2 with Gson, every list sorted and every key order fixed (blocks,
+hatch slots and hints by `(dy, dz, dx)` then identity), so a regenerated dump is a minimal,
+reviewable diff; field order mirrors `schema.py` exactly so it loads without a translation step.
+`ErrorCollector` gathers per-controller failures into `_meta.json.failures`.
 
 ## The Python consumer (`src/gtnh_solver/`)
 
@@ -122,9 +143,9 @@ routes its default path through this.
 
 ### dataset/schema.py: the contract
 Pydantic v2 models with `extra="forbid"` that re-state the extractor's raw facts (controllers,
-variants, blocks, hints, substitutions) and nothing more. This is the cross-language contract;
-`multiblock_json_schema()` derives a JSON Schema from it for the Java tests, so the two cannot
-drift. It holds **no interpretation**.
+variants, blocks, hints, hatch slots, substitutions) and nothing more. This is the cross-language
+contract; `multiblock_json_schema()` derives a JSON Schema from it for the Java tests, so the two
+cannot drift. It holds **no interpretation**.
 
 ### dataset/multiblocks.py: facts to physical rules
 `to_physical()` turns a validated `MultiblockDoc` into a `MachinePhysical`:
@@ -175,13 +196,15 @@ emitted HTML, never committed.
 Where the code stops short of [requirements.md](requirements.md) today, the raw material for
 planning next steps:
 
-- **No hatch-assignment stage.** The dump records hint *slots* and the loader turns them into face
-  capabilities (`io_faces`), but nothing chooses a concrete hatch (input vs output, item vs fluid,
-  tier) or emits it as a placeable block. A build guide cannot yet say "put an LV input hatch
-  here."
-- **Doc-less multiblocks stay placeholders.** A multiblock whose structure failed extraction (e.g.
-  the dynamic-height Distillation Tower) correctly refuses to collapse to a single cube; it renders
-  as its reserved-footprint placeholder until its doc exists.
+- **No hatch-assignment stage.** The dump records hint *slots* (which the loader turns into face
+  capabilities, `io_faces`) and, per hatch slot, the `HatchElement` kinds it accepts (which the
+  loader reduces to an output-layer count per variant). But nothing chooses a concrete hatch (input
+  vs output, item vs fluid, tier) or emits it as a placeable block. A build guide cannot yet say
+  "put an LV input hatch here."
+- **Doc-less multiblocks stay placeholders.** A multiblock whose structure failed extraction, or one
+  absent from the dataset in use (a fresh clone renders from the committed fixtures, which carry two
+  multiblocks), correctly refuses to collapse to a single cube; it renders as its reserved-footprint
+  placeholder until its doc exists.
 - **Single-block voltage tiers above MV** still fall back to `Basic`, so a high-tier machine may
   show the low-tier skin (near-identical in GT, but not exact). Numeral-tiered storage families and
   flavor-prefixed names now resolve (issue #3); only the per-family voltage naming above MV remains

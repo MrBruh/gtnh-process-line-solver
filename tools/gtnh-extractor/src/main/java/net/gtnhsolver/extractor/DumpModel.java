@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Plain data holders mirroring the schema-v1 dataset contract (one file per controller plus a
+ * Plain data holders mirroring the schema-v2 dataset contract (one file per controller plus a
  * run summary). These carry <em>raw facts only</em> - block registry names, metas, relative
  * offsets, hint positions - exactly as scanned from the world. All interpretation (footprint
  * math, I/O faces, tier semantics) lives in the Python adapter, per design principle 3 of

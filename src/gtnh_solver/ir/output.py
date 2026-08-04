@@ -44,8 +44,8 @@ class Placement(StrictModel):
 
 class Segment(StrictModel):
     """One cell-to-cell hop of a route on a given channel (< the per-edge channel cap).
-    Named ``start``/``end`` (docs/IR.md uses ``from``/``to``; ``from`` is a Python
-    keyword)."""
+    Named ``start``/``end`` rather than ``from``/``to``, because ``from`` is a Python
+    keyword; docs/IR.md matches."""
 
     start: CellCoord
     end: CellCoord

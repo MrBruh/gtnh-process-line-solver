@@ -8,7 +8,7 @@ them with independent LOGIC (docs/ARCHITECTURE.md #4). See docs/DOMAIN.md for th
 Shipped so far: the per-tier **voltage** ladder, the **cable loss** constant, and the amp-load
 helpers (``voltage`` submodule) that the shared-amperage power feature needs - machines average
 a *fractional* amp load and only aggregates round up to whole amps; and the **multiblock**
-footprint/face dataset - a schema-v1 loader (``schema``) for the extractor's ``data/multiblocks/``
+footprint/face dataset - a schema-v2 loader (``schema``) for the extractor's ``data/multiblocks/``
 JSON plus the adapter (``multiblocks``) that interprets those raw facts into IR-shaped physical
 records (footprints, hint-derived faces, coil tiers). Still TODO(dataset): per-material cable loss;
 throughput/tier caps; the real extractor (issue #45) replacing the illustrative fixtures; spot-check

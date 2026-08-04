@@ -29,6 +29,10 @@ InputIR
 Machine
   id: str
   type: str                         # GT machine id (keys into dataset)
+  block_key: str | null             # GT controller block as "<registry_name>@<meta>"; the exact
+                                    #  key the physical dataset joins on when the export supplies
+                                    #  it, else null and lookup falls back to `type`. Added in
+                                    #  InputIR v2 (additive). (GitHub #98.)
   footprint: CellBox                # 1 cell (single-block, default) or NxMxK (multiblock bbox)
   faces: FaceSpec                   # see DOMAIN.md: front (no I/O) + 5 usable
   voltage_tier: str                 # LV/MV/HV/... - sets cable voltage rating
