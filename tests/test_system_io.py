@@ -199,6 +199,114 @@ def test_power_amps_account_for_cable_loss_over_distance() -> None:
     io = system_io(problem, layout)
     assert io.power_total == pytest.approx(16.0)
     assert io.power_amps_by_tier == {"LV": 2}  # loss over 20 blocks doubles the amps vs lossless
+    assert io.power_amps_by_source == {"src": 2}  # one source on the tier: the two agree
+
+
+def _lv_source(mid: str) -> Machine:
+    return Machine(
+        id=mid,
+        type="Power Source (LV)",
+        voltage_tier="LV",
+        eut=0.0,
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[Port(id="po", commodity=Commodity.POWER, direction=IODirection.OUTPUT)]
+        ),
+    )
+
+
+def _lv_sink(mid: str, eut: float) -> Machine:
+    return Machine(
+        id=mid,
+        type="M",
+        voltage_tier="LV",
+        eut=eut,
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[Port(id="pi", commodity=Commodity.POWER, direction=IODirection.INPUT)]
+        ),
+    )
+
+
+def test_amps_are_attributed_per_source_not_per_tier() -> None:
+    # A tier that outgrows one cable run gets several sources (adapter.power), and each is fed
+    # separately. The per-source figure must charge each source only its OWN net: billing both for
+    # the tier total would tell the builder to feed 13 A twice for a 13 A tier.
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=4),
+        machines=[
+            _lv_source("src-a"),
+            _lv_source("src-b"),
+            _lv_sink("m0", 320.0),  # 10 A at LV (32 V)
+            _lv_sink("m1", 96.0),  # 3 A
+        ],
+        nets=[
+            Net(
+                id="pw-a",
+                commodity=Commodity.POWER,
+                throughput=320.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="src-a", port_id="po"),
+                    MachineFaceRef(machine_id="m0", port_id="pi"),
+                ],
+            ),
+            Net(
+                id="pw-b",
+                commodity=Commodity.POWER,
+                throughput=96.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="src-b", port_id="po"),
+                    MachineFaceRef(machine_id="m1", port_id="pi"),
+                ],
+            ),
+        ],
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id=mid, cell=CellCoord(x=i, y=0, z=0), orientation=Facing.NORTH)
+            for i, mid in enumerate(["src-a", "src-b", "m0", "m1"])
+        ],
+        routes=[],  # no cable: every machine sits at distance 0, so loss is out of the picture
+    )
+    io = system_io(problem, layout)
+    assert io.power_amps_by_source == {"src-a": 10, "src-b": 3}
+    assert io.power_amps_by_tier == {"LV": 13}  # the tier-wide total, rounded once
+
+
+def test_power_net_without_one_source_is_left_out_of_the_per_source_amps() -> None:
+    # Two sources on one shared-amperage net is not certifiable (the validator rejects it), so
+    # there is no single source to bill the load to. The summary skips the attribution rather than
+    # guessing one, and still reports the tier total.
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=4),
+        machines=[_lv_source("src-a"), _lv_source("src-b"), _lv_sink("m0", 320.0)],
+        nets=[
+            Net(
+                id="pw",
+                commodity=Commodity.POWER,
+                throughput=320.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="src-a", port_id="po"),
+                    MachineFaceRef(machine_id="src-b", port_id="po"),
+                    MachineFaceRef(machine_id="m0", port_id="pi"),
+                ],
+            )
+        ],
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id=mid, cell=CellCoord(x=i, y=0, z=0), orientation=Facing.NORTH)
+            for i, mid in enumerate(["src-a", "src-b", "m0"])
+        ],
+        routes=[],
+    )
+    io = system_io(problem, layout)
+    assert io.power_amps_by_source == {}
+    assert io.power_amps_by_tier == {"LV": 10}
 
 
 def test_helper_predicates() -> None:

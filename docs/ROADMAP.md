@@ -89,8 +89,10 @@ is demonstrably valid-but-bad (too large, unroutable, ugly). This is the recorde
   not a wall-clock timeout).
 - **power** - shared-amperage optimization (Steiner-like summing, thickness sizing, the 16x
   split/upgrade) beyond Phase 1's size-or-reject. Voltage loss is now modelled as a flat
-  1 EU/block; Phase 2 adds **per-material cable loss** and, driven by it, **multi-source
-  count/placement** (a nearer source instead of thickening a too-lossy run) and voltage upgrades.
+  1 EU/block; Phase 2 adds **per-material cable loss** and voltage upgrades. Multi-source *count*
+  has landed (a tier past 16x is bin-packed across several sources); what remains is **source
+  placement** driven by loss (a nearer source instead of thickening a too-lossy run) and the
+  parallel-run case for a single machine drawing past 16x on its own.
 - **validator (rule half)** - throughput/tier caps, one-fluid-per-line, and the
   dataset-specific half of face rules, once the physical dataset is real. (The summed-amperage
   and voltage-drop power checks already shipped, independent of the dataset.)

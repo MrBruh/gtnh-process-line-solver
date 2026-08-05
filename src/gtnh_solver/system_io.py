@@ -9,11 +9,12 @@ the two surfaces drift. This module is the single source, pure over the ``InputI
   so the builder fills it. Each carries the resource + its typed rate.
 - **outputs**: the product the line makes - normally a boundary storage that only *sinks* (a
   synthesized collection buffer, #16), or, as a fallback, a machine OUTPUT port no net consumes.
-- **power**: the summed ``eut`` the placed machines draw, plus the amperage per voltage tier the
-  source must supply - each machine's *fractional* load at its delivered voltage (cable loss over
-  distance included), summed per tier and rounded up to whole amps only then (docs/DOMAIN.md - a
-  shared-amperage net's aggregate draw is what the source must supply; machines buffer packets,
-  so per-machine whole amps would overstate it).
+- **power**: the summed ``eut`` the placed machines draw, plus the amperage each synthetic source
+  must supply - each machine's *fractional* load at its delivered voltage (cable loss over distance
+  included), summed over the machines sharing that source and rounded up to whole amps only then
+  (docs/DOMAIN.md - a shared-amperage net's aggregate draw is what the source must supply; machines
+  buffer packets, so per-machine whole amps would overstate it). Reported per source *and* per
+  tier, which differ once a tier needs more than one source.
 """
 
 from __future__ import annotations
@@ -49,16 +50,23 @@ class BoundaryFlow:
 @dataclass(frozen=True)
 class SystemIO:
     """The whole boundary: inputs to load, outputs to collect, the total EU/t draw, and the summed
-    **amperage** per voltage tier (what an external source must supply, docs/DOMAIN.md - the tier
-    already implies the voltage, so amps is the useful per-tier number). Each machine's fractional
-    load (``eut`` over its delivered voltage, so cable loss over distance is included) is summed
-    per tier and only the total rounds up to whole amps - machines buffer packets, so rounding per
-    machine would overstate what the builder must feed (confirmed in game)."""
+    **amperage** to feed (what an external source must supply, docs/DOMAIN.md - a tier already
+    implies its voltage, so amps is the useful number). Each machine's fractional load (``eut`` over
+    its delivered voltage, so cable loss over distance is included) is summed and only the total
+    rounds up to whole amps - machines buffer packets, so rounding per machine would overstate what
+    the builder must feed (confirmed in game).
+
+    Amps come two ways, because a tier can hold several sources once its load outgrows one cable
+    run (adapter.power): ``power_amps_by_source`` is what to feed **each source block** and is the
+    one to render per source, while ``power_amps_by_tier`` is the tier-wide total across all of its
+    sources, for a summary. They agree exactly when a tier has one source; when it has several the
+    tier figure is the lower of the two, since it rounds once rather than once per source."""
 
     inputs: list[BoundaryFlow]
     outputs: list[BoundaryFlow]
     power_total: float
     power_amps_by_tier: dict[str, int]
+    power_amps_by_source: dict[str, int]
 
 
 def is_boundary_storage(machine_type: str) -> bool:
@@ -146,8 +154,10 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
     # or an unrouted net) fall back to distance 0. The validator re-derives this distance
     # independently for its amperage check.
     power_distance = _power_distances(layout.routes, port_dir)
+    source_of = _power_source_of(problem, port_dir)
     power_total = 0.0
     load_by_tier: dict[str, float] = {}
+    load_by_source: dict[str, float] = {}
     for machine in problem.machines:
         if machine.eut <= 0 or machine.id not in coord_of:
             continue  # unpowered blocks / sources draw nothing; describe only placed machines
@@ -158,14 +168,46 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
         except (UnknownTierError, UnpowerableError):
             continue  # an off-ladder tier or a run loss has killed: nothing sizeable to report
         load_by_tier[tier] = load_by_tier.get(tier, 0.0) + load
+        source = source_of.get(machine.id)
+        if source is not None:
+            load_by_source[source] = load_by_source.get(source, 0.0) + load
     power_amps_by_tier = {tier: whole_amps(load) for tier, load in load_by_tier.items()}
+    power_amps_by_source = {sid: whole_amps(load) for sid, load in load_by_source.items()}
 
     return SystemIO(
         inputs=inputs,
         outputs=outputs,
         power_total=power_total,
         power_amps_by_tier=power_amps_by_tier,
+        power_amps_by_source=power_amps_by_source,
     )
+
+
+def _power_source_of(
+    problem: InputIR, port_dir: dict[tuple[str, str], IODirection]
+) -> dict[str, str]:
+    """Map each powered machine to the id of the source feeding it, via its power net.
+
+    A tier can hold several nets once its load outgrows one cable run (adapter.power), so the
+    source a machine draws from is a property of its **net**, not of its tier. A net without
+    exactly one source is skipped: that is a malformed net the validator reports, and guessing an
+    attribution here would put a number on a layout that is not certifiable anyway.
+    """
+    source_of: dict[str, str] = {}
+    for net in problem.nets:
+        if net.commodity is not Commodity.POWER:
+            continue
+        sources = [
+            e.machine_id
+            for e in net.endpoints
+            if port_dir.get((e.machine_id, e.port_id)) is IODirection.OUTPUT
+        ]
+        if len(sources) != 1:
+            continue
+        for endpoint in net.endpoints:
+            if port_dir.get((endpoint.machine_id, endpoint.port_id)) is IODirection.INPUT:
+                source_of[endpoint.machine_id] = sources[0]
+    return source_of
 
 
 def _power_distances(

@@ -119,8 +119,10 @@ def test_throughput_is_positive_for_sand_material_nets() -> None:
 
 def test_adapt_nitrobenzene_has_fluids_and_places() -> None:
     ir = adapt_file(_NITROBENZENE)
-    # 7 nodes + 11 input storages + 2 synthesized output buffers + 3 power sources (LV/MV/HV)
-    assert len(ir.machines) == 23
+    # 7 nodes + 11 input storages + 2 synthesized output buffers + 4 power sources. LV and HV take
+    # one source each; MV needs two, because its Coke Oven alone draws more amps than a cable
+    # carries and so cannot share a run with the Distillation Tower.
+    assert len(ir.machines) == 24
     assert any(n.commodity is Commodity.FLUID for n in ir.nets)
     assert any(n.commodity is Commodity.ITEM for n in ir.nets)
     assert any(n.commodity is Commodity.POWER for n in ir.nets)
@@ -228,6 +230,74 @@ def test_synthesizes_one_power_source_and_net_per_tier() -> None:
     assert any(
         p.commodity is Commodity.POWER and p.direction is IODirection.INPUT for p in n1.faces.ports
     )  # the powered machine gained a power input port
+
+
+def _powered_plan(*euts: float, tier: str = "LV") -> Plan:
+    """Independent powered nodes, one per ``eut``, all on ``tier`` (no edges between them)."""
+    return Plan(
+        schema_version=1,
+        recipes=[
+            Recipe(
+                id=f"r{i}",
+                machine_type="M",
+                duration_ticks=10.0,
+                eut=eut,
+                outputs=[_resource("item", f"x{i}")],
+            )
+            for i, eut in enumerate(euts)
+        ],
+        nodes=[Node(id=f"n{i}", recipe_id=f"r{i}", overclock_tier=tier) for i in range(len(euts))],
+    )
+
+
+def _power_nets(ir: InputIR) -> list[Net]:
+    return [n for n in ir.nets if n.commodity is Commodity.POWER]
+
+
+def _source_ids(ir: InputIR) -> set[str]:
+    return {m.id for m in ir.machines if m.type.startswith("Power Source")}
+
+
+def test_tier_within_the_cable_cap_keeps_one_unsuffixed_source() -> None:
+    # 136 EU/t at LV (32 V) is 4.25 A, well under the 16x cap, so the tier stays on one run and
+    # keeps the plain ids the build guide and previewer have always shown.
+    ir = to_input_ir(_powered_plan(16.0, 120.0))
+    assert {n.id for n in _power_nets(ir)} == {"power:LV"}
+    assert _source_ids(ir) == {"power-source:LV"}
+
+
+def test_tier_over_the_cable_cap_splits_into_several_sources() -> None:
+    # A shared-amperage trunk sums its machines and a cable tops out at 16x, so three 200 EU/t LV
+    # machines (18.75 A together) cannot share one run. The synthesis splits the tier, and each
+    # group's own trunk fits: 16 A x 32 V is 512 EU/t.
+    ir = to_input_ir(_powered_plan(200.0, 200.0, 200.0))
+    nets = _power_nets(ir)
+    assert {n.id for n in nets} == {"power:LV#1", "power:LV#2"}
+    assert _source_ids(ir) == {"power-source:LV#1", "power-source:LV#2"}
+    assert all(n.throughput <= 512 for n in nets)
+    # the split is a partition: every powered machine hangs off exactly one source
+    wired = [e.machine_id for n in nets for e in n.endpoints if e.port_id == "power:in"]
+    assert sorted(wired) == ["n0", "n1", "n2"]
+
+
+def test_machine_over_the_cap_alone_gets_its_own_source() -> None:
+    # 600 EU/t at LV is 18.75 A, past what any cable carries. No partition can fix one machine's
+    # own feed, so it lands in a group by itself and the router reports the over-cap run. The
+    # synthesis must not fold it in with a neighbour and bury the problem in a shared trunk.
+    ir = to_input_ir(_powered_plan(600.0, 16.0))
+    nets = {n.id: n for n in _power_nets(ir)}
+    assert set(nets) == {"power:LV#1", "power:LV#2"}
+    heavy = next(n for n in nets.values() if n.throughput == 600.0)
+    assert [e.machine_id for e in heavy.endpoints if e.port_id == "power:in"] == ["n0"]
+
+
+def test_unknown_tier_keeps_one_net_for_the_validator_to_report() -> None:
+    # An off-ladder tier has no voltage on the ladder, so the synthesis cannot size amps for it.
+    # It keeps the single-net shape rather than raising: the unknown tier is a violation the
+    # validator reports, and moving it earlier would turn a reported problem into a hard failure.
+    ir = to_input_ir(_powered_plan(600.0, 600.0, tier="ZZZ"))
+    assert {n.id for n in _power_nets(ir)} == {"power:ZZZ"}
+    assert _source_ids(ir) == {"power-source:ZZZ"}
 
 
 def test_recipe_output_ports_carry_throughput() -> None:

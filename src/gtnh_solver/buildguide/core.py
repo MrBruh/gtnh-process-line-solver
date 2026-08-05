@@ -170,8 +170,11 @@ def _power_note(layout: LayoutResult, machines: dict[str, Machine], sysio: Syste
     """Tell the builder where to feed external power - synthetic sources are not self-powered.
 
     Each source is stated as a wiring spec: its tier voltage, the amperage to feed, and the EU/t
-    that buys. The amperage comes from the shared ``system_io`` derivation - the tier's machine
-    draws summed at each machine's *delivered* voltage - NOT from cable thickness: a machine
+    that buys. The amperage comes from the shared ``system_io`` derivation - the draws of the
+    machines on *this source's own net*, summed at each machine's *delivered* voltage (per source,
+    not per tier: a tier splits across several sources once its load outgrows one cable run, and
+    charging each of them the whole tier's amps would overstate every one) - NOT from cable
+    thickness: a machine
     tapping the source's own dock cell draws through no segment at all, and a cable tier rounds
     up (3 A rides a 4x cable), so the thickest segment both under- and over-states what the
     builder must actually feed. The previewer reads the same numbers, so the two surfaces agree.
@@ -193,7 +196,7 @@ def _power_note(layout: LayoutResult, machines: dict[str, Machine], sysio: Syste
         "",
     ]
     for p, m in sources:
-        amps = sysio.power_amps_by_tier.get(m.voltage_tier, 0)
+        amps = sysio.power_amps_by_source.get(p.machine_id, 0)
         cell = f"({p.cell.x}, {p.cell.y}, {p.cell.z})"
         if not _has_power_trunk(layout, p.machine_id) or amps <= 0:
             lines.append(f"  {m.type} at {cell}")  # no cable / no sizeable draw: nothing to spec

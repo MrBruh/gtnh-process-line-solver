@@ -7,6 +7,33 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **A voltage tier drawing past the 16x cable cap is now split across several power sources
+  (`adapter/`, `system_io`).** A shared-amperage trunk sums every machine hanging off it, so one
+  source per tier meant the segment at the source carried the whole tier: the nitrobenzene line's
+  MV tier wanted 21 amps against a cap of 16 and was rejected outright, no matter how it was
+  placed. The synthesis now bin-packs each tier's machines by nominal amp load (first-fit
+  decreasing) and gives every group its own source and net, so a tier that does not fit one run
+  gets as many runs as it needs. A tier that fits keeps its old ids (`power-source:MV`,
+  `power:MV`); one that splits suffixes them (`power-source:MV#1`, `power:MV#2`, ...), so the
+  common case reads unchanged in the build guide and previewer.
+
+  Partitioning uses the *nominal* (at-source) amp load, because cable distances do not exist until
+  placement has run. That deliberately reserves no headroom for voltage loss: a group that loss
+  later pushes over the cap is still reported by the router, never silently accepted. A machine
+  whose own draw exceeds the cap is put in a group by itself rather than folded in with a
+  neighbour - no partition can help one machine's single feed, and burying it in a shared trunk
+  would hide the real problem behind a misleading number. That case needs parallel runs or a
+  higher tier, which is still Phase 2 (`docs/ROADMAP.md`).
+
+- **`system_io` now reports feed amperage per source as well as per tier.** The build guide states
+  a wiring spec per source block, and it was reading the per-*tier* total, which was correct only
+  while a tier had exactly one source. With the split above it charged every source of a tier the
+  whole tier's amps: the nitrobenzene MV source feeding a lone 120 EU/t Distillation Tower asked
+  the builder for 20 A instead of 2. `SystemIO.power_amps_by_source` attributes each machine's load
+  to the source on its own net, and the guide renders that; `power_amps_by_tier` stays as the
+  tier-wide summary the previewer shows. A power net without exactly one source is skipped rather
+  than guessed at, since the validator rejects that layout anyway.
+
 - **Every block the shipped example lines place now renders with its real GT sprite
   (`tools/gtnh-extractor/`, `previewer/`, GitHub #98).** Four mechanisms, because the single symptom
   ("the block is grey") had four unrelated causes, each needing its own fix:
