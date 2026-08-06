@@ -47,12 +47,16 @@ from .schema import (
 )
 from .voltage import (
     CABLE_LOSS_PER_BLOCK,
+    DESIGN_RUN_BLOCKS,
+    ENERGY_HATCH_AMPS,
     VOLTAGE_BY_TIER,
     UnknownTierError,
     UnpowerableError,
     amp_load,
     delivered_voltage,
+    energy_hatches_for,
     tier_voltage,
+    tiers_above,
     whole_amps,
 )
 
@@ -60,13 +64,17 @@ __all__ = [  # noqa: RUF022 - grouped by submodule, not alphabetized
     # voltage / power sizing
     "CABLE_LOSS_PER_BLOCK",
     "CABLE_THICKNESSES",
+    "DESIGN_RUN_BLOCKS",
     "MAX_CABLE_THICKNESS",
     "VOLTAGE_BY_TIER",
+    "ENERGY_HATCH_AMPS",
     "UnknownTierError",
     "UnpowerableError",
     "amp_load",
     "delivered_voltage",
+    "energy_hatches_for",
     "tier_voltage",
+    "tiers_above",
     "whole_amps",
     # multiblock schema v1 (raw extractor facts)
     "SCHEMA_VERSION",

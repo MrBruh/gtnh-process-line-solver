@@ -180,6 +180,7 @@ def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> Input
                 f"Split it into single-machine nodes in the export."
             )
         block_key = _block_key_for(recipe, resolved_machines.get(node.id))
+        record = physical.get(recipe.machine_type, block_key=block_key) if physical else None
         footprint = _footprint_for(
             recipe.machine_type, physical, block_key, _fluid_output_count(recipe)
         )
@@ -189,6 +190,9 @@ def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> Input
                 type=recipe.machine_type,
                 block_key=block_key,
                 footprint=footprint,
+                # None without a dataset record: no structural ceiling is known, so the power
+                # synthesis keeps such a machine on one connection (see adapter.power).
+                hatch_cells=record.hatch_cells or None if record is not None else None,
                 faces=FaceSpec(ports=_recipe_ports(recipe, node)),
                 voltage_tier=node.overclock_tier,
                 # A non-square multiblock is pinned to one orientation until occupied_cells rotates.

@@ -63,6 +63,7 @@ from gtnh_solver.ir import (
     InputIR,
     IODirection,
     LayoutResult,
+    Machine,
     Net,
     Segment,
 )
@@ -89,6 +90,7 @@ def validate(problem: InputIR, layout: LayoutResult) -> ValidationReport:
     _check_auto_connections(problem, layout, out)
     _check_power_amperage(problem, layout, out)
     _check_power_feed(problem, layout, out)
+    _check_hatch_cells(problem, out)
     _check_route_capacity(problem, layout, out)
     _check_pinned(problem, layout, out)
     return ValidationReport(tuple(out))
@@ -120,6 +122,44 @@ def _check_power_feed(problem: InputIR, layout: LayoutResult, out: list[Violatio
                     f"power source {pl.machine_id!r} front (feed) face "
                     f"{pl.orientation.value} faces the region interior, not the boundary "
                     f"(the external power feed must enter from outside)",
+                )
+            )
+
+
+def _check_hatch_cells(problem: InputIR, out: list[Violation]) -> None:
+    """A machine cannot be wired more connections than its structure has cells to host them.
+
+    A GT multiblock's casing cells are interchangeable - almost any one may be swapped for an
+    input bus, an output hatch, or an **energy hatch** - so ``Machine.hatch_cells`` is the ceiling
+    on its connections taken together, and the ports competing for it are of every commodity. It
+    binds when a heavy machine's draw is spread over many energy hatches (docs/DOMAIN.md): the
+    adapter allocates the hatches the draw actually needs rather than as many as fit, so a machine
+    that cannot host them is reported here instead of being quietly under-fed.
+
+    The ceiling is deliberately generous in two ways. It does not subtract the machine's upkeep
+    hatches (maintenance, muffler), which occupy a cell each but are not ports; and it counts the
+    whole cell pool rather than the cells that specifically accept an ``Energy`` hatch, which for
+    some machines is fewer (a Distillation Tower has 97 hatch cells but only 8 taking power). The
+    second is on purpose: the dump's per-cell ``kinds`` are a documented **lower** bound - a hatch
+    adder built from a bare method reference exposes no filter, so its cell is recorded without
+    that kind - and 61 machines in the current dump record zero energy cells, including ones that
+    certainly accept an energy hatch. Enforcing that count would manufacture false infeasibilities
+    from an extraction gap. Tightening it needs the extractor to distinguish "restricted" from
+    "not recorded" first; until then this catches the failure that matters, a machine needing far
+    more hatches than its structure has cells at all. ``hatch_cells is None`` - a single-block
+    machine, or a problem built without the physical dataset - imposes no ceiling.
+    """
+    for machine in problem.machines:
+        if machine.hatch_cells is None:
+            continue
+        needed = len(machine.faces.ports)
+        if needed > machine.hatch_cells:
+            out.append(
+                Violation(
+                    ViolationCode.HATCH_CELLS_EXCEEDED,
+                    f"machine {machine.id!r} needs {needed} connections "
+                    f"({len(machine.power_input_ports)} of them energy hatches) but its structure "
+                    f"has only {machine.hatch_cells} cells that can host one",
                 )
             )
 
@@ -561,6 +601,15 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
     drops the delivered voltage to <= 0 is flagged as unpowerable, and an off-ladder tier as
     unverifiable (``POWER_TIER_UNKNOWN``).
 
+    It also checks the other direction - that enough power actually **arrives**. Cable loss shrinks
+    every packet, and a machine takes them through hatches that pass a bounded number per tick
+    (``Port.max_amps``), so its real intake is ``sum(max_amps * delivered_volts)`` over its hatches.
+    A machine whose intake falls short of its ``eut`` cannot run the recipe the plan balanced, so
+    that is reported (``POWER_SUPPLY_INSUFFICIENT``) even though every cable is thick enough. The
+    hatches of one machine can sit on different routes at different distances, so the sum is
+    accumulated across routes and checked once at the end; a machine on any route this could not
+    verify is skipped rather than reported on partial evidence.
+
     Crucially the arithmetic is the validator's OWN (:func:`_required_amps` below, and the inline
     ``eut / (tier_voltage - loss * distance)`` per machine): it shares only the rule DATA with the
     router - the voltage ladder (``tier_voltage``), ``CABLE_LOSS_PER_BLOCK``, and the ``_AMP_EPSILON``
@@ -570,6 +619,8 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
     not certified by a gate that shares it (docs/ARCHITECTURE.md #4).
     """
     machines = {m.id: m for m in problem.machines}
+    supply: dict[str, float] = {}  # machine -> EU/t its hatches can take in after cable loss
+    unverified: set[str] = set()  # machines whose intake could not be measured on some route
     port_dir = port_direction_map(problem)
     for r in layout.routes:
         if r.commodity is not Commodity.POWER:
@@ -632,6 +683,13 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
                 continue  # a terminal not on the cable tree draws no load through it (as before)
             if machine.eut <= 0:
                 continue  # a source / unpowered block draws nothing (matches dataset.amp_load)
+            # What arrives through THIS connection, not the whole machine: a multiblock spreads
+            # its draw over several energy hatches (IR v3), and charging each of them the full
+            # ``eut`` would multiply the net's load by the hatch count. ``port_eut`` falls back to
+            # ``eut`` for an unrated port, so a single-connection machine is unchanged.
+            port_eut = machine.port_eut(t.port_id)
+            if port_eut <= 0:
+                continue
             try:
                 tier_v = tier_voltage(machine.voltage_tier)
             except UnknownTierError:
@@ -645,6 +703,13 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
                 uncheckable = True
                 break
             volts = tier_v - CABLE_LOSS_PER_BLOCK * distance  # voltage delivered after cable loss
+            # What this connection can actually deliver, for the under-supply check below: a hatch
+            # passes at most ``max_amps`` packets a tick, and loss has shrunk each packet to
+            # ``volts``. Summed over the machine's hatches - which may sit on different routes at
+            # different distances - this is the power that reaches it.
+            port_cap = _port_max_amps(machine, t.port_id)
+            if port_cap is not None and volts > 0:
+                supply[t.machine_id] = supply.get(t.machine_id, 0.0) + port_cap * volts
             if volts <= 0:
                 out.append(
                     Violation(
@@ -656,8 +721,9 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
                 )
                 uncheckable = True
                 break
-            amp_at[cell] += machine.eut / volts
+            amp_at[cell] += port_eut / volts
         if uncheckable:
+            unverified.update(t.machine_id for t in r.terminals)
             continue
 
         loads = _subtree_loads(order, parent, depth, edges, amp_at)
@@ -672,6 +738,31 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
                         f"but its cable is only {thick}x",
                     )
                 )
+
+    # Every route measured: now the other direction - does enough power actually arrive? A hatch
+    # passes at most its ``max_amps`` packets a tick and loss has shrunk each packet, so a machine
+    # far from its source can sit on cables that are all thick enough and still be starved.
+    for machine_id, delivered in sorted(supply.items()):
+        machine = machines.get(machine_id)
+        if machine is None or machine_id in unverified or machine.eut <= 0:
+            continue
+        if delivered + _AMP_EPSILON < machine.eut:
+            out.append(
+                Violation(
+                    ViolationCode.POWER_SUPPLY_INSUFFICIENT,
+                    f"machine {machine_id!r} draws {machine.eut:g} EU/t but its "
+                    f"{len(machine.power_input_ports)} energy hatch(es) can take in only "
+                    f"{delivered:g} EU/t after cable loss",
+                )
+            )
+
+
+def _port_max_amps(machine: Machine, port_id: str) -> float | None:
+    """``port_id``'s per-tick amp ceiling on ``machine``, or ``None`` when it declares none."""
+    for port in machine.faces.ports:
+        if port.id == port_id:
+            return None if port.max_amps is None else float(port.max_amps)
+    return None
 
 
 def _root_power_tree(

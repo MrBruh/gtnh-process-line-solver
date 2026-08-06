@@ -163,14 +163,22 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
             continue  # unpowered blocks / sources draw nothing; describe only placed machines
         tier = machine.voltage_tier
         power_total += machine.eut
-        try:
-            load = amp_load(machine.eut, tier, distance=power_distance.get(machine.id, 0))
-        except (UnknownTierError, UnpowerableError):
-            continue  # an off-ladder tier or a run loss has killed: nothing sizeable to report
-        load_by_tier[tier] = load_by_tier.get(tier, 0.0) + load
-        source = source_of.get(machine.id)
-        if source is not None:
-            load_by_source[source] = load_by_source.get(source, 0.0) + load
+        # Per *connection*, not per machine: a machine's energy hatches can sit on different nets
+        # and so be fed by different sources (adapter.power), each at its own cable distance. A
+        # machine with no power port at all (a hand-built problem) keeps the whole-draw reading.
+        feeds: list[tuple[str | None, float]] = [
+            (p.id, machine.port_eut(p.id)) for p in machine.power_input_ports
+        ] or [(None, machine.eut)]
+        for port_id, eut in feeds:
+            key = (machine.id, port_id)
+            try:
+                load = amp_load(eut, tier, distance=power_distance.get(key, 0))
+            except (UnknownTierError, UnpowerableError):
+                continue  # an off-ladder tier or a run loss has killed: nothing sizeable to report
+            load_by_tier[tier] = load_by_tier.get(tier, 0.0) + load
+            source = source_of.get(key)
+            if source is not None:
+                load_by_source[source] = load_by_source.get(source, 0.0) + load
     power_amps_by_tier = {tier: whole_amps(load) for tier, load in load_by_tier.items()}
     power_amps_by_source = {sid: whole_amps(load) for sid, load in load_by_source.items()}
 
@@ -185,15 +193,17 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
 
 def _power_source_of(
     problem: InputIR, port_dir: dict[tuple[str, str], IODirection]
-) -> dict[str, str]:
-    """Map each powered machine to the id of the source feeding it, via its power net.
+) -> dict[tuple[str, str | None], str]:
+    """Map each powered ``(machine, port)`` to the id of the source feeding it, via its power net.
 
+    Keyed by port, not by machine: a machine's energy hatches can be split across nets, so two
+    hatches of one machine may draw from two different sources and neither owns the whole load.
     A tier can hold several nets once its load outgrows one cable run (adapter.power), so the
-    source a machine draws from is a property of its **net**, not of its tier. A net without
+    source a connection draws from is a property of its **net**, not of its tier. A net without
     exactly one source is skipped: that is a malformed net the validator reports, and guessing an
     attribution here would put a number on a layout that is not certifiable anyway.
     """
-    source_of: dict[str, str] = {}
+    source_of: dict[tuple[str, str | None], str] = {}
     for net in problem.nets:
         if net.commodity is not Commodity.POWER:
             continue
@@ -206,19 +216,21 @@ def _power_source_of(
             continue
         for endpoint in net.endpoints:
             if port_dir.get((endpoint.machine_id, endpoint.port_id)) is IODirection.INPUT:
-                source_of[endpoint.machine_id] = sources[0]
+                source_of[(endpoint.machine_id, endpoint.port_id)] = sources[0]
     return source_of
 
 
 def _power_distances(
     routes: list[Route], port_dir: dict[tuple[str, str], IODirection]
-) -> dict[str, int]:
-    """Cable-block distance from the source to each powered machine, per power route: the machine
-    terminal's hop-depth in the routed cable tree (BFS from the single source terminal). Machines
-    not on a cable (power on ME, or an unrouted net) are absent, so the caller treats them as
-    distance 0. Kept deliberately separate from the validator's own rooting (which re-derives the
-    same distance independently, the gate's job) - this is only for the boundary summary."""
-    distances: dict[str, int] = {}
+) -> dict[tuple[str, str | None], int]:
+    """Cable-block distance from the source to each powered ``(machine, port)``, per power route:
+    the terminal's hop-depth in the routed cable tree (BFS from the single source terminal). Keyed
+    by port because a machine's hatches sit on different cells - and possibly different nets - so
+    they are not all the same distance from a source. Connections not on a cable (power on ME, or
+    an unrouted net) are absent, so the caller treats them as distance 0. Kept deliberately
+    separate from the validator's own rooting (which re-derives the same distance independently,
+    the gate's job) - this is only for the boundary summary."""
+    distances: dict[tuple[str, str | None], int] = {}
     for r in routes:
         if r.commodity is not Commodity.POWER:
             continue
@@ -236,7 +248,7 @@ def _power_distances(
             if port_dir.get((t.machine_id, t.port_id)) is IODirection.INPUT:
                 d = depth.get(t.cell.as_tuple())
                 if d is not None:
-                    distances[t.machine_id] = d
+                    distances[(t.machine_id, t.port_id)] = d
     return distances
 
 

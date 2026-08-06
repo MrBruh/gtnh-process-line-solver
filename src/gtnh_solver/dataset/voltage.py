@@ -43,6 +43,15 @@ VOLTAGE_BY_TIER: dict[str, int] = {
     "MAX": 2147483648,
 }
 
+#: Amps one standard GT energy hatch accepts per tick. ``MTEHatchEnergy.maxAmperesIn()`` returns
+#: 2, and the multiblock UI prints its tier as "EU/t(*2A)" for exactly this reason. A multiblock's
+#: total intake is the SUM over its energy hatches (``MTEMultiBlockBase.getMaxInputPower()`` adds
+#: ``inputVoltage * inputAmperage`` per hatch), so a machine drawing more than one hatch can take
+#: is powered by several - which is why an energy hatch is a *port*, not a machine-wide property
+#: (docs/DOMAIN.md). TecTech's 4A/16A/64A hatches exist from EV up; they are distinct blocks the
+#: dump would have to select, so they are not modelled and every hatch here is the standard 2 A.
+ENERGY_HATCH_AMPS = 2
+
 #: EU lost per cable block a power packet travels. GT cables lose voltage over distance; the
 #: voltage a machine receives is the source voltage minus this loss times the block distance
 #: (docs/DOMAIN.md). Simplifying assumption for now (maintainer call): every tier has a 1-loss
@@ -107,6 +116,53 @@ def amp_load(eut: float, tier: str, distance: int = 0) -> float:
             f"({tier_voltage(tier)} - {CABLE_LOSS_PER_BLOCK * distance} <= 0)"
         )
     return eut / volts
+
+
+#: Cable-block run length the adapter sizes energy hatches against, before any placement exists.
+#: A hatch's amp ceiling is fixed, so unlike a cable it cannot be thickened after the fact: sizing
+#: at the lossless voltage would leave zero margin and a hatch would tip over its limit the moment
+#: a route turned out to be longer than nothing. This is the run the adapter *designs* for - a
+#: machine within this many cable-blocks of its source needs no more hatches than it was given.
+#: It is an allowance, never a guarantee: the validator re-checks, at the distance actually routed,
+#: that the machine's hatches can still take in its whole draw, so a run long enough to starve it
+#: is reported rather than certified. Raising this buys margin at the cost of hatches (and the
+#: casing cells they occupy).
+DESIGN_RUN_BLOCKS = 16
+
+
+def energy_hatches_for(
+    eut: float,
+    tier: str,
+    *,
+    hatch_amps: int = ENERGY_HATCH_AMPS,
+    distance: int = DESIGN_RUN_BLOCKS,
+) -> int:
+    """How many energy hatches a machine drawing ``eut`` at ``tier`` needs to take it all in.
+
+    ``ceil(amp_load(eut, tier, distance) / hatch_amps)`` - each hatch accepts ``hatch_amps`` amps
+    and the machine's intake is their sum, so this is the smallest number that covers the draw.
+    Sized at the voltage delivered ``distance`` cable-blocks out (:data:`DESIGN_RUN_BLOCKS` by
+    default) rather than the lossless one, because loss raises the amps a given EU/t costs and a
+    hatch cannot be thickened to absorb it. 0 for a machine that draws nothing. Raises
+    :class:`UnknownTierError` for an unknown tier, and :class:`UnpowerableError` when the tier does
+    not survive ``distance`` at all - a machine that cannot be powered there whatever its hatches.
+    """
+    if eut <= 0:
+        return 0
+    return max(1, math.ceil(amp_load(eut, tier, distance) / hatch_amps - _AMP_EPSILON))
+
+
+def tiers_above(tier: str) -> list[str]:
+    """The ladder tiers above ``tier``, lowest first. Empty at the top of the ladder.
+
+    Raises :class:`UnknownTierError` if ``tier`` is not on the ladder at all.
+    """
+    ladder = list(VOLTAGE_BY_TIER)
+    try:
+        index = ladder.index(tier)
+    except ValueError:
+        raise UnknownTierError(tier) from None
+    return ladder[index + 1 :]
 
 
 def whole_amps(load: float) -> int:

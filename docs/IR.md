@@ -5,7 +5,7 @@ up front (minimal, not exhaustive) and grown with explicit version bumps. Implem
 typed schemas in `src/gtnh_solver/ir/` (Pydantic v2).
 
 > Status: **implemented** (Pydantic v2, `src/gtnh_solver/ir/`). The shapes below match the
-> code: `InputIR` is at **v2**, `LayoutResult` at **v0** (the contract changelog lives at the
+> code: `InputIR` is at **v3**, `LayoutResult` at **v0** (the contract changelog lives at the
 > bottom of `ir/__init__.py`). Bump the relevant `*_VERSION` on any breaking change.
 
 ## Input IR - the problem
@@ -43,6 +43,13 @@ Machine
                                     #  amperage it pulls on a shared cable (dataset.amperage).
                                     #  0 for an unpowered block or a power source. Added in
                                     #  InputIR v1 (additive); load-bearing for the power path.
+  hatch_cells: int | null           # how many cells of this machine's structure can host a
+                                    #  hatch of ANY kind (a multiblock's casing cells are
+                                    #  interchangeable, so item, fluid and power connections
+                                    #  compete for one pool), i.e. the ceiling on its total
+                                    #  connections; null when unknown (a single-block machine,
+                                    #  or a plan adapted without the physical dataset). Added
+                                    #  in InputIR v3 (additive).
 
 FaceSpec     { ports: [Port] }      # catalog of required I/O; the physical face is a solver choice
 Port
@@ -52,8 +59,16 @@ Port
   cover: str | null                 # conveyor/pump/regulator that drives this port, if any
                                     # (auto-output is a solver decision -> output's AutoConnection,
                                     #  not a Port input; is_auto_output was dropped in v2)
-  rate: float | null                # throughput moved (items/t or mB/t); null for power/unknown.
-                                    #  Adapter fills it; surfaces boundary I/O rates (added v2, additive)
+  rate: float | null                # throughput moved: items/t, mB/t, or (since v3) EU/t on a
+                                    #  power port; null when unknown. Adapter fills it; surfaces
+                                    #  boundary I/O rates (added v2, additive). On a power port
+                                    #  it is the share of the machine's eut arriving through THIS
+                                    #  connection, and a machine's power input ports must sum to
+                                    #  its eut (v3, BREAKING)
+  max_amps: float | null            # most amps this one connection accepts (2 for a GT energy
+                                    #  hatch); null for no per-connection ceiling. Checked at the
+                                    #  DELIVERED voltage, where cable loss is known. Added in
+                                    #  InputIR v3 (additive)
 
 Net
   id: str
@@ -71,6 +86,18 @@ PinnedIO       { net_id, cell: CellCoord, kind: "input" | "output" }
 (unique ids; every endpoint/pinned ref resolves; a net's commodity matches the ports it
 touches). It does **not** check geometry/rule validity (in-bounds, overlaps, tier caps,
 face reachability) - that is the validator's independent job (docs/TESTING.md).
+
+**A machine's power intake is per connection (InputIR v3).** A GT energy hatch accepts 2 amps
+and a multiblock's intake is the sum over its hatches, so a machine that draws more than one
+hatch can take carries several power INPUT ports, each with its own `rate` (its share of `eut`)
+and its own `max_amps`. Read a port's share with `Machine.port_eut(port_id)`: it returns that port's
+`rate` and falls back to the machine's whole `eut` when the port carries none, so a
+single-connection machine (and every pre-v3 problem, where power ports had no rate) sizes exactly
+as it did. The contract enforces the split itself: a machine's power input ports either all carry
+a rate or none do (a partly rated machine would leave part of its draw unsized), and the rated
+ones must sum to `eut`. What it does **not** decide is how many hatches a machine gets (the
+adapter, from the draw and the tier) or whether its structure can host them (the validator,
+against `hatch_cells`).
 
 ## Output layout schema - the solution
 
@@ -117,6 +144,10 @@ result carries no infeasibility; `infeasible`/`partial_invalid` must carry one.
 - `Machine.faces` distinguishes the front face (no I/O) from the five usable faces; required
   output faces are HARD constraints in placement/validation.
 - Power routes carry per-segment `thickness`; the validator checks summed amperage ≤ tier cap.
+- A power port's `rate` + `max_amps` let the validator check the *other* direction as well:
+  that enough EU/t actually **arrives** once cable loss has shrunk every packet
+  (`POWER_SUPPLY_INSUFFICIENT`), and that a machine is not wired more connections than its
+  `hatch_cells` can host (`HATCH_CELLS_EXCEEDED`).
 - `me_toggles` removes a commodity from physical routing (no `Route` for that commodity today - a
   toggled commodity is simply skipped everywhere). Placing the ME endpoint that replaces it on a
   machine face is Phase 2.

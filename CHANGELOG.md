@@ -7,6 +7,49 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **A machine takes power through as many energy hatches as its draw needs, not one connection
+  (`ir/` v3, `dataset/`, `adapter/`, `router/`, `validator/`, `system_io`).** A standard GT energy
+  hatch accepts 2 amps (`MTEHatchEnergy.maxAmperesIn()`; its tooltip says so, and
+  `BaseMetaTileEntity.injectEnergyUnits` enforces it per tick), and a multiblock's intake is the
+  sum over its hatches. The solver modelled one connection per machine, so it could certify a
+  layout feeding 16 amps into a single MV hatch that can take 2 - unbuildable. The adapter now
+  gives each machine the hatches its draw needs, each carrying its share of the EU/t, and the
+  partitioner works in hatches rather than machines: a heavy machine's hatches spread over as many
+  cable runs as the 16x cap requires, which is what makes it powerable at all. A machine needing
+  one hatch keeps the plain `power:in` port id; several suffix it (`power:in#1`, ...).
+
+  The structural budget comes from the dump the extractor already records: `hatch_slots` says, per
+  cell, which hatch kinds it accepts, and a multiblock's casing cells take I/O of any kind - the
+  Industrial Coke Oven has 17 cells and every one accepts `Energy`, `InputBus`, `InputHatch`,
+  `Maintenance`, `Muffler`, `OutputBus` and `OutputHatch` alike. `MachinePhysical` now derives
+  those counts and the validator rejects a layout wiring more connections onto a machine than its
+  structure can host (`HATCH_CELLS_EXCEEDED`). A machine with no structural record - a single-block
+  machine, or any plan adapted without the dataset - keeps exactly one connection, as before.
+
+- **The validator checks that enough power *arrives*, not just that the cable is thick enough
+  (`validator/`).** Cable loss shrinks every packet and a hatch passes a bounded number per tick,
+  so a machine far from its source can sit on cables that are all correctly sized and still be
+  starved. Its real intake is `sum(hatch_amps x delivered_volts)` over its hatches, accumulated
+  across routes because a machine's hatches can sit on different nets at different distances; a
+  shortfall against its `eut` is reported as `POWER_SUPPLY_INSUFFICIENT`. The opposite case - a
+  cable offering a hatch more amps than it accepts - is deliberately not an error: the hatch takes
+  its 2 and the under-supply check catches any genuine shortfall.
+
+- **TEMPORARY: a machine needing more than 3 energy hatches is supplied at a higher voltage tier
+  (`adapter/`).** Upstream gtnh-factory-flow computes some machines' EU/t against a wrong recipe
+  model (#44 and #45: the Industrial Coke Oven has no heating coils, and its parallel caps are
+  18/30 rather than 16/32), so a node can arrive drawing far more than its stated tier plausibly
+  delivers - the nitrobenzene Coke Oven wants 2355 EU/t at MV, which is 11 hatches. Rather than
+  ring it with a dozen hatches, the adapter raises the tier it is *supplied* at until 3 suffice
+  (MV -> HV here, which needs 3), the same thing a player would do. This does **not** re-derive the
+  recipe: a real tier change also re-overclocks, moving both `eut` and the parallel count, which
+  only the exporter can do. **Remove it once those upstream fixes land.** It applies only to
+  machines with a structural record, so a plan adapted without the dataset is untouched.
+
+  With these three, **the nitrobenzene example now solves `valid`** - the first time it has. It
+  supersedes the "needs parallel runs or a higher tier, still Phase 2" caveat below: parallel runs
+  for one machine are what the hatch model delivers.
+
 - **A voltage tier drawing past the 16x cable cap is now split across several power sources
   (`adapter/`, `system_io`).** A shared-amperage trunk sums every machine hanging off it, so one
   source per tier meant the segment at the source carried the whole tier: the nitrobenzene line's

@@ -16,6 +16,8 @@ What this contract guarantees (checked here) vs. what it does NOT:
 
 from __future__ import annotations
 
+import math
+
 from pydantic import Field, model_validator
 
 from ._base import FrozenModel, StrictModel
@@ -23,7 +25,7 @@ from .enums import HORIZONTAL_FACINGS, Commodity, Facing, IODirection
 from .geometry import CellBox, CellCoord
 
 #: Bump on any breaking change to the input contract; record it in ``ir/__init__.py``.
-INPUT_IR_VERSION = 2
+INPUT_IR_VERSION = 3
 
 
 class Port(StrictModel):
@@ -43,9 +45,18 @@ class Port(StrictModel):
     #: (buildguide ``_COVER``); this stays ``None`` until a dataset sets the specific cover a port
     #: needs (e.g. a regulator vs a plain pump).
     cover: str | None = None
-    #: Throughput through this port - items/t or mB/t (``None`` for power, or when unknown). The
-    #: adapter fills it from the recipe; it surfaces boundary I/O rates (``system_io``, previewer).
+    #: Throughput through this port - items/t, mB/t, or (since IR v3) **EU/t for a power port**.
+    #: ``None`` when unknown. The adapter fills it from the recipe; it surfaces boundary I/O rates
+    #: (``system_io``, previewer). For power it is the share of the machine's ``eut`` that arrives
+    #: through *this* connection: a multiblock spreads its draw over several energy hatches, so the
+    #: router and validator size a cable from the port's rate, never the whole machine's.
     rate: float | None = Field(default=None, ge=0.0)
+    #: Most amps this single connection can accept, or ``None`` for no per-connection ceiling.
+    #: A GT energy hatch takes 2 A (``dataset.ENERGY_HATCH_AMPS``). It is what a connection can
+    #: take **in**, so with the delivered voltage it says how much power actually reaches the
+    #: machine; a cable offering more is not an error (the hatch just takes its 2), but hatches
+    #: that together take in less than the machine's ``eut`` mean it cannot run its recipe.
+    max_amps: float | None = Field(default=None, gt=0.0)
 
 
 class FaceSpec(StrictModel):
@@ -92,6 +103,12 @@ class Machine(StrictModel):
     #: EU/t this machine draws; with ``voltage_tier`` it sets the amperage it pulls on a
     #: shared-amperage cable (dataset.amperage). 0 for an unpowered block or a power source.
     eut: float = Field(default=0.0, ge=0.0)
+    #: How many cells of this machine's structure can hold a hatch/bus, or ``None`` when unknown
+    #: (a single-block machine, or a plan adapted without the physical dataset). A multiblock's
+    #: casing cells accept I/O of any kind - items, fluids, **or power** - so this is the ceiling
+    #: on its total connections, energy hatches included. The validator uses it to reject a layout
+    #: that wires more connections onto a machine than its structure has cells to host.
+    hatch_cells: int | None = Field(default=None, ge=0)
 
     @property
     def is_power_source(self) -> bool:
@@ -108,6 +125,27 @@ class Machine(StrictModel):
             for p in self.faces.ports
         )
 
+    @property
+    def power_input_ports(self) -> list[Port]:
+        """This machine's power INPUT ports - its energy hatches, in declaration order."""
+        return [
+            p
+            for p in self.faces.ports
+            if p.commodity is Commodity.POWER and p.direction is IODirection.INPUT
+        ]
+
+    def port_eut(self, port_id: str) -> float:
+        """EU/t arriving through ``port_id``: its own ``rate``, else the machine's whole ``eut``.
+
+        The fallback keeps a single-port machine (and every pre-v3 problem, where power ports
+        carried no rate) sizing exactly as it did, while a machine whose draw is spread over
+        several energy hatches charges each cable only its own hatch's share.
+        """
+        for port in self.faces.ports:
+            if port.id == port_id:
+                return self.eut if port.rate is None else port.rate
+        return 0.0
+
     @model_validator(mode="after")
     def _check(self) -> Machine:
         if len(self.orientation_options) != len(set(self.orientation_options)):
@@ -118,6 +156,21 @@ class Machine(StrictModel):
                 "machine front must face a horizontal direction (N/S/E/W); "
                 f"got {[f.value for f in non_horizontal]}"
             )
+        rated = [p.rate for p in self.power_input_ports if p.rate is not None]
+        if rated:
+            # Split draws must account for the whole machine: a hatch left off the books would be
+            # a cable nothing sizes, and an extra one would double-charge the net. Rates only ever
+            # come from a division of ``eut``, so exact-ish equality is the right check.
+            if len(rated) != len(self.power_input_ports):
+                raise ValueError(
+                    "power input ports must all carry a rate or none of them (a partially rated "
+                    "machine would leave part of its draw unsized)"
+                )
+            total = math.fsum(rated)
+            if not math.isclose(total, self.eut, rel_tol=1e-9, abs_tol=1e-9):
+                raise ValueError(
+                    f"power input port rates sum to {total} EU/t but the machine draws {self.eut}"
+                )
         return self
 
 

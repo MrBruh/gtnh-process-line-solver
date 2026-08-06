@@ -3,11 +3,11 @@
 Source of truth for how `gtnh_solver` is built. If code disagrees with this doc, treat the
 doc as intent and reconcile.
 
-> **Build status.** This doc records the *design intent* - the nine engineering-review
-> decisions. Phase 1 has shipped a crude but end-to-end version of the whole pipeline; a few
-> refinements below are **Phase 2 (not yet built)** and are flagged inline. What is implemented
-> today is the `Added` list in [`../CHANGELOG.md`](../CHANGELOG.md); the phased plan is in
-> [`ROADMAP.md`](ROADMAP.md).
+> **Build status.** This doc records the *design intent* - the nine engineering-review decisions
+> (#1 to #9) plus #10, decided since. Phase 1 has shipped a crude but end-to-end version of the
+> whole pipeline; a few refinements below are **Phase 2 (not yet built)** and are flagged inline.
+> What is implemented today is the `Added` list in [`../CHANGELOG.md`](../CHANGELOG.md); the
+> phased plan is in [`ROADMAP.md`](ROADMAP.md).
 
 ## Data flow
 
@@ -143,14 +143,42 @@ doc as intent and reconcile.
    distance** is modelled: a machine `d` blocks out receives `tier_voltage - loss·d`, so amperage
    is sized at that delivered voltage (thicker cable the farther out), and a run whose voltage
    drops to 0 is infeasible; loss is a flat 1 EU/block for now. A tier gets **one synthesized
-   source per cable run it needs**: the adapter bin-packs its machines by nominal amp load, so a
-   tier drawing past 16x is split across several sources rather than rejected outright (a machine
-   over 16x on its own still is - one machine has one feed). Each source
-   is fed **from outside the structure**: its front face is the reserved feed entry, pinned flush
-   on the region boundary by placement and enforced independently by the validator (the front-face
-   rule already keeps internal cables off it). See [`DOMAIN.md`](DOMAIN.md).
+   source per cable run it needs**: the adapter bin-packs the tier's *feeds* by nominal amp load,
+   so a tier drawing past 16x is split across several sources rather than rejected outright, and
+   a machine drawing past 16x on its own is split too, because a feed is one energy hatch and not
+   a whole machine (#10). Each source is fed **from outside the structure**: its front face is the
+   reserved feed entry, pinned flush on the region boundary by placement and enforced
+   independently by the validator (the front-face rule already keeps internal cables off it). See
+   [`DOMAIN.md`](DOMAIN.md).
 9. **Spec corrections.** Required-I/O-face reachability is a HARD constraint; the output-layout
    schema is a versioned contract.
+10. **Power intake is per *connection*, not per machine** (added since the review, once the
+    physical dataset made a machine's structure knowable). A machine's draw is modelled as one
+    port per GT **energy hatch**: each carries its share of the `eut` (`Port.rate`) and its own
+    2 A ceiling (`Port.max_amps`), and the machine's intake is their sum, as in game
+    (`MTEHatchEnergy` accepts 2 amps; `MTEMultiBlockBase.getMaxInputPower()` sums its hatches).
+    The old one-port-per-machine model charged every cable the machine's whole draw, right only
+    while a machine has a single hatch, and it made a heavy machine unpowerable **by
+    construction** (one feed, capped at 16x) where the in-game answer is simply to add hatches.
+    So the adapter allocates the hatches a draw needs and the partitioner bin-packs *hatches*,
+    letting one machine's intake spread over several cable runs. The ceiling is structural, from
+    the extractor dump's hatch slots (`Machine.hatch_cells`): a multiblock's casing cells are
+    interchangeable, so item, fluid and power connections compete for one pool, and a machine
+    wired more connections than it has cells is reported (`HATCH_CELLS_EXCEEDED`) rather than
+    silently given fewer hatches than its draw needs, which would certify a layout that cannot
+    draw its own load. **Only the shortfall direction is checked.** After cable loss a machine's
+    real intake is `sum(max_amps · delivered_volts)` over its hatches, so it can sit on cables
+    that are all thick enough and still not take in its `eut`; nothing else catches that, and a
+    machine that cannot take in its draw does not run the recipe the plan balanced, so the
+    validator flags it (`POWER_SUPPLY_INSUFFICIENT`). The reverse, a cable offering a hatch more
+    amps than it accepts, is deliberately **not** an error: the hatch just takes its 2 A and
+    nothing burns (only a cable over its *own* rating does, which the thickness check already
+    covers), so flagging it would reject layouts that work in game. *Temporary:* a machine that
+    would need more than three hatches is supplied at a **higher voltage tier** instead, because
+    some upstream gtnh-factory-flow exports compute EU/t against a wrong recipe model
+    (gtnh-factory-flow #44, #45); it changes only the voltage the layout supplies, never the
+    recipe (a real tier change re-overclocks, which only the exporter can do), and it comes out
+    once those upstream fixes land. See [`DOMAIN.md`](DOMAIN.md).
 
 ## Spatial model
 

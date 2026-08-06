@@ -49,6 +49,33 @@ def _load(mid: str, eut: float, *, tier: str = "LV") -> Machine:
     )
 
 
+def _hatched(mid: str, eut: float, hatches: int, *, tier: str = "LV") -> Machine:
+    """A machine taking ``eut`` through ``hatches`` energy hatches, each carrying an equal share.
+
+    The shares must sum to ``eut`` (the IR enforces it), so no part of the draw goes unsized.
+    """
+    share = eut / hatches
+    return Machine(
+        id=mid,
+        type="M",
+        voltage_tier=tier,
+        eut=eut,
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[
+                Port(
+                    id=f"power:in#{i + 1}",
+                    commodity=_POWER,
+                    direction=IODirection.INPUT,
+                    rate=share,
+                    max_amps=2.0,
+                )
+                for i in range(hatches)
+            ]
+        ),
+    )
+
+
 def _pnet(*machine_ids: str, source: str = "src") -> Net:
     return Net(
         id="power:LV",
@@ -100,6 +127,99 @@ def test_power_trunk_sizes_thickness_by_summed_amperage() -> None:
     assert max(route.thickness_per_segment) == 4
     layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route])
     assert validate(problem, layout).ok, str(validate(problem, layout))
+
+
+def test_power_charges_each_hatch_its_own_share_not_the_whole_machine() -> None:
+    # A machine's draw is split over its energy hatches, so a cable carries only the share of the
+    # hatch it feeds. Charging every terminal the machine's whole eut - which is what reading
+    # Machine.eut per terminal does - would size this trunk for twice the real load.
+    split = InputIR(
+        bounding_region=CellBox(sx=10, sy=4, sz=10),
+        machines=[_src(), _hatched("m0", 32, 2)],
+        nets=[
+            Net(
+                id="power:LV",
+                commodity=_POWER,
+                throughput=32.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="src", port_id="power:out"),
+                    MachineFaceRef(machine_id="m0", port_id="power:in#1"),
+                    MachineFaceRef(machine_id="m0", port_id="power:in#2"),
+                ],
+            )
+        ],
+    )
+    whole = InputIR(
+        bounding_region=CellBox(sx=10, sy=4, sz=10),
+        machines=[_src(), _load("m0", 32)],
+        nets=[_pnet("m0")],
+    )
+    placements = [at("src", 0, 0, 0), at("m0", 3, 0, 0)]
+    split_route = route_power(split, placements).routes[0]
+    whole_route = route_power(whole, placements).routes[0]
+    assert split_route.thickness_per_segment is not None
+    assert whole_route.thickness_per_segment is not None
+    # two hatches or one, the machine pulls the same 32 EU/t, so the cable to it is the same size
+    assert max(split_route.thickness_per_segment) == max(whole_route.thickness_per_segment)
+    layout = LayoutResult(
+        status=LayoutStatus.VALID, seed=0, placements=placements, routes=[split_route]
+    )
+    assert validate(split, layout).ok, str(validate(split, layout))
+
+
+def test_power_two_hatches_of_one_machine_get_distinct_cells() -> None:
+    # Two energy hatches are two distinct casing cells, so their terminals must be too. Letting
+    # the second land on the cell the first already holds would be one hatch charged twice, under
+    # a cable sized for a draw no single hatch can take.
+    problem = InputIR(
+        bounding_region=CellBox(sx=10, sy=4, sz=10),
+        machines=[_src(), _hatched("m0", 32, 3)],
+        nets=[
+            Net(
+                id="power:LV",
+                commodity=_POWER,
+                throughput=32.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="src", port_id="power:out"),
+                    *(MachineFaceRef(machine_id="m0", port_id=f"power:in#{i}") for i in (1, 2, 3)),
+                ],
+            )
+        ],
+    )
+    placements = [at("src", 0, 0, 0), at("m0", 3, 0, 0)]
+    result = route_power(problem, placements)
+    assert result.ok
+    hatch_cells = [t.cell.as_tuple() for t in result.routes[0].terminals if t.machine_id == "m0"]
+    assert len(hatch_cells) == 3
+    assert len(set(hatch_cells)) == 3
+
+
+def test_power_infeasible_when_a_machine_runs_out_of_cells_for_its_own_hatches() -> None:
+    # Each hatch needs a casing cell of its own, so a machine cornered against the region bounds
+    # can run out: at (0,0,0) facing north only east, up and south are free, which is three cells
+    # for four hatches. Reported, not quietly collapsed onto a cell another hatch already holds.
+    problem = InputIR(
+        bounding_region=CellBox(sx=3, sy=3, sz=3),
+        machines=[_src(), _hatched("m0", 32, 4)],
+        nets=[
+            Net(
+                id="power:LV",
+                commodity=_POWER,
+                throughput=32.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="src", port_id="power:out"),
+                    *(
+                        MachineFaceRef(machine_id="m0", port_id=f"power:in#{i}")
+                        for i in (1, 2, 3, 4)
+                    ),
+                ],
+            )
+        ],
+    )
+    result = route_power(problem, [at("src", 2, 2, 2), at("m0", 0, 0, 0)])
+    assert not result.ok
+    assert result.infeasibility is not None
+    assert result.infeasibility.constraint == "face_reachability"
 
 
 def test_power_trunk_stays_a_tree_when_legs_would_otherwise_overlap() -> None:

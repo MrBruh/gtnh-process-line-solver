@@ -65,6 +65,14 @@ class DatasetError(ValueError):
 #: A hatch kind that receives one of a recipe's fluid OUTPUTS (``gregtech.api.enums.HatchElement``).
 _OUTPUT_HATCH = "OutputHatch"
 
+#: The hatch kind that takes power in (``gregtech.api.enums.HatchElement.Energy``).
+_ENERGY_HATCH = "Energy"
+
+#: Hatch kinds that occupy a cell for the machine's own upkeep rather than for routed I/O. Every
+#: multiblock that accepts them needs exactly one of each, so the adapter budgets them away before
+#: deciding how many cells are left for energy hatches.
+_UPKEEP_HATCHES = ("Maintenance", "Muffler")
+
 
 @dataclass(frozen=True)
 class VariantShape:
@@ -113,6 +121,33 @@ class MachinePhysical:
     #: tower that grows a layer per trigger-stack step) has the whole family, which is what lets
     #: :meth:`footprint_for` size it to a recipe instead of always reserving the maximum.
     variants: tuple[VariantShape, ...] = ()
+    #: How many distinct cells of the primary variant accept a hatch of any kind. A GT multiblock
+    #: builds its casing shell out of interchangeable cells: the structure asks only that a cell
+    #: hold *something* legal, so almost any casing may be swapped for an input bus, an output
+    #: hatch, a maintenance hatch **or an energy hatch**. This is that count - the ceiling on the
+    #: machine's total connections. 0 when the dump recorded no hatch slots (a pre-v2 dump), which
+    #: reads as "unknown", not "accepts none".
+    hatch_cells: int = 0
+    #: How many of those cells accept an ``Energy`` hatch specifically. Usually equal to
+    #: :attr:`hatch_cells` (a cell that takes any hatch generally takes a power one), but recorded
+    #: separately because a machine CAN restrict where power enters and guessing would be wrong.
+    energy_hatch_cells: int = 0
+    #: How many upkeep hatches (maintenance, muffler) this machine accepts, and so needs one each
+    #: of. Cells they occupy cannot carry routed I/O, so the budget subtracts them.
+    upkeep_hatch_count: int = 0
+
+    def energy_hatch_budget(self, routed_ports: int = 0) -> int:
+        """Cells left for energy hatches once ``routed_ports`` item/fluid connections and the
+        machine's upkeep hatches have taken theirs.
+
+        The binding limit is the *shared* pool of casing cells, not the ``Energy`` count alone: an
+        input bus and an energy hatch compete for the same cell. Returns 0 when the dump recorded
+        no hatch slots, which callers read as "unknown, impose no ceiling" rather than "none".
+        """
+        if not self.hatch_cells:
+            return 0
+        free = self.hatch_cells - self.upkeep_hatch_count - routed_ports
+        return max(0, min(self.energy_hatch_cells, free))
 
     @property
     def is_layer_indexed(self) -> bool:
@@ -251,9 +286,10 @@ def to_physical(doc: MultiblockDoc) -> MachinePhysical:
     """Interpret one :class:`MultiblockDoc` into its :class:`MachinePhysical` record.
 
     Derives the footprint from the blocks the primary variant actually spans (not the extractor's
-    reported ``bbox``, which is only cross-checked), the I/O faces from the hint positions, and the
-    coil-layer count from the coil substitution table. Raises :class:`DatasetError` if the derived
-    box disagrees with the reported one.
+    reported ``bbox``, which is only cross-checked), the I/O faces from the hint positions, the
+    coil-layer count from the coil substitution table, and the hatch-cell capacity from the
+    recorded hatch slots. Raises :class:`DatasetError` if the derived box disagrees with the
+    reported one.
     """
     variant = _primary_variant(doc)
     min_corner, size = _extent(b.d for b in variant.blocks)
@@ -281,6 +317,11 @@ def to_physical(doc: MultiblockDoc) -> MachinePhysical:
         coil_layer_count=len(coil_layers),
         variant_count=len(doc.variants),
         variants=_variant_shapes(doc),
+        hatch_cells=len(variant.hatch_slots),
+        energy_hatch_cells=sum(1 for s in variant.hatch_slots if _ENERGY_HATCH in s.kinds),
+        upkeep_hatch_count=sum(
+            1 for kind in _UPKEEP_HATCHES if any(kind in slot.kinds for slot in variant.hatch_slots)
+        ),
     )
 
 

@@ -135,4 +135,22 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   those machines fell back to a 1x1x1 footprint. The adapter sets it from the export's
 #   `recipe.source.machineBlock` (gtnh-factory-flow #25); consumers that have it join exactly and
 #   fall back to `type` when it is None, so pre-#25 plans behave exactly as before. (GitHub #98.)
+#
+# InputIR v3 (BREAKING) - a power port's `rate` is now meaningful: it is the EU/t arriving through
+#   THAT connection, and a machine's power input ports must sum to its `eut`. Previously a power
+#   port carried no rate and every consumer charged a cable the whole machine's draw, which is only
+#   right while a machine has one power connection. A GT multiblock does not: an energy hatch
+#   accepts 2 A (`MTEHatchEnergy.maxAmperesIn`), so a machine drawing more than that spreads its
+#   intake over several hatches, and each cable carries only its own hatch's share. Breaking
+#   because a producer that emits several power ports and a consumer that still reads `Machine.eut`
+#   per terminal disagree by a multiple - hence the bump, even though the field itself is old.
+#   Read a port's share through `Machine.port_eut`, which falls back to `eut` for an unrated port
+#   so single-connection machines are unchanged.
+#
+# InputIR v3 (additive, no version bump) - added `Port.max_amps: float | None`, the most amps one
+#   connection accepts (2 for an energy hatch), and `Machine.hatch_cells: int | None`, how many
+#   structure cells can host a hatch at all. A multiblock's casing cells take I/O of any kind,
+#   power included, so these two say how far a draw may be split and how many connections the
+#   structure can physically host. Both default to None ("no ceiling known"), so a problem built
+#   without the physical dataset behaves exactly as before.
 # ---------------------------------------------------------------------------

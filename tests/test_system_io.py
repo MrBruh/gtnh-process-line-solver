@@ -275,6 +275,73 @@ def test_amps_are_attributed_per_source_not_per_tier() -> None:
     assert io.power_amps_by_tier == {"LV": 13}  # the tier-wide total, rounded once
 
 
+def _lv_hatched_sink(mid: str, eut: float, hatches: int) -> Machine:
+    """A sink taking ``eut`` through ``hatches`` energy hatches, each carrying an equal share."""
+    share = eut / hatches
+    return Machine(
+        id=mid,
+        type="M",
+        voltage_tier="LV",
+        eut=eut,
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[
+                Port(
+                    id=f"pi{i}",
+                    commodity=Commodity.POWER,
+                    direction=IODirection.INPUT,
+                    rate=share,
+                    max_amps=2.0,
+                )
+                for i in range(hatches)
+            ]
+        ),
+    )
+
+
+def test_one_machines_hatches_bill_their_own_sources_separately() -> None:
+    # A machine's energy hatches can sit on different nets, so no one source owns its whole draw.
+    # Attribution is per connection: each source is billed only the hatches it actually feeds, so
+    # here the 256 EU/t machine splits 4 A and 4 A rather than putting 8 A on either source.
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=4),
+        machines=[_lv_source("src-a"), _lv_source("src-b"), _lv_hatched_sink("m0", 256.0, 2)],
+        nets=[
+            Net(
+                id="pw-a",
+                commodity=Commodity.POWER,
+                throughput=128.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="src-a", port_id="po"),
+                    MachineFaceRef(machine_id="m0", port_id="pi0"),
+                ],
+            ),
+            Net(
+                id="pw-b",
+                commodity=Commodity.POWER,
+                throughput=128.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="src-b", port_id="po"),
+                    MachineFaceRef(machine_id="m0", port_id="pi1"),
+                ],
+            ),
+        ],
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id=mid, cell=CellCoord(x=i, y=0, z=0), orientation=Facing.NORTH)
+            for i, mid in enumerate(["src-a", "src-b", "m0"])
+        ],
+        routes=[],  # no cable: every machine sits at distance 0, so loss is out of the picture
+    )
+    io = system_io(problem, layout)
+    assert io.power_amps_by_source == {"src-a": 4, "src-b": 4}
+    assert io.power_amps_by_tier == {"LV": 8}  # the machine's whole 256 EU/t, counted once
+    assert io.power_total == 256.0
+
+
 def test_power_net_without_one_source_is_left_out_of_the_per_source_amps() -> None:
     # Two sources on one shared-amperage net is not certifiable (the validator rejects it), so
     # there is no single source to bill the load to. The summary skips the attribution rather than

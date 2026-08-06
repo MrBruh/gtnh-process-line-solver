@@ -45,6 +45,8 @@ def _machine(
     *,
     ports: list[Port] | None = None,
     orientations: list[Facing] | None = None,
+    eut: float = 0.0,
+    hatch_cells: int | None = None,
 ) -> Machine:
     if ports is None:
         ports = [Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)]
@@ -57,6 +59,19 @@ def _machine(
         faces=FaceSpec(ports=ports),
         voltage_tier="LV",
         orientation_options=orientations,
+        eut=eut,
+        hatch_cells=hatch_cells,
+    )
+
+
+def _hatch(pid: str, *, rate: float | None = None, max_amps: float | None = None) -> Port:
+    """One energy hatch: a power INPUT port, optionally carrying its share of the draw."""
+    return Port(
+        id=pid,
+        commodity=Commodity.POWER,
+        direction=IODirection.INPUT,
+        rate=rate,
+        max_amps=max_amps,
     )
 
 
@@ -157,6 +172,18 @@ def test_port_rate_is_optional_and_non_negative() -> None:
         Port(id="o", commodity=c, direction=d, rate=-1.0)  # a rate cannot be negative
 
 
+def test_port_max_amps_is_optional_and_strictly_positive() -> None:
+    # additive in InputIR v3: a GT energy hatch takes 2 A, a per-connection ceiling the machine's
+    # whole-machine eut cannot express. A hatch that accepted 0 A would take in no power at all,
+    # so zero is a malformed ceiling rather than a tight one.
+    assert _hatch("pi").max_amps is None  # defaults to no per-connection ceiling
+    assert _hatch("pi", max_amps=2.0).max_amps == 2.0
+    with pytest.raises(ValidationError):
+        _hatch("pi", max_amps=0.0)
+    with pytest.raises(ValidationError):
+        _hatch("pi", max_amps=-2.0)
+
+
 # --------------------------------------------------------------------------- machine
 
 
@@ -189,6 +216,85 @@ def test_machine_no_longer_accepts_count() -> None:
             orientation_options=[Facing.NORTH],
             count=1,
         )
+
+
+def test_machine_hatch_cells_is_optional_and_non_negative() -> None:
+    # additive in InputIR v3. None is "unknown" (a single-block machine, or a plan adapted without
+    # the physical dataset) and imposes no ceiling - a distinct state from a structure with zero
+    # cells, which can host nothing at all.
+    assert _machine().hatch_cells is None
+    assert _machine(hatch_cells=0).hatch_cells == 0
+    with pytest.raises(ValidationError):
+        _machine(hatch_cells=-1)
+
+
+def test_power_input_ports_are_the_energy_hatches_in_declaration_order() -> None:
+    m = _machine(
+        ports=[
+            Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT),
+            _hatch("pi2"),
+            Port(id="po", commodity=Commodity.POWER, direction=IODirection.OUTPUT),
+            _hatch("pi1"),
+        ]
+    )
+    # only the power INPUTs: an item port is not a hatch, and a source's power OUTPUT supplies
+    # power rather than taking it in. Declaration order, so a caller can zip rates onto them.
+    assert [p.id for p in m.power_input_ports] == ["pi2", "pi1"]
+
+
+def test_port_eut_falls_back_to_the_whole_draw_for_an_unrated_port() -> None:
+    # Every pre-v3 problem left power ports unrated, and a single-hatch machine still does: the
+    # one connection carries the whole draw, so it must size from ``eut`` rather than from nothing.
+    m = _machine(ports=[_hatch("pi")], eut=48.0)
+    assert m.port_eut("pi") == 48.0
+
+
+def test_port_eut_returns_the_ports_own_share_when_rated() -> None:
+    # A machine spreading its draw over several hatches charges each cable only that hatch's
+    # share; billing every one the whole eut would multiply the net's load by the hatch count.
+    m = _machine(ports=[_hatch("pi1", rate=30.0), _hatch("pi2", rate=18.0)], eut=48.0)
+    assert m.port_eut("pi1") == 30.0
+    assert m.port_eut("pi2") == 18.0
+
+
+def test_port_eut_of_an_unknown_port_is_zero() -> None:
+    # A stale or foreign port id draws nothing, rather than silently billing the whole machine to
+    # a connection that does not exist.
+    assert _machine(ports=[_hatch("pi")], eut=48.0).port_eut("ghost") == 0.0
+
+
+def test_power_input_rates_must_be_all_set_or_none() -> None:
+    # A hatch left off the books would be a cable nothing sizes, so the half-rated machine is
+    # rejected rather than silently sized from the one rate it does carry.
+    with pytest.raises(ValidationError):
+        _machine(ports=[_hatch("pi1", rate=48.0), _hatch("pi2")], eut=48.0)
+
+
+def test_power_input_rates_must_sum_to_the_machines_draw() -> None:
+    with pytest.raises(ValidationError):
+        # the two hatches account for only 36 of the 48 EU/t: 12 EU/t would arrive over no cable
+        _machine(ports=[_hatch("pi1", rate=24.0), _hatch("pi2", rate=12.0)], eut=48.0)
+    with pytest.raises(ValidationError):
+        # and over-declaring double-charges the net, which is just as wrong as under-declaring
+        _machine(ports=[_hatch("pi1", rate=48.0), _hatch("pi2", rate=48.0)], eut=48.0)
+
+
+def test_a_correctly_split_power_draw_is_accepted() -> None:
+    # Three hatches carrying a third of the draw each. 100/3 does not sum back to 100 exactly in
+    # binary, so the rule has to tolerate float dust instead of demanding equality - constructing
+    # the machine without a ValidationError is the assertion.
+    m = _machine(ports=[_hatch(f"pi{i}", rate=100 / 3) for i in range(3)], eut=100.0)
+    assert m.port_eut("pi0") == pytest.approx(100 / 3)
+
+
+def test_a_power_sources_output_rate_is_not_a_draw_to_account_for() -> None:
+    # The rule polices energy hatches (power INPUTs). A source's OUTPUT rate is the power it
+    # supplies, which has nothing to sum to its own (zero) draw.
+    m = _machine(
+        ports=[Port(id="po", commodity=Commodity.POWER, direction=IODirection.OUTPUT, rate=512.0)],
+        eut=0.0,
+    )
+    assert m.power_input_ports == []
 
 
 # --------------------------------------------------------------------------- net

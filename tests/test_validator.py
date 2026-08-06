@@ -1019,6 +1019,236 @@ def test_zero_draw_power_sink_loads_no_amps() -> None:
     assert report.ok, str(report)
 
 
+# --------------------------------------------------- energy hatches: cells + power actually in
+
+
+def _hatch_pair(cells: int | None) -> tuple[InputIR, LayoutResult]:
+    """The valid power pair, with ``mp`` also carrying an unrouted input bus and ``cells`` cells.
+
+    Two connections on one machine (an energy hatch and an item bus, which compete for the same
+    interchangeable casing cells) is the smallest case where the structural ceiling can bind.
+    """
+    problem, layout = _power_pair()
+    mp = problem.machines[1]
+    ports = [*mp.faces.ports, Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT)]
+    wired = mp.model_copy(update={"faces": FaceSpec(ports=ports), "hatch_cells": cells})
+    return problem.model_copy(update={"machines": [problem.machines[0], wired]}), layout
+
+
+def test_hatch_cells_that_fit_every_connection_pass() -> None:
+    report = validate(*_hatch_pair(2))  # two connections, two cells that can host one
+    assert report.ok, str(report)
+
+
+def test_more_connections_than_hatch_cells_is_flagged() -> None:
+    # The energy hatch and the input bus want the same casing cell, so a structure offering one
+    # cell cannot host both - a layout that wires them anyway is not buildable in game.
+    codes = validate(*_hatch_pair(1)).codes()
+    assert ViolationCode.HATCH_CELLS_EXCEEDED in codes, codes
+
+
+def test_unknown_hatch_cells_imposes_no_ceiling() -> None:
+    # None is "unknown" (a single-block machine, or a problem built without the physical dataset),
+    # not "no cells": the same two connections a ceiling of 1 rejects must pass unmeasured here.
+    report = validate(*_hatch_pair(None))
+    assert report.ok, str(report)
+
+
+def _rated_trunk(max_amps: float) -> tuple[InputIR, LayoutResult]:
+    """The valid 2x trunk, with m0's energy hatch declaring a per-tick amp ceiling."""
+    problem, layout = _power_trunk()
+    m0 = problem.machines[1]
+    hatch = m0.faces.ports[0].model_copy(update={"max_amps": max_amps})
+    rated = m0.model_copy(update={"faces": FaceSpec(ports=[hatch])})
+    return problem.model_copy(update={"machines": [problem.machines[0], rated]}), layout
+
+
+def test_a_hatch_that_can_take_the_whole_draw_passes() -> None:
+    # 2 A through a hatch 2 blocks out (30 V after loss) is 60 EU/t arriving, comfortably over the
+    # 48 EU/t the machine draws - so the supply direction of the power check has nothing to say.
+    report = validate(*_rated_trunk(2.0))
+    assert report.ok, str(report)
+
+
+def test_an_unrated_hatch_is_not_measured_for_supply() -> None:
+    # Every pre-v3 problem leaves max_amps unset. With no per-connection ceiling there is nothing
+    # to measure, so the check must stay silent rather than read the absence as a 0 A hatch and
+    # declare every machine in every older problem starved.
+    codes = validate(*_power_trunk()).codes()
+    assert ViolationCode.POWER_SUPPLY_INSUFFICIENT not in codes, codes
+
+
+def test_hatches_that_cannot_take_the_draw_in_after_loss_are_flagged() -> None:
+    # 1 A at 30 V is 30 EU/t arriving against a 48 EU/t draw: the machine cannot run the recipe the
+    # plan balanced. The cable is thick enough for the 1.6 A it would pull, so nothing is wrong
+    # with the trunk itself - only the supply direction may fire.
+    codes = validate(*_rated_trunk(1.0)).codes()
+    assert ViolationCode.POWER_SUPPLY_INSUFFICIENT in codes, codes
+    assert ViolationCode.POWER_THICKNESS_INSUFFICIENT not in codes, codes
+
+
+def _split_hatch_pair(second_hatch_amps: float) -> tuple[InputIR, LayoutResult]:
+    """One machine drawing 48 EU/t through TWO energy hatches on two separate power routes.
+
+    ``mp`` splits its draw 24/24 between ``pi1`` (docked south, on the z=1 run) and ``pi2`` (docked
+    up, on the y=1 run), both 3 cable-blocks from ``src`` (29 V after loss). Neither hatch could
+    feed it alone at 1 A - 29 EU/t against a 48 EU/t draw - so only the sum ACROSS routes clears
+    the bar, which a per-route check would miss. The 24 EU/t share is likewise what keeps each run
+    under one amp; billed the whole 48 they would need 2 A and the 1x cables would be too thin.
+    """
+    src = Machine(
+        id="src",
+        type="Power Source (LV)",
+        voltage_tier="LV",
+        eut=0.0,
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[
+                Port(id="po1", commodity=Commodity.POWER, direction=IODirection.OUTPUT),
+                Port(id="po2", commodity=Commodity.POWER, direction=IODirection.OUTPUT),
+            ]
+        ),
+    )
+    mp = Machine(
+        id="mp",
+        type="M",
+        voltage_tier="LV",
+        eut=48.0,
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[
+                Port(
+                    id="pi1",
+                    commodity=Commodity.POWER,
+                    direction=IODirection.INPUT,
+                    rate=24.0,
+                    max_amps=1.0,
+                ),
+                Port(
+                    id="pi2",
+                    commodity=Commodity.POWER,
+                    direction=IODirection.INPUT,
+                    rate=24.0,
+                    max_amps=second_hatch_amps,
+                ),
+            ]
+        ),
+    )
+    problem = InputIR(
+        bounding_region=CellBox(sx=6, sy=4, sz=6),
+        machines=[src, mp],
+        nets=[
+            Net(
+                id=f"pw{i}",
+                commodity=Commodity.POWER,
+                throughput=24.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="src", port_id=f"po{i}"),
+                    MachineFaceRef(machine_id="mp", port_id=f"pi{i}"),
+                ],
+            )
+            for i in (1, 2)
+        ],
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id="src", cell=_coord(0, 0, 0), orientation=Facing.NORTH),
+            Placement(machine_id="mp", cell=_coord(3, 0, 0), orientation=Facing.NORTH),
+        ],
+        routes=[
+            Route(
+                net_id="pw1",
+                commodity=Commodity.POWER,
+                terminals=[
+                    Terminal(
+                        machine_id="src", port_id="po1", face=Facing.SOUTH, cell=_coord(0, 0, 1)
+                    ),
+                    Terminal(
+                        machine_id="mp", port_id="pi1", face=Facing.SOUTH, cell=_coord(3, 0, 1)
+                    ),
+                ],
+                segments=[
+                    Segment(start=_coord(i, 0, 1), end=_coord(i + 1, 0, 1), channel=0)
+                    for i in range(3)
+                ],
+                thickness_per_segment=[1, 1, 1],
+            ),
+            Route(
+                net_id="pw2",
+                commodity=Commodity.POWER,
+                terminals=[
+                    Terminal(machine_id="src", port_id="po2", face=Facing.UP, cell=_coord(0, 1, 0)),
+                    Terminal(machine_id="mp", port_id="pi2", face=Facing.UP, cell=_coord(3, 1, 0)),
+                ],
+                segments=[
+                    Segment(start=_coord(i, 1, 0), end=_coord(i + 1, 1, 0), channel=0)
+                    for i in range(3)
+                ],
+                thickness_per_segment=[1, 1, 1],
+            ),
+        ],
+    )
+    return problem, layout
+
+
+def test_energy_hatches_on_separate_routes_sum_their_supply() -> None:
+    # 29 + 29 = 58 EU/t reaches a machine that draws 48. Measuring either route on its own would
+    # see 29 and call it starved, so passing here is the accumulation across routes working.
+    report = validate(*_split_hatch_pair(1.0))
+    assert report.ok, str(report)
+
+
+def test_a_split_machine_is_still_starved_when_the_hatches_together_fall_short() -> None:
+    # Halve the second hatch: 29 + 14.5 = 43.5 EU/t against the same 48 EU/t draw. Both cables are
+    # still comfortably thick, so the shortfall shows up only in the supply direction.
+    codes = validate(*_split_hatch_pair(0.5)).codes()
+    assert ViolationCode.POWER_SUPPLY_INSUFFICIENT in codes, codes
+    assert ViolationCode.POWER_THICKNESS_INSUFFICIENT not in codes, codes
+
+
+def test_an_unrated_split_machine_charges_each_cable_its_whole_draw() -> None:
+    # Drop the per-hatch rates from the fixture above and nothing tells the validator a hatch takes
+    # only a share, so it falls back to billing all 48 EU/t (1.66 A) to each 1x cable and rejects
+    # both. That fallback is what the IR v3 rates replace - and it proves the split fixture passes
+    # BECAUSE of them, not because a 1x cable would have carried the whole draw anyway.
+    problem, layout = _split_hatch_pair(1.0)
+    mp = problem.machines[1]
+    ports = [p.model_copy(update={"rate": None}) for p in mp.faces.ports]
+    unrated = mp.model_copy(update={"faces": FaceSpec(ports=ports)})
+    problem = problem.model_copy(update={"machines": [problem.machines[0], unrated]})
+    codes = validate(problem, layout).codes()
+    assert ViolationCode.POWER_THICKNESS_INSUFFICIENT in codes, codes
+
+
+def _summed_trunk_with_a_short_hatch() -> tuple[InputIR, LayoutResult]:
+    """The valid summed trunk, with mA's hatch too small: 1 A at 31 V feeds 31 of its 62 EU/t."""
+    problem, layout = _power_summed_trunk()
+    src, m_a, m_b = problem.machines
+    hatch = m_a.faces.ports[0].model_copy(update={"max_amps": 1.0})
+    starved = m_a.model_copy(update={"faces": FaceSpec(ports=[hatch])})
+    return problem.model_copy(update={"machines": [src, starved, m_b]}), layout
+
+
+def test_a_short_hatch_on_a_shared_trunk_is_flagged() -> None:
+    codes = validate(*_summed_trunk_with_a_short_hatch()).codes()
+    assert ViolationCode.POWER_SUPPLY_INSUFFICIENT in codes, codes
+
+
+def test_a_machine_on_an_unverifiable_route_is_not_reported_as_starved() -> None:
+    # Same short hatch, but mB further along the same trunk now has an off-ladder tier, so the
+    # route's arithmetic stopped before it finished measuring. The gate reports what it could not
+    # verify and withholds the supply verdict rather than issuing one on partial evidence.
+    problem, layout = _summed_trunk_with_a_short_hatch()
+    src, m_a, m_b = problem.machines
+    weird = m_b.model_copy(update={"voltage_tier": "NOPE"})
+    problem = problem.model_copy(update={"machines": [src, m_a, weird]})
+    codes = validate(problem, layout).codes()
+    assert ViolationCode.POWER_TIER_UNKNOWN in codes, codes
+    assert ViolationCode.POWER_SUPPLY_INSUFFICIENT not in codes, codes
+
+
 # --------------------------------------------------------------- auto-output connections
 
 

@@ -6,6 +6,7 @@ error) plus what lands on stdout/stderr, against the real fixtures.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -117,9 +118,37 @@ def test_cli_dataset_version_unknown_falls_back(capsys: pytest.CaptureFixture[st
     assert "physical multiblock dataset unavailable" in capsys.readouterr().err
 
 
-def test_cli_partial_invalid_returns_1(capsys: pytest.CaptureFixture[str]) -> None:
-    # nitrobenzene's multiblocks overflow crude 1x1x1 faces -> partial_invalid, reported on stderr
+def test_cli_solves_nitrobenzene(capsys: pytest.CaptureFixture[str]) -> None:
+    # The multi-hatch power model is what makes this line solvable: its Coke Oven draws far more
+    # than one energy hatch can take, so before it the MV net was rejected outright.
     code = main([_NITROBENZENE])
+    assert code == 0
+    assert "# Build guide" in capsys.readouterr().out
+
+
+def test_cli_partial_invalid_returns_1(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # An off-ladder voltage tier has no voltage to size amperage against, so the power router
+    # reports it and the layout comes back infeasible - the exit-1 path, on stderr.
+    export = tmp_path / "off-ladder.json"
+    export.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "recipes": [
+                    {
+                        "id": "r",
+                        "machineType": "M",
+                        "durationTicks": 10,
+                        "eut": 32,
+                        "outputs": [{"kind": "item", "id": "x", "amount": 1}],
+                    }
+                ],
+                "nodes": [{"id": "n", "recipeId": "r", "overclockTier": "ZZZ"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    code = main([str(export)])
     err = capsys.readouterr().err
     assert code == 1
     assert "partial_invalid" in err

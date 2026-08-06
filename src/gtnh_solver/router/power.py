@@ -260,6 +260,11 @@ def _route_trunk(
     - chooses the face. One exception keeps the route well-formed: a route with no segments fails
     validation, so the last sink never taps a still-segment-less trunk - it lays a real leg.
 
+    A sink is a **connection**, not a machine: a machine's draw is spread over its energy hatches
+    and several of them can sit on one net, so the same machine appears once per hatch here. Each
+    is docked on a cell of its own (two hatches are two casing cells) and charged only its own
+    share of the draw.
+
     Every trunk cell's **depth** is its cable-block distance from the source; each sink's load is
     then sized at its *delivered* voltage, so cable loss thickens the run (``_size_trunk``).
     Laid cells stay blocked for the legs that follow (a leg may *attach* at a trunk cell but never
@@ -293,7 +298,17 @@ def _route_trunk(
     sink_cells: list[Cell] = []  # sink_cells[i] = sink m_i's terminal cell
     blocked = obstacles | {root}  # grows with the trunk so legs never cross it
 
+    claimed: dict[str, set[Cell]] = {}  # machine -> cells its own terminals already hold
     for i, cand in enumerate(candidates[1:]):
+        # Two energy hatches of one machine are two distinct casing cells, so their terminals must
+        # be distinct too: letting a second port land on a cell this machine already holds would
+        # be one hatch charged twice, and the cable under it sized for a draw no single hatch can
+        # take. Cross-net collisions cannot happen - a finished net's cells are obstacles.
+        mine = claimed.get(sinks[i].machine_id)
+        if mine:
+            cand = [t for t in cand if _cell(t) not in mine]
+            if not cand:
+                return _no_dock(net_id)
         # A tap lays no cable and a zero-segment route fails validation (ROUTE_DISCONTINUOUS),
         # so the last sink must extend a trunk that has no segments yet.
         may_tap = bool(legs) or i < len(sinks) - 1
@@ -302,6 +317,7 @@ def _route_trunk(
             tapped = min(taps, key=lambda t: depth[_cell(t)])  # shallowest; min() keeps cand order
             terminals.append(tapped)
             sink_cells.append(_cell(tapped))
+            claimed.setdefault(sinks[i].machine_id, set()).add(_cell(tapped))
             continue
         goals = {_cell(t) for t in cand} - blocked  # blocked already covers the laid trunk
         if not goals:
@@ -322,8 +338,12 @@ def _route_trunk(
         end = path[-1]
         terminals.append(next(t for t in cand if _cell(t) == end))
         sink_cells.append(end)
+        claimed.setdefault(sinks[i].machine_id, set()).add(end)
 
-    loads = [(machines[e.machine_id].eut, machines[e.machine_id].voltage_tier) for e in sinks]
+    loads = [
+        (machines[e.machine_id].port_eut(e.port_id), machines[e.machine_id].voltage_tier)
+        for e in sinks
+    ]
     sized = _size_trunk(net_id, legs, depth, sink_cells, loads)
     if isinstance(sized, Infeasibility):
         return sized
@@ -346,7 +366,9 @@ def _size_trunk(
 ) -> tuple[list[Segment], list[int]] | Infeasibility:
     """Size each segment to the summed load of the sink terminals on its far-from-root side.
 
-    ``loads[i]`` / ``sink_cells[i]`` are sink ``m_i``'s ``(eut, tier)`` and its terminal cell; its
+    ``loads[i]`` / ``sink_cells[i]`` are sink ``m_i``'s ``(eut, tier)`` and its terminal cell, where
+    ``eut`` is what arrives through *that port* - an energy hatch's share of the machine's draw
+    (``Machine.port_eut``), not the whole machine's, since a heavy machine has several hatches; its
     cable-block distance from the source is that cell's tree ``depth`` (a tap of the root is
     distance 0). Each sink's load is *fractional*, sized at its delivered voltage
     (``eut / (tier_voltage - distance)``, ``dataset.amp_load`` - machines buffer packets and

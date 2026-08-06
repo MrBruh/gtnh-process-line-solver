@@ -10,7 +10,7 @@ diverge, the doc records the intent, so reconcile one to the other and say which
 |-----|----------|
 | [DESIGN.md](DESIGN.md) | Problem framing: why a physical place-and-route solver for GT:NH exists, what it is and is not, and the agreed premises. |
 | [DOMAIN.md](DOMAIN.md) | The GT:NH rules the solver encodes (machine faces, covers, single-channel pipes, shared-amperage power, the 1.7.10 platform) that both the router and the validator are built against. |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Source of truth for how the solver is built: the end-to-end data flow and the nine engineering-review decisions. |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Source of truth for how the solver is built: the end-to-end data flow and the numbered engineering decisions behind it. |
 | [IR.md](IR.md) | The two versioned data contracts everything couples to, the input IR (the problem) and the output layout schema (the solution). |
 | [ROADMAP.md](ROADMAP.md) | The phased v1 plan (Phase 1 thin slice, Phase 2 optimizer core), the parallel lanes, and the deferred v1.1+ work. |
 | [TESTING.md](TESTING.md) | The testing strategy given there is no headless GT simulator: independent validator, hypothesis property tests, golden corpus. |

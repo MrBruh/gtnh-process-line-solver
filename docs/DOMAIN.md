@@ -61,10 +61,40 @@ where load **sums** along shared segments (Steiner-tree-like):
   delivered voltage reaches 0 cannot be powered at that tier and is reported infeasible. Loss is a
   flat **1 EU/block for every tier** for now (a simplifying assumption; per-material cable loss is
   Phase 2 dataset work).
+- **A machine is not one connection.** A multiblock takes power through **energy hatches**, and a
+  standard GT energy hatch accepts **2 amps** per tick - `MTEHatchEnergy.maxAmperesIn()` returns 2,
+  its in-game tooltip reads "Accepts up to 2 Amps", and `BaseMetaTileEntity.injectEnergyUnits`
+  enforces it against a per-tick `mAcceptedAmperes` counter. A multiblock's intake is the **sum**
+  over its hatches (`MTEMultiBlockBase.getMaxInputPower()` adds `voltage x amperage` per hatch), so
+  a machine drawing more than one hatch can take is fed through several, on as many cable runs as
+  the 16x cap needs. TecTech's 4A/16A/64A hatches exist from **EV up only**; below that the 2 A
+  hatch is the only one there is. The ceiling is rarely felt in play because it is 2 amps *at the
+  hatch's own tier* - one HV hatch already passes 1024 EU/t.
+- **Enough power must arrive, not just fit the cable.** Loss shrinks every packet, and a hatch
+  passes a bounded number of them, so a machine's real intake is
+  `sum(hatch_amps x delivered_volts)` over its hatches. A machine whose intake falls short of its
+  `eut` cannot run its recipe even though every cable on the way is thick enough - the solver
+  reports that (`POWER_SUPPLY_INSUFFICIENT`) rather than certifying it. The reverse - a cable
+  offering a hatch more amps than it can take - is deliberately **not** treated as an error: the
+  hatch simply takes its 2 and the under-supply check is what catches a genuine shortfall.
 - **Thickness** (1x / 2x / 4x / 8x / 12x / 16x, **16x max**) is sized to the **summed load** through
   that segment, rounded up to whole amps.
 - A segment needing **> 16x** must split into **parallel runs** or move to a **higher voltage
   tier** (more power per amp).
+- **Hatches ride casing cells, and casings are interchangeable.** A GT multiblock's shell asks
+  only that each cell hold *something* legal, so almost any casing may be swapped for an input bus,
+  an output hatch, a maintenance hatch **or an energy hatch** - they all compete for the same pool
+  of cells. The Industrial Coke Oven, for instance, has 17 such cells and every one of them accepts
+  any of those kinds. That pool is the ceiling on a machine's total connections, and the solver
+  rejects a layout that wires more onto a machine than its structure can host
+  (`HATCH_CELLS_EXCEEDED`).
+- **TEMPORARY: a machine needing more than 3 energy hatches is supplied at a higher tier instead.**
+  Some upstream gtnh-factory-flow exports compute EU/t against a wrong recipe model, so a node can
+  arrive drawing far more than its stated tier plausibly delivers. Rather than ring it with a dozen
+  hatches, the adapter raises the tier it is *supplied* at until 3 hatches suffice - what a player
+  would do. This does **not** re-derive the recipe (a real tier change re-overclocks, moving both
+  `eut` and the parallel count, which only the exporter can do), so the EU/t figure is still
+  upstream's. Remove it once gtnh-factory-flow #44 and #45 land.
 - **The synthesized source is fed from outside.** A plan export has no power node, so the
   adapter invents them: one per voltage tier, or several when a tier's summed draw needs more
   than one cable run can carry. *How* each is powered is left to the builder. The

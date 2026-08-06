@@ -30,9 +30,11 @@ from gtnh_solver.adapter import (
     to_input_ir,
 )
 from gtnh_solver.adapter.core import _bounding_region, _orientations_for
+from gtnh_solver.dataset import DatasetMeta, MachinePhysical, PhysicalDataset
 from gtnh_solver.ir import (
     CellBox,
     Commodity,
+    Facing,
     InputIR,
     IODirection,
     LayoutResult,
@@ -289,6 +291,146 @@ def test_machine_over_the_cap_alone_gets_its_own_source() -> None:
     assert set(nets) == {"power:LV#1", "power:LV#2"}
     heavy = next(n for n in nets.values() if n.throughput == 600.0)
     assert [e.machine_id for e in heavy.endpoints if e.port_id == "power:in"] == ["n0"]
+
+
+# --------------------------------------------------- energy hatches (multi-connection power)
+
+
+def _hatched_dataset(hatch_cells: int = 20, key: str = "M") -> PhysicalDataset:
+    """A dataset whose one machine is a multiblock with ``hatch_cells`` interchangeable cells.
+
+    A GT casing cell accepts a hatch of any kind, so ``energy_hatch_cells`` matches; one
+    maintenance hatch is reserved. This is what tells the synthesis the machine HAS hatches - with
+    no record it keeps a single connection.
+    """
+    return PhysicalDataset(
+        meta=DatasetMeta.model_validate(
+            {
+                "schema": 2,
+                "pack_version": "test",
+                "generated_at": "2026-01-01T00:00:00Z",
+                "extractor_sha": "0" * 40,
+                "controller_count": 1,
+            }
+        ),
+        machines={
+            key: MachinePhysical(
+                key=key,
+                registry_name="test:block",
+                meta=0,
+                source_class="test.Controller",
+                footprint=CellBox(sx=3, sy=3, sz=3),
+                io_faces=frozenset({Facing.NORTH}),
+                hint_layers=frozenset({0}),
+                coil_layer_count=0,
+                variant_count=1,
+                hatch_cells=hatch_cells,
+                energy_hatch_cells=hatch_cells,
+                upkeep_hatch_count=1,
+            )
+        },
+    )
+
+
+def _hatches(ir: InputIR, machine_id: str) -> list[str]:
+    machine = next(m for m in ir.machines if m.id == machine_id)
+    return [p.id for p in machine.power_input_ports]
+
+
+def test_a_machine_with_no_structural_record_keeps_one_connection() -> None:
+    # Without a dataset there is no evidence the machine even has hatches (a single-block machine
+    # has none), so splitting its intake would invent structure the layout cannot justify. It
+    # keeps the plain port id every consumer has always seen, and no rate.
+    ir = to_input_ir(_powered_plan(60.0))
+    assert _hatches(ir, "n0") == ["power:in"]
+    port = next(p for p in ir.machines[0].faces.ports if p.id == "power:in")
+    assert port.rate is None
+    assert port.max_amps is None
+
+
+def test_a_draw_past_one_hatch_is_split_across_several() -> None:
+    # A GT energy hatch accepts 2 A, so 60 EU/t at LV (3.75 A at the designed run length) needs
+    # two of them. Each carries its own share of the draw, and the shares must add back up to the
+    # machine's eut or part of it would go unsized.
+    ir = to_input_ir(_powered_plan(60.0), physical=_hatched_dataset())
+    assert _hatches(ir, "n0") == ["power:in#1", "power:in#2"]
+    machine = ir.machines[0]
+    assert [p.rate for p in machine.power_input_ports] == [30.0, 30.0]
+    assert all(p.max_amps == 2.0 for p in machine.power_input_ports)
+
+
+def test_hatches_of_one_machine_spread_across_several_cable_runs() -> None:
+    # The partitioner works in hatches, not machines: six 96 EU/t LV machines draw 18 A together,
+    # past the 16x cap, so the tier splits - and because the unit is a hatch, the split can cut
+    # through a machine rather than having to keep it whole.
+    ir = to_input_ir(_powered_plan(*([96.0] * 6)), physical=_hatched_dataset())
+    nets = _power_nets(ir)
+    assert {n.id for n in nets} == {"power:LV#1", "power:LV#2"}
+    # every hatch of every machine is wired exactly once, across the two runs
+    wired = sorted(
+        (e.machine_id, e.port_id) for n in nets for e in n.endpoints if "power:in" in e.port_id
+    )
+    assert len(wired) == 18  # 6 machines x 3 hatches
+    assert len(set(wired)) == 18
+
+
+def test_a_draw_needing_too_many_hatches_is_supplied_at_a_higher_tier() -> None:
+    # TEMPORARY workaround (adapter.power._supply_tier): 200 EU/t at LV would want seven hatches,
+    # which is a symptom of an upstream tier error rather than a real build. The layout supplies
+    # it at MV instead, where one hatch carries it - what a player would do.
+    ir = to_input_ir(_powered_plan(200.0), physical=_hatched_dataset())
+    machine = ir.machines[0]
+    assert machine.voltage_tier == "MV"
+    assert _hatches(ir, "n0") == ["power:in"]
+    assert {n.id for n in _power_nets(ir)} == {"power:MV"}
+
+
+def test_the_tier_upgrade_does_not_touch_the_recipes_draw() -> None:
+    # It changes only the voltage the layout supplies. A real tier change also re-overclocks,
+    # moving both eut and the parallel count, which only the exporter can do - so eut is left
+    # exactly as the export stated it, and the workaround stays honest about what it did.
+    ir = to_input_ir(_powered_plan(200.0), physical=_hatched_dataset())
+    assert ir.machines[0].eut == 200.0
+
+
+def test_a_machine_too_small_to_host_its_hatches_is_left_for_the_validator() -> None:
+    # Allocation is not capped by the free cells: giving it fewer hatches than its draw needs
+    # would under-size the feed and certify a machine that cannot draw its own load. The excess is
+    # reported against hatch_cells by the validator instead.
+    ir = to_input_ir(_powered_plan(60.0), physical=_hatched_dataset(hatch_cells=1))
+    machine = ir.machines[0]
+    assert len(machine.power_input_ports) == 2
+    assert machine.hatch_cells == 1
+
+
+def test_a_node_named_like_a_synthetic_source_is_rejected() -> None:
+    # The synthesis invents source machines with ids of its own; an export node already holding
+    # one would silently collide and give the net two machines under one id. Fail loud instead.
+    plan = Plan(
+        schema_version=1,
+        recipes=[Recipe(id="r", machine_type="M", eut=16.0, outputs=[_resource("item", "x")])],
+        nodes=[Node(id="power-source:LV", recipe_id="r", overclock_tier="LV")],
+    )
+    with pytest.raises(AdapterError, match="collides"):
+        to_input_ir(plan)
+
+
+def test_an_off_ladder_tier_keeps_one_connection_and_its_own_tier() -> None:
+    # A tier that is not on the ladder has no voltage to size hatches or an upgrade against. The
+    # synthesis neither splits nor re-tiers it: the unknown tier is a violation the validator
+    # reports, and guessing here would turn a reported problem into a silently different layout.
+    ir = to_input_ir(_powered_plan(600.0, tier="ZZZ"), physical=_hatched_dataset())
+    machine = ir.machines[0]
+    assert machine.voltage_tier == "ZZZ"
+    assert _hatches(ir, "n0") == ["power:in"]
+
+
+def test_a_draw_no_tier_can_carry_keeps_its_own_tier() -> None:
+    # The upgrade walks the ladder and stops at the first tier needing few enough hatches. A draw
+    # so large that even MAX does not qualify exhausts the ladder, and the machine keeps the tier
+    # the export gave it rather than being silently promoted to MAX for no benefit.
+    ir = to_input_ir(_powered_plan(1e13, tier="UXV"), physical=_hatched_dataset())
+    assert ir.machines[0].voltage_tier == "UXV"
 
 
 def test_unknown_tier_keeps_one_net_for_the_validator_to_report() -> None:

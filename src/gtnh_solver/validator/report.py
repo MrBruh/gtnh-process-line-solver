@@ -68,6 +68,12 @@ class ViolationCode(str, Enum):
     POWER_FEED_NOT_ON_BOUNDARY = (
         "power_feed_not_on_boundary"  # a source's front (feed) face is not on the region boundary
     )
+    HATCH_CELLS_EXCEEDED = (
+        "hatch_cells_exceeded"  # more connections wired to a machine than its structure can host
+    )
+    POWER_SUPPLY_INSUFFICIENT = (
+        "power_supply_insufficient"  # after cable loss, a machine's hatches cannot deliver its EU/t
+    )
 
 
 @dataclass(frozen=True)

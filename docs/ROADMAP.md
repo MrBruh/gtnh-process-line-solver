@@ -27,15 +27,17 @@ test CI; the **IR** contracts (`ir/`); the **adapter** (real gtnh-factory-flow e
 **validator**; and the **`gtnh-solve` CLI**. On top of that, several **Phase 2 slices** have
 shipped: SA + LNS placement over a routing-aware cost with a selectable footprint/volume/balanced
 objective (lane C); **negotiated-congestion routing** for item/fluid nets plus the shared-amperage
-power model (source synthesis, tree trunks, cable voltage-loss sizing, power trunks keeping
-failed-first rip-up/reroute) (lane D); the first slice of the **physical multiblock dataset** (a
-schema-v2 loader and the Electric Blast Furnace / Vacuum Freezer footprints, wired into the solve
-path) plus the **Java extractor** (`tools/gtnh-extractor/`) that regenerates the full dump locally
-on demand (the dump is local-only: never committed, no CI; lane B); the **place<->route feedback
-loop** as a multi-start grid
-(`solver/core.py`); the summed-amperage + voltage-drop half of the validator's power checks
-(lane E); and real GT **textures in the previewer** (sprite resolution now covers every block the
-two shipped example lines place; a third-party tail is still unresolved, see
+power model (source synthesis, tree trunks, cable voltage-loss sizing, **per-hatch power intake**
+so a heavy machine's draw spreads over several 2 A energy hatches and as many cable runs as the
+16x cap needs, power trunks keeping failed-first rip-up/reroute) (lane D); the first slice of the
+**physical multiblock dataset** (a schema-v2 loader and the Electric Blast Furnace / Vacuum
+Freezer footprints, wired into the solve path) plus the **Java extractor** (`tools/gtnh-extractor/`)
+that regenerates the full dump locally on demand (the dump is local-only: never committed, no CI;
+lane B); the **place<->route feedback loop** as a multi-start grid (`solver/core.py`); the
+summed-amperage + voltage-drop half of the validator's power checks, plus the hatch-cell ceiling on
+a machine's connections and the does-enough-power-actually-arrive check (lane E); and real GT
+**textures in the previewer** (sprite resolution now covers every block the two shipped example
+lines place; a third-party tail is still unresolved, see
 [`dataset-extraction/texture-resolution.md`](dataset-extraction/texture-resolution.md)) alongside
 the `system_io` boundary summary feeding both render surfaces (lane F). The full `Added`/`Changed`
 list is in [`../CHANGELOG.md`](../CHANGELOG.md).
@@ -89,10 +91,12 @@ is demonstrably valid-but-bad (too large, unroutable, ugly). This is the recorde
   not a wall-clock timeout).
 - **power** - shared-amperage optimization (Steiner-like summing, thickness sizing, the 16x
   split/upgrade) beyond Phase 1's size-or-reject. Voltage loss is now modelled as a flat
-  1 EU/block; Phase 2 adds **per-material cable loss** and voltage upgrades. Multi-source *count*
-  has landed (a tier past 16x is bin-packed across several sources); what remains is **source
-  placement** driven by loss (a nearer source instead of thickening a too-lossy run) and the
-  parallel-run case for a single machine drawing past 16x on its own.
+  1 EU/block. Multi-source *count* has landed (a tier past 16x is bin-packed across several
+  sources), and so has the **parallel-run case for a single machine drawing past 16x on its own**:
+  power enters through energy hatches that take 2 A each, so the partitioner works in hatches
+  rather than machines and one machine's intake spreads over as many runs as the cap needs. Still
+  open: **source placement** driven by loss (a nearer source instead of thickening a too-lossy
+  run), **per-material cable loss** in place of the flat 1 EU/block, and voltage upgrades.
 - **validator (rule half)** - throughput/tier caps, one-fluid-per-line, and the
   dataset-specific half of face rules, once the physical dataset is real. (The summed-amperage
   and voltage-drop power checks already shipped, independent of the dataset.)
