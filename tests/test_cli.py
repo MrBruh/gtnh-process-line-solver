@@ -2,6 +2,11 @@
 
 Drives ``main`` with argv lists and asserts the exit code (0 valid / 1 infeasible / 2 load
 error) plus what lands on stdout/stderr, against the real fixtures.
+
+Only the two end-to-end tests (sand and nitrobenzene) solve for real. Everything else here is
+about flag plumbing or the 0/1/2 contract, so it takes the ``solve_calls`` fixture: one cached
+real layout plus a record of the keywords the CLI handed the solver. Prefer that fixture for
+anything new, unless the test is genuinely about solving.
 """
 
 from __future__ import annotations
@@ -13,12 +18,46 @@ import pytest
 
 import gtnh_solver.cli as cli_module
 from gtnh_solver import __version__
+from gtnh_solver.adapter import adapt_file
 from gtnh_solver.cli import _load_physical_or_warn, main
 from gtnh_solver.dataset import DatasetError, DatasetMeta, PhysicalDataset
+from gtnh_solver.ir import InputIR, LayoutResult, LayoutStatus
+from gtnh_solver.solver import solve
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 _SAND = str(_EXAMPLES / "gtnh-sand.json")
 _NITROBENZENE = str(_EXAMPLES / "gtnh-nitrobenzene.json")
+
+
+@pytest.fixture(scope="session")
+def sand_layout() -> LayoutResult:
+    """One genuine annealed solve of the sand example, computed once for the whole session.
+
+    A flag test only needs *a* real, valid layout to render a guide or a preview from; re-solving
+    a real line per test is what made this file the slowest in the suite.
+    """
+    layout = solve(adapt_file(_SAND, physical=_load_physical_or_warn()))
+    assert layout.status is LayoutStatus.VALID  # a stand-in for a real solve must itself be real
+    return layout
+
+
+@pytest.fixture
+def solve_calls(
+    monkeypatch: pytest.MonkeyPatch, sand_layout: LayoutResult
+) -> list[dict[str, object]]:
+    """Swap the CLI's solver for a recorder over the cached layout; one dict per call.
+
+    Recording is what keeps the flag tests honest: a ``--seed`` or ``--objective`` the CLI parsed
+    and then quietly dropped would still exit 0, but would not show up here.
+    """
+    calls: list[dict[str, object]] = []
+
+    def recording_solve(problem: InputIR, **kwargs: object) -> LayoutResult:
+        calls.append(kwargs)
+        return sand_layout
+
+    monkeypatch.setattr(cli_module, "solve", recording_solve)
+    return calls
 
 
 def test_cli_solves_sand_and_prints_guide(capsys: pytest.CaptureFixture[str]) -> None:
@@ -30,7 +69,9 @@ def test_cli_solves_sand_and_prints_guide(capsys: pytest.CaptureFixture[str]) ->
     assert "## Power" in out  # the synthesized power network shows up in the guide
 
 
-def test_cli_writes_to_output_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_writes_to_output_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
     target = tmp_path / "guide.txt"
     code = main([_SAND, "-o", str(target)])
     assert code == 0
@@ -40,33 +81,50 @@ def test_cli_writes_to_output_file(tmp_path: Path, capsys: pytest.CaptureFixture
     assert str(target) in captured.err  # a confirmation went to stderr
 
 
-def test_cli_seed_is_accepted(capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_seed_is_accepted(
+    capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    # exit 0 alone would still pass if --seed were parsed and then dropped, so pin the value the
+    # CLI actually handed the solver
     assert main([_SAND, "--seed", "3"]) == 0
     assert "# Build guide" in capsys.readouterr().out
+    assert solve_calls[-1]["seed"] == 3
 
 
-def test_cli_fast_flag_skips_optimization(capsys: pytest.CaptureFixture[str]) -> None:
-    # --fast runs the constructive (no-optimize) path; sand is simple enough to stay fully valid
+def test_cli_fast_flag_skips_optimization(
+    capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    # --fast is the CLI's only handle on the constructive path, so what it owns is optimize=False
+    # reaching the solver (that the constructive layout is itself valid for sand is the solver
+    # lane's test_fast_mode_uses_constructive_placement).
     code = main([_SAND, "--fast"])
     assert code == 0
     assert "# Build guide" in capsys.readouterr().out
+    assert solve_calls[-1]["optimize"] is False
 
 
-def test_cli_objective_flag_is_accepted(capsys: pytest.CaptureFixture[str]) -> None:
-    # --objective selects what the optimizer treats as compact; with --fast it is accepted but
-    # ignored (constructive placement is floor-first by construction), which keeps this test fast.
-    assert main([_SAND, "--objective", "volume", "--fast"]) == 0
+def test_cli_objective_flag_is_accepted(
+    capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    # --objective selects what the optimizer treats as compact, so it only means anything on the
+    # optimizing path: assert the choice arrives there, rather than that argparse swallowed it.
+    assert main([_SAND, "--objective", "volume"]) == 0
     assert "# Build guide" in capsys.readouterr().out
+    assert solve_calls[-1]["objective"] == "volume"
+    assert solve_calls[-1]["optimize"] is True
 
 
-def test_cli_rejects_an_unknown_objective(capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_rejects_an_unknown_objective(
+    capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
     with pytest.raises(SystemExit):
         main([_SAND, "--objective", "tiny"])  # argparse rejects values outside the choices
     assert "--objective" in capsys.readouterr().err
+    assert not solve_calls  # rejected at parse time, before any solving work
 
 
 def test_cli_preview_writes_self_contained_html(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
 ) -> None:
     target = tmp_path / "view.html"
     code = main([_SAND, "--preview", str(target)])
@@ -79,7 +137,9 @@ def test_cli_preview_writes_self_contained_html(
     assert "wrote preview" in captured.err
 
 
-def test_cli_guide_and_preview_together(tmp_path: Path) -> None:
+def test_cli_guide_and_preview_together(
+    tmp_path: Path, solve_calls: list[dict[str, object]]
+) -> None:
     guide_file = tmp_path / "guide.txt"
     preview_file = tmp_path / "view.html"
     code = main([_SAND, "-o", str(guide_file), "--preview", str(preview_file)])
@@ -110,9 +170,12 @@ def test_cli_list_dataset_versions_empty(
     assert "no generated dataset versions" in out.err
 
 
-def test_cli_dataset_version_unknown_falls_back(capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_dataset_version_unknown_falls_back(
+    capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
     # An unknown version resolves to an absent data/<v>/multiblocks; the load warns and falls back
-    # to 1x1x1 footprints, so the sand line still solves.
+    # to 1x1x1 footprints instead of failing the run. (That the fallback still solves valid is
+    # test_cli_falls_back_when_dataset_load_fails, which keeps its real solve.)
     code = main([_SAND, "--dataset-version", "does-not-exist"])
     assert code == 0
     assert "physical multiblock dataset unavailable" in capsys.readouterr().err
@@ -154,28 +217,37 @@ def test_cli_partial_invalid_returns_1(tmp_path: Path, capsys: pytest.CaptureFix
     assert "partial_invalid" in err
 
 
-def test_cli_missing_export_arg_returns_2(capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_missing_export_arg_returns_2(
+    capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
     code = main([])
     assert code == 2
     assert "required" in capsys.readouterr().err
+    assert not solve_calls  # the exit-2 paths bail early; they must not solve first
 
 
-def test_cli_file_not_found_returns_2(capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_file_not_found_returns_2(
+    capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
     code = main(["does-not-exist.json"])
     assert code == 2
     assert "could not load" in capsys.readouterr().err
+    assert not solve_calls
 
 
-def test_cli_malformed_export_returns_2(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_malformed_export_returns_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
     bad = tmp_path / "bad.json"
     bad.write_text("{ this is not valid json", encoding="utf-8")
     code = main([str(bad)])
     assert code == 2
     assert "could not load" in capsys.readouterr().err
+    assert not solve_calls
 
 
 def test_cli_unwritable_output_returns_2(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
 ) -> None:
     # an unwritable output path (parent dir missing -> OSError) is reported and exits 2 per the
     # documented 0/1/2 contract, not dumped as a raw traceback (GitHub #39)
@@ -188,7 +260,7 @@ def test_cli_unwritable_output_returns_2(
 
 
 def test_cli_unwritable_preview_returns_2(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
 ) -> None:
     # same guard on the --preview write path
     target = tmp_path / "missing-dir" / "view.html"
@@ -239,7 +311,9 @@ def test_load_physical_returns_the_real_dataset(capsys: pytest.CaptureFixture[st
 
 
 def test_cli_threads_the_dataset_into_the_adapter(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    solve_calls: list[dict[str, object]],
 ) -> None:
     # Prove the wiring: the CLI must hand the loaded physical dataset to adapt_file so multiblocks
     # resolve to real footprints (not the 1x1x1 default the no-arg adapt would give).
