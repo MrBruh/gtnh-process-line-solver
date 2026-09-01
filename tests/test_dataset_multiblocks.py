@@ -146,12 +146,19 @@ def test_lookup_without_a_block_key_is_unchanged(dataset: PhysicalDataset) -> No
 # cosmetics - and mis-sizing DOWNWARD is the dangerous direction.
 
 
-def _tower_doc(heights: Iterable[int], *, output_layers_per_step: int = 1) -> MultiblockDoc:
+def _tower_doc(
+    heights: Iterable[int],
+    *,
+    output_layers_per_step: int = 1,
+    kinds: list[str] | None = None,
+) -> MultiblockDoc:
     """A synthetic parametric tower: one variant per height, 3x3 base, hatch slots up each layer.
 
     ``output_layers_per_step`` models a machine whose "output layer" spans several block layers (the
-    Mega Distillation Tower's is a 5-block band), which is what must NOT be selected on.
+    Mega Distillation Tower's is a 5-block band), which is what must NOT be selected on. ``kinds``
+    widens what each slot accepts, for tests that need energy-capable cells.
     """
+    slot_kinds = kinds if kinds is not None else ["OutputHatch"]
     variants = []
     for h in heights:
         blocks = [
@@ -161,7 +168,7 @@ def _tower_doc(heights: Iterable[int], *, output_layers_per_step: int = 1) -> Mu
             for z in range(3)
         ]
         slots = [
-            {"d": [1, y, 1], "kinds": ["OutputHatch"]}
+            {"d": [1, y, 1], "kinds": slot_kinds}
             for y in range(1, h)
             if (y - 1) % output_layers_per_step == 0 or output_layers_per_step == 1
         ]
@@ -237,6 +244,50 @@ def test_a_dump_without_hatch_slots_keeps_the_old_behaviour() -> None:
     assert record.footprint_for(4) == CellBox(sx=3, sy=5, sz=3)  # the largest form
 
 
+def test_hatch_counts_come_from_the_selected_form_not_the_largest() -> None:
+    """A form's hatch ceiling is its own, not the tallest form's.
+
+    ``_tower_doc`` puts one slot per layer above the base, so a height-h tower has h-1 cells. The
+    record-level count stays the largest form's (it describes ``footprint``); reading a reserved
+    form's ceiling goes through ``variant_for``.
+    """
+    record = to_physical(_tower_doc(range(3, 13)))
+    assert record.hatch_cells == 11  # the 12-tall form, which `footprint` also describes
+
+    small = record.variant_for(1)
+    assert (small.footprint, small.hatch_cells) == (CellBox(sx=3, sy=3, sz=3), 2)
+    mid = record.variant_for(5)
+    assert (mid.footprint, mid.hatch_cells) == (CellBox(sx=3, sy=6, sz=3), 5)
+    # Past every form's capacity the largest is still the answer, counts included.
+    assert record.variant_for(99).hatch_cells == 11
+
+
+def test_energy_hatch_budget_is_charged_against_the_reserved_form() -> None:
+    # The budget is a ceiling on power connections, so taking it from a taller form than the one
+    # the builder raises would certify a machine with more energy hatches than it has cells.
+    record = to_physical(_tower_doc(range(3, 13), kinds=["OutputHatch", "Energy"]))
+    assert record.energy_hatch_budget(fluid_outputs=1) == 2  # the 3-tall form has 2 cells
+    assert record.energy_hatch_budget(fluid_outputs=5) == 5  # the 6-tall form has 5
+    assert record.energy_hatch_budget(routed_ports=3, fluid_outputs=5) == 2  # buses take theirs
+
+
+def test_every_dumped_controller_agrees_on_which_form_it_reserved(
+    dataset: PhysicalDataset,
+) -> None:
+    """The footprint and the hatch counts must never describe different built forms.
+
+    The invariant this lane exists to establish, asserted over the whole dump rather than one
+    machine: whatever ``footprint_for`` reserves, ``variant_for`` returns the shape of, so a caller
+    cannot pick up one form's box and another form's ceiling.
+    """
+    for name, record in dataset.machines.items():
+        for fluid_outputs in range(0, 13):
+            shape = record.variant_for(fluid_outputs)
+            assert shape.footprint == record.footprint_for(fluid_outputs), name
+            assert shape.hatch_cells >= shape.energy_hatch_cells, name
+            assert shape.hatch_cells >= shape.upkeep_hatch_count, name
+
+
 def test_adapter_sizes_a_tower_from_the_recipes_fluid_outputs() -> None:
     """End to end: two recipes on the same machine type get different reserved heights."""
     dataset = PhysicalDataset(
@@ -255,6 +306,10 @@ def test_adapter_sizes_a_tower_from_the_recipes_fluid_outputs() -> None:
         )
         machine = next(m for m in to_input_ir(plan, physical=dataset).machines if m.id == "n")
         assert machine.footprint.sy == expected_height, f"{fluids} fluid outputs"
+        # The hatch ceiling must describe the SAME form. _tower_doc gives a height-h tower h-1
+        # slots, so a 3-tall tower has 2 cells and a 6-tall one 5; before this was fixed both were
+        # charged the 12-tall form's 11, a ceiling the reserved shape cannot host.
+        assert machine.hatch_cells == expected_height - 1, f"{fluids} fluid outputs"
 
 
 # --------------------------------------------------------------- interpretation branches

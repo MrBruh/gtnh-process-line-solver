@@ -181,9 +181,10 @@ def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> Input
             )
         block_key = _block_key_for(recipe, resolved_machines.get(node.id))
         record = physical.get(recipe.machine_type, block_key=block_key) if physical else None
-        footprint = _footprint_for(
-            recipe.machine_type, physical, block_key, _fluid_output_count(recipe)
-        )
+        # One fluid-output count drives both the reserved shape and its hatch ceiling, so the two
+        # cannot describe different built forms of the same machine.
+        fluid_outputs = _fluid_output_count(recipe)
+        footprint = _footprint_for(recipe.machine_type, physical, block_key, fluid_outputs)
         machines.append(
             Machine(
                 id=node.id,
@@ -192,7 +193,11 @@ def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> Input
                 footprint=footprint,
                 # None without a dataset record: no structural ceiling is known, so the power
                 # synthesis keeps such a machine on one connection (see adapter.power).
-                hatch_cells=record.hatch_cells or None if record is not None else None,
+                hatch_cells=(
+                    record.variant_for(fluid_outputs).hatch_cells or None
+                    if record is not None
+                    else None
+                ),
                 faces=FaceSpec(ports=_recipe_ports(recipe, node)),
                 voltage_tier=node.overclock_tier,
                 # A non-square multiblock is pinned to one orientation until occupied_cells rotates.

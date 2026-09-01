@@ -785,6 +785,18 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   optimizer/graph work actually needs them (see `docs/ROADMAP.md`).
 
 ### Fixed
+- **A machine's hatch ceiling now describes the form it actually reserves (`dataset/`, `adapter/`).**
+  `footprint_for` sizes a parametric machine to its recipe (a Distillation Tower with one fluid
+  output reserves 3x3x3, not 3x12x3), but the hatch counts were always taken from the largest
+  variant, so the two described different buildings. The Creosote Oil tower on the nitrobenzene line
+  reserves 3x6x3 and was charged the 3x12x3 form's **97** hatch cells against its own **49**, a
+  ceiling twice the shape the builder is told to raise. Today that only loosens a validator bound;
+  once hatch slots carry geometry it would place hatches outside the reserved box, so it is fixed
+  ahead of that work. `MachinePhysical.variant_for(fluid_outputs)` is now the single selection
+  point, `footprint_for` and `energy_hatch_budget` both read through it, and the counts ride on
+  `VariantShape` per built form. The record-level counts stay as the form `footprint` describes, for
+  a fixed-shape machine and a pre-v2 dump with no variants. No shipped example loses headroom: the
+  nitrobenzene tower needs 7 connections against its own 49.
 - **The extractor no longer discards legitimately parametric multiblocks
   (`tools/gtnh-extractor/`, GitHub #98).** `MAX_VARIANTS = 6` rejected 16 of 191 controllers
   outright, including the Distillation Tower, Assembly Line, Cleanroom and Lapotronic

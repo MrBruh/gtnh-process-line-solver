@@ -88,6 +88,27 @@ class VariantShape:
 
     footprint: CellBox
     output_layers: int
+    #: How many cells of *this* form accept a hatch of any kind. Per form, not per machine: a
+    #: Distillation Tower built 3x6x3 has its own count, and charging it the 3x12x3 form's would
+    #: let the solver wire more connections onto it than the shape it reserved can host.
+    hatch_cells: int = 0
+    #: How many of this form's cells accept an ``Energy`` hatch specifically.
+    energy_hatch_cells: int = 0
+    #: How many upkeep hatches (maintenance, muffler) this form accepts, and so needs one each of.
+    upkeep_hatch_count: int = 0
+
+    def energy_hatch_budget(self, routed_ports: int = 0) -> int:
+        """Cells left for energy hatches once ``routed_ports`` item/fluid connections and this
+        form's upkeep hatches have taken theirs.
+
+        The binding limit is the *shared* pool of casing cells, not the ``Energy`` count alone: an
+        input bus and an energy hatch compete for the same cell. Returns 0 when the dump recorded
+        no hatch slots, which callers read as "unknown, impose no ceiling" rather than "none".
+        """
+        if not self.hatch_cells:
+            return 0
+        free = self.hatch_cells - self.upkeep_hatch_count - routed_ports
+        return max(0, min(self.energy_hatch_cells, free))
 
 
 @dataclass(frozen=True)
@@ -127,6 +148,10 @@ class MachinePhysical:
     #: hatch, a maintenance hatch **or an energy hatch**. This is that count - the ceiling on the
     #: machine's total connections. 0 when the dump recorded no hatch slots (a pre-v2 dump), which
     #: reads as "unknown", not "accepts none".
+    #:
+    #: Describes the same form :attr:`footprint` does. A machine that reserves a *smaller* form for
+    #: its recipe has fewer cells than this, so read the count off :meth:`variant_for` rather than
+    #: here whenever a ``fluid_outputs`` is in hand.
     hatch_cells: int = 0
     #: How many of those cells accept an ``Energy`` hatch specifically. Usually equal to
     #: :attr:`hatch_cells` (a cell that takes any hatch generally takes a power one), but recorded
@@ -136,18 +161,13 @@ class MachinePhysical:
     #: of. Cells they occupy cannot carry routed I/O, so the budget subtracts them.
     upkeep_hatch_count: int = 0
 
-    def energy_hatch_budget(self, routed_ports: int = 0) -> int:
-        """Cells left for energy hatches once ``routed_ports`` item/fluid connections and the
-        machine's upkeep hatches have taken theirs.
+    def energy_hatch_budget(self, routed_ports: int = 0, fluid_outputs: int = 0) -> int:
+        """:meth:`VariantShape.energy_hatch_budget` for the form this recipe reserves.
 
-        The binding limit is the *shared* pool of casing cells, not the ``Energy`` count alone: an
-        input bus and an energy hatch compete for the same cell. Returns 0 when the dump recorded
-        no hatch slots, which callers read as "unknown, impose no ceiling" rather than "none".
+        ``fluid_outputs`` selects the form, exactly as :meth:`footprint_for` does, so the budget is
+        always charged against the shape the builder is actually told to raise.
         """
-        if not self.hatch_cells:
-            return 0
-        free = self.hatch_cells - self.upkeep_hatch_count - routed_ports
-        return max(0, min(self.energy_hatch_cells, free))
+        return self.variant_for(fluid_outputs).energy_hatch_budget(routed_ports)
 
     @property
     def is_layer_indexed(self) -> bool:
@@ -171,6 +191,41 @@ class MachinePhysical:
                 return False
         return self.variants[0].output_layers > 0
 
+    def variant_for(self, fluid_outputs: int = 0) -> VariantShape:
+        """The built form this recipe reserves: the smallest that can route ``fluid_outputs``
+        fluids, else the form :attr:`footprint` describes.
+
+        **The single selection point.** Footprint and hatch counts must come from the same form or
+        they describe different buildings: a Distillation Tower reserved 3x6x3 used to be charged
+        the 3x12x3 form's 97 hatch cells, a ceiling twice its own, which with geometric hatch slots
+        would place hatches outside the box the builder was told to raise.
+        """
+        if self.variants and self.is_layer_indexed:
+            for shape in self.variants:  # smallest first
+                if shape.output_layers >= fluid_outputs:
+                    return shape
+            return self.variants[-1]
+        return self._primary_shape()
+
+    def _primary_shape(self) -> VariantShape:
+        """The form :attr:`footprint` describes, with that form's own hatch counts.
+
+        Looked up by footprint rather than by index because :attr:`footprint` comes from the variant
+        with the most blocks while :attr:`variants` is ordered by volume; those agree for every
+        machine in the dump but nothing guarantees it. Falls back to the record's own counts, which
+        is the path a hand-built record and a pre-v2 dump (no variants at all) take.
+        """
+        for shape in self.variants:
+            if shape.footprint == self.footprint:
+                return shape
+        return VariantShape(
+            footprint=self.footprint,
+            output_layers=0,
+            hatch_cells=self.hatch_cells,
+            energy_hatch_cells=self.energy_hatch_cells,
+            upkeep_hatch_count=self.upkeep_hatch_count,
+        )
+
     def footprint_for(self, fluid_outputs: int = 0) -> CellBox:
         """The smallest built form that can route ``fluid_outputs`` fluids, else the largest form.
 
@@ -179,14 +234,7 @@ class MachinePhysical:
         cannot read, or a pre-v2 dump with no hatch data - keeps the previous behaviour of the
         largest form.
         """
-        if not self.variants:
-            return self.footprint
-        if not self.is_layer_indexed:
-            return self.footprint
-        for shape in self.variants:  # smallest first
-            if shape.output_layers >= fluid_outputs:
-                return shape.footprint
-        return self.variants[-1].footprint
+        return self.variant_for(fluid_outputs).footprint
 
     @property
     def block_key(self) -> str:
@@ -273,6 +321,20 @@ def _hint_faces(
     return frozenset(faces)
 
 
+def _hatch_counts(variant: Variant) -> tuple[int, int, int]:
+    """``(hatch_cells, energy_hatch_cells, upkeep_hatch_count)`` for one built form.
+
+    Shared by :func:`to_physical` and :func:`_variant_shapes` so a form's counts cannot drift from
+    the counts recorded against the machine as a whole.
+    """
+    slots = variant.hatch_slots
+    return (
+        len(slots),
+        sum(1 for s in slots if _ENERGY_HATCH in s.kinds),
+        sum(1 for kind in _UPKEEP_HATCHES if any(kind in slot.kinds for slot in slots)),
+    )
+
+
 def _primary_variant(doc: MultiblockDoc) -> Variant:
     """The variant that stands for the machine's footprint: the largest built form.
 
@@ -299,6 +361,7 @@ def to_physical(doc: MultiblockDoc) -> MachinePhysical:
             f"{variant.bbox} (a bad scan bound or facing bug in the extractor)"
         )
     footprint = CellBox(sx=size[0], sy=size[1], sz=size[2])
+    hatch_cells, energy_hatch_cells, upkeep_hatch_count = _hatch_counts(variant)
 
     coil_blocks = {(s.block, s.meta) for s in doc.substitutions.get(_COIL_CHANNEL, [])}
     coil_layers = {
@@ -317,11 +380,9 @@ def to_physical(doc: MultiblockDoc) -> MachinePhysical:
         coil_layer_count=len(coil_layers),
         variant_count=len(doc.variants),
         variants=_variant_shapes(doc),
-        hatch_cells=len(variant.hatch_slots),
-        energy_hatch_cells=sum(1 for s in variant.hatch_slots if _ENERGY_HATCH in s.kinds),
-        upkeep_hatch_count=sum(
-            1 for kind in _UPKEEP_HATCHES if any(kind in slot.kinds for slot in variant.hatch_slots)
-        ),
+        hatch_cells=hatch_cells,
+        energy_hatch_cells=energy_hatch_cells,
+        upkeep_hatch_count=upkeep_hatch_count,
     )
 
 
@@ -338,10 +399,14 @@ def _variant_shapes(doc: MultiblockDoc) -> tuple[VariantShape, ...]:
         output_layers = {
             slot.d[1] - min_corner[1] for slot in variant.hatch_slots if _OUTPUT_HATCH in slot.kinds
         }
+        hatch_cells, energy_hatch_cells, upkeep_hatch_count = _hatch_counts(variant)
         shapes.append(
             VariantShape(
                 footprint=CellBox(sx=size[0], sy=size[1], sz=size[2]),
                 output_layers=len(output_layers),
+                hatch_cells=hatch_cells,
+                energy_hatch_cells=energy_hatch_cells,
+                upkeep_hatch_count=upkeep_hatch_count,
             )
         )
     return tuple(sorted(shapes, key=lambda s: s.footprint.sx * s.footprint.sy * s.footprint.sz))
