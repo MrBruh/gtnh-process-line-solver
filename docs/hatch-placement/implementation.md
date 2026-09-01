@@ -29,6 +29,31 @@ This is what `docs/ARCHITECTURE.md` decision 4 exists to prevent.
 Lane 1 must give the validator its own expansion, derived independently. "Independently" means
 written from the dataset's stated convention, not copied from `ir/geometry.py`.
 
+**Decided 2026-09-01: the rule forbids sharing the derivation, not the data.** `FACE_DELTAS` and
+`OPPOSITE_FACE` are rule data (six unit vectors, six pairs) and stay shared; the precedent is
+already set and documented at `validator/core.py:613-619`, where the amperage check deliberately
+shares `tier_voltage` and `CABLE_LOSS_PER_BLOCK` with the router so the rounding *policy* cannot
+drift. `in_region` is a derivation and gets duplicated. The validator's own expansion is one
+function, roughly 10 to 15 lines (`body_cells(cell, footprint, orientation) -> set[Cell]`), plus six
+one-line call-site edits: all six of its current uses reduce to "the set of world cells this placed
+machine's body occupies", and none needs an iterator, an order or a count.
+
+Note `_check_auto_connections` already re-derives adjacency inline rather than importing
+`auto_output_faces` (`validator/core.py:518-522`). That is the pattern to follow.
+
+**The convention to write it from**, byte-identical across all 208 dumps:
+
+> `controller front = NORTH (-Z), ExtendedFacing NORTH_NORMAL_NONE; offsets d = [dx,dy,dz]`
+> `world-space deltas from the controller block`
+
+Offsets are deltas from the **controller block**, not from the bounding box's minimum corner, so
+they can be negative (the Coke Oven's `[-1,0,0]`). **Decided 2026-09-01: rotation preserves the
+min-corner anchor.** Rotate the cells, then re-anchor so the minimum corner lands on `origin`,
+exactly as `previewer/textures.py:_place_blocks` already does. Anything else moves every pinned cell
+in the suite, including for square-base machines. Whatever the validator gets must re-anchor the
+same way, or solver and validator disagree by a translation for every machine whose controller is
+not at its own minimum corner.
+
 ### 0.2 Recorded hatch kinds are a lower bound, never a hard constraint
 
 The dump's per-cell `kinds` come from asking the structure element what it would accept. An adder
@@ -50,6 +75,24 @@ acceptance tests pin.
 Re-derive the expected numbers and update the assertions. Do **not** loosen an exact-cell assertion
 into a range to make a lane green. If a pinned metric gets worse, that is a finding to report, not a
 test to relax.
+
+**Decided 2026-09-01: stop and show the diff before changing any pinned value.** Report the before,
+the after, and which of the two causes below it was. Do not re-baseline silently, and note that
+`cables <= 3` (`test_solver.py:87, 99, 111`) has **zero** headroom, so one extra cable cell fails
+three tests at once.
+
+**The two causes are not the same thing, and lane 1's are not what this section originally implied.**
+Measured: neither shipped example contains a non-square-base machine, so removing the
+`_orientations_for` pin is a behavioural no-op for sand and nitrobenzene. The 81-of-208 figure is
+real for the dataset but unreachable from either fixture. What actually moves sand is that making
+`occupied_cells` orientation-aware forces the orientation to be chosen *before* the cells are tested
+in `_relocate`, `_swap` and `_best_insertion` (all three test cells first today), which reorders
+`random.Random` draws and therefore the accepted moves.
+
+So: a layout change traceable to RNG reordering is an expected re-baseline; a layout change on a
+square-base-only example that is *not* traceable to it is a regression. If the orientation-first
+refactor can keep draw order identical for square-base machines, sand need not move at all, and any
+movement then becomes a regression signal for free.
 
 ### 0.4 The usual gates
 
@@ -137,6 +180,41 @@ in a different world cell per facing.
 - **Expect**: acceptance-test churn per 0.3. The sand line's 5x1x2 and the per-objective pins are
   the ones to watch.
 - **Size**: the largest mechanical lane. Comparable to `3cfc31c` (24 files, +1601/-113).
+
+### 3.1 Sites a survey found that the reference counts miss
+
+The "62 references" is 51 in code plus 11 in prose, and the 22 footprint reads miss 8 more that go
+through an `fp = ...footprint` alias. More importantly, four sites need work and appear in **neither**
+count. Treat these as first-class checklist items:
+
+- **`_reorient` (`placement/search.py:542-564`) performs no geometry check at all.** It picks a
+  machine, picks a facing, and returns. Correct today because rotation is a no-op; after this lane a
+  reorient of a non-cubic machine can overlap a neighbour, leave the region or land on a reserved
+  cell, breaking the annealing loop's stated invariant that every accepted state is
+  overlap/bounds/reserved-clean (`placement/search.py:39-41`). **This is the most likely place for
+  the lane to introduce a silently-invalid accepted state.**
+- **`_apply_occupied_delta` (`:245-269`)** keys `before_cell` by `machine_id -> cell` and guards on
+  `old_cell != new_p.cell`. A reorient changes the occupied set without changing the cell, so the key
+  must become `(cell, orientation)` and the guard must fire on an orientation change. Miss it and the
+  incremental occupied set drifts out of sync for the rest of the anneal.
+- **`_rand_origin` (`:779-787`)** bounds the origin with `fp.sx/sy/sz` against the region. Under
+  rotation the extents swap, so it both hands out origins a machine cannot fit at and consumes RNG
+  against the wrong bound. Callers (`_relocate:486`, `_candidate_origins:773`) have no orientation
+  chosen at that point, so this is real plumbing: pass one in, or return `(origin, orientation)`.
+- **`_free_origins` (`placement/constructive.py:126`)** decides which origins are free with no
+  orientation in scope, and `_fit` applies `orientation_options[0]` afterwards. For a non-cubic
+  machine "is this origin free" is unanswerable without an orientation. `_fit` has a second caller
+  (`search._best_insertion:683`), so a signature change ripples.
+
+**The 17 lines that go silently wrong under rotation** (bounding boxes, floor areas, volumes,
+centroids and fit tests, none of which raise): `ir/geometry.py:129,133`;
+`placement/search.py:365,367,369,424-426,701-703,781,784-786`; `previewer/scene.py:66-68,226`.
+`ir/geometry.py:129` and `:133` are the sharpest: `front_on_boundary` already takes the facing and
+simply does not use it when measuring depth.
+
+Genuinely orientation-invariant, and worth a comment so nobody "simplifies" them into bugs:
+`adapter/core.py:462-464` (`_bounding_region` runs before any orientation exists and is written
+symmetrically), `dataset/multiblocks.py:170,347` (y-only, and a volume product).
 
 The dataset's convention, for the independent implementation: *controller front = NORTH (-Z),
 ExtendedFacing NORTH_NORMAL_NONE; offsets `d = [dx,dy,dz]` are world-space deltas from the
@@ -243,17 +321,84 @@ never routed and therefore have nothing to repair against.
 
 ## 7. Lane 5: hatch textures
 
-**De-risk 7.1 before committing to a schedule for this lane.** It is the largest unknown in the
-whole body of work, and its fallback changes the cost of the dataset rather than the previewer.
+**7.1 was this plan's largest unknown. It is now settled: splice, do not re-dump (2026-09-01).**
 
-**7.1 Vertical facing cannot be expressed today.** `_rotate_side` (`previewer/textures.py:330-331`)
-permutes the four horizontal sides and returns UP and DOWN unchanged, and the extractor pins
-`aFacing` to NORTH when dumping (`TextureDumper.java:474-475`). Vertical facings are not an edge
-case: 75% of sand's terminals and 17% of nitrobenzene's are vertical. Two routes:
+`_rotate_side` (`previewer/textures.py:330-331`) permutes only the four horizontal sides and returns
+UP and DOWN unchanged, and the extractor pins `aFacing` to NORTH when dumping
+(`TextureDumper.java:474-475`). Vertical facings are not an edge case: 75% of sand's terminals and
+17% of nitrobenzene's are vertical.
 
-- **Splice**: background from the target side's own layer 0, overlay from NORTH's layers 1..n. Cheap,
-  but it must be checked against ME stocking buses and GT++ hatches before it is generalised.
-- **Re-dump across six facings**: correct by construction, roughly 6x the manifest volume.
+**Why the splice is exact rather than approximate.** `MTEHatch.getTexture`
+(`MTEHatch.java:55-80`) computes its background without referencing either `side` or `aFacing`; the
+only use of facing in the entire method is the equality test `side != aFacing`. So
+
+```
+getTexture(side, facing) = bg(side)                      if side != facing
+                         = [bg(side)] ++ overlays(state) if side == facing
+```
+
+with both halves facing-invariant. The per-side variation lives one level down, inside a single
+sided `ITexture` whose six-icon array the extractor already unwraps
+(`TextureDumper.java:508-517`), so the manifest's layer 0 for side S **is** `bg(S)`, correctly
+resolved. A six-facing re-dump would write byte-identical stacks.
+
+Verified rather than assumed. Across the whole monorepo exactly two classes in the 92-class
+`MTEHatch` hierarchy override `getTexture`, and one is a no-op `super()` delegation
+(`MTEHatchTFFT.java:76-79`). ME stocking buses, GT++ hatches and TecTech multi-amp hatches override
+only `getTexturesActive`/`getTexturesInactive`, making them the simplest case rather than the
+exception the spike feared. Empirically, across all 500 hatch entries x 2 states: zero non-front
+sides with more than one layer, zero front stacks whose layer 0 differs from the horizontal
+background, zero missing side/state keys.
+
+**Two corrections to what section 5 of `plan.md` says.**
+
+- The "roughly 6x the manifest volume" figure is overstated by about 3.5x. Hatches are 1.97 MB of an
+  11.70 MB `blocks` payload, so a naive re-dump is 1.69x the whole file and a front-only re-dump
+  1.21x. Size was never the deciding argument anyway; redundancy is.
+- **Not all five non-front sides share a background.** UP and DOWN differ from the four horizontals
+  in **500 of 500** hatch entries (`MACHINE_LV_TOP`/`_BOTTOM` vs `_SIDE`). An implementation that
+  took the background from SOUTH would be wrong on every hatch in the pack. This is precisely why a
+  vertical facing needs the target side's own layer 0.
+
+**The rule.** Applies to hatches only; gate on the hatch set, because `MTEBasicMachine` descendants
+have genuine per-side overlays and are dumped through a different code path
+(`TextureDumper.java:444-467`).
+
+```
+FRONT_IN_DUMP = "NORTH"                     # TextureDumper.java:474 pins aFacing
+
+def hatch_layers(manifest, block, meta, render_side, facing, state):
+    own = manifest.layers(block, meta, render_side, state)   # target side's OWN stack
+    if not own:
+        return []
+    background = own[0]                     # whole layer dict: icon + rgba + glow
+    if render_side != facing:
+        return [background]                 # MTEHatch.java:68-69
+    front = manifest.layers(block, meta, FRONT_IN_DUMP, state)
+    return [background] + list(front[1:])   # MTEHatch.java:70-75, same state on both reads
+```
+
+Implementation notes:
+
+- **Do not re-rotate.** For a hatch, replace the `_rotate_side(side, -cube.steps)` mechanism in
+  `_face_icons` (`previewer/textures.py:461-480`) entirely: pass world-space `render_side` and the
+  hatch's own world-space `facing`. The yaw applies to the hatch's facing, not to the side lookup.
+- **The pool key must gain the facing.** It is `f"{block}|{meta}|{side}|{state}"` today. Without the
+  facing, an UP-facing and a NORTH-facing hatch of the same type collide in the texture pool and one
+  silently gets the other's bake. **This is the one place the change can go quietly wrong.**
+- `front[1:]` is safe: the front stack's layer 0 equals the horizontal background in 500/500 entries
+  at both states, so the slice never eats an overlay.
+- No schema change. The texture manifest is read untyped in `textures.py`; `dataset/schema.py` does
+  not model it.
+- Free win: the same rule fixes horizontal facings, which are wrong today whenever a hatch faces
+  differently from its machine.
+
+**Three fidelity limits that cost the same either way**, so they are separate issues and not
+arguments for re-dumping: `.extFacing()` overlay *rotation* is not captured by the manifest's layer
+record at all (it selects a rotation, never a different icon, so the splice picks the right sprite
+and may draw it turned); the extractor dumps *unattached* hatches, so a bus on a Coke Oven renders
+with its tier casing rather than the controller's skin (`updateTexture` only runs when a hatch joins
+a formed multiblock); and colorization is dumped unpainted, which is correct for an unpainted build.
 
 **7.2 Per-cube facing.** `BlockCube` carries one `steps` for the whole machine's yaw. A hatch needs
 its own.
