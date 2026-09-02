@@ -546,13 +546,14 @@ hatches have facings. It belongs in the assignment lane, not before it.
 
 ## 11. Where this stands (2026-09-02)
 
-**Lanes 0 to 4 are done; lane 5 (textures) is all that remains of the plan.** The suite is at 500
-tests and 98% coverage. Both shipped examples solve VALID and validate clean, and nitrobenzene now
-places 45 real hatches - a cell, a facing and a `HatchElement` kind each.
+**Every lane of this plan has landed.** Both shipped examples solve VALID and validate clean;
+nitrobenzene places 45 real hatches - a cell, a facing and a `HatchElement` kind each - and each
+one renders as the GT block it actually is, at its own facing, vertical facings included.
+What is left over is small and listed in 11.2.
 
 ### 11.1 Landed
 
-Five lanes are on `main`, each merged after a full green run of the gates.
+All six lanes are on `main`, each merged after a full green run of the gates.
 
 | Lane | Commit | What it did |
 |---|---|---|
@@ -561,6 +562,7 @@ Five lanes are on `main`, each merged after a full green run of the gates.
 | 2 | `5e436f5` | Hatch slots reach the IR; a layout records every placed hatch (`LayoutResult` v1) |
 | 3 | `37ef490` | Item and fluid docking is route-aware; `dock()` is gone (section 2.1) |
 | 4 | `813c293`, `cfb7078` | Docking is slot-driven and kind-filtered, casing cells are one shared pool, and every hatch is emitted with its cell and facing |
+| 5 | (this lane) | Hatches render as their real GT block at their own facing, vertical ones included (section 5) |
 
 What that leaves in place for the assignment lane:
 
@@ -575,19 +577,30 @@ What that leaves in place for the assignment lane:
   port's terminal.
 - Every hatch is emitted now: routed, auto-output and upkeep alike. Nitrobenzene places 45.
 
-### 11.2 What to do next
+### 11.2 What is left over
 
-**Lane 5** of [`implementation.md`](implementation.md): the hatch textures. Everything it needs now
-exists - a hatch has a real cell, a real facing and a real `HatchElement` kind - and section 7.1's
-splice rule is already settled and written down. Its own open items are unchanged: the committed
-manifest carries no hatch entries (issue #98's a/b fork), `BlockCube` carries one yaw for a whole
-machine where a hatch needs its own, the maintenance hatch's states are inverted, `previewer/scene`
-drops `port_id`, and the `TextureDumper` line to fix is shared with issue #105.
+Nothing in this plan is outstanding. Five things it touched are worth someone's attention, none of
+them blocking, all recorded where the work is:
 
-Lane 4's own leftovers are small and listed in [`implementation.md` 6.3](implementation.md):
-nothing yet checks that every port *has* a hatch, and `ir.geometry.auto_output_faces` is now only
-the placement cost's (looser) rule. 4c, the legalize-and-repair step, was not built and turned out
-not to be needed - 6.1 explains why.
+1. **Nothing checks that every port HAS a hatch** ([`implementation.md` 6.3](implementation.md)).
+   Emission gives every port on a dumped machine one and a test asserts it end to end on both
+   shipped lines, but the validator does not, so a producer that dropped one would not be caught.
+   Needs the ME-toggled and unrouted-port cases thought through first.
+2. **`ir.geometry.auto_output_faces` is now only the placement cost's rule.** It models the loose
+   "any touching body cell" adjacency, which is right as a soft reward but is no longer what the
+   router does, so placement is still rewarded for adjacencies routing will refuse.
+3. **The `footprint` objective can be beaten at its own metric by the `volume` objective** (126
+   against 154 on nitrobenzene). A multi-start grid artifact, unrelated to hatches, unscheduled.
+4. **Three texture-fidelity limits stand** ([`implementation.md` 7.7](implementation.md)):
+   `.extFacing()` overlay *rotation* is not in the manifest's layer record, the extractor dumps
+   *unattached* hatches (so a bus wears its tier casing rather than the controller's skin), and
+   colorization is dumped unpainted. All three cost the same under a re-dump.
+5. **Issue #106**, the power router never checking a machine's intake, found while landing lane 3.
+
+Section 9 of [`implementation.md`](implementation.md) is the definition of done; items 1 to 8 hold.
+Item 9 - the build guide emitting the fluid-lock and item-lock configuration - is **not** done and
+is deliberately parked: the text build guide is on hold per the maintainer's 2026-07-01 priority,
+and `plan.md` section 1.6 explains why a deterministic build eventually needs it.
 
 ### 11.3 Things learned since the spike that are not in sections 1 to 9
 

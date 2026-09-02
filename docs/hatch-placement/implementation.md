@@ -7,8 +7,8 @@ plan implements are `plan.md` section 10, and they are not re-argued here.
 **Read before starting any lane:** section 0 below. Two of its rules exist to prevent a failure mode
 that validates clean and cannot be built.
 
-Status: lanes 0 to 3 have landed, and lane 4 all but its repair step (4c). Next is lane 5
-(section 7), with 4c reassessed in 6.1.
+Status: **every lane has landed.** 0 to 3, lane 4 all but its repair step (4c, which dissolved -
+see 6.1), and lane 5. What is left over is in 6.3 and 7.7.
 
 ---
 
@@ -469,6 +469,8 @@ regression, and it is unscheduled.
 
 ## 7. Lane 5: hatch textures
 
+**[Landed 2026-09-02.]** What each sub-step turned into is in 7.7.
+
 **7.1 was this plan's largest unknown. It is now settled: splice, do not re-dump (2026-09-01).**
 
 `_rotate_side` (`previewer/textures.py:330-331`) permutes only the four horizontal sides and returns
@@ -571,6 +573,41 @@ should do both, and the two lanes should be sequenced together rather than treat
 The good news, unchanged from `plan.md` section 5: the full local manifest already carries all 465
 hatch and bus MTEs at every real tier, all six sides, both states, with per-kind per-tier overlay
 icons already resolved. No extractor work is needed to *find* them.
+
+### 7.7 What landed, and what the splice needed that 7.1 did not say
+
+| Sub-step | State |
+|---|---|
+| 7.1 the splice, in place of a re-dump | landed, with one correction below |
+| 7.2 per-cube facing | landed (`BlockCube.facing`, plus its own idle/running states) |
+| 7.3 the committed manifest carries hatches | landed, resolved through the previewer's own lookup |
+| 7.4 the inverted maintenance states | landed |
+| 7.5 `scene` drops `port_id` | landed, and the machine now carries its hatch list too |
+| 7.6 coordinate with issue #105 | **not needed**: the splice means the extractor is never touched |
+
+**The rule in 7.1 is right and its prose is not, in one place that matters.** It reads
+"``if render_side != facing: return [background]``" - the *first layer*, not the recorded stack.
+Returning the stack is wrong on exactly one side and it is the side you would not think to check:
+the dump's own NORTH already carries the front overlays, so a hatch facing WEST would still wear
+its sign on whichever side happened to be north. Caught by a test, not by review, and only because
+the test asserted the NORTH face of a WEST-facing hatch.
+
+**Resolution turned out to be the interesting half, and 7.1 does not mention it at all.** Getting
+from "this cell holds an `InputBus`" to "this is `gregtech:gt.blockmachines|73`" cannot go through
+display names: GT spells these two ways ("Input Bus (LV)" against "LV Energy Hatch"), so a name
+rule would need both. The MTE's ``source_class`` is the exact thing ``HatchElement.mteClasses()``
+names, so the join is GT's own, and a subclass (an ME stocking bus, a GT++ hatch) inherits its kind
+the way GT's adders already treat it. Ties break on the shortest display name, which is what picks
+the plain `Maintenance Hatch` over the LuV-gated `Auto Maintenance Hatch` sharing its class.
+
+**A hatch replaces a casing cube; it does not add one.** That is the same fact as "a hatch spends a
+casing cell", seen from the previewer, and getting it wrong would double-occupy the cell.
+
+**Left open.** `.extFacing()` overlay *rotation* is still not captured by the manifest's layer
+record, so a spliced sprite can be drawn turned; the extractor still dumps *unattached* hatches, so
+a bus on a Coke Oven wears its tier casing rather than the controller's skin; and colorization is
+still unpainted. All three cost the same under a re-dump, so they remain separate issues rather
+than arguments against the splice.
 
 ---
 

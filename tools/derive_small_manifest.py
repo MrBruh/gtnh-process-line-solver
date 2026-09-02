@@ -6,6 +6,13 @@ shipped example lines and the two committed multiblock fixtures need, plus the i
 reference, and writes the small committed ``data/textures/manifest.json`` so
 ``gtnh-solve --preview examples/*.json`` skins out of the box. Rerun when the examples change.
 
+**Hatches are kept by resolution, not by name.** A hatch can never match an example machine's name
+("Input Bus (LV)" contains no machine type), so keeping them needs a second rule: for every hatch
+kind at every voltage tier the examples use, ask the previewer's own
+``TextureManifest.hatch_block`` which block it would draw, and keep exactly that. Asking the same
+function the previewer will ask is what guarantees the committed manifest holds precisely what a
+preview looks up, rather than a hand-kept list that drifts from it.
+
 Usage (from the repo root, in the dev venv)::
 
     python tools/derive_small_manifest.py [FULL_MANIFEST]
@@ -23,6 +30,7 @@ from typing import Any
 
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.dataset import list_versions, load_physical_dataset
+from gtnh_solver.previewer.textures import HATCH_KIND_BY_CLASS, TextureManifest
 
 REPO = Path.cwd()
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
@@ -49,14 +57,33 @@ def _find_full_manifest() -> Path:
     )
 
 
-def _example_types() -> set[str]:
-    """Normalized machine-type names the shipped example lines reference."""
+def _example_types_and_tiers() -> tuple[set[str], set[str]]:
+    """Normalized machine-type names and voltage tiers the shipped example lines reference."""
     physical = load_physical_dataset()
     types: set[str] = set()
+    tiers: set[str] = set()
     for example in sorted((REPO / "examples").glob("*.json")):
         for machine in adapt_file(str(example), physical=physical).machines:
             types.add(_norm(machine.type))
-    return types
+            tiers.add(machine.voltage_tier)
+    return types, tiers
+
+
+def _hatch_keys(full: dict[str, Any], tiers: set[str]) -> set[str]:
+    """``"<block>|<meta>"`` for every hatch a preview of the examples could resolve.
+
+    Every ``HatchElement`` kind the solver places, at every tier the examples use, resolved through
+    the previewer's own lookup so the two can never disagree. A kind with no block at all (nothing
+    in the dump implements it) simply contributes nothing.
+    """
+    manifest = TextureManifest(full)
+    keys: set[str] = set()
+    for kind in sorted(set(HATCH_KIND_BY_CLASS.values())):
+        for tier in sorted(tiers):
+            found = manifest.hatch_block(kind, tier)
+            if found is not None:
+                keys.add(f"{found[0]}|{found[1]}")
+    return keys
 
 
 def _fixture_block_keys() -> set[str]:
@@ -83,11 +110,14 @@ def main() -> None:
     if not _is_full(full):
         raise SystemExit(f"{source} looks already pruned, not a full manifest")
 
-    types = _example_types()
+    types, tiers = _example_types_and_tiers()
     fixture_keys = _fixture_block_keys()
+    hatch_keys = _hatch_keys(full, tiers)
     keep: dict[str, Any] = {}
     for key, entry in full["blocks"].items():
-        if entry.get("kind") == "mte":
+        if key in hatch_keys:
+            keep[key] = entry  # a hatch never matches a machine name; see the module docstring
+        elif entry.get("kind") == "mte":
             name = _norm(entry.get("display_name") or "")
             if name and any(t and t in name for t in types):
                 keep[key] = entry
@@ -111,8 +141,9 @@ def main() -> None:
             "coverage": {"blocks": len(keep), "mte": mte_kept, "icons": len(icons), "gaps": 0},
             "note": (
                 "SMALL committed manifest: only the blocks the shipped example lines and the two "
-                "multiblock fixtures need, so `gtnh-solve --preview examples/*.json` skins out of the "
-                "box. The full dump is local and version-namespaced "
+                "multiblock fixtures need - plus every hatch kind at the tiers those lines use, "
+                "since a hatch matches no machine name - so `gtnh-solve --preview examples/*.json` "
+                "skins out of the box. The full dump is local and version-namespaced "
                 "(data/<version>/textures/manifest.json), never committed. Regenerate with "
                 "tools/derive_small_manifest.py."
             ),

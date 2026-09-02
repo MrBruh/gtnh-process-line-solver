@@ -103,7 +103,8 @@ def test_scene_routes_carry_terminals() -> None:
     power = next(r for r in _sand_scene()["routes"] if r["commodity"] == "power")
     assert power["terminals"]  # so the viewer can draw a lead to each machine face
     term = power["terminals"][0]
-    assert set(term) == {"machine", "face", "cell", "thickness"}
+    assert set(term) == {"machine", "port", "face", "cell", "thickness"}
+    assert term["port"]  # which port it serves, so a viewer can tie it to its hatch
     assert len(term["cell"]) == 3
     # every power terminal sizes its lead from a real cable thickness (GitHub #6)
     assert all(t["thickness"] in {1, 2, 4, 8, 12, 16} for t in power["terminals"])

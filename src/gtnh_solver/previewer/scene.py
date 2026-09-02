@@ -2,11 +2,11 @@
 
 The output-layout contract (``LayoutResult``) references machines by id and leaves their
 geometry in the ``InputIR``; a renderer needs it all in one place. ``build_scene`` flattens both
-into a plain dict the three.js viewer can draw with no further lookups (machine boxes, route
-segments coloured by commodity + sized by cable thickness, terminals carrying their incident
-segment's thickness so the wire->machine leads match the trunk they join, auto-output links, the
-region, a legend, and the ``io`` boundary summary - inputs to load, outputs to collect, summed
-power). This
+into a plain dict the three.js viewer can draw with no further lookups (machine boxes, the hatches
+and buses built into each one's casing, route segments coloured by commodity + sized by cable
+thickness, terminals carrying their port and their incident segment's thickness so the
+wire->machine leads match the trunk they join, auto-output links, the region, a legend, and the
+``io`` boundary summary - inputs to load, outputs to collect, summed power). This
 is a *previewer-internal* format - NOT the versioned contract - so the un-testable
 WebGL last mile stays a thin static template while the mapping here is pure and fully tested.
 """
@@ -70,6 +70,17 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
     types = sorted({m.type for m in problem.machines})
     color_for_type = {t: _MACHINE_PALETTE[i % len(_MACHINE_PALETTE)] for i, t in enumerate(types)}
 
+    hatches_by_machine: dict[str, list[dict[str, Any]]] = {}
+    for hatch in layout.hatches:
+        hatches_by_machine.setdefault(hatch.machine_id, []).append(
+            {
+                "cell": [hatch.cell.x, hatch.cell.y, hatch.cell.z],
+                "kind": hatch.kind,
+                "facing": hatch.facing.value,
+                "port": hatch.port_id,
+            }
+        )
+
     scene_machines = [
         {
             "id": pl.machine_id,
@@ -90,6 +101,10 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
             "voltage_tier": machines[pl.machine_id].voltage_tier,
             "role": _role(machines[pl.machine_id]),
             "color": color_for_type[machines[pl.machine_id].type],
+            # The hatches and buses built into this machine's casing, each at the CELL it replaces
+            # and facing the way it works. The texture pass swaps them in for the casing cubes
+            # underneath, so a bus renders as a bus rather than as the block it displaced.
+            "hatches": hatches_by_machine.get(pl.machine_id, []),
         }
         for pl in layout.placements
         if pl.machine_id in machines
@@ -109,6 +124,10 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
         terminals = [
             {
                 "machine": t.machine_id,
+                # Which port this terminal serves, so a viewer can tie it to the hatch it docks
+                # against (``hatch.cell == terminal.cell - FACE_DELTAS[face]``) instead of guessing
+                # from geometry when a machine has several terminals on one face.
+                "port": t.port_id,
                 "face": t.face.value,
                 "cell": [t.cell.x, t.cell.y, t.cell.z],
                 "thickness": _terminal_thickness(route, t),

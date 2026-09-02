@@ -72,6 +72,10 @@ _STATE_ACTIVE = "active"
 #: Horizontal ForgeDirection sides as (dx, dz) unit vectors, for the yaw that orients a machine's
 #: blocks to its placed ``front`` (the dump builds every controller facing NORTH / -Z).
 _SIDE_VEC = {2: (0, -1), 3: (0, 1), 4: (-1, 0), 5: (1, 0)}
+#: The scene's lowercase facing names to GT side indices, so a hatch's own facing resolves to the
+#: manifest's side key. Vertical facings are here too, which is the whole point: they are 75% of
+#: sand's terminals and could not be expressed at all before.
+_FACING_TO_SIDE = {"down": 0, "up": 1, "north": 2, "south": 3, "west": 4, "east": 5}
 _VEC_SIDE = {v: s for s, v in _SIDE_VEC.items()}
 #: Clockwise 90-degree steps (viewed from +Y) from the dump's NORTH front to each placed facing.
 _FRONT_CW_STEPS = {"north": 0, "east": 1, "south": 2, "west": 3}
@@ -85,6 +89,46 @@ _FRONT_CW_STEPS = {"north": 0, "east": 1, "south": 2, "west": 3}
 #: preview stand-in because GT single-block skins are near identical across tiers.
 _TIER_PREFIX = {"LV": "Basic", "MV": "Advanced"}
 _FALLBACK_PREFIX = "Basic"
+
+#: The GT class behind each ``HatchElement`` kind the solver places, from that enum's own
+#: ``mteClasses()``. Joining on the class rather than the display name is what makes the lookup
+#: robust: GT names these two different ways ("Input Bus (LV)" against "LV Energy Hatch"), and a
+#: subclass (an ME stocking bus, a GT++ hatch) keeps its parent's kind exactly as GT's adders do.
+HATCH_KIND_BY_CLASS = {
+    "gregtech.api.metatileentity.implementations.MTEHatchInputBus": "InputBus",
+    "gregtech.api.metatileentity.implementations.MTEHatchOutputBus": "OutputBus",
+    "gregtech.api.metatileentity.implementations.MTEHatchInput": "InputHatch",
+    "gregtech.api.metatileentity.implementations.MTEHatchOutput": "OutputHatch",
+    "gregtech.api.metatileentity.implementations.MTEHatchEnergy": "Energy",
+    "gregtech.api.metatileentity.implementations.MTEHatchDynamo": "Dynamo",
+    "gregtech.api.metatileentity.implementations.MTEHatchMaintenance": "Maintenance",
+    "gregtech.api.metatileentity.implementations.MTEHatchMuffler": "Muffler",
+}
+
+#: The voltage ladder as it appears inside a hatch's display name, low to high. Longest-first in
+#: the pattern so ``LuV`` is never read as ``L`` + ``uV``; ``\b`` keeps ``LV`` out of ``ULV``.
+_TIER_LADDER = (
+    "ULV",
+    "LV",
+    "MV",
+    "HV",
+    "EV",
+    "IV",
+    "LuV",
+    "ZPM",
+    "UV",
+    "UHV",
+    "UEV",
+    "UIV",
+    "UMV",
+    "UXV",
+    "MAX",
+)
+_TIER_TOKEN = re.compile(r"\b(" + "|".join(sorted(_TIER_LADDER, key=len, reverse=True)) + r")\b")
+
+#: The dumped side a hatch's overlays live on. ``TextureDumper`` pins ``aFacing`` to NORTH for
+#: every MTE it walks, so the front stack is always recorded there whatever the block's real front.
+_FRONT_IN_DUMP = "NORTH"
 
 #: Runs of non-alphanumeric characters, collapsed to one space when normalizing a machine name so
 #: matching tolerates case, punctuation, and whitespace differences between plan and manifest.
@@ -178,6 +222,26 @@ class TextureManifest:
         self._mte_by_norm: dict[str, tuple[str, int]] = {}
         for name, block_meta in self._mte_by_name.items():
             self._mte_by_norm.setdefault(_normalize_name(name), block_meta)
+        # Hatch index: (HatchElement kind, tier) -> (block, meta). Keyed off the MTE's
+        # ``source_class`` rather than its display name, because the names are not one shape -
+        # "Input Bus (LV)" against "LV Energy Hatch" - while the class is exactly what
+        # ``HatchElement.mteClasses()`` names, so the join is GT's own. Ties break on the shortest
+        # display name, which picks the plain "Maintenance Hatch" over the "Auto Maintenance Hatch"
+        # that shares its class (and needs LuV to craft).
+        self._hatches: dict[tuple[str, str], tuple[str, int]] = {}
+        hatch_names: dict[tuple[str, str], str] = {}
+        for key, entry in self._blocks.items():
+            kind = HATCH_KIND_BY_CLASS.get(str(entry.get("source_class", "")))
+            name = entry.get("display_name")
+            if kind is None or not name or "|" not in key:
+                continue
+            match = _TIER_TOKEN.search(name)
+            index = (kind, match.group(0) if match else "")
+            if index in hatch_names and len(hatch_names[index]) <= len(name):
+                continue
+            block, meta = key.rsplit("|", 1)
+            hatch_names[index] = name
+            self._hatches[index] = (block, int(meta))
         # Tiered-storage index: "super tank" (generic) -> the LOWEST "Super Tank I".."IX" variant,
         # since the plan names such families generically and the tiers share a skin (see mte_block).
         self._mte_tiered: dict[str, tuple[str, int]] = {}
@@ -214,6 +278,29 @@ class TextureManifest:
         if chosen is None and side_entry:
             chosen = next(iter(side_entry.values()))
         return list(chosen or [])
+
+    def hatch_block(self, kind: str, tier: str | None) -> tuple[str, int] | None:
+        """The ``(block, meta)`` of the ``kind`` hatch at ``tier``, or ``None`` if unresolvable.
+
+        Falls back from the exact tier to the family's **untiered** entry (the maintenance hatch is
+        the only one), then to the nearest tier at or below the one asked for, then to the lowest
+        there is. GT does not tier every family the whole way up - the muffler stops at UHV - so a
+        machine above a family's ceiling must still resolve to *a* block rather than lose its skin;
+        the block chosen is always one that exists, and the previewer draws it at the cell the
+        solver picked either way.
+        """
+        exact = self._hatches.get((kind, tier or ""))
+        if exact is not None:
+            return exact
+        untiered = self._hatches.get((kind, ""))
+        if untiered is not None:
+            return untiered
+        ladder = [t for t in _TIER_LADDER if (kind, t) in self._hatches]
+        if not ladder:
+            return None
+        wanted = _TIER_LADDER.index(tier) if tier in _TIER_LADDER else len(_TIER_LADDER)
+        below = [t for t in ladder if _TIER_LADDER.index(t) <= wanted]
+        return self._hatches[(kind, below[-1] if below else ladder[0])]
 
     def icon_path(self, icon: str) -> str | None:
         """The path inside the mod jar for ``icon`` (e.g. ``assets/gregtech/.../NAME.png``)."""
@@ -337,12 +424,28 @@ def _rotate_side(side: int, steps: int) -> int:
 
 @dataclass(frozen=True)
 class BlockCube:
-    """One constituent block ready to render: its world cell, identity, and the yaw applied."""
+    """One constituent block ready to render: its world cell, identity, and how it is oriented.
+
+    A block is oriented one of two ways, and they are not interchangeable. An ordinary structure
+    block turns with its **machine**: ``steps`` is the machine's yaw, and the texture for a given
+    world face is read from whichever GT side that yaw maps it back to. A **hatch** turns on its
+    own: ``facing`` names the world side its front points at, chosen by the router per hatch, and
+    the yaw is irrelevant to it - see :func:`_face_icons`.
+
+    ``idle_state`` / ``active_state`` are the dumped state names to read for the resting and
+    running looks. They exist because the maintenance hatch's are inverted: GT flips it to
+    ``active`` the moment it joins a formed multiblock, so its dumped ``inactive`` stack is
+    ``OVERLAY_MAINTENANCE + OVERLAY_DUCTTAPE`` - the *broken* look - and the previewer's plain
+    default would draw every machine in the line as needing repair.
+    """
 
     cell: tuple[int, int, int]
     block: str
     meta: int
     steps: int  # clockwise yaw turns applied to orient the machine to its placed front
+    facing: str | None = None  # a hatch's own world-space front side, e.g. "WEST"
+    idle_state: str = _STATE
+    active_state: str = _STATE_ACTIVE
 
 
 def _place_blocks(
@@ -379,7 +482,9 @@ def _within_footprint(pos: tuple[int, int, int], origin: list[int], size: list[i
     return all(origin[i] <= pos[i] < origin[i] + size[i] for i in range(3))
 
 
-def expand_machine(machine: Mapping[str, Any], doc: MultiblockDoc) -> list[BlockCube]:
+def expand_machine(
+    machine: Mapping[str, Any], doc: MultiblockDoc, manifest: TextureManifest | None = None
+) -> list[BlockCube]:
     """Expand a scene machine into per-block cubes, kept strictly inside its reserved footprint.
 
     The dump builds every controller facing NORTH; a machine placed facing ``front`` yaw-rotates its
@@ -391,12 +496,69 @@ def expand_machine(machine: Mapping[str, Any], doc: MultiblockDoc) -> list[Block
     machine's blocks outside it and the old fall-back to the native orientation is gone. The hard
     clamp stays: any cube outside the reserved box is discarded, so one machine's blocks can never
     spill into a neighbour's cells.
+
+    With a ``manifest``, the machine's ``hatches`` then **replace** the casing cubes they sit on: a
+    hatch is not an extra block, it is one of the structure's own cells built as something else,
+    which is why it spends the casing budget. Each carries its own facing rather than the machine's
+    yaw. Without a manifest the structure is expanded bare, which is what the doc-only callers want.
     """
     cell = machine["cell"]
     size = machine.get("size", [1, 1, 1])
     steps = _FRONT_CW_STEPS.get(str(machine.get("front", "north")), 0)
-    cubes = _place_blocks(doc, cell, steps, size)
-    return [c for c in cubes if _within_footprint(c.cell, cell, size)]
+    cubes = [
+        c for c in _place_blocks(doc, cell, steps, size) if _within_footprint(c.cell, cell, size)
+    ]
+    if manifest is None:
+        return cubes
+    return _substitute_hatches(cubes, machine, manifest)
+
+
+def _substitute_hatches(
+    cubes: list[BlockCube], machine: Mapping[str, Any], manifest: TextureManifest
+) -> list[BlockCube]:
+    """Replace each casing cube the machine's hatches occupy with that hatch's own block.
+
+    A hatch whose block cannot be resolved is left as plain casing rather than dropped: the cell is
+    genuinely occupied either way, and losing the cube would open a hole in the structure. That is
+    the same graceful-degradation contract the rest of the module keeps.
+    """
+    hatches = machine.get("hatches") or ()
+    if not hatches:
+        return cubes
+    tier = machine.get("voltage_tier")
+    replacement: dict[tuple[int, int, int], BlockCube] = {}
+    for hatch in hatches:
+        found = manifest.hatch_block(str(hatch["kind"]), tier if isinstance(tier, str) else None)
+        if found is None:
+            continue
+        block, meta = found
+        at = (int(hatch["cell"][0]), int(hatch["cell"][1]), int(hatch["cell"][2]))
+        idle, active = _hatch_states(str(hatch["kind"]))
+        replacement[at] = BlockCube(
+            cell=at,
+            block=block,
+            meta=meta,
+            steps=0,  # a hatch is oriented by its own facing, never by the machine's yaw
+            facing=_SIDE_NAMES[_FACING_TO_SIDE[str(hatch["facing"])]],
+            idle_state=idle,
+            active_state=active,
+        )
+    return [replacement.pop(c.cell, c) for c in cubes] + list(replacement.values())
+
+
+def _hatch_states(kind: str) -> tuple[str, str]:
+    """Which dumped states are this hatch's resting and running looks.
+
+    Only the maintenance hatch differs, and it is fully inverted: GT flips it to ``active`` the
+    moment it joins a formed multiblock, so the dumped ``inactive`` stack is
+    ``OVERLAY_MAINTENANCE + OVERLAY_DUCTTAPE`` - a hatch that needs repair. Reading the states
+    straight would draw every machine in the line duct-taped, which is not merely ugly: it is the
+    one skin a builder is meant to react to. It has no meaningful running look either, so both map
+    to ``active``.
+    """
+    if kind == "Maintenance":
+        return _STATE_ACTIVE, _STATE_ACTIVE
+    return _STATE, _STATE_ACTIVE
 
 
 def _glyph_steps(machine: Mapping[str, Any], auto_out_face: Mapping[str, str] | None) -> int:
@@ -444,7 +606,7 @@ def _machine_cubes(
     """
     doc = docs.get(machine.get("block_key") or "") or docs.get(machine["type"])
     if doc is not None:
-        return expand_machine(machine, doc)
+        return expand_machine(machine, doc, manifest)
     single = manifest.mte_block(machine["type"], machine.get("voltage_tier"))
     if single is not None and tuple(machine.get("size", (1, 1, 1))) == (1, 1, 1):
         block, meta = single
@@ -454,26 +616,74 @@ def _machine_cubes(
     return []
 
 
-def _face_icons(cube: BlockCube, manifest: TextureManifest) -> tuple[list[str | None], set[str]]:
-    """The six per-face texture keys for ``cube`` (three.js slot order) and the icons they need.
+def _face_icons(
+    cube: BlockCube, manifest: TextureManifest
+) -> tuple[list[str | None], dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]]]:
+    """The six per-face texture keys for ``cube`` (three.js slot order) and the stacks behind them.
 
-    A face's key is ``"block|meta|side|state"`` when that face resolves to at least one manifest
-    layer, else ``None``. Yaw rotates which GT side a face's texture comes from, so the overlay that
-    the dump put on the controller's NORTH face follows the machine's placed front. Returns the key
-    list plus the set of iconset names any resolved face references (to fetch and bake).
+    A face's key is ``None`` when it resolves to no manifest layer. Returns the key list plus, per
+    distinct key, the ``(idle, running)`` layer stacks - handed back rather than re-derived from the
+    key by the caller, because a hatch's stack is a *splice* that the key alone cannot reproduce.
+
+    **An ordinary block turns with its machine.** The yaw says which native GT side supplies a given
+    world face, so the overlay the dump put on the controller's NORTH face follows the placed front.
+
+    **A hatch turns on its own**, and needs no rotation at all: the router already chose its facing
+    in world space, so the world face IS the side to look up. What it needs instead is a splice,
+    because the extractor pins ``aFacing`` to NORTH for every MTE it walks and therefore only ever
+    recorded the front overlays on that one side. ``MTEHatch.getTexture`` computes its background
+    without consulting either ``side`` or ``aFacing`` and adds the overlays only where
+    ``side == aFacing``, so::
+
+        face(side) = own background                              if side != facing
+                   = own background ++ NORTH's overlays          if side == facing
+
+    Both halves are facing-invariant, which is what makes this exact rather than approximate - a
+    six-facing re-dump would write byte-identical stacks. Taking the background from the target
+    side's **own** layer 0 is essential and not a detail: UP and DOWN carry ``MACHINE_<TIER>_TOP`` /
+    ``_BOTTOM`` against the horizontals' ``_SIDE`` in every hatch entry in the pack, so reading it
+    off a fixed side would be wrong on all of them - and 75% of sand's terminals are vertical.
     """
     faces: list[str | None] = [None] * _FACE_SLOTS
-    needed: set[str] = set()
+    stacks: dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {}
     for side in range(_FACE_SLOTS):
-        source_side = _rotate_side(side, -cube.steps)  # which native GT side supplies this face
-        layers = manifest.layers(cube.block, cube.meta, _SIDE_NAMES[source_side])
-        if not layers:
+        if cube.facing is None:
+            source = _SIDE_NAMES[_rotate_side(side, -cube.steps)]
+            idle = manifest.layers(cube.block, cube.meta, source, cube.idle_state)
+            running = manifest.layers(cube.block, cube.meta, source, cube.active_state)
+            key = f"{cube.block}|{cube.meta}|{source}|{cube.idle_state}"
+        else:
+            source = _SIDE_NAMES[side]
+            idle = _hatch_layers(manifest, cube, source, cube.idle_state)
+            running = _hatch_layers(manifest, cube, source, cube.active_state)
+            # The facing MUST be in the key. Without it an UP-facing and a NORTH-facing hatch of
+            # the same type collide in the texture pool and one silently gets the other's bake.
+            key = f"{cube.block}|{cube.meta}|{source}|{cube.idle_state}|{cube.facing}"
+        if not idle:
             continue
-        faces[_GT_SIDE_TO_THREE_SLOT[side]] = (
-            f"{cube.block}|{cube.meta}|{_SIDE_NAMES[source_side]}|{_STATE}"
-        )
-        needed.update(layer["icon"] for layer in layers)
-    return faces, needed
+        faces[_GT_SIDE_TO_THREE_SLOT[side]] = key
+        stacks[key] = (idle, running)
+    return faces, stacks
+
+
+def _hatch_layers(
+    manifest: TextureManifest, cube: BlockCube, render_side: str, state: str
+) -> list[dict[str, Any]]:
+    """One hatch face: its own background, plus the dump's front overlays where it faces us.
+
+    Layer 0 alone on a non-facing side, never the recorded stack: the dump's own NORTH entry
+    already carries the front overlays, so handing it back would leave a hatch wearing its sign on
+    whichever side happened to be north regardless of where the router pointed it.
+    """
+    own = manifest.layers(cube.block, cube.meta, render_side, state)
+    if not own:
+        return own
+    if render_side != cube.facing:
+        return [own[0]]
+    front = manifest.layers(cube.block, cube.meta, _FRONT_IN_DUMP, state)
+    # front[1:] is safe: a hatch's front layer 0 is the same background as its horizontal sides in
+    # every entry in the pack, so the slice never eats an overlay.
+    return [own[0], *front[1:]]
 
 
 def _png_data_uri(png: bytes) -> str:
@@ -551,19 +761,17 @@ def texturize_scene(
             continue  # no doc and not a known single-block machine -> keep the placeholder box
         machine["expanded"] = True
         for cube in machine_cubes:
-            faces, needed = _face_icons(cube, manifest)
+            faces, stacks = _face_icons(cube, manifest)
             if all(face is None for face in faces):
                 unskinned.add(f"{cube.block}|{cube.meta}")
-            needed_icons |= needed
-            for key in faces:
-                if key is not None and key not in key_layers:
-                    block, meta_s, side, state = key.split("|")
-                    idle = manifest.layers(block, int(meta_s), side, state)
-                    key_layers[key] = idle
-                    active = manifest.layers(block, int(meta_s), side, _STATE_ACTIVE)
-                    if active != idle:
-                        key_layers_active[key] = active
-                        needed_icons.update(layer["icon"] for layer in active)
+            for key, (idle, running) in stacks.items():
+                needed_icons.update(layer["icon"] for layer in idle)
+                if key in key_layers:
+                    continue
+                key_layers[key] = idle
+                if running != idle:
+                    key_layers_active[key] = running
+                    needed_icons.update(layer["icon"] for layer in running)
             cubes.append(
                 {
                     "cell": list(cube.cell),

@@ -7,6 +7,43 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Hatches render as real GT hatch blocks, at their own facing, vertical ones included
+  (`previewer/`, `tools/`).** A hatch was previously invisible: the previewer drew the casing block
+  it displaced. It now resolves to the actual `(block, meta)` GT would place - an `Input Bus (HV)`,
+  an `LV Energy Hatch`, a `Muffler Hatch` - **replacing** that casing cube rather than adding one,
+  which is what makes a hatch cost a casing cell. The join is on the MTE's `source_class`, exactly
+  what `HatchElement.mteClasses()` names, because the display names come in two shapes
+  ("Input Bus (LV)" against "LV Energy Hatch") and a subclass keeps its parent's kind the way GT's
+  own adders do. Nitrobenzene places 45 of them across 14 distinct blocks, 7 of them facing up or
+  down.
+
+  **A vertical facing could not previously be expressed at all.** `_rotate_side` permutes the four
+  horizontal sides and returns UP and DOWN unchanged, and the extractor pins `aFacing` to NORTH for
+  every MTE it walks, so the front overlays exist on that one side only. A hatch face is therefore
+  **spliced**: the target side's own background, plus NORTH's overlays where the side is the one
+  the hatch faces. That is exact rather than approximate - `MTEHatch.getTexture` computes its
+  background without consulting either `side` or `aFacing`, so a six-facing re-dump would write
+  byte-identical stacks. Taking the background from the target side is essential: UP and DOWN carry
+  `MACHINE_<TIER>_TOP`/`_BOTTOM` against the horizontals' `_SIDE` in every hatch in the pack.
+
+  A hatch is not turned by its machine's yaw, only by its own facing, and the texture pool key
+  carries that facing - without it an UP-facing and a NORTH-facing bus of one type collide and one
+  silently gets the other's bake.
+
+- **The maintenance hatch is no longer drawn duct-taped.** Its dumped states are inverted: GT flips
+  it to `active` the moment it joins a formed multiblock, so the `inactive` stack is
+  `OVERLAY_MAINTENANCE + OVERLAY_DUCTTAPE`, the *broken* look. Read straight, every machine in a
+  line would show as needing repair - the one skin a builder is meant to react to.
+
+- **The committed manifest carries hatches.** `tools/derive_small_manifest.py` kept an MTE only if
+  its display name contained an example machine type, which no hatch can match, so a preview run
+  without a local dump skinned none of them. It now also keeps every hatch kind at every tier the
+  examples use, resolved through the previewer's *own* `TextureManifest.hatch_block` so the two
+  cannot drift. 30 blocks to 52, 204 KB to 310 KB.
+
+- **The scene carries `port` on every terminal and the hatch list on every machine**, so a viewer
+  can tie a terminal to the hatch it docks against instead of inferring it from geometry.
+
 - **A layout now says which casing cell every hatch is, and which way it faces
   (`router/hatches.py`).** `LayoutResult.hatches` has existed since the output contract went to
   v1 and has been empty ever since; it is filled now, from three sources. A routed terminal
