@@ -499,7 +499,7 @@ Five lanes are on `main`, each merged after a full green run of the gates.
 | 1 | `aa2c1b8` | Rotation-aware geometry, and the validator stops sharing the solver's expansion (section 4) |
 | 2 | `5e436f5` | Hatch slots reach the IR; a layout records every placed hatch (`LayoutResult` v1) |
 | 3 | `37ef490` | Item and fluid docking is route-aware; `dock()` is gone (section 2.1) |
-| 4 | `813c293` + | Docking is slot-driven and kind-filtered, casing cells are one shared pool, and every hatch is emitted with its cell and facing |
+| 4 | `813c293`, `cfb7078` | Docking is slot-driven and kind-filtered, casing cells are one shared pool, and every hatch is emitted with its cell and facing |
 
 What that leaves in place for the assignment lane:
 
