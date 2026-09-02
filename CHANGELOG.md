@@ -7,6 +7,40 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- **A pipe or cable may only attach where GT would actually let a hatch be built
+  (`ir/`, `router/`, `validator/`, `solver/`).** Docking walked every cell of a machine's bounding
+  box, so a route could dock against a casing block no hatch can replace, and the layout described
+  a structure that will not form. It now walks the machine's recorded hatch slots
+  (`Machine.hatch_slots`, turned with the placement), filtered to the cells that accept that
+  port's own `HatchElement` kind, and only on faces that are actually **exposed** - which is what
+  keeps a hatch off an interior slot, 29% of every slot in the dump, where it would be walled
+  inside the structure and reach nothing.
+
+  Kinds stay a **lower bound, never a whitelist**, at three levels: a machine recording no slots
+  constrains nothing; a kind some slot names restricts to those slots; a kind *no* slot names is
+  allowed anywhere, because a GT hatch adder built from a bare method reference records the cell
+  without the kind rather than as refusing it. That last one is load-bearing, not theoretical: the
+  Chemical Plant records zero `Energy`-capable cells and nitrobenzene must still power it. Power
+  input accepts `Energy`, `ExoticEnergy` and `MultiAmpEnergy`, since 34 of 208 controllers record
+  only the TecTech spelling.
+
+  A machine's hatch cells are also now **one shared pool**. A casing cell is one block, so a cell
+  holding an input bus cannot also hold an energy hatch - and a claim on the *dock* cell could
+  never see that, because one casing cell has up to five free faces. The item/fluid router hands
+  its claims to the power router, so the two compete for one budget instead of quietly stacking
+  two hatches on one block, which they did before. On a machine with no recorded slots the claim
+  falls back to the face, since a single-block GT machine genuinely does take input on one face
+  and output on another of the same block.
+
+  The validator proves all of it from its own rotation (`_geometry.hatch_cells`, written from the
+  dump's stated convention, not from `ir.geometry.rotated_slot`): `terminal_not_on_hatch_cell` and
+  `terminal_hatch_contention`. A property test holds the two derivations to the same answer, and
+  the oracle checks every recorded slot of every controller at all four facings lands inside its
+  own machine.
+
+  Nitrobenzene's floor area comes back from 152 to 144 as a side effect: the shared pool is what
+  the previous release gave up when route-aware docking started starving multi-hatch machines.
+
 - **Which face a pipe docks on is now decided by the route, not by a tuple ordering
   (`router/`).** `dock()` walked `FACE_ORDER` and committed to the first free face before it knew
   where the route had to go, which is why nitrobenzene's item and fluid terminals piled onto

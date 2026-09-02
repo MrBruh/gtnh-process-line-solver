@@ -28,8 +28,16 @@ either way.
 
 from __future__ import annotations
 
+from ._grid import claims_by_machine
 from .auto import assign_auto_outputs
 from .core import RouteResult, route
 from .power import PowerRouteResult, route_power
 
-__all__ = ["PowerRouteResult", "RouteResult", "assign_auto_outputs", "route", "route_power"]
+__all__ = [
+    "PowerRouteResult",
+    "RouteResult",
+    "assign_auto_outputs",
+    "claims_by_machine",
+    "route",
+    "route_power",
+]

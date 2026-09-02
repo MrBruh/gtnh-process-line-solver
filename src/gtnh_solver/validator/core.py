@@ -74,6 +74,7 @@ from ._geometry import (
     OPPOSITE_FACE,
     Cell,
     body_cells,
+    hatch_cells,
     in_region,
     is_connected,
     is_unit_step,
@@ -91,6 +92,7 @@ def validate(problem: InputIR, layout: LayoutResult) -> ValidationReport:
     _check_power_amperage(problem, layout, out)
     _check_power_feed(problem, layout, out)
     _check_hatch_cells(problem, out)
+    _check_terminal_hatch_cells(problem, layout, out)
     _check_hatches(problem, layout, out)
     _check_route_capacity(problem, layout, out)
     _check_pinned(problem, layout, out)
@@ -397,6 +399,74 @@ def _check_routed_net_endpoints(
                     f"{e.machine_id!r} carrying {commodity.value}, not the net's commodity",
                 )
             )
+
+
+def _check_terminal_hatch_cells(
+    problem: InputIR, layout: LayoutResult, out: list[Violation]
+) -> None:
+    """A routed connection must attach where its hatch could actually be built.
+
+    A terminal is one cell *outside* the machine, so the block it attaches to is the casing cell
+    one step back along its face - and on a multiblock that block is not casing at all once wired,
+    it IS the hatch. Two rules follow, and this is the independent gate for both (the router
+    enforces them at dock time; ``docs/ARCHITECTURE.md`` #4 is why that is not enough):
+
+    - **the cell must accept that kind of hatch.** Re-derived from the machine's recorded slots
+      with the validator's own rotation (``_geometry.hatch_cells``), never the router's. A
+      Distillation Tower's upper cells take an output hatch and nothing else, so an input bus
+      docked there describes a structure that will not form;
+    - **two connections cannot want the same block.** One casing cell is one block, and a claim on
+      the *dock* cell would miss the collision entirely, since one casing cell has up to five free
+      faces. This is where an energy hatch quietly sharing a block with an input bus is caught.
+
+    Permissive exactly where the dump is silent, per the rule ``Machine.hatch_slots`` documents and
+    ``_check_hatch_cells`` already follows. A machine recording no slots is skipped altogether - it
+    is a single block, or an unknown one, and a single-block GT machine genuinely takes input on
+    one face and output on another of the same block, so neither rule applies to it. A machine that
+    records slots but names this kind on none of them is skipped for that kind only: a hatch adder
+    built from a bare method reference exposes no filter, so the cell is recorded without the kind
+    rather than as refusing it, and 61 of 185 controllers record no ``Energy`` cell at all.
+    """
+    machines = {m.id: m for m in problem.machines}
+    placements = placement_index(layout.placements)
+    claimed: dict[tuple[str, Cell], str] = {}  # (machine, casing cell) -> who wants it
+    for route in layout.routes:
+        for terminal in route.terminals:
+            machine = machines.get(terminal.machine_id)
+            placement = placements.get(terminal.machine_id)
+            if machine is None or placement is None or not machine.hatch_slots:
+                continue  # unknown, or a single block: it has no hatches to place
+            dx, dy, dz = FACE_DELTAS[terminal.face]
+            cell = (terminal.cell.x - dx, terminal.cell.y - dy, terminal.cell.z - dz)
+            slots = hatch_cells(
+                placement.cell, machine.footprint, placement.orientation, machine.hatch_slots
+            )
+            wanted = frozenset(machine.hatch_kinds_for(terminal.port_id))
+            recorded = slots.get(cell)
+            anywhere = any(not wanted.isdisjoint(kinds) for kinds in slots.values())
+            if recorded is None or (anywhere and wanted.isdisjoint(recorded)):
+                out.append(
+                    Violation(
+                        ViolationCode.TERMINAL_NOT_ON_HATCH_CELL,
+                        f"port {terminal.port_id!r} on {terminal.machine_id!r} docks against cell "
+                        f"{cell}, which hosts no "
+                        f"{'/'.join(sorted(wanted)) or 'known'} hatch"
+                        + ("" if recorded is None else f" (it accepts {'/'.join(recorded)})"),
+                    )
+                )
+                continue
+            owner = claimed.get((terminal.machine_id, cell))
+            if owner is not None and owner != terminal.port_id:
+                out.append(
+                    Violation(
+                        ViolationCode.TERMINAL_HATCH_CONTENTION,
+                        f"cell {cell} of {terminal.machine_id!r} would have to be both "
+                        f"{owner!r}'s hatch and {terminal.port_id!r}'s; one casing cell is one "
+                        f"block",
+                    )
+                )
+            else:
+                claimed[(terminal.machine_id, cell)] = terminal.port_id
 
 
 def _check_hatches(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:

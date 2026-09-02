@@ -48,7 +48,7 @@ from gtnh_solver.ir import (
 )
 from gtnh_solver.ir.geometry import occupied_cells
 from gtnh_solver.placement import Objective, optimize_placement, place
-from gtnh_solver.router import route, route_power
+from gtnh_solver.router import claims_by_machine, route, route_power
 from gtnh_solver.validator import ValidationReport, validate
 
 # Feedback loop bounds. Cycle detection on the failed-net set usually stops sooner when nothing
@@ -247,7 +247,15 @@ def _assemble(
     # Power cables route around the item/fluid pipes already laid, so no cell carries two routes
     # (the crude single-channel capacity the validator enforces). docs/ARCHITECTURE.md #7.
     item_cells = {cell for r in routing.routes for cell in r.cells()}
-    power = route_power(problem, placements, extra_obstacles=item_cells)
+    # ...and around the CASING cells those pipes' hatches occupy, which is a different resource: a
+    # machine's hatch cells are one shared pool an input bus and an energy hatch compete for, and
+    # a single casing cell has up to five free faces, so ``item_cells`` cannot stand in for it.
+    power = route_power(
+        problem,
+        placements,
+        extra_obstacles=item_cells,
+        claimed_cells=claims_by_machine(routing.routes, {m.id: m for m in problem.machines}),
+    )
     routes = [*routing.routes, *power.routes]
     placement_list = list(placements)
     metrics = _layout_metrics(problem, placement_list, routes)  # footprint/layers for every result

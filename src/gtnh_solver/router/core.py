@@ -53,9 +53,10 @@ auto-connection, and enforces the one-route-per-cell cap on the negotiated resul
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
+from types import MappingProxyType
 
 from gtnh_solver.ir import (
     AutoConnection,
@@ -73,7 +74,7 @@ from gtnh_solver.ir import (
 from gtnh_solver.ir.geometry import Cell
 from gtnh_solver.ir.nets import placement_index
 
-from ._grid import astar, astar_multi, coord, dock_candidates, obstacle_cells
+from ._grid import astar, astar_multi, claim_key, coord, dock_candidates, obstacle_cells
 from .auto import assign_auto_outputs
 
 #: Backstop on negotiation rounds. Convergence is normally a handful of rounds (a two-net
@@ -196,8 +197,13 @@ def _negotiate(
     terminals_by_net: dict[str, list[Terminal]] = {}
     term_cells_by_net: dict[str, set[Cell]] = {}
     docked: set[Cell] = set()
+    # Casing cells already spoken for, per machine. One cell is one block, so a cell holding an
+    # input bus cannot also hold an output hatch - not even by facing the other way, which a claim
+    # on the outward cell alone (``docked``) does not catch. Power docks against this same pool,
+    # seeded from the terminals below, so the two routers compete for one budget rather than two.
+    claimed: dict[str, set[Cell]] = {}
     for net in nets:
-        picked = _dock_net(net, placement_by_machine, machines, hard, docked, region)
+        picked = _dock_net(net, placement_by_machine, machines, hard, docked, region, claimed)
         if isinstance(picked, Infeasibility):
             failures[net.id] = picked
             continue
@@ -205,6 +211,10 @@ def _negotiate(
         terminals_by_net[net.id] = picked
         term_cells_by_net[net.id] = chosen
         docked |= chosen
+        for terminal in picked:
+            claimed.setdefault(terminal.machine_id, set()).add(
+                claim_key(terminal, machines[terminal.machine_id])
+            )
 
     active = [net for net in nets if net.id not in failures]
     all_terms: set[Cell] = set().union(*term_cells_by_net.values()) if term_cells_by_net else set()
@@ -308,6 +318,7 @@ def _dock_net(
     hard: set[Cell],
     docked: set[Cell],
     region: CellBox,
+    claimed: Mapping[str, Collection[Cell]] = MappingProxyType({}),
 ) -> list[Terminal] | Infeasibility:
     """Choose one Terminal per endpoint **route-aware**: chain the endpoints with multi-goal A*.
 
@@ -329,13 +340,24 @@ def _dock_net(
     keeps the failure taxonomy unchanged: an endpoint with no free face at all is
     ``face_reachability`` here, while a docked-but-unreachable net fails as ``routing`` in the
     round, as it always has.
+
+    ``claimed`` are the casing cells each machine's already-placed hatches hold. This net adds its
+    own as it goes, so two of its endpoints landing on one machine still take a cell each.
     """
     candidates: list[list[Terminal]] = []
     for endpoint in net.endpoints:
         ep_placement = placement_by_machine.get(endpoint.machine_id)
         ep_machine = machines.get(endpoint.machine_id)
         cand = (
-            dock_candidates(endpoint.port_id, ep_placement, ep_machine, hard, docked, region)
+            dock_candidates(
+                endpoint.port_id,
+                ep_placement,
+                ep_machine,
+                hard,
+                docked,
+                region,
+                claimed.get(endpoint.machine_id, ()),
+            )
             if ep_placement is not None and ep_machine is not None
             else []
         )
@@ -345,30 +367,58 @@ def _dock_net(
 
     blocked = hard | docked
     terminals: list[Terminal] = []
-    taken: set[Cell] = set()  # this net's own terminals, so two of its ports don't co-locate
+    taken: set[Cell] = set()  # this net's own dock cells, so two of its ports don't co-locate
+    mine: dict[str, set[Cell]] = {}  # ...and its own casing cells, for two ports on one machine
     for leg, cand in enumerate(candidates[1:]):
         starts = (
             {t.cell.as_tuple() for t in candidates[0]}
             if not terminals
             else {terminals[-1].cell.as_tuple()}
         )
-        goals = {t.cell.as_tuple() for t in cand} - taken - starts
+        goals = {t.cell.as_tuple() for t in _free(cand, taken, mine, machines)} - starts
         path = astar_multi(starts, goals, blocked, region) if goals else None
         if path is None:
             break  # unreachable from here on; the fallback below picks the remaining faces
         if not terminals:
-            terminals.append(_at_cell(candidates[0], path[0]))
-            taken.add(path[0])
-        terminals.append(_at_cell(candidates[leg + 1], path[-1]))
-        taken.add(path[-1])
+            _keep(_at_cell(candidates[0], path[0]), terminals, taken, mine, machines)
+        _keep(_at_cell(candidates[leg + 1], path[-1]), terminals, taken, mine, machines)
 
     for i in range(len(terminals), len(candidates)):
-        free = next((t for t in candidates[i] if t.cell.as_tuple() not in taken), None)
+        free = next(iter(_free(candidates[i], taken, mine, machines)), None)
         if free is None:
             return _no_dock(net.id, net.endpoints[i].machine_id)
-        terminals.append(free)
-        taken.add(free.cell.as_tuple())
+        _keep(free, terminals, taken, mine, machines)
     return terminals
+
+
+def _free(
+    candidates: Sequence[Terminal],
+    taken: set[Cell],
+    mine: dict[str, set[Cell]],
+    machines: dict[str, Machine],
+) -> list[Terminal]:
+    """``candidates`` minus the dock cells and the hatch cells this net already holds."""
+    return [
+        t
+        for t in candidates
+        if t.cell.as_tuple() not in taken
+        and claim_key(t, machines[t.machine_id]) not in mine.get(t.machine_id, frozenset())
+    ]
+
+
+def _keep(
+    terminal: Terminal,
+    terminals: list[Terminal],
+    taken: set[Cell],
+    mine: dict[str, set[Cell]],
+    machines: dict[str, Machine],
+) -> None:
+    """Accept ``terminal`` for this net, spending its dock cell and its hatch cell."""
+    terminals.append(terminal)
+    taken.add(terminal.cell.as_tuple())
+    mine.setdefault(terminal.machine_id, set()).add(
+        claim_key(terminal, machines[terminal.machine_id])
+    )
 
 
 def _at_cell(candidates: Sequence[Terminal], cell: Cell) -> Terminal:

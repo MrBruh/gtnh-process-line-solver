@@ -98,6 +98,28 @@ class HatchSlot(FrozenModel):
     kinds: tuple[str, ...] = Field(min_length=1)
 
 
+#: Which ``gregtech.api.enums.HatchElement`` kinds could host a port's hatch, by what the port
+#: carries. The bus/hatch split is lexical in GT and means items/fluids: ``InputBus`` takes items
+#: (``MTEHatchInputBus``), ``InputHatch`` fluids (``MTEHatchInput``). Power input is the one
+#: many-to-one entry - a plain ``Energy`` hatch, TecTech's ``ExoticEnergy``, and ``MultiAmpEnergy``
+#: all satisfy it, and 34 of the 208 dumped controllers record only ``ExoticEnergy``, so demanding
+#: ``Energy`` alone would refuse a machine that plainly does accept power.
+#:
+#: **Not a closed vocabulary.** Roughly 30 further ``IHatchElement`` implementations exist outside
+#: this enum (TecTech's ``EnergyMulti``/``DynamoMulti``/``InputData``, gtPlusPlus's own set,
+#: per-controller ones like the driller's ``DataAccess``, and ``HatchElementEither``'s "A or B"),
+#: any of which a dump may record. That is a second reason the lookup must stay permissive rather
+#: than treating an unmatched kind as a prohibition; see :meth:`Machine.hatch_slots_for`.
+HATCH_KINDS: dict[tuple[Commodity, IODirection], tuple[str, ...]] = {
+    (Commodity.ITEM, IODirection.INPUT): ("InputBus",),
+    (Commodity.ITEM, IODirection.OUTPUT): ("OutputBus",),
+    (Commodity.FLUID, IODirection.INPUT): ("InputHatch",),
+    (Commodity.FLUID, IODirection.OUTPUT): ("OutputHatch",),
+    (Commodity.POWER, IODirection.INPUT): ("Energy", "ExoticEnergy", "MultiAmpEnergy"),
+    (Commodity.POWER, IODirection.OUTPUT): ("Dynamo",),
+}
+
+
 class Machine(StrictModel):
     """A single machine to place at one position.
 
@@ -162,6 +184,38 @@ class Machine(StrictModel):
             for p in self.faces.ports
             if p.commodity is Commodity.POWER and p.direction is IODirection.INPUT
         ]
+
+    def hatch_slots_for(self, port_id: str) -> tuple[HatchSlot, ...] | None:
+        """The casing cells that may host ``port_id``'s hatch, or ``None`` when nothing is known.
+
+        Three levels, because :attr:`HatchSlot.kinds` is a **lower bound, never a whitelist**:
+
+        - this machine records no slots at all -> ``None``. The caller must fall back to treating
+          every body cell as a candidate, which is what a single-block machine, a plan adapted
+          without the dataset, and 23 of 208 controllers all need;
+        - some slot accepts one of the port's kinds -> exactly those slots. This is the real
+          constraint, and it is what makes a Distillation Tower's 17 output-only upper cells refuse
+          an input hatch;
+        - slots are recorded but *none* names the port's kind -> all of them. The dump is silent
+          about that kind on this machine rather than prohibiting it: a hatch adder built from a
+          bare method reference exposes no filter, so its cell is recorded without the kind. 61 of
+          185 controllers record no ``Energy`` cell, the Chemical Plant among them, and reading
+          that as a prohibition would refuse to power a machine that certainly takes power.
+
+        An unknown ``port_id`` names no kinds and therefore lands in the third case, permissive.
+        """
+        if not self.hatch_slots:
+            return None
+        kinds = frozenset(self.hatch_kinds_for(port_id))
+        matching = tuple(s for s in self.hatch_slots if not kinds.isdisjoint(s.kinds))
+        return matching or self.hatch_slots
+
+    def hatch_kinds_for(self, port_id: str) -> tuple[str, ...]:
+        """The ``HatchElement`` kinds that could host ``port_id``, empty for an unknown port."""
+        for port in self.faces.ports:
+            if port.id == port_id:
+                return HATCH_KINDS.get((port.commodity, port.direction), ())
+        return ()
 
     def port_eut(self, port_id: str) -> float:
         """EU/t arriving through ``port_id``: its own ``rate``, else the machine's whole ``eut``.

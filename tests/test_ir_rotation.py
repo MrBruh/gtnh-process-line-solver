@@ -25,7 +25,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from gtnh_solver.dataset import MultiblockDoc, load_multiblock_doc
-from gtnh_solver.ir import CellBox, CellCoord, Facing
+from gtnh_solver.ir import CellBox, CellCoord, Facing, HatchSlot
 from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 from gtnh_solver.ir.geometry import (
     CW_STEPS,
@@ -34,7 +34,7 @@ from gtnh_solver.ir.geometry import (
     rotated_footprint,
     rotated_slot,
 )
-from gtnh_solver.validator._geometry import body_cells
+from gtnh_solver.validator._geometry import body_cells, hatch_cells
 
 _DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "multiblocks"
 
@@ -170,6 +170,66 @@ def test_rotated_slot_maps_a_machines_own_cells_onto_its_reserved_box(
         for dz in range(footprint.sz)
     }
     assert turned == set(occupied_cells(CellCoord(x=0, y=0, z=0), footprint, orientation))
+
+
+@given(origin=_ORIGINS, footprint=_FOOTPRINTS, orientation=_FACINGS)
+def test_solver_and_validator_slot_rotations_agree(
+    origin: CellCoord, footprint: CellBox, orientation: Facing
+) -> None:
+    """``rotated_slot`` (solver) and ``_geometry.hatch_cells`` (gate) must place a slot alike.
+
+    The same argument as :func:`test_solver_and_validator_expansions_agree`, one level finer.
+    Getting the body box right and the slots inside it wrong is exactly the silent failure the
+    split exists to catch: a hatch on the wrong casing cell yields a layout that validates clean,
+    forms in game, and moves nothing.
+    """
+    offsets = [
+        (dx, dy, dz)
+        for dx in range(footprint.sx)
+        for dy in range(footprint.sy)
+        for dz in range(footprint.sz)
+    ]
+    slots = [
+        HatchSlot(offset=CellCoord(x=o[0], y=o[1], z=o[2]), kinds=("InputBus",)) for o in offsets
+    ]
+    solver = {
+        (origin.x + c[0], origin.y + c[1], origin.z + c[2])
+        for c in (rotated_slot(o, footprint, orientation) for o in offsets)
+    }
+    assert set(hatch_cells(origin, footprint, orientation, slots)) == solver
+
+
+@pytest.mark.parametrize(("name", "doc"), _controller_docs())
+def test_oracle_every_controllers_slots_land_inside_its_own_body(
+    name: str, doc: MultiblockDoc
+) -> None:
+    """Every recorded hatch slot, at every facing, must land on a cell of its own machine.
+
+    The dump measures a slot from the controller block while the solver anchors it on the
+    minimum corner, so the two differ by a translation that has to be applied identically to the
+    body and to the slots. This is the check that would catch them drifting apart, across all 208
+    controllers rather than on generated boxes.
+    """
+    for variant in doc.variants:
+        if not variant.hatch_slots:
+            continue
+        size = CellBox(sx=variant.bbox[0], sy=variant.bbox[1], sz=variant.bbox[2])
+        min_corner = [min(b.d[i] for b in variant.blocks) for i in range(3)]
+        slots = [
+            HatchSlot(
+                offset=CellCoord(
+                    x=s.d[0] - min_corner[0], y=s.d[1] - min_corner[1], z=s.d[2] - min_corner[2]
+                ),
+                kinds=tuple(s.kinds),
+            )
+            for s in variant.hatch_slots
+        ]
+        origin = CellCoord(x=0, y=0, z=0)
+        for facing in HORIZONTAL_FACINGS_ORDERED:
+            body = body_cells(origin, size, facing)
+            placed = hatch_cells(origin, size, facing, slots)
+            assert len(placed) == len(slots), f"{name} {facing.value}: two slots collapsed"
+            assert set(placed) <= body, f"{name} {facing.value}: a slot fell outside its machine"
 
 
 @given(footprint=_FOOTPRINTS, orientation=_FACINGS)

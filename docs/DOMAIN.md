@@ -18,6 +18,8 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
 
 ## Machine faces
 
+### A single-block machine
+
 - A machine has six faces. The **front face** (set by orientation) is the working face and
   carries **no item/fluid I/O**. The solver chooses orientation so required I/O faces stay
   routable.
@@ -29,6 +31,39 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
   cover-driven output on another non-front face (or ME) for the other.
 - **Required-I/O-face reachability is a HARD constraint** - a blocked required output face
   means the line doesn't run. "Convenient access" is a soft preference.
+
+### A multiblock's hatches: the five faces are NOT interchangeable
+
+Everything above is a single-block machine's rule. A multiblock does no I/O of its own: every
+connection is a **hatch or bus**, which is one casing cell of the structure replaced by a
+different block, with its own front facing. Three consequences the solver has to honour, none of
+which GT will catch for you.
+
+- **Items and power are front-face-only, in both directions.** An input bus accepts items only on
+  its own front (`MTEHatchInputBus.allowPutStack`), an output bus pushes only on its own front,
+  every 8 ticks, into whatever inventory is adjacent (`MTEHatchOutputBus.onPostTick`), and an
+  energy hatch takes power only on its front (`MTEHatchEnergy.isInputFacing`). A dynamo is the
+  same in reverse. So for these, a face is usable only if the receiver is *on* it.
+- **Fluids are omnidirectional, and that is a footgun rather than a freedom.** `isLiquidInput` /
+  `isLiquidOutput` default to true on every side, and a fluid *input* hatch does not override
+  `isLiquidOutput` - so a pipe that merely touches one can **drain** it. (A fluid *output* hatch
+  does override `isLiquidInput` to false, so it cannot be back-filled.)
+- **The facing is entirely ours to get right.** `IStructureElement.check` takes no facing and every
+  GT hatch returns `isFacingValid = true`, so a multiblock forms perfectly happily with every
+  hatch pointing into its own structure, and then moves nothing. GT's own survival auto-builder
+  uses a heuristic worth mirroring: the first face not contained in the structure piece,
+  preferring a horizontal one.
+
+Two more structural facts follow from a hatch *being* a casing cell:
+
+- **One cell is one block.** An input bus and an energy hatch cannot share a cell, not even by
+  facing two different ways, so a machine's connections all compete for one pool of casing cells
+  (`HATCH_CELLS_EXCEEDED`, and `terminal_hatch_contention` for the per-cell case).
+- **Position can carry meaning.** A Distillation Tower routes output fluid `i` to structure layer
+  `i` and accepts an output hatch there and nowhere else; an Assembly Line feeds its `n`th input
+  bus from the `n`th recipe input. Which cells accept which hatch kinds is dumped per controller
+  (`Machine.hatch_slots`), and those kinds are a **lower bound**: an adder built from a bare method
+  reference exposes no filter, so a cell is recorded without a kind rather than as refusing it.
 
 ## Fluids and items (pipes)
 

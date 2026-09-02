@@ -10,10 +10,27 @@ terminal) are unchanged from the original crude router.
 from __future__ import annotations
 
 import heapq
-from collections.abc import Collection, Iterator, Mapping, Sequence
+from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
 
-from gtnh_solver.ir import CellBox, CellCoord, Facing, InputIR, Machine, Placement, Terminal
-from gtnh_solver.ir.geometry import FACE_DELTAS, FACE_OFFSETS, Cell, in_region, occupied_cells
+from gtnh_solver.ir import (
+    CellBox,
+    CellCoord,
+    Facing,
+    HatchSlot,
+    InputIR,
+    Machine,
+    Placement,
+    Route,
+    Terminal,
+)
+from gtnh_solver.ir.geometry import (
+    FACE_DELTAS,
+    FACE_OFFSETS,
+    Cell,
+    in_region,
+    occupied_cells,
+    rotated_slot,
+)
 
 # Enumeration order for the non-front faces (the front face == placement orientation is skipped
 # at runtime). Both routers weigh every face against the route, so this fixes only the order
@@ -37,6 +54,71 @@ def obstacle_cells(
     return obstacles
 
 
+def body_cell(terminal: Terminal) -> Cell:
+    """The casing cell whose hatch a terminal docks against: one step back along its face.
+
+    The relationship ``PlacedHatch`` documents, read the other way. A terminal sits one cell
+    *outside* the machine on ``face``, so the hatch it serves occupies the cell behind it. One
+    casing cell is one block, so this is also the resource two hatches on one machine compete for.
+    """
+    dx, dy, dz = FACE_DELTAS[terminal.face]
+    return (terminal.cell.x - dx, terminal.cell.y - dy, terminal.cell.z - dz)
+
+
+def claim_key(terminal: Terminal, machine: Machine) -> Cell:
+    """The cell two connections on one machine may not both hold - the unit they contend over.
+
+    For a **multiblock** that is the casing cell: a hatch IS one block of the structure, so two
+    hatches cannot share it even facing two different ways, and a claim on the dock cell alone
+    would miss that (one casing cell has up to five free faces).
+
+    For a machine with **no recorded slots** it is the dock cell instead. Such a machine is a
+    single block, or one the dump knows nothing about, and a single-block GT machine genuinely
+    does take input on one face of that block and output on another. Claiming its one body cell
+    would cap it at a single connection, which is a false infeasibility rather than a rule - the
+    same "unrecorded means permissive" reasoning as
+    :meth:`~gtnh_solver.ir.Machine.hatch_slots_for`.
+    """
+    return body_cell(terminal) if machine.hatch_slots else terminal.cell.as_tuple()
+
+
+def claims_by_machine(
+    routes: Iterable[Route], machines: Mapping[str, Machine]
+) -> dict[str, set[Cell]]:
+    """What each machine's already-routed connections hold, per :func:`claim_key`.
+
+    Read straight off the terminals, so it needs no new bookkeeping. The solver hands it to the
+    power router: a multiblock's hatch cells are one shared pool, and a cell an input bus stands
+    on cannot also hold an energy hatch.
+    """
+    claimed: dict[str, set[Cell]] = {}
+    for route in routes:
+        for terminal in route.terminals:
+            machine = machines.get(terminal.machine_id)
+            if machine is not None:
+                claimed.setdefault(terminal.machine_id, set()).add(claim_key(terminal, machine))
+    return claimed
+
+
+def host_cells(
+    placement: Placement, machine: Machine, slots: Sequence[HatchSlot] | None
+) -> list[Cell]:
+    """``slots`` as world cells, ascending; the machine's whole body when ``slots`` is None.
+
+    None means the dump recorded nothing to go on, which is "unknown", not "none": a single-block
+    machine, a plan adapted without the physical dataset, and 23 of 208 controllers all land here
+    and must keep every body cell as a candidate rather than lose the ability to dock at all.
+    """
+    origin = placement.cell
+    if slots is None:
+        return sorted(occupied_cells(origin, machine.footprint, placement.orientation))
+    turned = (
+        rotated_slot(slot.offset.as_tuple(), machine.footprint, placement.orientation)
+        for slot in slots
+    )
+    return sorted({(origin.x + dx, origin.y + dy, origin.z + dz) for dx, dy, dz in turned})
+
+
 def _dock_faces(
     port_id: str,
     placement: Placement,
@@ -44,24 +126,43 @@ def _dock_faces(
     obstacles: set[Cell],
     docked: set[Cell],
     region: CellBox,
+    claimed: Collection[Cell] = (),
 ) -> Iterator[Terminal]:
-    """Free cells just outside the machine's usable (non-front) faces, one Terminal per face+cell.
+    """Free cells just outside a hatch-capable casing cell, one Terminal per face+cell.
 
-    The single scan behind :func:`dock_candidates`: it walks ``FACE_ORDER`` (front face skipped)
-    and, within each, ascending body cell, yielding a Terminal for every free, in-region,
-    unclaimed cell - deduping a cell already yielded from an earlier face, so each cell appears
-    exactly once. Order is deterministic and total; no caller may read anything into the *first*
-    yield, which is the ``FACE_ORDER`` tiebreak and not a decision.
+    The single scan behind :func:`dock_candidates`. A candidate must clear four things:
+
+    - its **host** cell accepts this port's hatch kind
+      (:meth:`~gtnh_solver.ir.Machine.hatch_slots_for`, permissive wherever the dump is silent)
+      and is not already ``claimed`` by another connection on this machine. What "already held"
+      means differs by machine and :func:`claim_key` decides it: a multiblock contends over casing
+      cells, a single block over faces;
+    - the face is not the machine's front, which carries no I/O;
+    - the face is **exposed**: the cell one step out is not another cell of this machine's own
+      body. That is what keeps a hatch off an interior slot - 29% of all slots dataset-wide - which
+      would be walled inside the structure and could reach nothing;
+    - that outward cell is in-region, free of obstacles, and unclaimed by another net.
+
+    Walks ``FACE_ORDER`` (front skipped) and, within each, ascending host cell, deduping a cell
+    already yielded from an earlier face so each appears exactly once. Order is deterministic and
+    total; no caller may read anything into the *first* yield, which is the ``FACE_ORDER`` tiebreak
+    and not a decision.
     """
     body = set(occupied_cells(placement.cell, machine.footprint, placement.orientation))
+    slots = machine.hatch_slots_for(port_id)
+    hosts = host_cells(placement, machine, slots)
+    if slots is not None:  # a multiblock contends over casing cells (see :func:`claim_key`)
+        hosts = [c for c in hosts if c not in claimed]
     seen: set[Cell] = set()
     for face in FACE_ORDER:
         if face is placement.orientation:  # front face carries no I/O
             continue
         dx, dy, dz = FACE_DELTAS[face]
-        for bx, by, bz in sorted(body):
+        for bx, by, bz in hosts:
             cand = (bx + dx, by + dy, bz + dz)
-            if cand in body or cand in seen:
+            if cand in body or cand in seen:  # walled in by its own machine, or already yielded
+                continue
+            if slots is None and cand in claimed:  # ...a single block contends over faces
                 continue
             if not in_region(cand, region) or cand in obstacles or cand in docked:
                 continue
@@ -81,15 +182,17 @@ def dock_candidates(
     obstacles: set[Cell],
     docked: set[Cell],
     region: CellBox,
+    claimed: Collection[Cell] = (),
 ) -> list[Terminal]:
-    """Every free cell just outside a usable (non-front) face, one Terminal per face+cell.
+    """Every free cell outside a hatch-capable, exposed, usable face; one Terminal per face+cell.
 
     Returning *all* the options is what lets both routers choose a face from where the route has
     to go rather than from a tuple ordering: the power router docks on whichever face yields the
     shortest cable, and the item/fluid router chains its endpoints with multi-goal A*
-    (``core._dock_net``). Deterministic order: ``FACE_ORDER``, then ascending body cell.
+    (``core._dock_net``). ``claimed`` are the casing cells this machine's other hatches already
+    hold. Deterministic order: ``FACE_ORDER``, then ascending host cell.
     """
-    return list(_dock_faces(port_id, placement, machine, obstacles, docked, region))
+    return list(_dock_faces(port_id, placement, machine, obstacles, docked, region, claimed))
 
 
 def astar(

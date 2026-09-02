@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from gtnh_solver.ir import CellBox, CellCoord, Facing
+from gtnh_solver.ir import CellBox, CellCoord, Facing, HatchSlot
 from gtnh_solver.ir.geometry import FACE_DELTAS, OPPOSITE_FACE, Cell
 
 __all__ = [
@@ -26,6 +26,7 @@ __all__ = [
     "OPPOSITE_FACE",
     "Cell",
     "body_cells",
+    "hatch_cells",
     "in_region",
     "is_connected",
     "is_unit_step",
@@ -61,6 +62,43 @@ def body_cells(origin: CellCoord, footprint: CellBox, orientation: Facing) -> se
         for dy in range(footprint.sy)
         for dz in range(depth)
     }
+
+
+def hatch_cells(
+    origin: CellCoord, footprint: CellBox, orientation: Facing, slots: Iterable[HatchSlot]
+) -> dict[Cell, tuple[str, ...]]:
+    """Where each recorded hatch slot lands once the machine is placed and turned, to its kinds.
+
+    The validator's own re-derivation, from the convention rather than from
+    ``ir.geometry.rotated_slot`` (see the module docstring). A slot offset is measured from the
+    machine's **unrotated** minimum corner, so it turns with the structure and is then re-anchored,
+    exactly as the body box is.
+
+    Working it out from the convention alone: the dump's front is NORTH, which is ``-Z``, so facing
+    the machine EAST is the turn that carries ``-Z`` onto ``+X``, and that turn sends an offset
+    ``(dx, dz)`` to ``(-dz, dx)``. That lands the turned offsets in ``-(sz - 1) .. 0`` on x, so
+    adding ``sz - 1`` puts the minimum corner back at ``origin``. Two and three turns are the same
+    map applied again, with the extents that turn exchanged. Height is untouched: the turn is about
+    the vertical axis.
+
+    Two slots can never land on one cell (the turn is a bijection), so a dict loses nothing; a
+    machine that repeats an offset in its dump would collapse, which is a dump defect either way.
+    """
+    turns = _QUARTER_TURNS_FROM_NORTH.get(orientation, 0)
+    sx, sz = footprint.sx, footprint.sz
+    placed: dict[Cell, tuple[str, ...]] = {}
+    for slot in slots:
+        dx, dy, dz = slot.offset.as_tuple()
+        if turns == 1:
+            x, z = sz - 1 - dz, dx
+        elif turns == 2:
+            x, z = sx - 1 - dx, sz - 1 - dz
+        elif turns == 3:
+            x, z = dz, sx - 1 - dx
+        else:
+            x, z = dx, dz
+        placed[(origin.x + x, origin.y + dy, origin.z + z)] = slot.kinds
+    return placed
 
 
 def in_region(cell: Cell, region: CellBox) -> bool:

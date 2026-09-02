@@ -53,6 +53,7 @@ from __future__ import annotations
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
+from types import MappingProxyType
 
 from gtnh_solver.dataset import (
     CABLE_THICKNESSES,
@@ -78,7 +79,7 @@ from gtnh_solver.ir import (
 from gtnh_solver.ir.geometry import Cell
 from gtnh_solver.ir.nets import net_sources_sinks, placement_index, port_direction_map
 
-from ._grid import astar_multi, coord, dock_candidates, manhattan, obstacle_cells
+from ._grid import astar_multi, claim_key, coord, dock_candidates, manhattan, obstacle_cells
 
 #: Backstop on rip-up/reroute passes (cycle detection on the failed-net set usually stops
 #: first). The item/fluid router moved on to negotiated congestion (core, GitHub #7); power
@@ -113,6 +114,7 @@ def route_power(
     placements: Sequence[Placement],
     *,
     extra_obstacles: Collection[Cell] = (),
+    claimed_cells: Mapping[str, Collection[Cell]] = MappingProxyType({}),
 ) -> PowerRouteResult:
     """Route each per-tier power net of ``problem`` as a shared-amperage trunk over ``placements``.
 
@@ -131,13 +133,20 @@ def route_power(
     solver's feedback loop from getting a false infeasibility on power that it would not get on
     pipes. When routing genuinely stalls, ALL still-failing nets are reported (#40), not just the
     first. (The buildguide half of #40 - branching-trunk rendering - is parked; not touched here.)
+
+    ``claimed_cells`` are the **casing** cells per machine that the item/fluid pipes already spent
+    on their own hatches. A machine's hatch cells are one shared pool - an input bus and an energy
+    hatch compete for the same block - so an energy hatch must not be given a cell an input bus is
+    standing on. ``extra_obstacles`` cannot express that: it names the cells *outside* the machine
+    a pipe occupies, and one casing cell has up to five free faces.
     """
     if problem.me_toggles.toggled(Commodity.POWER):
         return PowerRouteResult()  # power is on the ME network; nothing to route
 
     power_nets = [net for net in problem.nets if net.commodity is Commodity.POWER]
     routes, failures = _rip_up_reroute(
-        power_nets, lambda order: _route_pass(problem, placements, order, extra_obstacles)
+        power_nets,
+        lambda order: _route_pass(problem, placements, order, extra_obstacles, claimed_cells),
     )
     if not failures:
         return PowerRouteResult(routes=tuple(routes))
@@ -197,6 +206,7 @@ def _route_pass(
     placements: Sequence[Placement],
     nets: Sequence[Net],
     extra_obstacles: Collection[Cell] = (),
+    claimed_cells: Mapping[str, Collection[Cell]] = MappingProxyType({}),
 ) -> tuple[list[Route], dict[str, Infeasibility]]:
     """Route ``nets`` once in the given order as shared-amperage trunks, capacity-aware.
 
@@ -229,6 +239,7 @@ def _route_pass(
             machines,
             obstacles,
             region,
+            claimed_cells,
         )
         if isinstance(built, Infeasibility):
             failures[net.id] = built
@@ -247,6 +258,7 @@ def _route_trunk(
     machines: dict[str, Machine],
     obstacles: set[Cell],
     region: CellBox,
+    claimed_cells: Mapping[str, Collection[Cell]] = MappingProxyType({}),
 ) -> Route | Infeasibility:
     """Dock every machine route-aware and grow the net's shared-amperage cable tree.
 
@@ -282,7 +294,15 @@ def _route_trunk(
         # No extra docked-cell exclusion: this net's terminals may share trunk cells (taps), and
         # a finished net's trunk - every one of its terminals sits on a segment cell - is already
         # in ``obstacles`` by the time the next net docks.
-        cand = dock_candidates(ep.port_id, placement, machine, obstacles, set(), region)
+        cand = dock_candidates(
+            ep.port_id,
+            placement,
+            machine,
+            obstacles,
+            set(),
+            region,
+            claimed_cells.get(ep.machine_id, ()),
+        )
         if not cand:
             return _no_dock(net_id)
         candidates.append(cand)
@@ -298,15 +318,17 @@ def _route_trunk(
     sink_cells: list[Cell] = []  # sink_cells[i] = sink m_i's terminal cell
     blocked = obstacles | {root}  # grows with the trunk so legs never cross it
 
-    claimed: dict[str, set[Cell]] = {}  # machine -> cells its own terminals already hold
+    claimed: dict[str, set[Cell]] = {}  # machine -> CASING cells its own terminals already hold
     for i, cand in enumerate(candidates[1:]):
-        # Two energy hatches of one machine are two distinct casing cells, so their terminals must
-        # be distinct too: letting a second port land on a cell this machine already holds would
+        # Two energy hatches of one machine are two distinct casing cells, so they must sit on
+        # distinct blocks: letting a second port land on a cell this machine already holds would
         # be one hatch charged twice, and the cable under it sized for a draw no single hatch can
-        # take. Cross-net collisions cannot happen - a finished net's cells are obstacles.
+        # take. The claim is on the casing cell, not the dock cell - one casing cell has up to
+        # five free faces, so two terminals can be distinct and still name one hatch. Cross-net
+        # collisions cannot happen: a finished net's cells are obstacles.
         mine = claimed.get(sinks[i].machine_id)
         if mine:
-            cand = [t for t in cand if _cell(t) not in mine]
+            cand = [t for t in cand if _claim(t, machines) not in mine]
             if not cand:
                 return _no_dock(net_id)
         # A tap lays no cable and a zero-segment route fails validation (ROUTE_DISCONTINUOUS),
@@ -317,7 +339,7 @@ def _route_trunk(
             tapped = min(taps, key=lambda t: depth[_cell(t)])  # shallowest; min() keeps cand order
             terminals.append(tapped)
             sink_cells.append(_cell(tapped))
-            claimed.setdefault(sinks[i].machine_id, set()).add(_cell(tapped))
+            claimed.setdefault(sinks[i].machine_id, set()).add(_claim(tapped, machines))
             continue
         goals = {_cell(t) for t in cand} - blocked  # blocked already covers the laid trunk
         if not goals:
@@ -336,8 +358,10 @@ def _route_trunk(
         blocked.update(path)  # later legs must avoid these cells so the graph stays a tree
         legs.append(path)
         end = path[-1]
-        terminals.append(next(t for t in cand if _cell(t) == end))
+        landed = next(t for t in cand if _cell(t) == end)
+        terminals.append(landed)
         sink_cells.append(end)
+        claimed.setdefault(sinks[i].machine_id, set()).add(_claim(landed, machines))
         claimed.setdefault(sinks[i].machine_id, set()).add(end)
 
     loads = [
@@ -426,6 +450,11 @@ def _size_trunk(
             segments.append(Segment(start=coord(parent), end=coord(child), channel=0))
             thickness.append(_cable_thickness(amps))
     return segments, thickness
+
+
+def _claim(terminal: Terminal, machines: Mapping[str, Machine]) -> Cell:
+    """:func:`_grid.claim_key` for a terminal whose machine is looked up by id."""
+    return claim_key(terminal, machines[terminal.machine_id])
 
 
 def _nearest(candidates: Sequence[Terminal], targets: Sequence[Terminal]) -> Terminal:

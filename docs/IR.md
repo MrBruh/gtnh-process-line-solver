@@ -64,6 +64,23 @@ HatchSlot { offset: CellCoord, kinds: [str] }
           A LOWER BOUND, never a whitelist: a GT hatch adder built from a bare method reference
           exposes no filter, so its cell is recorded without that kind. Treating an absent kind
           as a prohibition manufactures false infeasibilities across a third of the dataset.
+          Nor is the enum closed - ~30 further IHatchElement implementations live outside
+          gregtech.api.enums.HatchElement (TecTech's EnergyMulti/InputData, gtPlusPlus's set,
+          per-controller ones, and HatchElementEither's "A or B"), any of which a dump may name.
+
+  Which kinds a port needs (ir.input_ir.HATCH_KINDS; the bus/hatch split is lexical in GT and
+  means items/fluids):
+        item   input -> InputBus      fluid input  -> InputHatch
+        item  output -> OutputBus     fluid output -> OutputHatch
+        power  input -> Energy | ExoticEnergy | MultiAmpEnergy   (34 of 208 controllers record
+                                                                  only the TecTech spelling)
+        power output -> Dynamo
+  Machine.hatch_slots_for(port_id) applies that in three levels, and the third is load-bearing:
+        no slots recorded at all      -> None; every body cell stays a candidate
+        some slot names the kind      -> exactly those slots
+        no slot names the kind        -> ALL of them (the dump is silent, not prohibiting; the
+                                         Chemical Plant records zero Energy cells and must still
+                                         be powerable)
 
 FaceSpec     { ports: [Port] }      # catalog of required I/O; the physical face is a solver choice
 Port
