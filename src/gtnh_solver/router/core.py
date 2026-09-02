@@ -7,7 +7,8 @@ adjacent 1-source-1-sink nets, one auto-output per machine) and lays pipes only 
 For each piped net: resolve a :class:`~gtnh_solver.ir.Terminal` per endpoint (a free cell just
 outside a usable, non-front machine face - the front comes from the placement orientation, so no
 dataset is needed), then A* between the terminals over the free cell grid (machine + reserved
-cells are obstacles). Two nets must never share a cell - the crude single-channel cap (one route
+cells are obstacles). Which face an endpoint docks on is itself decided by routing, not by a
+face ordering: every free face cell is a candidate and multi-goal A* picks the pair (``_dock_net``). Two nets must never share a cell - the crude single-channel cap (one route
 per cell), which the validator independently enforces. Rather than laying nets sequentially (and
 being hostage to net order), the router runs **negotiated congestion** (the FPGA PathFinder
 scheme, GitHub #7): every net first routes independently as if alone, then every cell shared by
@@ -28,9 +29,11 @@ Four phases (item/fluid nets; power is ``router.power``'s job)::
       |  [1] auto-assign  router.auto: adjacent 1-source-1-sink nets take GT's free auto-output
       |                   (one per machine); only the uncovered nets are piped.
       v
-      |  [2] dock         a Terminal per endpoint on a usable (non-front) face, one cell out;
-      |                   terminals are fixed for the whole negotiation (a pipe MUST touch its
-      |                   dock cell, so docks are not tradeable and foreign docks are hard).
+      |  [2] dock         a Terminal per endpoint on a usable (non-front) face, one cell out,
+      |                   chosen route-aware (multi-goal A* over every free face cell, not the
+      |                   first face in a tuple); terminals are then fixed for the whole
+      |                   negotiation (a pipe MUST touch its dock cell, so docks are not
+      |                   tradeable and foreign docks are hard).
       v
       |  [3] route        every net independently: priced A* between its terminals; machine,
       |                   reserved, and foreign-terminal cells are hard, contested cells cost
@@ -60,6 +63,7 @@ from gtnh_solver.ir import (
     Commodity,
     Infeasibility,
     InputIR,
+    Machine,
     Net,
     Placement,
     Route,
@@ -69,7 +73,7 @@ from gtnh_solver.ir import (
 from gtnh_solver.ir.geometry import Cell
 from gtnh_solver.ir.nets import placement_index
 
-from ._grid import astar, coord, dock, obstacle_cells
+from ._grid import astar, astar_multi, coord, dock_candidates, obstacle_cells
 from .auto import assign_auto_outputs
 
 #: Backstop on negotiation rounds. Convergence is normally a handful of rounds (a two-net
@@ -161,9 +165,9 @@ def _negotiate(
 ) -> tuple[list[Route], dict[str, Infeasibility]]:
     """Route ``nets`` by negotiated congestion; return ``(routes, {net_id: why it failed})``.
 
-    Terminals are docked once, up front (a pipe MUST touch its dock cell, so docks are not
-    tradeable: an undockable net fails outright, and every other net treats foreign dock cells
-    as hard). Then the rounds: each net in turn is ripped up and re-routed with priced A* -
+    Terminals are docked once, up front, route-aware (:func:`_dock_net`) and against a shared
+    claim set, since a pipe MUST touch its dock cell, so docks are not tradeable: an undockable
+    net fails outright, and every other net treats foreign dock cells as hard. Then the rounds: each net in turn is ripped up and re-routed with priced A* -
     contested cells cost ``_PRESENT_PENALTY`` per other current user plus the accumulated
     history - and each round every cell still shared by 2+ nets has its history raised by
     ``_HISTORY_STEP``. No overlap left means convergence: the per-net cheapest paths are
@@ -193,25 +197,14 @@ def _negotiate(
     term_cells_by_net: dict[str, set[Cell]] = {}
     docked: set[Cell] = set()
     for net in nets:
-        chosen: set[Cell] = set()  # this net's own terminals, so two of its ports don't co-locate
-        terminals: list[Terminal] = []
-        for endpoint in net.endpoints:
-            ep_placement = placement_by_machine.get(endpoint.machine_id)
-            ep_machine = machines.get(endpoint.machine_id)
-            terminal = (
-                dock(endpoint.port_id, ep_placement, ep_machine, hard, docked | chosen, region)
-                if ep_placement is not None and ep_machine is not None
-                else None
-            )
-            if terminal is None:
-                failures[net.id] = _no_dock(net.id, endpoint.machine_id)
-                break
-            chosen.add(terminal.cell.as_tuple())
-            terminals.append(terminal)
-        else:
-            terminals_by_net[net.id] = terminals
-            term_cells_by_net[net.id] = chosen
-            docked |= chosen
+        picked = _dock_net(net, placement_by_machine, machines, hard, docked, region)
+        if isinstance(picked, Infeasibility):
+            failures[net.id] = picked
+            continue
+        chosen = {t.cell.as_tuple() for t in picked}
+        terminals_by_net[net.id] = picked
+        term_cells_by_net[net.id] = chosen
+        docked |= chosen
 
     active = [net for net in nets if net.id not in failures]
     all_terms: set[Cell] = set().union(*term_cells_by_net.values()) if term_cells_by_net else set()
@@ -306,6 +299,81 @@ def _negotiate(
         if net.id in routed_ids
     ]
     return routes, failures
+
+
+def _dock_net(
+    net: Net,
+    placement_by_machine: dict[str, Placement],
+    machines: dict[str, Machine],
+    hard: set[Cell],
+    docked: set[Cell],
+    region: CellBox,
+) -> list[Terminal] | Infeasibility:
+    """Choose one Terminal per endpoint **route-aware**: chain the endpoints with multi-goal A*.
+
+    A pipe connects to any face but the front, so which face an endpoint docks on is a routing
+    decision, not a tuple ordering. Committing to the first free face in ``FACE_ORDER`` - blind
+    to where the route then has to go - is what made nitrobenzene's item/fluid terminals pile
+    onto SOUTH while route-aware power spread over four faces. So this mirrors ``router.power``:
+    take *every* free cell outside a usable face (``_grid.dock_candidates``) and let the path
+    pick, leg by leg, in endpoint order (``_lay_legs`` chains the same consecutive pairs).
+
+    The first leg runs multi-source **and** multi-goal, so the opening pair of faces is chosen
+    together rather than the first endpoint guessing before it knows the second; each later leg
+    starts from the cell already chosen. Selection routes against ``hard | docked`` only - other
+    nets' *paths* do not exist yet, and pricing them apart is the negotiation's job - so the
+    terminals this returns stay fixed for the whole negotiation, exactly as before (a pipe MUST
+    touch its dock cell; see the module docstring).
+
+    Falls back to the first free candidate for any endpoint the chain could not reach, which
+    keeps the failure taxonomy unchanged: an endpoint with no free face at all is
+    ``face_reachability`` here, while a docked-but-unreachable net fails as ``routing`` in the
+    round, as it always has.
+    """
+    candidates: list[list[Terminal]] = []
+    for endpoint in net.endpoints:
+        ep_placement = placement_by_machine.get(endpoint.machine_id)
+        ep_machine = machines.get(endpoint.machine_id)
+        cand = (
+            dock_candidates(endpoint.port_id, ep_placement, ep_machine, hard, docked, region)
+            if ep_placement is not None and ep_machine is not None
+            else []
+        )
+        if not cand:
+            return _no_dock(net.id, endpoint.machine_id)
+        candidates.append(cand)
+
+    blocked = hard | docked
+    terminals: list[Terminal] = []
+    taken: set[Cell] = set()  # this net's own terminals, so two of its ports don't co-locate
+    for leg, cand in enumerate(candidates[1:]):
+        starts = (
+            {t.cell.as_tuple() for t in candidates[0]}
+            if not terminals
+            else {terminals[-1].cell.as_tuple()}
+        )
+        goals = {t.cell.as_tuple() for t in cand} - taken - starts
+        path = astar_multi(starts, goals, blocked, region) if goals else None
+        if path is None:
+            break  # unreachable from here on; the fallback below picks the remaining faces
+        if not terminals:
+            terminals.append(_at_cell(candidates[0], path[0]))
+            taken.add(path[0])
+        terminals.append(_at_cell(candidates[leg + 1], path[-1]))
+        taken.add(path[-1])
+
+    for i in range(len(terminals), len(candidates)):
+        free = next((t for t in candidates[i] if t.cell.as_tuple() not in taken), None)
+        if free is None:
+            return _no_dock(net.id, net.endpoints[i].machine_id)
+        terminals.append(free)
+        taken.add(free.cell.as_tuple())
+    return terminals
+
+
+def _at_cell(candidates: Sequence[Terminal], cell: Cell) -> Terminal:
+    """The candidate Terminal sitting on ``cell`` (``_dock_faces`` yields each cell once)."""
+    return next(t for t in candidates if t.cell.as_tuple() == cell)
 
 
 def _lay_legs(

@@ -6,6 +6,27 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Which face a pipe docks on is now decided by the route, not by a tuple ordering
+  (`router/`).** `dock()` walked `FACE_ORDER` and committed to the first free face before it knew
+  where the route had to go, which is why nitrobenzene's item and fluid terminals piled onto
+  SOUTH 16 times out of 18 while the route-aware power router spread over four faces. Docking now
+  takes *every* free cell outside a usable face and lets multi-goal A* pick: the first leg runs
+  multi-source and multi-goal, so the opening pair of faces is chosen together rather than the
+  first endpoint guessing before it knows the second, and each later leg starts from the cell
+  already chosen. Terminals stay fixed for the whole negotiation exactly as before, so the
+  docks-are-not-tradeable invariant is untouched, and an endpoint the chain cannot reach falls
+  back to the old first-fit so the failure taxonomy is unchanged. `dock()` itself is gone; its
+  only caller was this one.
+
+  Nitrobenzene's terminals now read `west 6, east 6, south 4, down 3, up 3`, its build lays 86
+  route segments against 114, and its power cable drops from 60 cells to 43. Its floor area rises
+  from 136 to 152: shorter pipes hug machine surfaces, and one machine with three HV energy
+  hatches is left with two free dock cells, so the power net cannot dock and the attempt that used
+  to win is lost. Per-machine cell claiming is the next lane's job (`docs/hatch-placement/`), and
+  the regression is recorded there rather than absorbed into a loosened assertion. Sand is
+  unchanged.
+
 ### Added
 - **A multiblock's hatch cells now say WHERE they are, and a layout says where each hatch went
   (`ir/` LayoutResult v1, `dataset/`, `adapter/`, `validator/`).** `Machine.hatch_slots` carries

@@ -34,7 +34,7 @@ from gtnh_solver.placement import place
 from gtnh_solver.router import route, route_power
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
-from tests._helpers import at, machine
+from tests._helpers import at, machine, net
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 _SAND = _EXAMPLES / "gtnh-sand.json"
@@ -519,6 +519,65 @@ def test_route_terminals_avoid_the_front_face() -> None:
     faces = [t.face for r in result.routes for t in r.terminals]
     assert faces  # there are terminals
     assert all(face is not Facing.NORTH for face in faces)  # north is the front (orientation)
+
+
+def test_route_docks_on_the_face_the_route_wants_not_the_first_in_face_order() -> None:
+    # Two machines on the x axis with a 2-cell gap. FACE_ORDER puts SOUTH first, so first-fit
+    # docking would put both terminals in the +z row and pay 3 hops to cross; the shortest
+    # connection is the facing pair EAST/WEST at 1 hop. Docking is a routing decision, so the
+    # router must choose the latter - it is the whole point of route-aware docking.
+    problem = _item_pair(CellBox(sx=8, sy=4, sz=8))
+    result = route(problem, [at("a", 0, 0, 0), at("b", 3, 0, 0)])
+
+    assert result.ok
+    (laid,) = result.routes
+    assert [t.face for t in laid.terminals] == [Facing.EAST, Facing.WEST]
+    assert len(laid.segments) == 1  # (1,0,0) -> (2,0,0); first-fit SOUTH would have paid 3
+
+
+def test_route_chains_a_multi_endpoint_net_leg_by_leg() -> None:
+    # Three endpoints: the first leg picks the opening PAIR of faces together (multi-source and
+    # multi-goal), and each later leg starts from the cell already chosen. Nothing here may fall
+    # back to the FACE_ORDER tiebreak - every endpoint's face comes from a laid leg.
+    a = machine("a", [Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)])
+    b = machine("b", [Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT)])
+    c = machine("c", [Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT)])
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[a, b, c],
+        nets=[net("n", "a", "b", "c")],
+    )
+    result = route(problem, [at("a", 0, 0, 0), at("b", 3, 0, 0), at("c", 6, 0, 0)])
+
+    assert result.ok
+    (laid,) = result.routes
+    assert len(laid.terminals) == 3
+    # a and b face each other across the first gap, exactly as the two-endpoint case does; c is
+    # reached by a second leg that starts where the first one ended.
+    assert [t.face for t in laid.terminals[:2]] == [Facing.EAST, Facing.WEST]
+    assert laid.terminals[2].cell.as_tuple() in _route_cells(laid)
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[at("a", 0, 0, 0), at("b", 3, 0, 0), at("c", 6, 0, 0)],
+        routes=list(result.routes),
+        auto_connections=list(result.auto_connections),
+    )
+    assert validate(problem, layout).ok, str(validate(problem, layout))
+
+
+def test_route_infeasible_when_both_endpoints_want_the_only_free_cell() -> None:
+    # A 3x1x1 corridor: the lone free cell (1,0,0) is the ONLY dock candidate of both machines,
+    # and two ports of one net may not co-locate. The chain cannot even start (its goal set is
+    # empty once the shared cell is excluded), so docking falls back to first-fit - which seats
+    # the first endpoint and leaves the second with nothing.
+    problem = _item_pair(CellBox(sx=3, sy=1, sz=1))
+    result = route(problem, [at("a", 0, 0, 0), at("b", 2, 0, 0)])
+
+    assert not result.ok
+    assert result.infeasibility is not None
+    assert result.infeasibility.constraint == "face_reachability"
+    assert "'b'" in result.infeasibility.detail  # the endpoint left without a cell, not the first
 
 
 def test_route_skips_me_toggled_commodity() -> None:

@@ -491,7 +491,7 @@ hatches have facings. It belongs in the assignment lane, not before it.
 
 ### 11.1 Landed
 
-Three lanes are on `main`, each merged after a full green run of the gates. The suite is at 462
+Four lanes are on `main`, each merged after a full green run of the gates. The suite is at 465
 tests and 98% coverage.
 
 | Lane | Commit | What it did |
@@ -499,6 +499,7 @@ tests and 98% coverage.
 | 0 | `306e3f6` | A machine's hatch ceiling is charged to the form it reserves, not the largest one (section 8, question 2) |
 | 1 | `aa2c1b8` | Rotation-aware geometry, and the validator stops sharing the solver's expansion (section 4) |
 | 2 | `5e436f5` | Hatch slots reach the IR; a layout records every placed hatch (`LayoutResult` v1) |
+| 3 | (this lane) | Item and fluid docking is route-aware; `dock()` is gone (section 2.1) |
 
 What that leaves in place for the assignment lane:
 
@@ -515,15 +516,17 @@ What that leaves in place for the assignment lane:
 
 ### 11.2 What to do next
 
-Lanes 3 to 5 of [`implementation.md`](implementation.md), in that order. Lane 3 is small,
-standalone and a hard precondition for lane 4's legalize step: move item and fluid docking onto
-`dock_candidates`, so the legalize step repairs a route-aware choice rather than promoting the
-`FACE_ORDER` tiebreak (section 2.1) into a build instruction.
+Lanes 4 and 5 of [`implementation.md`](implementation.md), in that order.
 
 Only the *structural* half of the hatch rules is enforced. The policy half is lane 4: a face that is
 outward must also be **usable** - for items and power the receiver has to be on it, because those
 are front-face-only in both directions (section 1.1) - plus the muffler keep-out, the casing budget
 as an explicit infeasibility, and the auto-output tightening (section 8, question 3).
+
+**Lane 4 now also has a number to beat.** Lane 3 left nitrobenzene's floor area at 152 against the
+136 it used to reach, because tighter pipes starve a three-energy-hatch machine of dock cells and
+lose the grid attempt that used to win. 4a and 4d are the bookkeeping that fixes it;
+[`implementation.md` 5.1](implementation.md) has the measurement and the mechanism.
 
 ### 11.3 Things learned since the spike that are not in sections 1 to 9
 
@@ -552,6 +555,16 @@ as an explicit infeasibility, and the auto-output tightening (section 8, questio
   CI; `test_cli_solves_nitrobenzene` did exactly that for weeks. See the new section in
   [`../TESTING.md`](../TESTING.md). Lanes 4 and 5 will want dataset-dependent tests, so read it
   first.
+- **Route-aware docking competes with the power router for casing cells, and items go first.**
+  Lane 3's whole gain (114 route segments -> 86) came from pipes hugging machine surfaces, which is
+  the same scarce resource an energy hatch docks on. This was invisible while item and fluid
+  terminals all piled onto SOUTH. It is the clearest evidence yet that casing cells are a *shared,
+  per-machine* budget rather than a per-net one, which is the premise of lane 4.
+- **The power router never checks that enough power arrives**, only that cables are thick enough,
+  so it can emit a layout the validator kills with `POWER_SUPPLY_INSUFFICIENT` - returned as
+  `partial_invalid` with an empty `failed_nets`, so the feedback loop cannot even penalize it. Two
+  of nitrobenzene's eight grid attempts hit it after lane 3. Pre-existing and unrelated to hatches;
+  filed as issue #106, with the detail in [`implementation.md` 5.2](implementation.md).
 
 ### 11.4 Still open, unchanged
 

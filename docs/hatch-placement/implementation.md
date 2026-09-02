@@ -7,7 +7,7 @@ plan implements are `plan.md` section 10, and they are not re-argued here.
 **Read before starting any lane:** section 0 below. Two of its rules exist to prevent a failure mode
 that validates clean and cannot be built.
 
-Status: no lane started as of 2026-09-01.
+Status: lanes 0, 1, 2 and 3 have landed. Next is lane 4 (section 6).
 
 ---
 
@@ -249,7 +249,9 @@ carrying the offset and the accepted kinds, and `MachinePhysical` already derive
 
 ## 5. Lane 3: route-aware docking for items and fluids
 
-**Small, standalone, shippable on its own, and a hard precondition for lane 4.**
+**[Landed, 2026-09-02.] Small, standalone, shippable on its own, and a hard precondition for
+lane 4.** The three acceptance criteria below all hold; the two findings it turned up are in 5.1
+and 5.2, and 5.1 is work lane 4 already owns.
 
 `dock()` (`router/_grid.py:74`) commits to the first free face in `FACE_ORDER` (`:20`), blind to
 where the route has to go. That is why fluid docking on nitrobenzene measures south 15 / west 1
@@ -264,6 +266,52 @@ which is the whole reason this lane comes first.
 - **Acceptance**: the nitrobenzene face histogram stops being `FACE_ORDER`-shaped; total route cells
   do not regress on either shipped example; the solve stays deterministic for a fixed seed.
 - **Size**: under a session.
+
+**Measured, all three met.** The histogram went `south 16, up 1, west 1` -> `west 6, east 6,
+south 4, down 3, up 3`. Route segments went 114 -> 86 and power cable cells 60 -> 43. Both
+examples still solve twice to the same layout. Sand did not move at all, on any objective. The
+whole suite stayed green with no assertion touched, which was not expected: 0.3 anticipated
+churn here and there was none, because nothing pins a face or a cell count on nitrobenzene.
+
+`dock()` is gone. Its only caller was `core._negotiate`, and leaving a first-fit helper in
+`_grid` next to `dock_candidates` would only invite a future caller to reintroduce the bug.
+
+### 5.1 What it cost, and why lane 4 is the fix rather than a lane 3 mitigation
+
+Nitrobenzene's floor area went **136 -> 152** under the default `footprint` objective, which is
+that objective's *leading* metric, so by the project's own ranking the shipped example got worse
+even as its build got 25% shorter. Under `volume` and `balanced` the ranked metric also worsens
+slightly (1360 -> 1400, 1496 -> 1575). Recorded rather than absorbed, per 0.3.
+
+The mechanism is exact, and it is a capacity problem, not a docking one. Shorter pipes hug machine
+surfaces. Machine `node-c85c58bc` has **three HV energy hatches** and 9 dockable cells; after
+item/fluid routing takes 7 of them it has 2 left, and three hatches need three distinct cells
+(`power._route_trunk`'s `claimed` set), so `power:HV` fails `face_reachability`. That kills grid
+attempt 0 - which was the baseline's *winning* layout - and the multi-start grid falls back to a
+worse-ranked survivor.
+
+Nothing in lane 3 can fix that: the item/fluid router has no way to know a machine owes three
+cells to a net it does not route. **4d (claimed body cells) and 4a (slot-driven candidates) are
+exactly that bookkeeping**, and 4e turns the leftover case into an explicit infeasibility instead
+of a lost attempt. Pulling a reservation step forward into lane 3 would move every layout twice
+for the same end state. Decided 2026-09-02 with the maintainer: land lane 3, recover the metric in
+lane 4, and treat 136/1360/1496 as the numbers lane 4 has to beat.
+
+### 5.2 A pre-existing power defect this made reachable
+
+The power router sizes cables but never checks that enough power **arrives**: a machine takes
+packets through hatches capped at `Port.max_amps`, and cable loss shrinks each packet, so
+`sum(max_amps * delivered_volts)` can fall below `eut` on a run whose every segment is thick
+enough. `validator/core` checks it (`POWER_SUPPLY_INSUFFICIENT`); `router/power` has no equivalent,
+and greps clean for `max_amps`.
+
+The result is a fully-routed layout the validator kills, which `solver/core._assemble` returns as
+`partial_invalid` with an **empty** `failed_nets` - so no net is penalized and the feedback loop
+treats it as unfixable by re-placing, when it is precisely distance-driven and therefore exactly
+what re-placing fixes. Two of nitrobenzene's eight grid attempts now hit it.
+
+Lane 3 did not cause this and does not touch power sizing; longer trunks simply made it reachable.
+Filed as issue #106 rather than fixed here.
 
 ---
 

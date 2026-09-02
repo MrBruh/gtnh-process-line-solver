@@ -15,8 +15,9 @@ from collections.abc import Collection, Iterator, Mapping, Sequence
 from gtnh_solver.ir import CellBox, CellCoord, Facing, InputIR, Machine, Placement, Terminal
 from gtnh_solver.ir.geometry import FACE_DELTAS, FACE_OFFSETS, Cell, in_region, occupied_cells
 
-# Order to try non-front faces (south first -> docks into the open +z row). The front face
-# (== placement orientation) is skipped at runtime.
+# Enumeration order for the non-front faces (the front face == placement orientation is skipped
+# at runtime). Both routers weigh every face against the route, so this fixes only the order
+# candidates are listed in - it is a determinism aid, not a preference.
 FACE_ORDER = (Facing.SOUTH, Facing.NORTH, Facing.EAST, Facing.WEST, Facing.UP, Facing.DOWN)
 NEIGHBORS = FACE_OFFSETS  # the six face-adjacent unit steps A* expands into
 _UNREACHABLE = 1 << 30
@@ -46,11 +47,11 @@ def _dock_faces(
 ) -> Iterator[Terminal]:
     """Free cells just outside the machine's usable (non-front) faces, one Terminal per face+cell.
 
-    The single scan behind both :func:`dock` and :func:`dock_candidates`: it walks ``FACE_ORDER``
-    (front face skipped) and, within each, ascending body cell, yielding a Terminal for every free,
-    in-region, unclaimed cell - deduping a cell already yielded from an earlier face. ``dock`` takes
-    the first yield; ``dock_candidates`` takes them all. The first cell yielded is exactly ``dock``'s
-    old first free cell (the dedup only affects later faces), so neither result changes.
+    The single scan behind :func:`dock_candidates`: it walks ``FACE_ORDER`` (front face skipped)
+    and, within each, ascending body cell, yielding a Terminal for every free, in-region,
+    unclaimed cell - deduping a cell already yielded from an earlier face, so each cell appears
+    exactly once. Order is deterministic and total; no caller may read anything into the *first*
+    yield, which is the ``FACE_ORDER`` tiebreak and not a decision.
     """
     body = set(occupied_cells(placement.cell, machine.footprint, placement.orientation))
     seen: set[Cell] = set()
@@ -73,18 +74,6 @@ def _dock_faces(
             )
 
 
-def dock(
-    port_id: str,
-    placement: Placement,
-    machine: Machine,
-    obstacles: set[Cell],
-    docked: set[Cell],
-    region: CellBox,
-) -> Terminal | None:
-    """First free cell just outside a usable (non-front) face of the machine, as a Terminal."""
-    return next(_dock_faces(port_id, placement, machine, obstacles, docked, region), None)
-
-
 def dock_candidates(
     port_id: str,
     placement: Placement,
@@ -95,10 +84,10 @@ def dock_candidates(
 ) -> list[Terminal]:
     """Every free cell just outside a usable (non-front) face, one Terminal per face+cell.
 
-    Where :func:`dock` commits to the first free face in ``FACE_ORDER`` (blind to where the route
-    then has to go), this returns *all* the options so a route-aware caller (the power router) can
-    dock on whichever face yields the shortest cable. Deterministic order: ``FACE_ORDER``, then
-    ascending body cell.
+    Returning *all* the options is what lets both routers choose a face from where the route has
+    to go rather than from a tuple ordering: the power router docks on whichever face yields the
+    shortest cable, and the item/fluid router chains its endpoints with multi-goal A*
+    (``core._dock_net``). Deterministic order: ``FACE_ORDER``, then ascending body cell.
     """
     return list(_dock_faces(port_id, placement, machine, obstacles, docked, region))
 
