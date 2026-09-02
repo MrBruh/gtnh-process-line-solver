@@ -12,6 +12,7 @@ anything new, unless the test is genuinely about solving.
 from __future__ import annotations
 
 import json
+from functools import cache
 from pathlib import Path
 
 import pytest
@@ -181,12 +182,39 @@ def test_cli_dataset_version_unknown_falls_back(
     assert "physical multiblock dataset unavailable" in capsys.readouterr().err
 
 
+@cache
+def _line_resolves_multiblocks() -> bool:
+    """Whether the resolved dataset actually knows the nitrobenzene line's machines.
+
+    Generated dumps are local and version-namespaced by policy, so a checkout has only the two
+    committed fixtures (Electric Blast Furnace, Vacuum Freezer) and every machine on this line
+    falls back to the 1x1x1 default. That decides the outcome below, so the test reads it instead
+    of assuming the author's machine.
+    """
+    ir = adapt_file(_NITROBENZENE, physical=_load_physical_or_warn())
+    return any(m.footprint.volume > 1 for m in ir.machines)
+
+
 def test_cli_solves_nitrobenzene(capsys: pytest.CaptureFixture[str]) -> None:
-    # The multi-hatch power model is what makes this line solvable: its Coke Oven draws far more
-    # than one energy hatch can take, so before it the MV net was rejected outright.
+    """End to end on the multiblock line, asserting what the available dataset actually allows.
+
+    With the real structure dump this is VALID, and the multi-hatch power model is what makes it
+    so: the Coke Oven draws far more than one energy hatch can take, and before that model the MV
+    net was rejected outright. With fixtures alone every machine is a 1x1x1 block, the HV
+    Distillation Tower needs 7 connections against 5 usable faces, and the honest answer is an
+    explicit face-reachability infeasibility.
+
+    Both are asserted rather than folded into a disjunction, because each is a real property of
+    its own configuration. This test read the fixtures case until the energy-hatch model landed
+    and replaced it with an unconditional exit 0 - true on a machine carrying the full dump, and
+    the reason CI has been red since that work was first pushed.
+    """
     code = main([_NITROBENZENE])
-    assert code == 0
-    assert "# Build guide" in capsys.readouterr().out
+    assert "# Build guide" in capsys.readouterr().out  # the guide is emitted either way
+    if _line_resolves_multiblocks():
+        assert code == 0
+    else:
+        assert code == 1
 
 
 def test_cli_partial_invalid_returns_1(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
