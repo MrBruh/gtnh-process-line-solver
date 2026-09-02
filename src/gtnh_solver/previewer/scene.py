@@ -16,7 +16,17 @@ from __future__ import annotations
 from typing import Any
 
 from gtnh_solver.dataset import tier_voltage
-from gtnh_solver.ir import Commodity, InputIR, LayoutResult, Machine, Route, Terminal
+from gtnh_solver.ir import (
+    CellBox,
+    Commodity,
+    Facing,
+    InputIR,
+    LayoutResult,
+    Machine,
+    Route,
+    Terminal,
+)
+from gtnh_solver.ir.geometry import rotated_footprint
 from gtnh_solver.system_io import RATE_STEM, is_boundary_storage, system_io
 
 #: Bump if the scene shape the viewer template expects changes.
@@ -37,8 +47,15 @@ _MACHINE_PALETTE = (
     "#bc6c25",
 )
 
+
 #: Route colours by commodity. The single source: routes carry their colour, and the scene's
 #: ``routeLegend`` (below) carries the legend swatches, so the viewer no longer hard-codes a
+def _reserved_size(footprint: CellBox, orientation: Facing) -> list[int]:
+    """The reserved box a machine occupies as placed, ``[sx, sy, sz]`` after its yaw."""
+    box = rotated_footprint(footprint, orientation)
+    return [box.sx, box.sy, box.sz]
+
+
 #: second copy of these hex values on the JS side.
 _COMMODITY_COLOR = {
     Commodity.ITEM: "#3cb44b",
@@ -62,11 +79,10 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
             # recipe-map name and the dump is keyed by the controller block's own name.
             "block_key": machines[pl.machine_id].block_key,
             "cell": [pl.cell.x, pl.cell.y, pl.cell.z],
-            "size": [
-                machines[pl.machine_id].footprint.sx,
-                machines[pl.machine_id].footprint.sy,
-                machines[pl.machine_id].footprint.sz,
-            ],
+            # The reserved box AS PLACED: a quarter turn swaps the horizontal extents, and this
+            # size is what the texture pass clamps a machine's blocks against, so an unrotated one
+            # silently deletes the cubes that stick out.
+            "size": _reserved_size(machines[pl.machine_id].footprint, pl.orientation),
             "front": pl.orientation.value,
             # The machine's voltage tier (LV/MV/HV/...), carried so the texture pass can resolve a
             # generically named single-block machine to its GT tier-prefixed manifest entry
@@ -223,7 +239,7 @@ def _content_bounds(
         if m is None:
             continue
         cell = [pl.cell.x, pl.cell.y, pl.cell.z]
-        size = [m.footprint.sx, m.footprint.sy, m.footprint.sz]
+        size = _reserved_size(m.footprint, pl.orientation)
         grow(cell, [cell[i] + size[i] for i in range(3)])
     for route in layout.routes:
         for seg in route.segments:

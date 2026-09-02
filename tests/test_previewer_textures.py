@@ -542,15 +542,21 @@ def test_cubes_never_spill_outside_the_reserved_footprint() -> None:
         assert 5 <= c.cell[2] < 7
 
 
-def test_yaw_spill_falls_back_to_native_orientation() -> None:
-    """A non-cubic footprint whose yaw would spill renders native, so all cubes stay in-bounds."""
+def test_yaw_rotates_the_blocks_inside_the_rotated_reserved_box() -> None:
+    """A yawed non-cubic machine renders turned, because the reserved box turns with it.
+
+    The scene now emits ``size`` as the box AS PLACED (``scene._reserved_size``), so an east-facing
+    3x1x1 bar reserves 1x1x3 and its blocks run along z. There is no spill and therefore no
+    fall-back to the native orientation: the old behaviour drew the bar unturned, which was a
+    picture of a build the solver had not reserved space for.
+    """
     doc = MultiblockDoc.model_validate(_bar_doc(3))
-    cubes = expand_machine(_machine("m", "Bar", cell=[0, 0, 0], size=[3, 1, 1], front="east"), doc)
-    assert len(cubes) == 3, "native fallback keeps all three blocks, none clamped away"
+    cubes = expand_machine(_machine("m", "Bar", cell=[0, 0, 0], size=[1, 1, 3], front="east"), doc)
+    assert len(cubes) == 3, "all three blocks survive the clamp"
     for c in cubes:
-        assert 0 <= c.cell[0] < 3
+        assert c.cell[0] == 0
         assert c.cell[1] == 0
-        assert c.cell[2] == 0
+        assert 0 <= c.cell[2] < 3
 
 
 # --------------------------------------------------------------------------------------------------

@@ -24,8 +24,8 @@ Footprints: single-block 1x1x1 by default, or a machine's real multiblock footpr
 optional physical dataset (``dataset.load_physical_dataset``) is passed and knows the type - see
 ``to_input_ir(plan, physical=...)``; the bounding region is then sized to fit those footprints
 (``_bounding_region``). Still crude-on-purpose for Phase 1 (docs/ROADMAP.md): all four horizontal
-orientations for a square-base machine, but a non-square-base multiblock is pinned to one
-orientation until ``occupied_cells`` rotates (``_orientations_for``); hint-derived face constraints
+orientations for every machine, non-square bases included (``occupied_cells`` rotates the
+reserved box); hint-derived face constraints
 stay on the dataset record; and **multi-instance nodes (``machineCount > 1``) are rejected**
 rather than mapped - a net endpoint
 cannot address one instance of a group until routing is instance-aware (InputIR v1 dropped
@@ -46,7 +46,6 @@ from gtnh_solver.ir import (
     CellBox,
     Commodity,
     FaceSpec,
-    Facing,
     InputIR,
     IODirection,
     Machine,
@@ -123,35 +122,15 @@ def _footprint_for(
     """The footprint for a machine type: the dataset's real one if known, else the 1x1x1 default.
 
     Opt-in by design - with no dataset every machine stays single-block (the Phase 1 behaviour), so
-    the solver runs whether or not a ``data/multiblocks/`` dump is present. Orientation handling of
-    non-cubic footprints is a placement TODO (``ir/geometry.occupied_cells``); the current dataset
-    machines have square (NxN) bases, so their bbox is rotation-invariant. A footprint whose base is
-    *not* square is pinned to one orientation by :func:`_orientations_for` until that TODO lands.
+    the solver runs whether or not a ``data/multiblocks/`` dump is present. The footprint is the
+    machine's *unrotated* box; ``ir.geometry.occupied_cells`` turns it about the vertical axis when
+    the placer faces the machine some way other than north.
     """
     if physical is not None:
         record = physical.get(machine_type, block_key=block_key)
         if record is not None:
             return record.footprint_for(fluid_outputs)
     return _DEFAULT_FOOTPRINT
-
-
-def _orientations_for(footprint: CellBox) -> list[Facing]:
-    """Legal front-face orientations for a machine with this footprint.
-
-    ``ir.geometry.occupied_cells`` does NOT yet rotate a non-cubic footprint (its documented TODO),
-    and the validator's independent safety net shares that primitive - so a horizontally-rotated
-    non-square-base multiblock would reserve the wrong cells on BOTH the solver and its gate, a
-    *shared* blind spot the gate could not catch. Until ``occupied_cells`` is rotation-aware
-    (recorded as the follow-up there), a footprint whose base is not square (``sx != sz``) is pinned
-    to a single default orientation so its reserved box always matches reality. A square-base
-    footprint - every 1x1x1 block and every current dataset multiblock (EBF 3x3x4, Vacuum Freezer
-    3x3x3) - keeps all four horizontal facings, since a vertical-axis turn leaves its bbox unchanged;
-    this is the safe, lower-risk path (no dataset machine is non-square today, so shipping behaviour
-    is unchanged, and the guard is in place the moment one is added).
-    """
-    if footprint.sx == footprint.sz:
-        return list(_DEFAULT_ORIENTATIONS)
-    return [_DEFAULT_ORIENTATIONS[0]]  # non-square base: one orientation until rotation is modelled
 
 
 def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> InputIR:
@@ -200,8 +179,9 @@ def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> Input
                 ),
                 faces=FaceSpec(ports=_recipe_ports(recipe, node)),
                 voltage_tier=node.overclock_tier,
-                # A non-square multiblock is pinned to one orientation until occupied_cells rotates.
-                orientation_options=_orientations_for(footprint),
+                # Every machine keeps all four horizontal facings: occupied_cells rotates a
+                # non-cubic footprint now, so there is nothing left to pin against.
+                orientation_options=list(_DEFAULT_ORIENTATIONS),
                 # EU/t draw the power synthesis sizes amperage from (see _node_eut).
                 eut=_node_eut(recipe, node, resolved_machines),
             )

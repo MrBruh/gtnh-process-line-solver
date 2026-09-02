@@ -9,6 +9,7 @@ units, not blocks. Axes follow Minecraft: ``x``/``z`` horizontal, ``y`` vertical
 from __future__ import annotations
 
 from collections.abc import Iterator
+from functools import cache
 
 from pydantic import Field
 
@@ -52,25 +53,81 @@ class CellBox(FrozenModel):
 Cell = tuple[int, int, int]
 
 
-def occupied_cells(origin: CellCoord, footprint: CellBox) -> Iterator[Cell]:
-    """Every cell a footprint box covers, given its minimum-corner ``origin``.
+#: Clockwise quarter-turns about +Y that take NORTH to each horizontal facing. The multiblock dump
+#: records every machine at ``controller front = NORTH (-Z)``, so this is the yaw its contents take
+#: when the placer faces the machine some other way. A vertical facing carries no yaw and reads as
+#: 0: ``orientation`` comes from ``Machine.orientation_options``, which the adapter fills with
+#: horizontals only, so a vertical one means the caller passed a face where a facing belongs.
+CW_STEPS: dict[Facing, int] = {
+    Facing.NORTH: 0,
+    Facing.EAST: 1,
+    Facing.SOUTH: 2,
+    Facing.WEST: 3,
+}
+
+
+def rotate_offset(dx: int, dz: int, steps: int) -> tuple[int, int]:
+    """Rotate a horizontal offset by ``steps`` clockwise quarter-turns, viewed from +Y.
+
+    One step sends NORTH ``(0, -1)`` to EAST ``(1, 0)``. The general primitive: a footprint box
+    only needs its extents swapped (:func:`rotated_footprint`), but a hatch slot's offset is an
+    arbitrary point and needs this.
+    """
+    for _ in range(steps % 4):
+        dx, dz = -dz, dx
+    return dx, dz
+
+
+@cache
+def _swapped(sx: int, sy: int, sz: int) -> CellBox:
+    """The horizontal-extent swap, memoized on plain ints.
+
+    Keyed on ints rather than on the ``CellBox`` itself: this sits under ``occupied_cells``, which a
+    single solve calls hundreds of thousands of times, and hashing a pydantic model for the cache
+    lookup costs more than the box construction it saves.
+    """
+    return CellBox(sx=sz, sy=sy, sz=sx)
+
+
+def rotated_footprint(footprint: CellBox, orientation: Facing) -> CellBox:
+    """``footprint`` as it sits in the world facing ``orientation``.
+
+    A quarter-turn swaps the horizontal extents; y is a rotation axis and never moves. Rotating a
+    *box* needs nothing more than this, because the box is symmetric about its own centre: rotating
+    every cell and re-anchoring the minimum corner (what :func:`rotate_offset` does for an arbitrary
+    offset set) yields exactly the swapped extents. A property test pins that equivalence, since
+    lane 2's hatch slots take the general path and the two must not drift.
+
+    Two cheap outs come first, and between them they cover every machine in both shipped examples:
+    a square base is rotation-invariant, and a half turn restores the extents.
+    """
+    if footprint.sx == footprint.sz or CW_STEPS.get(orientation, 0) % 2 == 0:
+        return footprint
+    return _swapped(footprint.sx, footprint.sy, footprint.sz)
+
+
+def occupied_cells(origin: CellCoord, footprint: CellBox, orientation: Facing) -> Iterator[Cell]:
+    """Every cell a footprint box covers, given its minimum-corner ``origin`` and its facing.
 
     Conventions shared by placement, router, and validator:
     - ``origin`` is the **minimum corner**; the box occupies
-      ``[x, x+sx) x [y, y+sy) x [z, z+sz)``.
-    - Orientation-driven rotation of non-cubic footprints is a TODO tied to the dataset
-      (1x1x1 machines, the common case, are unaffected). Because this primitive is shared by
-      placement, the router AND the validator (its independent safety net), a rotated multi-cell
-      machine would be mis-modeled *identically* on both sides - so when rotation lands the
-      validator must get its own rotation-aware expansion (or this primitive must be oracle-tested)
-      or the gate will share the solver's blind spot instead of catching it. Until then the adapter
-      side-steps the blind spot by pinning a non-square-base multiblock to a single orientation
-      (``adapter.core._orientations_for``), so every reserved box this expands matches reality; a
-      square-base footprint (all current dataset machines) is rotation-invariant and rotates freely.
+      ``[x, x+sx) x [y, y+sy) x [z, z+sz)`` of the *rotated* footprint.
+    - Rotation preserves the minimum-corner anchor: the cells turn about +Y and are then
+      re-anchored so their minimum corner is still ``origin``. Anything else would move every
+      placement, since ``origin`` is what a ``Placement`` records.
+
+    ``orientation`` is required rather than defaulted on purpose. This primitive is shared by
+    placement, the router AND the validator's independent safety net, so a caller that forgot to
+    rotate would be wrong *identically* on both sides - the one failure class
+    docs/ARCHITECTURE.md #4 exists to prevent, and one that fails silently (a plausible layout that
+    validates clean and cannot be built). Making it required turns every such caller into a type
+    error instead. The validator does not use this function at all; it expands independently
+    (``validator/_geometry.body_cells``).
     """
-    for dx in range(footprint.sx):
-        for dy in range(footprint.sy):
-            for dz in range(footprint.sz):
+    box = rotated_footprint(footprint, orientation)
+    for dx in range(box.sx):
+        for dy in range(box.sy):
+            for dz in range(box.sz):
                 yield (origin.x + dx, origin.y + dy, origin.z + dz)
 
 
@@ -123,17 +180,20 @@ def front_on_boundary(
     external power feed enters from outside the structure - docs/DOMAIN.md); the validator
     re-derives the same predicate independently from the occupied cells.
     """
+    # The depth to step is the ROTATED extent: an east-facing 5x1x2 is 2 deep along x, not 5.
+    # ``front`` is the orientation, so the box is measured as it actually sits in the world.
+    box = rotated_footprint(footprint, front)
     if front is Facing.NORTH:
         return origin.z == 0
     if front is Facing.SOUTH:
-        return origin.z + footprint.sz == region.sz
+        return origin.z + box.sz == region.sz
     if front is Facing.WEST:
         return origin.x == 0
     if front is Facing.EAST:
-        return origin.x + footprint.sx == region.sx
+        return origin.x + box.sx == region.sx
     if front is Facing.DOWN:
         return origin.y == 0
-    return origin.y + footprint.sy == region.sy  # UP
+    return origin.y + box.sy == region.sy  # UP
 
 
 def auto_output_faces(
@@ -154,8 +214,8 @@ def auto_output_faces(
     the placement cost (which rewards orientations that enable one) without either importing the
     other. The validator deliberately re-derives this independently (docs/ARCHITECTURE.md #4).
     """
-    source_cells = set(occupied_cells(source_origin, source_footprint))
-    target_cells = set(occupied_cells(target_origin, target_footprint))
+    source_cells = set(occupied_cells(source_origin, source_footprint, source_front))
+    target_cells = set(occupied_cells(target_origin, target_footprint, target_front))
     for face, (dx, dy, dz) in FACE_DELTAS.items():
         if face is source_front:  # the source's front carries no I/O
             continue

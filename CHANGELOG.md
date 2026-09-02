@@ -632,6 +632,37 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Sand passes the hand-built compactness + <= 3-cable budget under every objective.
 
 ### Changed
+- **Cell geometry is rotation-aware, and the validator no longer shares it (`ir/`, `validator/`,
+  `placement/`, `router/`, `previewer/`, `adapter/`).** `occupied_cells` turns a footprint about the
+  vertical axis, so a non-square-base multiblock finally reserves the cells it actually covers, and
+  the adapter's pin holding those machines to a single orientation is gone (81 of the 208 dumped
+  controllers were affected). `orientation` is a **required** argument rather than a defaulted one:
+  the primitive is shared by placement, the router and the validator, so a caller that forgot to
+  rotate would be wrong identically on both sides, and requiring it makes every such caller a type
+  error instead of a silent one.
+
+  The validator now expands cells **independently** (`validator/_geometry.body_cells`), written from
+  the dump's stated facing convention rather than derived from the solver's code; it used to
+  re-export `ir.geometry.occupied_cells`, which was harmless only while that function could not
+  rotate (docs/ARCHITECTURE.md #4). What stays shared is data, not derivation: `FACE_DELTAS` and
+  `OPPOSITE_FACE` are six unit vectors and six pairs, on the same reasoning the amperage check
+  already shares `tier_voltage` and `CABLE_LOSS_PER_BLOCK` with the router. A property test asserts
+  the two expansions agree everywhere, and an oracle test re-derives every controller's cell set
+  from the raw dump offsets at all four facings (208 of 208 pass locally; the committed fixtures
+  cover two).
+
+  Four sites needed fixing that no type error would have found. `_reorient` performed no geometry
+  check at all, so a turn could overlap a neighbour or leave the region and still be accepted;
+  `_apply_occupied_delta` keyed its diff on the cell, which a reorient does not change even though
+  it moves every cell a non-cubic machine covers; `_rand_origin` bounded the random origin with the
+  unrotated extents, both rejecting origins that fit and offering origins that do not; and
+  `_free_origins` decided whether an origin was free without knowing the orientation. The reserved
+  box the previewer clamps against is now rotated too, which retires the yaw-spill fall-back that
+  used to draw a turned machine unturned.
+
+  Neither shipped example moved: both are entirely square-base, and the orientation-before-cells
+  reordering was done so the RNG draw sequence is unchanged, so every pinned layout, metric and
+  cable count is exactly as it was. A sand solve is 0.77s against 0.87s before the lane.
 - **The committed dataset is now just small fixtures; full datasets are local and version-namespaced
   (`dataset`, `previewer`).** The extractor's outputs are regenerated on demand into gitignored
   per-version folders (`data/<version>/{multiblocks,textures}/`), so several pack versions coexist

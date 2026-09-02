@@ -340,7 +340,9 @@ def test_apply_occupied_delta_survives_lns_reordering_with_multiblock_footprints
 
     def rebuild(placements: list[Placement]) -> set[tuple[int, int, int]]:
         return {
-            c for p in placements for c in occupied_cells(p.cell, machines[p.machine_id].footprint)
+            c
+            for p in placements
+            for c in occupied_cells(p.cell, machines[p.machine_id].footprint, p.orientation)
         }
 
     before = [on_row("a", 0), on_row("wide", 2), on_row("c", 5)]
@@ -350,3 +352,35 @@ def test_apply_occupied_delta_survives_lns_reordering_with_multiblock_footprints
     occupied = rebuild(before)
     _apply_occupied_delta(occupied, before, after, machines)
     assert occupied == rebuild(after)
+
+
+def test_apply_occupied_delta_follows_a_reorient_that_never_moves_the_cell() -> None:
+    # The other half of the same hazard, and the one rotation introduced. A reorient leaves the
+    # origin alone, so a diff keyed on the CELL sees no change - while a quarter turn moves every
+    # cell a non-cubic machine covers. The delta would then drift out of sync with the layout for
+    # the rest of the anneal, and every later overlap test would be run against a stale set.
+    wide = Machine(
+        id="wide",
+        type="wide",
+        footprint=CellBox(sx=3, sy=1, sz=1),
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH, Facing.EAST],
+    )
+    machines = {m.id: m for m in (_hub("a"), wide)}
+
+    def rebuild(placements: list[Placement]) -> set[tuple[int, int, int]]:
+        return {
+            c
+            for p in placements
+            for c in occupied_cells(p.cell, machines[p.machine_id].footprint, p.orientation)
+        }
+
+    before = [at("a", 0, 0, 0), at("wide", 4, 0, 0)]
+    turned = before[1].model_copy(update={"orientation": Facing.EAST})
+    after = [before[0], turned]
+    assert before[1].cell == turned.cell, "the premise: a reorient does not move the origin"
+
+    occupied = rebuild(before)
+    _apply_occupied_delta(occupied, before, after, machines)
+    assert occupied == rebuild(after)
+    assert rebuild(before) != rebuild(after), "a turned 3x1x1 must cover different cells"

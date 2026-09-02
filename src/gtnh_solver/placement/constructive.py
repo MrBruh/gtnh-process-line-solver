@@ -65,7 +65,7 @@ def place(problem: InputIR) -> PlacementResult:
                 placements=tuple(placements), infeasibility=_wont_fit(machine, region)
             )
         origin, orientation = fit
-        occupied.update(occupied_cells(origin, machine.footprint))
+        occupied.update(occupied_cells(origin, machine.footprint, orientation))
         placements.append(Placement(machine_id=machine.id, cell=origin, orientation=orientation))
 
     return PlacementResult(placements=tuple(placements))
@@ -99,33 +99,60 @@ def _fit(machine: Machine, region: CellBox, occupied: set[Cell]) -> tuple[CellCo
     boundary, so it takes the first free origin at which *some* legal orientation does that.
     """
     if not machine.is_power_source:
-        origin = _first_fit(machine, region, occupied)
-        return None if origin is None else (origin, machine.orientation_options[0])
-    for origin in _free_origins(machine, region, occupied):
+        orientation = machine.orientation_options[0]
+        origin = _first_fit(machine, region, occupied, orientation)
+        return None if origin is None else (origin, orientation)
+    # Origin-major, exactly as before. Whether an origin is free now depends on the orientation
+    # (a turned non-cubic box covers different cells), so the fit test moves inside the orientation
+    # loop rather than filtering origins ahead of it. For a cubic machine - every power source
+    # today - the two orders pick the same slot.
+    for origin in _scan_origins(region):
         for orientation in machine.orientation_options:
-            if front_on_boundary(origin, machine.footprint, orientation, region):
+            if _fits(machine, origin, orientation, region, occupied) and front_on_boundary(
+                origin, machine.footprint, orientation, region
+            ):
                 return origin, orientation
     return None
 
 
-def _first_fit(machine: Machine, region: CellBox, occupied: set[Cell]) -> CellCoord | None:
-    """The first in-bounds, non-overlapping origin for ``machine``, or ``None`` if none fits."""
-    return next(_free_origins(machine, region, occupied), None)
+def _first_fit(
+    machine: Machine, region: CellBox, occupied: set[Cell], orientation: Facing
+) -> CellCoord | None:
+    """The first in-bounds, non-overlapping origin for ``machine`` at ``orientation``."""
+    return next(_free_origins(machine, region, occupied, orientation), None)
 
 
-def _free_origins(machine: Machine, region: CellBox, occupied: set[Cell]) -> Iterator[CellCoord]:
-    """Every in-bounds, non-overlapping origin for ``machine``, in first-fit scan order.
+def _scan_origins(region: CellBox) -> Iterator[CellCoord]:
+    """Every origin in the region, in first-fit scan order.
 
-    Scans floor layer first (``y`` outer), then rows (``z``), then columns (``x``), so layouts
-    fill the ground before stacking - the buildable-compact bias, crudely.
+    Floor layer first (``y`` outer), then rows (``z``), then columns (``x``), so layouts fill the
+    ground before stacking - the buildable-compact bias, crudely.
     """
     for y in range(region.sy):
         for z in range(region.sz):
             for x in range(region.sx):
-                origin = CellCoord(x=x, y=y, z=z)
-                cells = list(occupied_cells(origin, machine.footprint))
-                if all(in_region(c, region) for c in cells) and occupied.isdisjoint(cells):
-                    yield origin
+                yield CellCoord(x=x, y=y, z=z)
+
+
+def _fits(
+    machine: Machine,
+    origin: CellCoord,
+    orientation: Facing,
+    region: CellBox,
+    occupied: set[Cell],
+) -> bool:
+    """Whether ``machine`` placed at ``origin`` facing ``orientation`` is in bounds and free."""
+    cells = list(occupied_cells(origin, machine.footprint, orientation))
+    return all(in_region(c, region) for c in cells) and occupied.isdisjoint(cells)
+
+
+def _free_origins(
+    machine: Machine, region: CellBox, occupied: set[Cell], orientation: Facing
+) -> Iterator[CellCoord]:
+    """Every in-bounds, non-overlapping origin for ``machine`` at ``orientation``, in scan order."""
+    for origin in _scan_origins(region):
+        if _fits(machine, origin, orientation, region, occupied):
+            yield origin
 
 
 def _flow_order(problem: InputIR) -> list[Machine]:

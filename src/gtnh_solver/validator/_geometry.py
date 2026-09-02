@@ -1,26 +1,76 @@
-"""Cell-graph connectivity for route validation.
+"""Cell-graph connectivity and the validator's own geometry, for route validation.
 
-The cell-grid primitives (``Cell``, ``occupied_cells``, ``in_region``) live in
-``gtnh_solver.ir.geometry`` next to the value types they operate on, and are re-exported here
-so the validator's imports stay in one place. The origin-anchored / minimum-corner conventions
-are documented there. This module adds only ``is_connected`` (route-graph specific).
+**This module deliberately does not use the solver's cell expansion.** It used to re-export
+``ir.geometry.occupied_cells``, which was harmless only while that function could not rotate: the
+moment a footprint turns, a bug in it would be mis-modelled *identically* in the solver and in the
+only automated gate that exists to catch solver bugs, and it would fail silently - a plausible
+layout, on the wrong cells, validating clean. That is the failure docs/ARCHITECTURE.md #4 exists to
+prevent, so :func:`body_cells` below is written from the dataset's stated convention rather than
+derived from the solver's code.
+
+What stays shared is *data*, not derivation: ``FACE_DELTAS`` and ``OPPOSITE_FACE`` are six unit
+vectors and six pairs, and sharing them keeps the two sides' notion of "north" from drifting the
+way ``validator/core`` already argues for ``tier_voltage`` and ``CABLE_LOSS_PER_BLOCK``. ``Cell`` is
+a type alias. Everything computed from them is computed here.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 
-from gtnh_solver.ir.geometry import FACE_DELTAS, OPPOSITE_FACE, Cell, in_region, occupied_cells
+from gtnh_solver.ir import CellBox, CellCoord, Facing
+from gtnh_solver.ir.geometry import FACE_DELTAS, OPPOSITE_FACE, Cell
 
 __all__ = [
     "FACE_DELTAS",
     "OPPOSITE_FACE",
     "Cell",
+    "body_cells",
     "in_region",
     "is_connected",
     "is_unit_step",
-    "occupied_cells",
 ]
+
+#: How many quarter-turns each facing is from NORTH, counted the way the dump states its
+#: convention: *controller front = NORTH (-Z)*, and a machine faced elsewhere is that structure
+#: turned about the vertical axis. Derived here from the convention rather than imported, so a
+#: mistake in the solver's table cannot hide in both places at once.
+_QUARTER_TURNS_FROM_NORTH: dict[Facing, int] = {
+    Facing.NORTH: 0,
+    Facing.EAST: 1,
+    Facing.SOUTH: 2,
+    Facing.WEST: 3,
+}
+
+
+def body_cells(origin: CellCoord, footprint: CellBox, orientation: Facing) -> set[Cell]:
+    """The world cells a machine placed at ``origin`` facing ``orientation`` occupies.
+
+    The validator's own expansion (see the module docstring). Written from the convention: turning
+    a structure a quarter turn about the vertical axis exchanges its two horizontal extents and
+    leaves its height alone, and ``origin`` names the minimum corner of the box *as placed*, so the
+    turned box is measured from the same corner.
+
+    Returns a set because every caller here asks a membership question; none needs an order.
+    """
+    turns = _QUARTER_TURNS_FROM_NORTH.get(orientation, 0)
+    width, depth = (footprint.sz, footprint.sx) if turns % 2 else (footprint.sx, footprint.sz)
+    return {
+        (origin.x + dx, origin.y + dy, origin.z + dz)
+        for dx in range(width)
+        for dy in range(footprint.sy)
+        for dz in range(depth)
+    }
+
+
+def in_region(cell: Cell, region: CellBox) -> bool:
+    """Whether a cell lies inside the origin-anchored bounding region.
+
+    Origin-anchored: ``(x, y, z)`` is in-bounds iff ``0 <= x < sx``, ``0 <= y < sy`` and
+    ``0 <= z < sz``. A derivation, so the validator keeps its own copy.
+    """
+    x, y, z = cell
+    return 0 <= x < region.sx and 0 <= y < region.sy and 0 <= z < region.sz
 
 
 def is_unit_step(a: Cell, b: Cell) -> bool:

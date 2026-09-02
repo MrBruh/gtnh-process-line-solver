@@ -30,7 +30,9 @@ def obstacle_cells(
     for placement in placements:
         machine = machines.get(placement.machine_id)
         if machine is not None:
-            obstacles.update(occupied_cells(placement.cell, machine.footprint))
+            obstacles.update(
+                occupied_cells(placement.cell, machine.footprint, placement.orientation)
+            )
     return obstacles
 
 
@@ -50,7 +52,7 @@ def _dock_faces(
     the first yield; ``dock_candidates`` takes them all. The first cell yielded is exactly ``dock``'s
     old first free cell (the dedup only affects later faces), so neither result changes.
     """
-    body = set(occupied_cells(placement.cell, machine.footprint))
+    body = set(occupied_cells(placement.cell, machine.footprint, placement.orientation))
     seen: set[Cell] = set()
     for face in FACE_ORDER:
         if face is placement.orientation:  # front face carries no I/O

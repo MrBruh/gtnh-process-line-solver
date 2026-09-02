@@ -73,10 +73,10 @@ from ._geometry import (
     FACE_DELTAS,
     OPPOSITE_FACE,
     Cell,
+    body_cells,
     in_region,
     is_connected,
     is_unit_step,
-    occupied_cells,
 )
 from .report import ValidationReport, Violation, ViolationCode
 
@@ -113,7 +113,7 @@ def _check_power_feed(problem: InputIR, layout: LayoutResult, out: list[Violatio
         if m is None or not m.is_power_source:
             continue
         dx, dy, dz = FACE_DELTAS[pl.orientation]
-        body = set(occupied_cells(pl.cell, m.footprint))
+        body = body_cells(pl.cell, m.footprint, pl.orientation)
         front_plane = ((x + dx, y + dy, z + dz) for x, y, z in body)
         if any(c not in body and in_region(c, region) for c in front_plane):
             out.append(
@@ -190,7 +190,7 @@ def _check_placements(problem: InputIR, layout: LayoutResult, out: list[Violatio
                     f"not one of its orientation_options",
                 )
             )
-        for cell in occupied_cells(pl.cell, m.footprint):
+        for cell in body_cells(pl.cell, m.footprint, pl.orientation):
             if not in_region(cell, region):
                 out.append(
                     Violation(
@@ -233,11 +233,11 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
     machines = {m.id: m for m in problem.machines}
     port_dir = port_direction_map(problem)
     port_commodity = {(m.id, p.id): p.commodity for m in problem.machines for p in m.faces.ports}
-    body_cells: set[Cell] = set()
+    all_body_cells: set[Cell] = set()
     for pl in layout.placements:
         m = machines.get(pl.machine_id)
         if m is not None:
-            body_cells.update(occupied_cells(pl.cell, m.footprint))
+            all_body_cells.update(body_cells(pl.cell, m.footprint, pl.orientation))
     routed: set[str] = set()
 
     for r in layout.routes:
@@ -306,7 +306,7 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
         # the abstraction would otherwise certify a pipe running through a machine body or a
         # reserved cell (docs/ARCHITECTURE.md: cell->block realizability).
         for cell in sorted(route_cells):
-            if cell in body_cells:
+            if cell in all_body_cells:
                 out.append(
                     Violation(
                         ViolationCode.ROUTE_THROUGH_MACHINE,
@@ -465,7 +465,7 @@ def _check_terminals(problem: InputIR, layout: LayoutResult, out: list[Violation
                     )
                 )
             dx, dy, dz = FACE_DELTAS[t.face]
-            body = set(occupied_cells(placement.cell, machine.footprint))
+            body = body_cells(placement.cell, machine.footprint, placement.orientation)
             if (cell[0] - dx, cell[1] - dy, cell[2] - dz) not in body or cell in body:
                 out.append(
                     Violation(
@@ -516,8 +516,8 @@ def _check_auto_connections(problem: InputIR, layout: LayoutResult, out: list[Vi
                 )
             )
         dx, dy, dz = FACE_DELTAS[ac.source_face]
-        source_cells = set(occupied_cells(sp.cell, sm.footprint))
-        target_cells = set(occupied_cells(tp.cell, tm.footprint))
+        source_cells = body_cells(sp.cell, sm.footprint, sp.orientation)
+        target_cells = body_cells(tp.cell, tm.footprint, tp.orientation)
         adjacent = any((x + dx, y + dy, z + dz) in target_cells for x, y, z in source_cells)
         if not adjacent or ac.target_face is not OPPOSITE_FACE[ac.source_face]:
             out.append(

@@ -386,20 +386,16 @@ def expand_machine(machine: Mapping[str, Any], doc: MultiblockDoc) -> list[Block
     blocks so the controller's front overlay points the way the solver oriented it, then translates
     the variant's minimum corner onto the placement ``cell``.
 
-    **No overlap (wall-sharing is out of scope here).** The solver reserves the *unrotated* footprint
-    (``occupied_cells`` does not yet rotate non-cubic footprints, a documented TODO), so a yaw that
-    would push a non-cubic machine's blocks past that footprint is dropped in favour of the native
-    orientation, which fills the reserved footprint exactly. A final hard clamp discards any cube
-    still outside the footprint, so one machine's blocks can never spill into a neighbour's cells.
+    **No overlap (wall-sharing is out of scope here).** The scene's ``size`` is the reserved box *as
+    placed* - the solver rotates it with the machine - so a yaw no longer pushes a non-cubic
+    machine's blocks outside it and the old fall-back to the native orientation is gone. The hard
+    clamp stays: any cube outside the reserved box is discarded, so one machine's blocks can never
+    spill into a neighbour's cells.
     """
     cell = machine["cell"]
     size = machine.get("size", [1, 1, 1])
     steps = _FRONT_CW_STEPS.get(str(machine.get("front", "north")), 0)
     cubes = _place_blocks(doc, cell, steps, size)
-    if steps and not all(_within_footprint(c.cell, cell, size) for c in cubes):
-        cubes = _place_blocks(
-            doc, cell, 0, size
-        )  # native orientation fits the reserved footprint exactly
     return [c for c in cubes if _within_footprint(c.cell, cell, size)]
 
 

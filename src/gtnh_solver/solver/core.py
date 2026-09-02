@@ -155,7 +155,7 @@ def _occupied_cells(
     for p in placements:
         machine = machines.get(p.machine_id)
         if machine is not None:
-            cells.update(occupied_cells(p.cell, machine.footprint))
+            cells.update(occupied_cells(p.cell, machine.footprint, p.orientation))
     for r in routes:
         cells.update(r.cells())
     return cells

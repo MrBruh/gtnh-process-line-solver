@@ -29,7 +29,7 @@ from gtnh_solver.adapter import (
     load_plan,
     to_input_ir,
 )
-from gtnh_solver.adapter.core import _bounding_region, _orientations_for
+from gtnh_solver.adapter.core import _bounding_region
 from gtnh_solver.dataset import DatasetMeta, MachinePhysical, PhysicalDataset
 from gtnh_solver.ir import (
     CellBox,
@@ -667,16 +667,11 @@ def test_bounding_region_empty_is_a_defensive_default() -> None:
     assert _bounding_region([]) == CellBox(sx=8, sy=4, sz=8)
 
 
-def test_orientations_square_base_keeps_all_four() -> None:
-    # A square-base footprint (sx == sz) is rotation-invariant about the vertical axis, so all four
-    # horizontal facings are safe - occupied_cells expands the same box for each. The EBF (3x4x3)
-    # and every 1x1x1 block are square-base.
-    assert _orientations_for(CellBox(sx=3, sy=4, sz=3)) == list(HORIZONTAL_FACINGS_ORDERED)
-    assert _orientations_for(CellBox()) == list(HORIZONTAL_FACINGS_ORDERED)
-
-
-def test_orientations_non_square_base_is_pinned_to_one() -> None:
-    # A non-square base (sx != sz) would swap extents under a 90-degree turn, which occupied_cells
-    # does not yet model, so it is pinned to a single default orientation until rotation lands.
-    for footprint in (CellBox(sx=2, sy=1, sz=5), CellBox(sx=7, sy=3, sz=2)):
-        assert _orientations_for(footprint) == [HORIZONTAL_FACINGS_ORDERED[0]]
+def test_every_footprint_keeps_all_four_orientations() -> None:
+    # The non-square pin is gone: occupied_cells rotates the reserved box, so a 2x1x5 machine is
+    # modelled correctly at any facing and no longer has to be held at one. Asserted through
+    # to_input_ir rather than a helper, because the helper it used to need no longer exists.
+    ir = adapt_file(_SAND)
+    assert ir.machines, "the fixture must actually place machines for this to mean anything"
+    for machine in ir.machines:
+        assert machine.orientation_options == list(HORIZONTAL_FACINGS_ORDERED), machine.id

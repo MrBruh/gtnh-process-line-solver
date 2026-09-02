@@ -26,7 +26,7 @@ from gtnh_solver.ir import (
     Net,
     Route,
 )
-from gtnh_solver.ir.geometry import Cell, occupied_cells
+from gtnh_solver.ir.geometry import Cell, occupied_cells, rotated_footprint
 from gtnh_solver.ir.nets import port_direction_map
 from gtnh_solver.system_io import (
     RATE_UNIT,
@@ -117,7 +117,9 @@ def _placement_table(layout: LayoutResult, machines: dict[str, Machine]) -> list
     for p in sorted(layout.placements, key=lambda pl: (pl.cell.y, pl.cell.z, pl.cell.x)):
         machine = machines.get(p.machine_id)
         typ = machine.type if machine else p.machine_id
-        fp = machine.footprint if machine else None
+        # As placed, not as declared: this line tells a builder which box to clear, and a turned
+        # non-cubic machine occupies swapped horizontal extents.
+        fp = rotated_footprint(machine.footprint, p.orientation) if machine else None
         size = f"{fp.sx}x{fp.sy}x{fp.sz}" if fp else "?"
         lines.append(
             f"  {typ:<22} at ({p.cell.x}, {p.cell.y}, {p.cell.z})"
@@ -297,7 +299,7 @@ def _layer_maps(problem: InputIR, layout: LayoutResult, machines: dict[str, Mach
         machine = machines.get(p.machine_id)
         if machine is None:
             continue
-        for cell in occupied_cells(p.cell, machine.footprint):
+        for cell in occupied_cells(p.cell, machine.footprint, p.orientation):
             machine_cells[cell] = marker_of[p.machine_id]
 
     route_cells: dict[Cell, str] = {}
