@@ -247,7 +247,7 @@ def test_optimizer_reorients_to_enable_auto_output_the_seed_blocks() -> None:
         machines=machines,
         nets=[net("n0", "m0", "m1"), net("n1", "m1", "m2"), net("n2", "m2", "m3")],
     )
-    seed_autos, _ = assign_auto_outputs(problem, place(problem).placements)
+    seed_autos = assign_auto_outputs(problem, place(problem).placements).connections
     assert len(seed_autos) == 0  # the seed orientation blocks every link; reorientation must fix it
     for s in range(8):
         layout = solve(problem, seed=s)

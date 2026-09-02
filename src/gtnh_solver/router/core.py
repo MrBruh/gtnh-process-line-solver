@@ -134,19 +134,21 @@ def route(problem: InputIR, placements: Sequence[Placement]) -> RouteResult:
     maximal collision-free subset is kept and the rest reported). Crude: one channel per cell;
     the per-edge multi-channel cap (``Segment.channel``) is later lane-D work.
     """
-    autos, covered = assign_auto_outputs(problem, placements)
-    auto_connections = tuple(autos)
+    assignment = assign_auto_outputs(problem, placements)
+    auto_connections = assignment.connections
     nets = [
         net
         for net in problem.nets
-        if net.id not in covered  # satisfied by auto-output, no pipe needed
+        if net.id not in assignment.covered  # satisfied by auto-output, no pipe needed
         and not problem.me_toggles.toggled(net.commodity)
         and net.commodity is not Commodity.POWER  # power is the power router's job (router.power)
     ]
     if not nets:
         return RouteResult(auto_connections=auto_connections)
 
-    routes, failures = _negotiate(problem, placements, nets)
+    # A free connection still costs its two machines a casing cell each (an output hatch ejects
+    # through its own front face), so a pipe must not dock onto one of those blocks.
+    routes, failures = _negotiate(problem, placements, nets, assignment.claimed)
     if not failures:
         return RouteResult(routes=tuple(routes), auto_connections=auto_connections)
 
@@ -162,7 +164,10 @@ def route(problem: InputIR, placements: Sequence[Placement]) -> RouteResult:
 
 
 def _negotiate(
-    problem: InputIR, placements: Sequence[Placement], nets: Sequence[Net]
+    problem: InputIR,
+    placements: Sequence[Placement],
+    nets: Sequence[Net],
+    spent: Mapping[str, Collection[Cell]] = MappingProxyType({}),
 ) -> tuple[list[Route], dict[str, Infeasibility]]:
     """Route ``nets`` by negotiated congestion; return ``(routes, {net_id: why it failed})``.
 
@@ -197,11 +202,12 @@ def _negotiate(
     terminals_by_net: dict[str, list[Terminal]] = {}
     term_cells_by_net: dict[str, set[Cell]] = {}
     docked: set[Cell] = set()
-    # Casing cells already spoken for, per machine. One cell is one block, so a cell holding an
-    # input bus cannot also hold an output hatch - not even by facing the other way, which a claim
-    # on the outward cell alone (``docked``) does not catch. Power docks against this same pool,
-    # seeded from the terminals below, so the two routers compete for one budget rather than two.
-    claimed: dict[str, set[Cell]] = {}
+    # Casing cells already spoken for, per machine, seeded with the ones the free auto-output
+    # connections took. One cell is one block, so a cell holding an input bus cannot also hold an
+    # output hatch - not even by facing the other way, which a claim on the outward cell alone
+    # (``docked``) does not catch. Power docks against this same pool, seeded from the terminals
+    # below, so every commodity competes for one budget rather than three.
+    claimed: dict[str, set[Cell]] = {k: set(v) for k, v in spent.items()}
     for net in nets:
         picked = _dock_net(net, placement_by_machine, machines, hard, docked, region, claimed)
         if isinstance(picked, Infeasibility):

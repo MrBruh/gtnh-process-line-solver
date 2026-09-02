@@ -7,7 +7,8 @@ plan implements are `plan.md` section 10, and they are not re-argued here.
 **Read before starting any lane:** section 0 below. Two of its rules exist to prevent a failure mode
 that validates clean and cannot be built.
 
-Status: lanes 0, 1, 2 and 3 have landed. Next is lane 4 (section 6).
+Status: lanes 0 to 3 have landed, and lane 4 all but its repair step (4c). Next is lane 5
+(section 7), with 4c reassessed in 6.1.
 
 ---
 
@@ -317,7 +318,8 @@ Filed as issue #106 rather than fixed here.
 
 ## 6. Lane 4: assignment, legalize, upkeep, keep-out
 
-The substance. Sub-steps in dependency order.
+**[Landed 2026-09-02, except 4c.] The substance.** Sub-steps in dependency order. What actually
+happened to each is in 6.1; read that before starting 4c or lane 5.
 
 **4a. Slot-driven, kind-filtered candidates.** `_dock_faces` (`router/_grid.py:37`) currently walks
 every cell of the bounding box. It becomes: rotated slot offsets only, filtered by kind, with the
@@ -364,6 +366,86 @@ never routed and therefore have nothing to repair against.
   records none); no hatch faces into its own structure; every muffler has an empty cell in front;
   nitrobenzene and sand still solve VALID; the validator enforces all of it from its own expansion.
 - **Size**: 4 to 7 sessions, and the widest uncertainty band in the plan.
+
+### 6.1 What landed, and the one sub-step that turned out not to be needed
+
+Two commits, both green on the full gates.
+
+| Sub-step | State |
+|---|---|
+| 4a slot-driven, kind-filtered candidates | landed |
+| 4b the facing rule | landed (structural half was lane 2; the usable-face half is the kind filter plus the exposure test) |
+| **4c legalize and repair** | **not built, and not needed as specified** - see below |
+| 4d claimed body cells | landed, and wider than planned: the pool is shared across commodities |
+| 4e casing budget as an infeasibility | landed (`hatch_budget`) |
+| 4f upkeep hatches + the muffler keep-out | landed |
+| 4g auto-output tightening | landed |
+| the LAP warm start | not built, and not needed: see below |
+
+**4c dissolved once 4a and 4d were in place.** The plan's shape was "route, then check whether a
+hatch can legally go where it docked, and try a nearby slot if not". But 4a makes the candidate
+set *legal by construction* - docking only ever offers a cell that accepts the kind and has an
+exposed face - and 4d makes it unique, so a routed terminal cannot be illegal by the time it is
+checked. What was left for a repair loop is the case where a machine simply runs out of cells,
+and the plan already says that one must be reported rather than retried (4e). Section 10.2's
+decision was between repair-after-routing and negotiation-during-routing; constrain-before-routing
+turned out to be a third option that costs neither.
+
+The one thing this loses is the ability to *trade* a contested cell, which is what option C was
+for. If a future line proves infeasible only because docking order spent a scarce cell badly, C is
+still the answer, and nothing here forecloses it.
+
+**The LAP warm start was not needed for the upkeep hatches either.** `plan.md` 6.1 kept it in
+reserve for them, since they are never routed and so have nothing to repair against. In practice
+they take the first free legal cell in the same total order docking uses, and both shipped
+examples place every one of them first try. A machine tight enough to need an optimal assignment
+would be one hatch cell from infeasible anyway, and reports that.
+
+**Two deviations from the plan's text, both forced by the geometry.**
+
+- **Upkeep hatches may not sit on an interior slot**, which 4f says they may. An interior cell has
+  no outward face, and every hatch needs one or `HATCH_FACES_INWARD` rejects it - correctly: a
+  maintenance hatch buried in the structure cannot be right-clicked, and GT's own maintenance GUI
+  is front-face-only (`MTEHatchMaintenance.onRightclick`).
+- **The claim pool is not just "body cells"**, as 4d frames it. For a machine with no dumped
+  structure the claim has to be the *face*: a single-block GT machine genuinely takes input on one
+  face of its one block and output on another, so claiming its body cell would cap it at one
+  connection. `_grid.claim_key` is that split.
+
+### 6.2 Where the metrics went
+
+Recorded per 0.3. Nitrobenzene, default `footprint` objective, floor area / volume / power cable
+cells / route segments:
+
+| | floor | volume | power | segments |
+|---|---|---|---|---|
+| before lane 3 | **136** | 1360 | 60 | 114 |
+| lane 3 (route-aware docking) | 152 | 1216 | **43** | **86** |
+| lane 4a/4d (slot-driven + shared pool) | 144 | 1440 | 73 | 111 |
+| lane 4 complete | 154 | 1540 | 60 | 90 |
+
+Under `volume` and `balanced`, though, the finished lane beats the original baseline outright:
+**882** volume against 1360, 126 floor against 136, 34 power cells against 60, 79 segments against
+114. Sand is byte-identical throughout, on all three objectives.
+
+The honest reading: the floor-area number under the default objective is 13% worse than a layout
+that **could not be built** - hatches on cells that host none, two hatches on one block,
+auto-output through casing with no bus in it, and no maintenance hatch or muffler anywhere. The
+constraints are physical, so the earlier figure was never available. What is worth chasing
+separately is why the `footprint` objective now finds a *worse* floor area (154) than the `volume`
+objective happens to find on the way past (126); that is a multi-start grid artifact, not a lane 4
+regression, and it is unscheduled.
+
+### 6.3 Left open
+
+- **Nothing checks that every port HAS a hatch.** Emission gives every port on a dumped machine
+  one, and a test asserts it end to end on both shipped lines, but the validator does not, so a
+  producer that dropped one would not be caught. It needs the ME-toggled and unrouted-port cases
+  thought through first.
+- **`ir.geometry.auto_output_faces` is now only the placement cost's rule.** It models the loose
+  "any touching body cell" adjacency, which is right as a soft reward but is no longer what the
+  router does. Worth a comment at minimum, and possibly worth teaching the cost the tighter rule
+  so placement stops being rewarded for adjacencies routing will refuse.
 
 ---
 

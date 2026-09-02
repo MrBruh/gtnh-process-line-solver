@@ -2,8 +2,10 @@
 
 Moved with the logic from the solver: given final placements + orientations,
 ``assign_auto_outputs`` greedily connects each adjacent 1-source-1-sink item/fluid net by GT's
-free auto-output (one auto-output per source machine; power/ME never auto-feed). These unit
-tests pin the greedy rules the validator independently re-checks.
+free auto-output; power/ME never auto-feed. These unit tests pin the greedy rules the validator
+independently re-checks. The machines here all have single-block footprints and no dumped
+structure, which is the case the "one auto-output per source machine" limit applies to: a
+multiblock ejects from each output hatch's own front face and is covered in test_router_hatches.
 """
 
 from __future__ import annotations
@@ -29,9 +31,9 @@ def test_adjacent_pair_auto_connects_on_the_touching_faces() -> None:
         machines=[producer("a"), consumer("b")],
         nets=[net("n", "a", "b")],
     )
-    autos, covered = assign_auto_outputs(problem, [at("a", 1, 0, 1), at("b", 2, 0, 1)])
-    assert covered == {"n"}
-    (ac,) = autos
+    assigned = assign_auto_outputs(problem, [at("a", 1, 0, 1), at("b", 2, 0, 1)])
+    assert assigned.covered == {"n"}
+    (ac,) = assigned.connections
     assert (ac.source_machine_id, ac.target_machine_id) == ("a", "b")
     assert (ac.source_face, ac.target_face) == (Facing.EAST, Facing.WEST)
 
@@ -42,9 +44,9 @@ def test_non_adjacent_machines_do_not_auto_connect() -> None:
         machines=[producer("a"), consumer("b")],
         nets=[net("n", "a", "b")],
     )
-    autos, covered = assign_auto_outputs(problem, [at("a", 1, 0, 1), at("b", 4, 0, 1)])
-    assert autos == []
-    assert covered == set()
+    assigned = assign_auto_outputs(problem, [at("a", 1, 0, 1), at("b", 4, 0, 1)])
+    assert assigned.connections == ()
+    assert assigned.covered == frozenset()
 
 
 def test_source_front_face_blocks_the_auto_output() -> None:
@@ -62,9 +64,9 @@ def test_source_front_face_blocks_the_auto_output() -> None:
         nets=[net("n", "a", "b")],
     )
     placements = [at("a", 1, 0, 1, orientation=Facing.EAST), at("b", 2, 0, 1)]
-    autos, covered = assign_auto_outputs(problem, placements)
-    assert autos == []
-    assert covered == set()
+    assigned = assign_auto_outputs(problem, placements)
+    assert assigned.connections == ()
+    assert assigned.covered == frozenset()
 
 
 def test_an_unplaced_endpoint_machine_never_auto_connects() -> None:
@@ -73,9 +75,9 @@ def test_an_unplaced_endpoint_machine_never_auto_connects() -> None:
         machines=[producer("a"), consumer("b")],
         nets=[net("n", "a", "b")],
     )
-    autos, covered = assign_auto_outputs(problem, [at("a", 1, 0, 1)])  # b is not placed
-    assert autos == []
-    assert covered == set()
+    assigned = assign_auto_outputs(problem, [at("a", 1, 0, 1)])  # b is not placed
+    assert assigned.connections == ()
+    assert assigned.covered == frozenset()
 
 
 def test_source_spends_its_single_auto_output_on_the_first_net() -> None:
@@ -87,9 +89,9 @@ def test_source_spends_its_single_auto_output_on_the_first_net() -> None:
         nets=[net("n1", "a", "b"), net("n2", "a", "c")],
     )
     placements = [at("a", 1, 0, 1), at("b", 2, 0, 1), at("c", 0, 0, 1)]
-    autos, covered = assign_auto_outputs(problem, placements)
-    assert [ac.net_id for ac in autos] == ["n1"]
-    assert covered == {"n1"}
+    assigned = assign_auto_outputs(problem, placements)
+    assert [ac.net_id for ac in assigned.connections] == ["n1"]
+    assert assigned.covered == {"n1"}
 
 
 def test_fan_out_net_is_not_eligible() -> None:
@@ -100,9 +102,9 @@ def test_fan_out_net_is_not_eligible() -> None:
         nets=[net("n", "a", "b", "c")],
     )
     placements = [at("a", 1, 0, 1), at("b", 2, 0, 1), at("c", 0, 0, 1)]
-    autos, covered = assign_auto_outputs(problem, placements)
-    assert autos == []
-    assert covered == set()
+    assigned = assign_auto_outputs(problem, placements)
+    assert assigned.connections == ()
+    assert assigned.covered == frozenset()
 
 
 def test_power_and_me_toggled_nets_never_auto_feed() -> None:
@@ -128,6 +130,6 @@ def test_power_and_me_toggled_nets_never_auto_feed() -> None:
         at("ia", 1, 0, 4),
         at("ib", 2, 0, 4),
     ]
-    autos, covered = assign_auto_outputs(problem, placements)
-    assert autos == []
-    assert covered == set()
+    assigned = assign_auto_outputs(problem, placements)
+    assert assigned.connections == ()
+    assert assigned.covered == frozenset()

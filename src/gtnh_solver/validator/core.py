@@ -65,6 +65,7 @@ from gtnh_solver.ir import (
     LayoutResult,
     Machine,
     Net,
+    Placement,
     Segment,
 )
 from gtnh_solver.ir.nets import placement_index, port_direction_map
@@ -94,6 +95,7 @@ def validate(problem: InputIR, layout: LayoutResult) -> ValidationReport:
     _check_hatch_cells(problem, out)
     _check_terminal_hatch_cells(problem, layout, out)
     _check_hatches(problem, layout, out)
+    _check_mufflers(problem, layout, out)
     _check_route_capacity(problem, layout, out)
     _check_pinned(problem, layout, out)
     return ValidationReport(tuple(out))
@@ -401,6 +403,34 @@ def _check_routed_net_endpoints(
             )
 
 
+def _hatch_hosts(machine: Machine, placement: Placement, port_id: str) -> set[Cell]:
+    """The casing cells of a placed machine that could host ``port_id``'s hatch.
+
+    The validator's own answer, on its own rotation (``_geometry.hatch_cells``, never the
+    router's), to the three-level question ``Machine.hatch_slots`` documents:
+
+    - no slots recorded -> every body cell. That is "unknown", not "none", and covers a
+      single-block machine, a plan adapted without the physical dataset, and 23 of 208 dumped
+      controllers;
+    - some slot names one of the port's kinds -> exactly those cells. The real constraint;
+    - no slot names any of them -> every recorded cell. A GT hatch adder built from a bare method
+      reference exposes no filter, so the cell is recorded *without* the kind rather than as
+      refusing it, and 61 of 185 controllers record no ``Energy`` cell at all.
+
+    The rule is deliberately shared with the router (via ``Machine.hatch_kinds_for``) the way the
+    amperage check shares ``tier_voltage``: if the two disagreed about what a hatch *is*, the gate
+    would reject buildable layouts. What is not shared is the geometry that answers *where*.
+    """
+    if not machine.hatch_slots:
+        return body_cells(placement.cell, machine.footprint, placement.orientation)
+    placed = hatch_cells(
+        placement.cell, machine.footprint, placement.orientation, machine.hatch_slots
+    )
+    wanted = frozenset(machine.hatch_kinds_for(port_id))
+    matching = {cell for cell, kinds in placed.items() if not wanted.isdisjoint(kinds)}
+    return matching or set(placed)
+
+
 def _check_terminal_hatch_cells(
     problem: InputIR, layout: LayoutResult, out: list[Violation]
 ) -> None:
@@ -438,20 +468,13 @@ def _check_terminal_hatch_cells(
                 continue  # unknown, or a single block: it has no hatches to place
             dx, dy, dz = FACE_DELTAS[terminal.face]
             cell = (terminal.cell.x - dx, terminal.cell.y - dy, terminal.cell.z - dz)
-            slots = hatch_cells(
-                placement.cell, machine.footprint, placement.orientation, machine.hatch_slots
-            )
-            wanted = frozenset(machine.hatch_kinds_for(terminal.port_id))
-            recorded = slots.get(cell)
-            anywhere = any(not wanted.isdisjoint(kinds) for kinds in slots.values())
-            if recorded is None or (anywhere and wanted.isdisjoint(recorded)):
+            if cell not in _hatch_hosts(machine, placement, terminal.port_id):
+                wanted = "/".join(machine.hatch_kinds_for(terminal.port_id)) or "known"
                 out.append(
                     Violation(
                         ViolationCode.TERMINAL_NOT_ON_HATCH_CELL,
                         f"port {terminal.port_id!r} on {terminal.machine_id!r} docks against cell "
-                        f"{cell}, which hosts no "
-                        f"{'/'.join(sorted(wanted)) or 'known'} hatch"
-                        + ("" if recorded is None else f" (it accepts {'/'.join(recorded)})"),
+                        f"{cell}, which hosts no {wanted} hatch",
                     )
                 )
                 continue
@@ -559,6 +582,59 @@ def _check_hatches(problem: InputIR, layout: LayoutResult, out: list[Violation])
                     f"hatch for port {hatch.port_id!r} on {hatch.machine_id!r} sits at {cell} "
                     f"facing {hatch.facing.value}, but its terminal docks at "
                     f"{terminal.cell.as_tuple()} on face {terminal.face.value}",
+                )
+            )
+
+
+def _check_mufflers(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
+    """A polluting machine needs a muffler, and a muffler needs literal air to vent into.
+
+    ``MTEHatchMuffler.polluteEnvironment`` calls ``getAirAtSide`` on its own front facing and
+    returns false for anything else - a cable, a pipe, a casing, a neighbouring machine. The
+    controller then hits ``VENT_AMOUNT`` of stored pollution and stops with ``POLLUTION_FAIL``. So
+    the cell in front of a muffler is a genuine keep-out, a constraint class routing has no other
+    instance of, and this is the only gate that says so.
+
+    A structure that records a ``Muffler``-capable cell is one GT offered the muffler element to,
+    which it only does for a controller that pollutes, so a missing muffler is reported too. That
+    over-reports on the few controllers that accept one without asserting it (the Implosion
+    Compressor), which is the safe direction: an unneeded muffler costs a casing cell, a missing
+    one stops the machine.
+    """
+    machines = {m.id: m for m in problem.machines}
+    occupied = {c.as_tuple() for c in problem.reserved_cells}
+    for placement in layout.placements:
+        machine = machines.get(placement.machine_id)
+        if machine is not None:
+            occupied |= body_cells(placement.cell, machine.footprint, placement.orientation)
+    for route in layout.routes:
+        occupied |= route.cells()
+
+    placed = {h.machine_id for h in layout.hatches if h.kind == "Muffler"}
+    for hatch in layout.hatches:
+        if hatch.kind != "Muffler":
+            continue
+        dx, dy, dz = FACE_DELTAS[hatch.facing]
+        vent = (hatch.cell.x + dx, hatch.cell.y + dy, hatch.cell.z + dz)
+        if vent in occupied:
+            out.append(
+                Violation(
+                    ViolationCode.MUFFLER_BLOCKED,
+                    f"the muffler on {hatch.machine_id!r} vents {hatch.facing.value} into "
+                    f"{vent}, which is not empty air: the machine would stop with POLLUTION_FAIL",
+                )
+            )
+    for placement in layout.placements:
+        machine = machines.get(placement.machine_id)
+        if machine is None or placement.machine_id in placed:
+            continue
+        if any("Muffler" in slot.kinds for slot in machine.hatch_slots):
+            out.append(
+                Violation(
+                    ViolationCode.MUFFLER_MISSING,
+                    f"machine {placement.machine_id!r} ({machine.type}) has casing cells that "
+                    f"accept a muffler, which GT only offers to a controller that pollutes, but "
+                    f"the layout places none",
                 )
             )
 
@@ -681,26 +757,52 @@ def _check_auto_connections(problem: InputIR, layout: LayoutResult, out: list[Vi
                 )
             )
         dx, dy, dz = FACE_DELTAS[ac.source_face]
-        source_cells = body_cells(sp.cell, sm.footprint, sp.orientation)
-        target_cells = body_cells(tp.cell, tm.footprint, tp.orientation)
+        # Two bodies touching is not enough. A multiblock ejects through an output hatch's own
+        # front face and receives through an input bus's, so the connection needs a touching pair
+        # of cells that can host those two hatches. For a machine with no dumped structure both
+        # sets are its whole body, which is exactly the old rule.
+        source_cells = _hatch_hosts(sm, sp, _endpoint_port(net, ac.source_machine_id, sm))
+        target_cells = _hatch_hosts(tm, tp, _endpoint_port(net, ac.target_machine_id, tm))
         adjacent = any((x + dx, y + dy, z + dz) in target_cells for x, y, z in source_cells)
         if not adjacent or ac.target_face is not OPPOSITE_FACE[ac.source_face]:
             out.append(
                 Violation(
                     ViolationCode.AUTO_OUTPUT_NOT_ADJACENT,
-                    f"auto-output for net {ac.net_id!r}: {ac.source_machine_id!r} does not meet "
-                    f"{ac.target_machine_id!r} on {ac.source_face.value}/{ac.target_face.value}",
+                    f"auto-output for net {ac.net_id!r}: {ac.source_machine_id!r} has no hatch "
+                    f"cell meeting one of {ac.target_machine_id!r} on "
+                    f"{ac.source_face.value}/{ac.target_face.value}",
                 )
             )
 
     for machine_id, uses in source_uses.items():
-        if uses > 1:
+        # One auto-output face is a SINGLE-BLOCK machine's limit: it ejects from the machine
+        # itself, to one face, items XOR fluids. A multiblock ejects from each output hatch's own
+        # front face, so several of its nets may go free at once; what it cannot do is put two
+        # hatches on one casing cell, which HATCH_CELL_COLLISION catches instead.
+        machine = machines.get(machine_id)
+        if uses > 1 and (machine is None or not machine.hatch_slots):
             out.append(
                 Violation(
                     ViolationCode.DUPLICATE_AUTO_OUTPUT,
                     f"machine {machine_id!r} auto-outputs to {uses} nets (only one auto-output face)",
                 )
             )
+
+
+def _endpoint_port(net: Net | None, machine_id: str, machine: Machine) -> str:
+    """The port ``machine_id`` connects ``net`` through, or a name that matches no port.
+
+    A miss leaves the kind filter with nothing to match, which the permissive third level turns
+    into "any recorded cell" - the right answer when the endpoint itself is what is malformed,
+    since that is already reported as AUTO_OUTPUT_WRONG_ENDPOINTS rather than here.
+    """
+    if net is None:
+        return ""
+    ports = {p.id for p in machine.faces.ports}
+    for endpoint in net.endpoints:
+        if endpoint.machine_id == machine_id and endpoint.port_id in ports:
+            return endpoint.port_id
+    return ""
 
 
 def _check_auto_net(

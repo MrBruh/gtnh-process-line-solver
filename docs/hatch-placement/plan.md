@@ -491,8 +491,7 @@ hatches have facings. It belongs in the assignment lane, not before it.
 
 ### 11.1 Landed
 
-Four lanes are on `main`, each merged after a full green run of the gates. The suite is at 465
-tests and 98% coverage.
+Five lanes are on `main`, each merged after a full green run of the gates.
 
 | Lane | Commit | What it did |
 |---|---|---|
@@ -500,6 +499,7 @@ tests and 98% coverage.
 | 1 | `aa2c1b8` | Rotation-aware geometry, and the validator stops sharing the solver's expansion (section 4) |
 | 2 | `5e436f5` | Hatch slots reach the IR; a layout records every placed hatch (`LayoutResult` v1) |
 | 3 | `37ef490` | Item and fluid docking is route-aware; `dock()` is gone (section 2.1) |
+| 4 | `813c293` + | Docking is slot-driven and kind-filtered, casing cells are one shared pool, and every hatch is emitted with its cell and facing |
 
 What that leaves in place for the assignment lane:
 
@@ -512,21 +512,21 @@ What that leaves in place for the assignment lane:
 - `LayoutResult.hatches` holds a `PlacedHatch` per hatch, routed and upkeep alike, and the validator
   already rejects one that is off its machine, faces inward, shares a cell, or disagrees with its
   port's terminal.
-- Nothing emits a hatch yet. Every `hatches` list is empty.
+- Every hatch is emitted now: routed, auto-output and upkeep alike. Nitrobenzene places 45.
 
 ### 11.2 What to do next
 
-Lanes 4 and 5 of [`implementation.md`](implementation.md), in that order.
+**Lane 5** of [`implementation.md`](implementation.md): the hatch textures. Everything it needs now
+exists - a hatch has a real cell, a real facing and a real `HatchElement` kind - and section 7.1's
+splice rule is already settled and written down. Its own open items are unchanged: the committed
+manifest carries no hatch entries (issue #98's a/b fork), `BlockCube` carries one yaw for a whole
+machine where a hatch needs its own, the maintenance hatch's states are inverted, `previewer/scene`
+drops `port_id`, and the `TextureDumper` line to fix is shared with issue #105.
 
-Only the *structural* half of the hatch rules is enforced. The policy half is lane 4: a face that is
-outward must also be **usable** - for items and power the receiver has to be on it, because those
-are front-face-only in both directions (section 1.1) - plus the muffler keep-out, the casing budget
-as an explicit infeasibility, and the auto-output tightening (section 8, question 3).
-
-**Lane 4 now also has a number to beat.** Lane 3 left nitrobenzene's floor area at 152 against the
-136 it used to reach, because tighter pipes starve a three-energy-hatch machine of dock cells and
-lose the grid attempt that used to win. 4a and 4d are the bookkeeping that fixes it;
-[`implementation.md` 5.1](implementation.md) has the measurement and the mechanism.
+Lane 4's own leftovers are small and listed in [`implementation.md` 6.3](implementation.md):
+nothing yet checks that every port *has* a hatch, and `ir.geometry.auto_output_faces` is now only
+the placement cost's (looser) rule. 4c, the legalize-and-repair step, was not built and turned out
+not to be needed - 6.1 explains why.
 
 ### 11.3 Things learned since the spike that are not in sections 1 to 9
 
@@ -566,12 +566,33 @@ lose the grid attempt that used to win. 4a and 4d are the bookkeeping that fixes
   of nitrobenzene's eight grid attempts hit it after lane 3. Pre-existing and unrelated to hatches;
   filed as issue #106, with the detail in [`implementation.md` 5.2](implementation.md).
 
-### 11.4 Still open, unchanged
+### 11.4 Still open
 
-Section 8's questions 1 and 3 to 8 all stand. Question 1 (kinds are a lower bound) is now documented
-at every level the data passes through, but nothing enforces the permissive fallback yet, because
-nothing filters by kind yet - that arrives with lane 4 and is the single easiest way to manufacture
-false infeasibilities across a third of the dataset.
+Of section 8's questions, lane 4 closed 1, 3 and 4 and turned 5 into something narrower:
+
+- **Question 1 (kinds are a lower bound) is now enforced permissively**, at three levels, in
+  `Machine.hatch_slots_for` and again independently in the validator. It is load-bearing rather
+  than theoretical: the Chemical Plant records zero `Energy`-capable cells and nitrobenzene must
+  still power it, so a strict reading would have failed the shipped example immediately. The GT
+  source also shows the vocabulary is not closed - roughly 30 further `IHatchElement`
+  implementations live outside the core enum - which is a second reason it must stay permissive.
+- **Question 3 (auto-output semantics) is done**: the predicate is now a touching pair of cells
+  that can host the two hatches, and the one-per-machine rule is scoped to single-block machines.
+- **Question 4 (interior slots) is done**: an interior cell has no outward face, so it yields no
+  dock candidate and can host no hatch at all - not even a maintenance hatch, which is a small
+  correction to what the plan assumed.
+- **Question 5 (the feedback channel)** narrowed rather than closed. A casing-budget failure is now
+  an explicit `hatch_budget` infeasibility naming the machine, which is the right answer for a
+  constraint no re-placement can fix, but it still reaches the solver with no failed net, so the
+  loop cannot steer on it.
+
+Questions 2, 6, 7 and 8 stand: cell == block is still accidental rather than ratified, hatch
+*tier* is still unmodelled, and the fluid-lock / item-lock configuration still does not reach the
+build output.
+
+Also unrelated but unscheduled: issue #106 (the power router never checks a machine's intake), and
+from the `factory-flow-upstream` spike, the adapter not modelling `nodes[].recipeInputOverrides`
+and `schema_version` having no producer guard.
 
 Also unrelated to this work but unscheduled, from the `factory-flow-upstream` spike: the adapter
 does not model `nodes[].recipeInputOverrides` (both shipped fixtures carry it), and `schema_version`

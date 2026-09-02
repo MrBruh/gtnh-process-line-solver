@@ -6,7 +6,50 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **A layout now says which casing cell every hatch is, and which way it faces
+  (`router/hatches.py`).** `LayoutResult.hatches` has existed since the output contract went to
+  v1 and has been empty ever since; it is filled now, from three sources. A routed terminal
+  becomes a hatch on the casing cell behind it, facing the way it docked. A **free auto-output**
+  connection places two - GT still ejects through an output bus's own front face into an input
+  bus, so two touching casing blocks are spent even though no pipe is laid, and nothing recorded
+  them before. And every dumped machine gets the **upkeep hatches its structure records**: a
+  maintenance hatch, plus a muffler wherever GT offered the muffler element, which it only does
+  for a controller that pollutes.
+
+  A machine with no dumped structure gets none at all: a single-block machine *is* its own I/O,
+  and emitting a bus at its cell would describe replacing the machine with a bus. So sand, which
+  is single-block machines and boundary storage throughout, still places zero hatches.
+
+- **The muffler's vent is a routing keep-out, a constraint class the solver had no instance of.**
+  `MTEHatchMuffler.polluteEnvironment` calls `getAirAtSide` on its own front facing, so a cable, a
+  pipe, a casing or a neighbouring machine in that cell makes it return false and the controller
+  stops with `POLLUTION_FAIL`. Hatch placement picks a facing whose outward cell is empty, and the
+  validator proves it (`muffler_blocked`), along with a polluting structure that was given no
+  muffler at all (`muffler_missing`).
+
+- **Running out of casing cells is an explicit infeasibility, never a retry** (`hatch_budget`).
+  The budget is a per-machine total, so no nearby cell and no re-placement can create one; it
+  names the machine and what it ran out of room for.
+
 ### Changed
+- **Two touching machines are no longer enough for a free auto-output.** A multiblock ejects
+  through an output hatch's own front face and receives through an input bus's, so the connection
+  needs a touching pair of casing cells that can *host* those two hatches - not merely two bodies
+  in contact. `ir.geometry.auto_output_faces` still models the loose rule and is still right for
+  the placement cost that rewards adjacency and for a single-block machine, whose one cell is its
+  own hatch; the router and the validator both apply the tighter one now.
+
+  The **one-auto-output-per-machine** limit is scoped to match. It is a real GT limit on a
+  single-block machine (one auto-output face, items XOR fluids) and simply wrong for a multiblock,
+  where each output hatch ejects on its own front face independently. A multiblock now spends
+  casing *cells* instead, and those claims reach the pipe router, so a pipe cannot dock onto a
+  block an auto-output hatch is already standing on.
+
+  Nitrobenzene: 45 hatches placed, floor area 154 against 144, but under the `volume` and
+  `balanced` objectives the line comes out at 882 against a 1360 baseline, with 34 power cable
+  cells against 60 and 79 route segments against 114. Sand is unchanged.
+
 - **A pipe or cable may only attach where GT would actually let a hatch be built
   (`ir/`, `router/`, `validator/`, `solver/`).** Docking walked every cell of a machine's bounding
   box, so a route could dock against a casing block no hatch can replace, and the layout described

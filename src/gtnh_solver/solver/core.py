@@ -48,7 +48,7 @@ from gtnh_solver.ir import (
 )
 from gtnh_solver.ir.geometry import occupied_cells
 from gtnh_solver.placement import Objective, optimize_placement, place
-from gtnh_solver.router import claims_by_machine, route, route_power
+from gtnh_solver.router import claims_by_machine, place_hatches, route, route_power
 from gtnh_solver.validator import ValidationReport, validate
 
 # Feedback loop bounds. Cycle detection on the failed-net set usually stops sooner when nothing
@@ -260,7 +260,14 @@ def _assemble(
     placement_list = list(placements)
     metrics = _layout_metrics(problem, placement_list, routes)  # footprint/layers for every result
 
-    infeasibility = routing.infeasibility or power.infeasibility
+    # Which casing cell each connection turns into a hatch, plus the maintenance hatch and muffler
+    # that belong to no net. Last, because a muffler needs empty air in front of it and only a
+    # finished routing knows which cells are still empty.
+    plan = place_hatches(
+        problem, placement_list, routes, autos, _occupied_cells(problem, placement_list, routes)
+    )
+
+    infeasibility = routing.infeasibility or power.infeasibility or plan.infeasibility
     if infeasibility is not None:
         layout = LayoutResult(
             status=LayoutStatus.PARTIAL_INVALID,
@@ -269,6 +276,7 @@ def _assemble(
             placements=placement_list,
             routes=routes,
             auto_connections=autos,
+            hatches=list(plan.hatches),
             metrics=metrics,
         )
         return layout, (*routing.failed_nets, *power.failed_nets)
@@ -279,6 +287,7 @@ def _assemble(
         placements=placement_list,
         routes=routes,
         auto_connections=autos,
+        hatches=list(plan.hatches),
         metrics=metrics,
     )
     # The placer and router each report success on their own terms; the validator is the only
@@ -294,6 +303,7 @@ def _assemble(
             placements=placement_list,
             routes=routes,
             auto_connections=autos,
+            hatches=list(plan.hatches),
             metrics=metrics,
         )
         return downgraded, ()
