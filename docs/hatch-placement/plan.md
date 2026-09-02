@@ -499,7 +499,7 @@ tests and 98% coverage.
 | 0 | `306e3f6` | A machine's hatch ceiling is charged to the form it reserves, not the largest one (section 8, question 2) |
 | 1 | `aa2c1b8` | Rotation-aware geometry, and the validator stops sharing the solver's expansion (section 4) |
 | 2 | `5e436f5` | Hatch slots reach the IR; a layout records every placed hatch (`LayoutResult` v1) |
-| 3 | (this lane) | Item and fluid docking is route-aware; `dock()` is gone (section 2.1) |
+| 3 | `37ef490` | Item and fluid docking is route-aware; `dock()` is gone (section 2.1) |
 
 What that leaves in place for the assignment lane:
 
