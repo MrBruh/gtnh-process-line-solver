@@ -1,12 +1,15 @@
 # Placing real hatches and buses on multiblocks
 
-**Status: research spike, 2026-08-27. Nothing here is built.** Deliberately uncommitted; this is a
-findings document to decide from, not a contract.
+**Status: findings from a research spike, 2026-08-27. Lanes 0, 1 and 2 have since landed.**
 
-**Decided 2026-09-01 (section 10).** The open questions this document raised have been answered by
-the maintainer. The executable form of those decisions is
-[`implementation.md`](implementation.md); read section 10 for what was chosen and why, then work
-from that.
+Sections 1 to 9 are the spike as written, and are left as a record of what was known then. Where a
+finding has since been resolved or corrected, it is marked inline as **[Landed]** or
+**[Corrected]** rather than rewritten. Read them for the GT behaviour, which has not changed.
+
+- **Section 10** is what the maintainer decided.
+- **Section 11 is the current state and what to do next.** Start there.
+- [`implementation.md`](implementation.md) is the lane-by-lane execution, and the more accurate of
+  the two documents on anything mechanical.
 
 Today a multiblock's I/O is abstract: a `Port` says "this machine needs a fluid output somewhere on
 a non-front face", and the router picks any free cell next to the bounding box. This spike asks what
@@ -129,9 +132,12 @@ correction whatever else is decided here.
 - `Terminal` records `(machine_id, port_id, face, cell)` where `cell` is just *outside* the footprint
   (`ir/output.py:55-63`). The hosting body cell is therefore already implicitly encoded as
   `cell - FACE_DELTAS[face]`, and the validator already computes exactly that expression
-  (`validator/core.py:467-469`). It is simply **unconstrained**.
+  (`validator/core.py:467-469`). It is simply **unconstrained**. **[Landed, lane 2]** A hatch is now
+  recorded explicitly (`PlacedHatch`), and the validator checks it against that same expression.
 - `to_physical` reduces the whole slot list to three integers (`dataset/multiblocks.py:320-324`).
-  **The offsets are dropped on the floor.**
+  **The offsets are dropped on the floor.** **[Landed, lane 2]** They are carried now, per built
+  form, re-anchored from controller-relative to minimum-corner-relative, and reach `Machine`
+  as `hatch_slots`.
 - The router treats the entire bounding box as one solid obstacle (`router/_grid.py:25-34`), so the
   interior does not exist for routing.
 
@@ -188,9 +194,11 @@ of its 26 cells are dockable today and must stop being.
 
 ## 4. The prerequisite: rotation-aware geometry
 
-**Hatch placement cannot ship before this, and the scope is larger than the existing TODO admits.**
+**[Landed, lane 1.]** `occupied_cells(origin, footprint, orientation)` rotates, the
+`_orientations_for` pin is gone, and every machine keeps all four horizontal facings. The section
+below is why it had to come first, and is still the right framing for anyone touching that code.
 
-`ir/geometry.occupied_cells` does not rotate; its docstring records the TODO, and
+`ir.geometry.occupied_cells` does not rotate; its docstring records the TODO, and
 `adapter/core._orientations_for` pins non-square-base machines to one facing because of it. That
 affects 81 of 208 machines *today*.
 
@@ -218,6 +226,12 @@ Mitigation is cheap but not optional: an independent expansion on the validator 
 property test that re-derives every controller's rotated cell set from the raw dump blocks, per
 facing.
 
+**[Landed, lane 1.]** Both exist. `validator/_geometry.body_cells` is written from the dump's stated
+convention rather than from the solver's code, a property test holds the two expansions to the same
+answer, and the oracle passes for all 208 controllers at all four facings. `FACE_DELTAS` and
+`OPPOSITE_FACE` stay shared as *data*, by the same reasoning `validator/core` already gives for
+`tier_voltage` and `CABLE_LOSS_PER_BLOCK`; only the derivation is duplicated.
+
 ---
 
 ## 5. Textures
@@ -242,6 +256,16 @@ No extractor work is needed: `TextureDumper` already walks every MTE unfiltered.
    overlay from NORTH's layers 1..n, sound for `MTEHatch` per its `getTexture`) or re-dump across
    six facings at ~6x the volume. **The splice needs checking against ME stocking buses and GT++
    hatches before it is generalised.**
+
+   **[Corrected, 2026-09-01.]** Checked, and the splice is exact rather than approximate:
+   `MTEHatch.getTexture` computes its background without referencing `side` or `aFacing` at all, so
+   a six-facing re-dump would write byte-identical stacks. Two overriders in the 92-class hierarchy,
+   one of them a no-op `super()` call; ME stocking buses and GT++ hatches turn out to be the
+   simplest case, not the exception. Two figures here are also wrong: a re-dump is **1.7x** the
+   manifest, not 6x, and the five non-front sides do **not** share a background (UP and DOWN differ
+   from the horizontals in 500 of 500 hatch entries), so taking the background from SOUTH would be
+   wrong on every hatch in the pack. The rule and the pool-key gotcha are in `implementation.md`
+   section 7.1.
 3. **Per-cube facing.** `BlockCube` carries one `steps` for the whole machine's yaw; a hatch needs
    its own.
 4. **`previewer/scene.py` drops `port_id`** when emitting terminals, so the previewer cannot
@@ -339,11 +363,11 @@ Three changes, in order. Nothing hatch-related starts before step 1 is green.
    extraction gap into a false infeasibility across roughly a third of the dataset. Needs an explicit
    "unrecorded means permissive" fallback, and ideally an extractor change that distinguishes
    *restricted* from *not recorded*.
-2. **Variant/footprint mismatch (a live bug today).** `hatch_cells` comes from the *largest* variant
-   while `footprint_for` may reserve a *smaller* one. Verified: a Distillation Tower reserved 3x6x3
-   carries `hatch_cells=97`, the 3x12x3 form's count, against 49 for its own. Today only a loose
-   validator ceiling; with geometric slots it would place hatches outside the reserved box. **Fix
-   this independently of the spike.**
+2. **Variant/footprint mismatch (a live bug today).** **[Landed, lane 0.]** `hatch_cells` came from
+   the *largest* variant while `footprint_for` may reserve a *smaller* one: a Distillation Tower
+   reserved 3x6x3 carried `hatch_cells=97`, the 3x12x3 form's count, against 49 for its own.
+   `MachinePhysical.variant_for(fluid_outputs)` is now the single selection point and footprint,
+   ceiling and slot offsets all come from it.
 3. **Auto-output semantics change, and every shipped layout moves with them.** Auto-output for a
    multiblock goes through a specific output hatch's facing, not "any touching body cell" as
    `ir.geometry.auto_output_faces` models. The predicate gets strictly tighter, and `router/auto.py`'s
@@ -460,3 +484,82 @@ Open question 2 (the variant/footprint mismatch) is genuinely independent and sh
 first, as it says. Open question 3 (auto-output semantics) is **not** independent, despite reading
 that way: the tighter predicate is "the output hatch's own facing", which cannot be written until
 hatches have facings. It belongs in the assignment lane, not before it.
+
+---
+
+## 11. Where this stands (2026-09-02)
+
+### 11.1 Landed
+
+Three lanes are on `main`, each merged after a full green run of the gates. The suite is at 462
+tests and 98% coverage.
+
+| Lane | Commit | What it did |
+|---|---|---|
+| 0 | `306e3f6` | A machine's hatch ceiling is charged to the form it reserves, not the largest one (section 8, question 2) |
+| 1 | `aa2c1b8` | Rotation-aware geometry, and the validator stops sharing the solver's expansion (section 4) |
+| 2 | `5e436f5` | Hatch slots reach the IR; a layout records every placed hatch (`LayoutResult` v1) |
+
+What that leaves in place for the assignment lane:
+
+- `Machine.hatch_slots` carries every hatch-capable casing cell, as an offset from the machine's
+  unrotated minimum corner plus the kinds it accepts. Measured on nitrobenzene: Chemical Plant 23,
+  Distillation Tower 25 and 49, Coke Oven 17, Large Chemical Reactor 25.
+- `ir.geometry.rotated_slot(offset, footprint, orientation)` turns a slot with its machine and
+  re-anchors it, property-tested to map a machine's own cells exactly onto `occupied_cells` and to
+  stay injective.
+- `LayoutResult.hatches` holds a `PlacedHatch` per hatch, routed and upkeep alike, and the validator
+  already rejects one that is off its machine, faces inward, shares a cell, or disagrees with its
+  port's terminal.
+- Nothing emits a hatch yet. Every `hatches` list is empty.
+
+### 11.2 What to do next
+
+Lanes 3 to 5 of [`implementation.md`](implementation.md), in that order. Lane 3 is small,
+standalone and a hard precondition for lane 4's legalize step: move item and fluid docking onto
+`dock_candidates`, so the legalize step repairs a route-aware choice rather than promoting the
+`FACE_ORDER` tiebreak (section 2.1) into a build instruction.
+
+Only the *structural* half of the hatch rules is enforced. The policy half is lane 4: a face that is
+outward must also be **usable** - for items and power the receiver has to be on it, because those
+are front-face-only in both directions (section 1.1) - plus the muffler keep-out, the casing budget
+as an explicit infeasibility, and the auto-output tightening (section 8, question 3).
+
+### 11.3 Things learned since the spike that are not in sections 1 to 9
+
+- **Lane 2 was smaller than section 7 assumed, and lane 1 larger.** `HatchSlot` already existed in
+  the dataset schema and the counts were already derived from it; only the offsets were dropped. Lane
+  1, by contrast, had four sites needing work that no type error would have found, the worst being
+  `_reorient`, which performed no geometry check at all and would have started accepting overlapping
+  states in silence.
+- **Only `LayoutResult` bumped.** Section 7 said both contracts would. The rule in `ir/__init__.py`
+  is that additive fields do not bump, so `Machine.hatch_slots` did not; `LayoutResult` did, because
+  a consumer that ignores `hatches` renders a build with no maintenance hatch and no muffler, which
+  is breaking by omission even though nothing raises.
+- **`_cost` is hot enough to notice a constructor.** Rotating inside it built a pydantic model 407k
+  times per sand solve, and testing the fit once per orientation in `_best_insertion` quadrupled
+  that work: together 2.5x on a solve, caught only because the suite went from ~540s to 862s. It
+  needed a square-base short-circuit and a per-rotated-box memo to come back under baseline.
+  **Lane 4 adds per-slot work on that same path** - measure it.
+- **Making `orientation` a required argument is what made lane 1 tractable.** `mypy --strict`
+  enumerated all 19 call sites instead of a human hunting them. Worth repeating for any change to a
+  primitive this widely shared.
+- **The RNG trajectory can be preserved deliberately.** Picking the orientation before testing cells
+  reorders nothing random, so both shipped examples came through lane 1 byte-identical. That is why
+  any future movement in those pins is a regression signal rather than an expected re-baseline.
+- **CI carries only the two committed fixtures**, so every nitrobenzene machine falls back to 1x1x1
+  there and the line cannot solve valid. A test that asserts otherwise passes locally and fails in
+  CI; `test_cli_solves_nitrobenzene` did exactly that for weeks. See the new section in
+  [`../TESTING.md`](../TESTING.md). Lanes 4 and 5 will want dataset-dependent tests, so read it
+  first.
+
+### 11.4 Still open, unchanged
+
+Section 8's questions 1 and 3 to 8 all stand. Question 1 (kinds are a lower bound) is now documented
+at every level the data passes through, but nothing enforces the permissive fallback yet, because
+nothing filters by kind yet - that arrives with lane 4 and is the single easiest way to manufacture
+false infeasibilities across a third of the dataset.
+
+Also unrelated to this work but unscheduled, from the `factory-flow-upstream` spike: the adapter
+does not model `nodes[].recipeInputOverrides` (both shipped fixtures carry it), and `schema_version`
+has no producer guard. Both are live defects today.

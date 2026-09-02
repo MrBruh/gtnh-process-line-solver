@@ -55,6 +55,32 @@ during the Assignment - v1's only contact with actual GT behavior.
 - A machine whose distinct I/O commodities exceed its five usable faces → flagged.
 - Empty / single-machine line; the largest line the solver is expected to handle.
 
+## CI sees a smaller dataset than you do
+
+**Assert on the dataset the run actually resolved, never on the one your machine has.** Generated
+dumps are local and version-namespaced (`data/<version>/`, gitignored); a fresh checkout and every
+CI job carry only the committed fixtures, which are two multiblocks (Electric Blast Furnace, Vacuum
+Freezer) and an example-scoped texture manifest. `resolve_dataset_path` silently falls back to
+those, so a test written against a full local dump passes for its author and fails in CI.
+
+This is not hypothetical: `test_cli_solves_nitrobenzene` asserted `exit 0` for weeks. With real
+footprints the line solves valid; with fixtures alone every machine falls back to 1x1x1, and its HV
+Distillation Tower needs 7 connections against the 5 usable faces a single block has, so the honest
+answer is exit 1 with a `face_reachability` infeasibility. Nothing caught it because the branch was
+not pushed until long after it was written.
+
+Three ways out, in order of preference:
+
+- **Pass the fixture directory explicitly** (`load_physical_dataset(_DATA_DIR)`), so the test asserts
+  one known configuration and means the same thing everywhere. Most dataset tests do this.
+- **Branch on what resolved**, when both configurations are real properties worth pinning - see
+  `tests/test_cli.py::_line_resolves_multiblocks`. Prefer this to a `0 or 1` disjunction, which
+  passes in every configuration and therefore asserts nothing.
+- **Skip** when the full dump is absent, if the property genuinely cannot be expressed on fixtures.
+
+The same applies to the texture manifest: the committed one is scoped to the example lines' machines
+and has no hatch, cable or pipe entries at all.
+
 ## Not auto-testable (manual / in-game)
 
 - Whether a layout actually runs in GT:NH - covered by the in-game Assignment, not CI.
