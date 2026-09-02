@@ -42,7 +42,7 @@ return side == aBaseMetaTileEntity.getFrontFacing();
 // MTEHatchEnergy.java:60-62              POWER INPUT: front face only
 return side == getBaseMetaTileEntity().getFrontFacing();
 
-// MetaTileEntity.java:502-509            FLUID: any side, never overridden by MTEHatchInput
+// MetaTileEntity.java:501-509            FLUID: any side, by default
 public boolean isLiquidInput(ForgeDirection side)  { return true; }
 public boolean isLiquidOutput(ForgeDirection side) { return true; }
 ```
@@ -54,6 +54,17 @@ Two corollaries. A fluid *input* hatch can also be **drained** from any side (`i
 defaults true and is never overridden), so a routed pipe that merely touches an input hatch is a
 real footgun. And the auto-maintenance hatch is the one exception that accepts from any side
 (`MTEHatchMaintenance.java:433-443`).
+
+**[Corrected, 2026-09-02.]** "Never overridden" is right for `MTEHatchInput` and **wrong in
+general**: `MTEHatchOutput` overrides `isLiquidInput` to `false` (`MTEHatchOutput.java:94-97`), so a
+fluid *output* hatch cannot be back-filled from any side. `isLiquidOutput` is genuinely never
+overridden, so the drain footgun above stands, and `MTEHatchInput.canTankBeEmptied` returns true
+(`:180-183`), which is the flag `MTEBasicTank.drain` actually checks. Two further refinements: the
+item slots on *both* fluid hatches (the cell in/out slots) are front-only
+(`MTEHatchInput.java:195-208`, `MTEHatchOutput.java:171-181`); and the maintenance hatch accepts
+from any side only for **item automation** - `onRightclick` requires the front face
+(`MTEHatchMaintenance.java:174-203`), so tools, duct tape and its GUI are front-only. That last one
+is why an upkeep hatch cannot be buried; see section 8, question 4.
 
 ### 1.2 Output hatches push, on their front face, by default
 
@@ -91,6 +102,23 @@ makes `polluteEnvironment` return false, which shuts the machine down with `POLL
 solver has no equivalent for. A muffler is required exactly when `getPollutionPerSecond > 0`
 (`:3629-3631`) and is an explicit error on several machines that do not pollute.
 
+**[Corrected, 2026-09-02.]** `requiresMuffler()` exists at `MTEMultiBlockBase.java:3629-3631` but is
+**dead code in gregtech**: its only callers are in gtPlusPlus (`GTPPMultiBlockBase.java:457,461`),
+and `gregtech`'s own `validateStructure` is an empty method (`:538-540`). In vanilla GT the rule is
+**per controller**, in `checkMachine` or in the shape itself - an assertion (`MTEPyrolyseOven`,
+`MTEDieselEngine`, `MTELargeBoiler`), or a required shape slot (`MTEElectricBlastFurnace.java:79`,
+`'m'` must be a muffler). Machines *do* list `Muffler` without ever asserting one: the Implosion
+Compressor advertises a muffler hatch, pollutes, and forms with zero
+(`MTECubicMultiBlockBase.java:121-129`), where the consequence is runtime rather than structural -
+`polluteEnvironment` returns false once stored pollution reaches `VENT_AMOUNT` and `runMachine`
+stops with `POLLUTION_FAIL`. Only `MTELargeTurbine.java:153-157` goes the other way, *rejecting* a
+muffler when it does not pollute, and it withholds the element in that case anyway.
+
+**What that means for us**: "the dump records a `Muffler`-capable cell" is the usable proxy, because
+GT only offers the element to a controller that pollutes. It over-places on the handful that accept
+one without asserting it, which is the safe direction - an unneeded muffler costs a casing cell, a
+missing one stops the machine.
+
 ### 1.5 Hatches spend the casing budget
 
 `buildAndChain` tries the hatch element first and falls through to the counting casing element only
@@ -99,6 +127,16 @@ count**, and machines assert minimums: `mCasingAmount >= 8` (LCR), `BASE_CASING_
 MAX_HATCHES_ALLOWED` (Large Fluid Extractor), `CasingInfo.maxHatches` in the newer wrapper API.
 Adding one more output bus can un-form a machine. Per-machine caps are near-universal:
 `mMaintenanceHatches.size() == 1` appears in at least a dozen `checkMachine` implementations.
+
+**[Corrected, 2026-09-02.]** Near-universal, not universal, and there is no global rule at all -
+`gregtech`'s `validateStructure` is empty and each controller asserts for itself.
+`MTECubicMultiBlockBase.java:121-123` is the default (`== 1`) and eighteen controllers spell it out,
+but three take "at most one" (`MTEOilDrillBase` and friends take "at least one"), and four permit
+**zero**: `MTEPlasmaForge.java:894`, `MTETranscendentPlasmaMixer.java:272`,
+`MTEIntegratedOreFactory.java:735`, and `MTENanoForge.java:666` at special tier 4. Their structure
+maps declare `Maintenance, 0`, which `HatchElementBuilder.atLeast` treats as "allowed, never
+demanded". Placing one anyway is legal on all of them, so the proxy holds; it just is not the
+invariant this section implies.
 
 ### 1.6 Which hatch a product lands in is the machine's choice, not ours
 
@@ -189,6 +227,16 @@ art, not new work.
 The Industrial Coke Oven is the worked example: 3x3x3, 17 hatch slots, all seven kinds on every
 slot, **40 exposed (cell, face) pairs**, and a middle ring (y=1) that accepts no hatch at all, so 8
 of its 26 cells are dockable today and must stop being.
+
+**[Extended, 2026-09-02.]** Nine kind names occur across the 208 dumps - `Maintenance` (151
+controllers), `InputBus` (145), `InputHatch` (143), `Energy` (124), `OutputHatch` (115), `OutputBus`
+(110), `Muffler` (58), `ExoticEnergy` (34), `Dynamo` (27) - against ten constants in
+`gregtech.api.enums.HatchElement` (the tenth, `MultiAmpEnergy`, has an empty `mteClasses()` and so
+contributes nothing to record). **The vocabulary is not closed**: roughly 30 further
+`IHatchElement` implementations live outside that enum - TecTech's `EnergyMulti`/`DynamoMulti`/
+`InputData`, gtPlusPlus's own set, per-controller ones like the driller's `DataAccess`, and
+`HatchElementEither`'s "A or B" - any of which a future dump may name. A second, independent reason
+the kind filter must stay permissive rather than treat an unmatched name as a prohibition.
 
 ---
 
@@ -376,6 +424,15 @@ Three changes, in order. Nothing hatch-related starts before step 1 is green.
 4. **Interior slots.** 29% of slots touch no bbox face. They must be excluded from routed I/O
    candidates (they may still legally host a maintenance hatch), or the router must be allowed inside
    the box, which is a much larger change.
+
+   **[Corrected, 2026-09-02.]** An interior slot can host **nothing at all**, a maintenance hatch
+   included. Every hatch needs a facing that points out of its own structure, and an interior cell has
+   six body neighbours, so any facing it could be given is inward - which the validator rejects
+   (`HATCH_FACES_INWARD`). GT agrees for the wrong reason: it never checks facing, so such a hatch
+   would form and simply do nothing. And a maintenance hatch specifically must stay reachable, since
+   `MTEHatchMaintenance.onRightclick` requires the **front face** for tools, duct tape and the GUI -
+   only its item automation is omnidirectional. So interior slots drop out of the candidate set
+   entirely, which is what landed.
 5. **Feedback channel.** `failed_nets` is the only signal and it only steers placement. A
    hatch-caused failure (demand exceeds legal slots, muffler with nowhere to vent) is not fixable by
    re-placing that net, so the loop would cycle-detect and return a partial.
@@ -489,6 +546,10 @@ hatches have facings. It belongs in the assignment lane, not before it.
 
 ## 11. Where this stands (2026-09-02)
 
+**Lanes 0 to 4 are done; lane 5 (textures) is all that remains of the plan.** The suite is at 500
+tests and 98% coverage. Both shipped examples solve VALID and validate clean, and nitrobenzene now
+places 45 real hatches - a cell, a facing and a `HatchElement` kind each.
+
 ### 11.1 Landed
 
 Five lanes are on `main`, each merged after a full green run of the gates.
@@ -555,6 +616,39 @@ not to be needed - 6.1 explains why.
   CI; `test_cli_solves_nitrobenzene` did exactly that for weeks. See the new section in
   [`../TESTING.md`](../TESTING.md). Lanes 4 and 5 will want dataset-dependent tests, so read it
   first.
+
+Added after lane 4:
+
+- **Constraining the candidate set beat repairing after the fact.** Section 10.2 framed the choice
+  as repair-after-routing (chosen) versus negotiate-during-routing (option C). Making docking
+  slot-driven and kind-filtered turned out to be a third option that costs neither: the candidate
+  set becomes legal *by construction*, so 4c had nothing left to repair. Worth remembering as a
+  shape - when a "check it afterwards and fix it" step is proposed, ask whether the generator can
+  simply stop producing the illegal thing.
+- **The permissive fallback was load-bearing on the very first line it touched.** The Chemical Plant
+  records **zero** `Energy`-capable cells, and nitrobenzene has to power it. A strict reading of
+  `kinds` would have failed the shipped example immediately rather than subtly, which is the good
+  case; the bad case is the third of the dataset where it would have failed quietly on someone
+  else's line. Section 0.2 of the implementation doc was the single most useful rule in the plan.
+- **A rule that is right for a multiblock can be wrong for a single block, and the tests catch it
+  before the examples do.** Claiming a *body cell* per connection is correct for a multiblock and
+  breaks a 1x1x1 machine, which genuinely takes input on one face of its one block and output on
+  another. Three synthetic power tests failed on the first run for exactly this and forced
+  `_grid.claim_key`. The same split recurs three more times (hatch emission, the one-auto-output
+  limit, the validator's checks), so it is a shape, not an incident.
+- **The GT source settled four questions the spike had guessed at**, in one pass, and overturned
+  three of them: `MTEHatchOutput` *does* override `isLiquidInput`; the muffler requirement is not
+  `getPollutionPerSecond > 0`; zero-maintenance multiblocks exist; and the `HatchElement` vocabulary
+  is not closed. `CLAUDE.local.md` is right that reading it beats inferring - each of those would
+  have been a plausible-looking bug.
+- **The floor-area metric moved three times and is not a good regression signal on its own.**
+  136 -> 152 -> 144 -> 154 across lanes 3 and 4, because each change reshuffles which multi-start
+  attempt wins rather than making any one layout worse. Route segments and power cable cells moved
+  monotonically in the right direction the whole way. When judging a lane, read the whole row.
+- **The `footprint` objective can be beaten by the `volume` objective at its own metric** (126
+  against 154 on nitrobenzene). Both grids explore eight attempts; the volume grid splits them
+  across two SA weightings and the footprint grid does not, and the penalties they accumulate
+  diverge. Unrelated to hatches, unscheduled, and worth a look.
 - **Route-aware docking competes with the power router for casing cells, and items go first.**
   Lane 3's whole gain (114 route segments -> 86) came from pipes hugging machine surfaces, which is
   the same scarce resource an energy hatch docks on. This was invisible while item and fluid

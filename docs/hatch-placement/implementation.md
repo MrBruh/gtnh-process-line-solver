@@ -351,6 +351,24 @@ interior slot. The muffler needs literal **air** in front of its facing, or the 
 with `POLLUTION_FAIL`; that cell becomes a routing keep-out, a constraint class the router has no
 equivalent for today. A muffler is required exactly when `getPollutionPerSecond > 0`.
 
+> **[Corrected, 2026-09-02.]** Two of those three sentences are wrong, and the code follows the
+> corrections, not this paragraph.
+>
+> **A maintenance hatch may NOT sit on an interior slot.** Every hatch needs a facing that points
+> out of its own structure, and an interior cell has six body neighbours, so any facing is inward -
+> `HATCH_FACES_INWARD`. It also has to stay reachable: only the maintenance hatch's *item
+> automation* is omnidirectional, while `onRightclick` requires the front face for tools, duct tape
+> and the GUI. Interior slots therefore host nothing at all.
+>
+> **A muffler is not required "exactly when `getPollutionPerSecond > 0`".** That predicate exists
+> (`MTEMultiBlockBase.java:3629-3631`) but is dead code in gregtech - only gtPlusPlus calls it, and
+> gregtech's own `validateStructure` is empty. The requirement is per controller, and some
+> controllers accept a muffler without ever asserting one. The proxy that works, and that landed, is
+> **"the dump records a `Muffler`-capable cell"**: GT only offers the element to a controller that
+> pollutes. It over-places on a handful, which is the safe direction.
+>
+> `plan.md` sections 1.1, 1.4 and 8.4 carry the full source citations.
+
 **4g. Auto-output tightening.** `ir.geometry.auto_output_faces` (`:139`) models auto-output as any
 touching body cell. For a multiblock it is a specific output hatch's own facing, and
 `router/auto.py`'s one-auto-output-per-machine rule (`:46`) is wrong for a machine with several
