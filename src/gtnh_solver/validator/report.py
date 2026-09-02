@@ -74,6 +74,12 @@ class ViolationCode(str, Enum):
     POWER_SUPPLY_INSUFFICIENT = (
         "power_supply_insufficient"  # after cable loss, a machine's hatches cannot deliver its EU/t
     )
+    # placed hatches (LayoutResult v1): the record must describe a hatch that could actually exist
+    HATCH_NOT_ON_MACHINE = "hatch_not_on_machine"  # its cell is not a body cell of its machine
+    HATCH_FACES_INWARD = "hatch_faces_inward"  # it faces its own structure, so it moves nothing
+    HATCH_CELL_COLLISION = "hatch_cell_collision"  # two hatches claim one casing cell
+    HATCH_TERMINAL_MISMATCH = "hatch_terminal_mismatch"  # its port's terminal says somewhere else
+    HATCH_UNKNOWN_PORT = "hatch_unknown_port"  # port_id names no port on that machine
 
 
 @dataclass(frozen=True)

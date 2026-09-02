@@ -32,6 +32,7 @@ from gtnh_solver.ir.geometry import (
     occupied_cells,
     rotate_offset,
     rotated_footprint,
+    rotated_slot,
 )
 from gtnh_solver.validator._geometry import body_cells
 
@@ -150,3 +151,34 @@ def test_oracle_every_controller_at_every_facing(name: str, doc: MultiblockDoc) 
             reserved = set(occupied_cells(origin, size, facing))
             assert real <= reserved, f"{name} {facing.value}: blocks fall outside the reserved box"
             assert body_cells(origin, size, facing) == reserved, f"{name} {facing.value}"
+
+
+@given(footprint=_FOOTPRINTS, orientation=_FACINGS)
+def test_rotated_slot_maps_a_machines_own_cells_onto_its_reserved_box(
+    footprint: CellBox, orientation: Facing
+) -> None:
+    """Turning every cell of a machine must reproduce exactly the box it reserves.
+
+    This is the invariant hatch placement rests on: a slot offset turned with its machine has to
+    land on a cell the machine actually occupies, or a hatch would be placed outside the footprint
+    the placer reserved and inside a neighbour's.
+    """
+    turned = {
+        rotated_slot((dx, dy, dz), footprint, orientation)
+        for dx in range(footprint.sx)
+        for dy in range(footprint.sy)
+        for dz in range(footprint.sz)
+    }
+    assert turned == set(occupied_cells(CellCoord(x=0, y=0, z=0), footprint, orientation))
+
+
+@given(footprint=_FOOTPRINTS, orientation=_FACINGS)
+def test_rotated_slot_is_injective(footprint: CellBox, orientation: Facing) -> None:
+    # Two slots must never collapse onto one cell, or two hatches would claim the same casing.
+    offsets = [
+        (dx, dy, dz)
+        for dx in range(footprint.sx)
+        for dy in range(footprint.sy)
+        for dz in range(footprint.sz)
+    ]
+    assert len({rotated_slot(o, footprint, orientation) for o in offsets}) == len(offsets)

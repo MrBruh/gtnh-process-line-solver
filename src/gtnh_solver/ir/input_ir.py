@@ -76,6 +76,28 @@ class FaceSpec(StrictModel):
         return self
 
 
+class HatchSlot(FrozenModel):
+    """One casing cell of a multiblock that can host a hatch or bus, and the kinds it accepts.
+
+    ``offset`` is measured from the machine's **unrotated** minimum corner, the same corner
+    ``Placement.cell`` names, so a placed slot's world cell is
+    ``placement.cell + ir.geometry.rotated_slot(offset, footprint, placement.orientation)``. Kept
+    unrotated here because orientation is a placement decision the IR must not pre-empt.
+
+    ``kinds`` holds ``gregtech.api.enums.HatchElement`` names (``OutputHatch``, ``InputBus``,
+    ``Energy``, ``Maintenance``, ``Muffler``, ...), sorted so a layout is reproducible. **It is a
+    lower bound, never a whitelist**: a GT hatch adder built from a bare method reference exposes no
+    filter, so its cell is recorded without that kind rather than wrongly. 23 of 208 dumped
+    controllers record no slots at all, 61 of the remaining 185 record no ``Energy``-capable cell,
+    and 35 no ``Maintenance``-capable one. A consumer that treats an absent kind as a prohibition
+    manufactures a false infeasibility across roughly a third of the dataset; treat "unrecorded" as
+    permissive (``validator/core`` already refuses to enforce per-kind counts for this reason).
+    """
+
+    offset: CellCoord
+    kinds: tuple[str, ...] = Field(min_length=1)
+
+
 class Machine(StrictModel):
     """A single machine to place at one position.
 
@@ -109,6 +131,13 @@ class Machine(StrictModel):
     #: on its total connections, energy hatches included. The validator uses it to reject a layout
     #: that wires more connections onto a machine than its structure has cells to host.
     hatch_cells: int | None = Field(default=None, ge=0)
+    #: Where those cells actually are, when the structure dump recorded them. Empty for a
+    #: single-block machine, for a plan adapted without the physical dataset, and for the 23 of 208
+    #: controllers whose adders expose no filter - all of which read as "unknown", not "none", so a
+    #: consumer falls back to treating any body face as dockable rather than refusing to place.
+    #: ``len(hatch_slots)`` agrees with :attr:`hatch_cells` whenever both are present; the count
+    #: exists separately because it survived a dump that recorded no offsets.
+    hatch_slots: tuple[HatchSlot, ...] = ()
 
     @property
     def is_power_source(self) -> bool:

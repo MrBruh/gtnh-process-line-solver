@@ -91,6 +91,7 @@ def validate(problem: InputIR, layout: LayoutResult) -> ValidationReport:
     _check_power_amperage(problem, layout, out)
     _check_power_feed(problem, layout, out)
     _check_hatch_cells(problem, out)
+    _check_hatches(problem, layout, out)
     _check_route_capacity(problem, layout, out)
     _check_pinned(problem, layout, out)
     return ValidationReport(tuple(out))
@@ -394,6 +395,100 @@ def _check_routed_net_endpoints(
                     ViolationCode.ROUTE_NET_MIXED_COMMODITY,
                     f"routed net {net.id!r} ({net.commodity.value}) has endpoint {e.port_id!r} on "
                     f"{e.machine_id!r} carrying {commodity.value}, not the net's commodity",
+                )
+            )
+
+
+def _check_hatches(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
+    """A placed hatch must describe a block that could exist where it says it does.
+
+    The structural half of the hatch rules (LayoutResult v1). Four things, all re-derived here
+    rather than taken from the producer:
+
+    - its cell is a **body** cell of its own machine, expanded independently (``body_cells``);
+    - it faces *out*: the neighbour cell in its facing is not another body cell of that machine.
+      GT never checks this - ``IStructureElement.check`` takes no facing and every hatch returns
+      ``isFacingValid = true`` - so a structure forms happily with every hatch pointing inward and
+      then moves nothing. Correctness is entirely ours;
+    - no two hatches claim the same casing cell;
+    - a routed hatch agrees with its own ``Terminal``: same face, and the terminal's dock cell is
+      exactly one step out from this body cell.
+
+    Whether that outward face is also *usable* - a receiver on it for items and power, which are
+    front-face-only in both directions - is the assignment lane's rule, not this one.
+    """
+    machines = {m.id: m for m in problem.machines}
+    placements = placement_index(layout.placements)
+    terminals = {(t.machine_id, t.port_id): t for route in layout.routes for t in route.terminals}
+    claimed: dict[Cell, str] = {}
+
+    for hatch in layout.hatches:
+        machine = machines.get(hatch.machine_id)
+        placement = placements.get(hatch.machine_id)
+        if machine is None or placement is None:
+            out.append(
+                Violation(
+                    ViolationCode.UNKNOWN_MACHINE,
+                    f"hatch {hatch.kind!r} names machine {hatch.machine_id!r}, which is not placed",
+                )
+            )
+            continue
+
+        body = body_cells(placement.cell, machine.footprint, placement.orientation)
+        cell = hatch.cell.as_tuple()
+        if cell not in body:
+            out.append(
+                Violation(
+                    ViolationCode.HATCH_NOT_ON_MACHINE,
+                    f"hatch {hatch.kind!r} on {hatch.machine_id!r} sits at {cell}, which is not a "
+                    f"cell of that machine's body",
+                )
+            )
+            continue
+
+        dx, dy, dz = FACE_DELTAS[hatch.facing]
+        if (cell[0] + dx, cell[1] + dy, cell[2] + dz) in body:
+            out.append(
+                Violation(
+                    ViolationCode.HATCH_FACES_INWARD,
+                    f"hatch {hatch.kind!r} on {hatch.machine_id!r} at {cell} faces "
+                    f"{hatch.facing.value}, into its own structure",
+                )
+            )
+
+        owner = claimed.get(cell)
+        if owner is not None:
+            out.append(
+                Violation(
+                    ViolationCode.HATCH_CELL_COLLISION,
+                    f"cell {cell} hosts both {owner} and {hatch.kind!r} on {hatch.machine_id!r}",
+                )
+            )
+        else:
+            claimed[cell] = repr(hatch.kind)
+
+        if hatch.port_id is None:
+            continue  # an upkeep hatch serves no net, so there is no terminal to agree with
+        if not any(p.id == hatch.port_id for p in machine.faces.ports):
+            out.append(
+                Violation(
+                    ViolationCode.HATCH_UNKNOWN_PORT,
+                    f"hatch on {hatch.machine_id!r} names port {hatch.port_id!r}, which does not "
+                    f"exist on that machine",
+                )
+            )
+            continue
+        terminal = terminals.get((hatch.machine_id, hatch.port_id))
+        if terminal is None:
+            continue  # the port may resolve by auto-output; the terminal checks own that case
+        expected = (cell[0] + dx, cell[1] + dy, cell[2] + dz)
+        if terminal.face is not hatch.facing or terminal.cell.as_tuple() != expected:
+            out.append(
+                Violation(
+                    ViolationCode.HATCH_TERMINAL_MISMATCH,
+                    f"hatch for port {hatch.port_id!r} on {hatch.machine_id!r} sits at {cell} "
+                    f"facing {hatch.facing.value}, but its terminal docks at "
+                    f"{terminal.cell.as_tuple()} on face {terminal.face.value}",
                 )
             )
 

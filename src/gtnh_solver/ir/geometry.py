@@ -131,6 +131,33 @@ def occupied_cells(origin: CellCoord, footprint: CellBox, orientation: Facing) -
                 yield (origin.x + dx, origin.y + dy, origin.z + dz)
 
 
+def rotated_slot(offset: Cell, footprint: CellBox, orientation: Facing) -> Cell:
+    """Where a slot sits inside its own machine once the machine faces ``orientation``.
+
+    ``offset`` is relative to the machine's **unrotated** minimum corner, which is how
+    ``Machine.hatch_slots`` records it; the result is relative to the *rotated* minimum corner, so
+    ``placement.cell + rotated_slot(...)`` is the slot's world cell and always lands inside
+    ``occupied_cells(placement.cell, footprint, orientation)``.
+
+    The re-anchoring is the part that is easy to get wrong. Turning the box moves its minimum
+    corner, so a rotated offset has to be shifted back by however far the corner travelled: a
+    quarter turn clockwise sends ``x`` to ``-z``, whose smallest value over a box of depth ``sz`` is
+    ``-(sz - 1)``. A property test pins that this maps the box's own cells exactly onto
+    ``occupied_cells``, which is the same equivalence :func:`rotated_footprint` relies on.
+    """
+    dx, dy, dz = offset
+    steps = CW_STEPS.get(orientation, 0) % 4
+    x, z = rotate_offset(dx, dz, steps)
+    if steps == 1:
+        x += footprint.sz - 1
+    elif steps == 2:
+        x += footprint.sx - 1
+        z += footprint.sz - 1
+    elif steps == 3:
+        z += footprint.sx - 1
+    return (x, dy, z)
+
+
 def in_region(cell: Cell, region: CellBox) -> bool:
     """Whether a cell lies inside the origin-anchored bounding region.
 

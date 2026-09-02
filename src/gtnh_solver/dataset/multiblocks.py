@@ -30,7 +30,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from gtnh_solver.ir import CellBox, Facing
+from gtnh_solver.ir import CellBox, CellCoord, Facing, HatchSlot
 
 from .roots import resolve_dataset_path
 from .schema import (
@@ -96,6 +96,10 @@ class VariantShape:
     energy_hatch_cells: int = 0
     #: How many upkeep hatches (maintenance, muffler) this form accepts, and so needs one each of.
     upkeep_hatch_count: int = 0
+    #: Where those cells are, as offsets from THIS form's minimum corner (the corner
+    #: ``Placement.cell`` names), so a consumer can turn them with the machine. Empty when the dump
+    #: recorded no slots, which reads as "unknown", not "none".
+    slots: tuple[HatchSlot, ...] = ()
 
     def energy_hatch_budget(self, routed_ports: int = 0) -> int:
         """Cells left for energy hatches once ``routed_ports`` item/fluid connections and this
@@ -224,7 +228,7 @@ class MachinePhysical:
             hatch_cells=self.hatch_cells,
             energy_hatch_cells=self.energy_hatch_cells,
             upkeep_hatch_count=self.upkeep_hatch_count,
-        )
+        )  # no slots: a hand-built record has no offsets to hand out
 
     def footprint_for(self, fluid_outputs: int = 0) -> CellBox:
         """The smallest built form that can route ``fluid_outputs`` fluids, else the largest form.
@@ -335,6 +339,35 @@ def _hatch_counts(variant: Variant) -> tuple[int, int, int]:
     )
 
 
+def _hatch_slots(variant: Variant, min_corner: tuple[int, int, int]) -> tuple[HatchSlot, ...]:
+    """One form's hatch slots, re-anchored from controller-relative to minimum-corner-relative.
+
+    The dump states its offsets as world-space deltas **from the controller block**, which is not
+    generally the structure's minimum corner (the Coke Oven has a slot at ``[-1, 0, 0]``). Every
+    other consumer measures from the minimum corner, because that is what ``Placement.cell`` names
+    and what ``ir.geometry.occupied_cells`` expands from, so the translation happens once, here.
+
+    Sorted, and ``kinds`` sorted within each slot, so a layout built from this is reproducible: the
+    dump's own order is whatever StructureLib's element visit produced.
+    """
+    return tuple(
+        sorted(
+            (
+                HatchSlot(
+                    offset=CellCoord(
+                        x=slot.d[0] - min_corner[0],
+                        y=slot.d[1] - min_corner[1],
+                        z=slot.d[2] - min_corner[2],
+                    ),
+                    kinds=tuple(sorted(slot.kinds)),
+                )
+                for slot in variant.hatch_slots
+            ),
+            key=lambda s: (s.offset.y, s.offset.z, s.offset.x, s.kinds),
+        )
+    )
+
+
 def _primary_variant(doc: MultiblockDoc) -> Variant:
     """The variant that stands for the machine's footprint: the largest built form.
 
@@ -407,6 +440,7 @@ def _variant_shapes(doc: MultiblockDoc) -> tuple[VariantShape, ...]:
                 hatch_cells=hatch_cells,
                 energy_hatch_cells=energy_hatch_cells,
                 upkeep_hatch_count=upkeep_hatch_count,
+                slots=_hatch_slots(variant, min_corner),
             )
         )
     return tuple(sorted(shapes, key=lambda s: s.footprint.sx * s.footprint.sy * s.footprint.sz))

@@ -50,6 +50,20 @@ Machine
                                     #  connections; null when unknown (a single-block machine,
                                     #  or a plan adapted without the physical dataset). Added
                                     #  in InputIR v3 (additive).
+  hatch_slots: [HatchSlot]          # WHERE those cells are; empty when unknown (same cases as
+                                    #  hatch_cells being null, plus the 23 of 208 dumped
+                                    #  controllers that record no slots). Added in InputIR v3
+                                    #  (additive - an empty tuple reads exactly as the old
+                                    #  behaviour did, so no bump).
+
+HatchSlot { offset: CellCoord, kinds: [str] }
+  offset  from the machine's UNROTATED minimum corner (the corner Placement.cell names), so a
+          placed slot's world cell is placement.cell + rotated_slot(offset, footprint,
+          placement.orientation). Kept unrotated because orientation is a placement decision.
+  kinds   HatchElement names (OutputHatch, InputBus, Energy, Maintenance, Muffler, ...), sorted.
+          A LOWER BOUND, never a whitelist: a GT hatch adder built from a bare method reference
+          exposes no filter, so its cell is recorded without that kind. Treating an absent kind
+          as a prohibition manufactures false infeasibilities across a third of the dataset.
 
 FaceSpec     { ports: [Port] }      # catalog of required I/O; the physical face is a solver choice
 Port
@@ -112,6 +126,7 @@ LayoutResult
   placements: [Placement]
   routes: [Route]                        # nets connected by a pipe
   auto_connections: [AutoConnection]     # nets connected by adjacency (no pipe)
+  hatches: [PlacedHatch]                 # every hatch/bus the build needs (v1)
   metrics: { footprint, layers, buildability, congestion, ... }
   seed: int                              # for the seed-compare workflow
 
@@ -123,6 +138,10 @@ Route
   segments: [Segment]                    # cell-path; lowered to blocks only at export
   thickness_per_segment: [int] | null    # power only (else null); 1/2/4/8/12/16, summed amperage
 Terminal    { machine_id, port_id, face: Facing, cell: CellCoord }  # non-front face; cell just outside
+PlacedHatch { machine_id, kind: str, cell: CellCoord, facing: Facing, port_id: str | null }
+              # cell is the BODY cell the hatch replaces, inside the footprint - not the dock
+              # cell outside it. port_id is null for an upkeep hatch (maintenance, muffler),
+              # which belongs to no net and is why the record has to exist at all.
 Segment     { start: CellCoord, end: CellCoord, channel: int }   # >= 0 only; the per-edge channel cap is Phase 2, not yet enforced
 AutoConnection { net_id, source_machine_id, source_face: Facing, target_machine_id, target_face: Facing }
 Infeasibility { constraint: str, detail: str, suggested_relaxation: str | null }
@@ -156,4 +175,8 @@ result carries no infeasibility; `infeasible`/`partial_invalid` must carry one.
 
 - `version` is an int on both IR roots. Additive fields can land without a bump; any change
   that breaks an existing consumer bumps it and updates all consumers in the same PR.
+- "Breaks an existing consumer" includes breaking by *omission*. `LayoutResult` v1 added
+  `hatches`, which is additive in shape, and still bumped: a consumer that ignores it renders a
+  build for a machine with no maintenance hatch and no muffler, which will not run. Nothing
+  raises; the build is simply wrong.
 - Keep a short changelog of contract changes at the bottom of `src/gtnh_solver/ir/__init__.py`.

@@ -177,6 +177,9 @@ def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> Input
                     if record is not None
                     else None
                 ),
+                # From the same variant as the footprint and the ceiling, so all three describe one
+                # built form. Empty when the dump recorded no slots, which reads as "unknown".
+                hatch_slots=(record.variant_for(fluid_outputs).slots if record is not None else ()),
                 faces=FaceSpec(ports=_recipe_ports(recipe, node)),
                 voltage_tier=node.overclock_tier,
                 # Every machine keeps all four horizontal facings: occupied_cells rotates a

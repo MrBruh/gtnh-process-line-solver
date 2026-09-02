@@ -10,11 +10,11 @@ validator lanes. Only the value types (``CellCoord``, ``CellBox``) surface here.
 
 - ``enums``      - Commodity, IODirection, Facing, LayoutStatus
 - ``geometry``   - CellCoord, CellBox (integer cell-grid value types)
-- ``input_ir``   - Port, FaceSpec, Machine, MachineFaceRef, Net, METoggles, PinnedIO,
+- ``input_ir``   - Port, FaceSpec, HatchSlot, Machine, MachineFaceRef, Net, METoggles, PinnedIO,
                    InputIR  (+ INPUT_IR_VERSION)
 - ``nets``       - net helpers shared by the router and the system-IO summary
-- ``output``     - Placement, Segment, Terminal, Route, LayoutMetrics, Infeasibility,
-                   LayoutResult  (+ LAYOUT_RESULT_VERSION)
+- ``output``     - Placement, PlacedHatch, Segment, Terminal, Route, LayoutMetrics,
+                   Infeasibility, LayoutResult  (+ LAYOUT_RESULT_VERSION)
 
 Both roots carry an int ``version``. Additive fields can land without a bump; any change
 that breaks an existing consumer bumps the relevant ``*_VERSION`` and updates all
@@ -28,6 +28,7 @@ from .geometry import CellBox, CellCoord
 from .input_ir import (
     INPUT_IR_VERSION,
     FaceSpec,
+    HatchSlot,
     InputIR,
     Machine,
     MachineFaceRef,
@@ -42,6 +43,7 @@ from .output import (
     Infeasibility,
     LayoutMetrics,
     LayoutResult,
+    PlacedHatch,
     Placement,
     Route,
     Segment,
@@ -63,6 +65,7 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
     # input IR
     "Port",
     "FaceSpec",
+    "HatchSlot",
     "Machine",
     "MachineFaceRef",
     "Net",
@@ -71,6 +74,7 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
     "InputIR",
     # output schema
     "Placement",
+    "PlacedHatch",
     "Segment",
     "Terminal",
     "Route",
@@ -81,6 +85,19 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 ]
 
 
+# LayoutResult v1 (BREAKING) - added `LayoutResult.hatches: list[PlacedHatch]`, one record per
+#   hatch or bus the build needs, routed and upkeep alike, at the body cell it occupies and the way
+#   it faces. Additive in shape and still a bump, because the omission is what breaks: a maintenance
+#   hatch and a muffler belong to no net and had nowhere to live, so a v0 layout described a machine
+#   that will not run, and a consumer that ignores the new field keeps describing one. A routed
+#   hatch is deliberately recorded twice, here and by its `Terminal`; the validator re-derives the
+#   agreement rather than trusting it (docs/ARCHITECTURE.md #4).
+#
+# InputIR v3 (additive, no version bump) - added `Machine.hatch_slots: tuple[HatchSlot, ...]`, where
+#   a multiblock's hatch-capable casing cells actually are, as offsets from its unrotated minimum
+#   corner plus the kinds each accepts. No bump because it is purely additive and an empty tuple
+#   reads as "unknown" exactly the way the old behaviour did: a machine without it stays dockable on
+#   any body face. `kinds` is a LOWER bound, never a whitelist - see `HatchSlot`.
 # ---------------------------------------------------------------------------
 # Contract changelog (bump the relevant *_VERSION on any breaking change):
 #

@@ -27,6 +27,7 @@ from gtnh_solver.adapter import (
     ResolvedBlock,
     ResolvedMachine,
     Resource,
+    adapt_file,
     to_input_ir,
 )
 from gtnh_solver.dataset import (
@@ -42,6 +43,7 @@ from gtnh_solver.validator import validate
 from tests._helpers import PLACEMENT_CODES
 
 _DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "multiblocks"
+_SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
 
 
 @pytest.fixture(scope="module")
@@ -286,6 +288,55 @@ def test_every_dumped_controller_agrees_on_which_form_it_reserved(
             assert shape.footprint == record.footprint_for(fluid_outputs), name
             assert shape.hatch_cells >= shape.energy_hatch_cells, name
             assert shape.hatch_cells >= shape.upkeep_hatch_count, name
+
+
+def test_slots_are_re_anchored_onto_the_forms_minimum_corner(dataset: PhysicalDataset) -> None:
+    """The dump measures a slot from the controller block; everything else measures from the
+    minimum corner, which is what ``Placement.cell`` names. The translation happens once, here.
+
+    Checked against the machine's own footprint rather than against a hardcoded list, so it holds
+    for any dump: every slot must land inside the box the placer reserves, or a hatch would be
+    placed outside its machine and inside a neighbour's.
+    """
+    for name, record in dataset.machines.items():
+        shape = record.variant_for(0)
+        assert len(shape.slots) == shape.hatch_cells, name  # the offsets and the count agree
+        for slot in shape.slots:
+            assert 0 <= slot.offset.x < shape.footprint.sx, f"{name} {slot}"
+            assert 0 <= slot.offset.y < shape.footprint.sy, f"{name} {slot}"
+            assert 0 <= slot.offset.z < shape.footprint.sz, f"{name} {slot}"
+            assert list(slot.kinds) == sorted(slot.kinds), f"{name}: kinds must be sorted"
+
+
+def test_slots_reach_the_ir_from_the_same_form_as_the_footprint() -> None:
+    # The lane-0 invariant, extended: footprint, ceiling AND offsets all describe one built form.
+    dataset = PhysicalDataset(
+        meta=load_physical_dataset(_DATA_DIR).meta,
+        machines={"Tower": to_physical(_tower_doc(range(3, 13)))},
+    )
+    for fluids, height in ((1, 3), (5, 6)):
+        outputs = [Resource(kind="fluid", id=f"fluid:{i}", amount=1.0) for i in range(fluids)]
+        recipe = Recipe(
+            id="r", machine_type="Tower", eut=480.0, duration_ticks=100.0, outputs=outputs
+        )
+        plan = Plan(
+            schema_version=1,
+            recipes=[recipe],
+            nodes=[Node(id="n", recipe_id="r", overclock_tier="MV")],
+        )
+        machine = next(m for m in to_input_ir(plan, physical=dataset).machines if m.id == "n")
+        assert machine.footprint.sy == height, f"{fluids} fluid outputs"
+        assert len(machine.hatch_slots) == height - 1, f"{fluids} fluid outputs"
+        assert len(machine.hatch_slots) == machine.hatch_cells
+        for slot in machine.hatch_slots:
+            assert 0 <= slot.offset.y < machine.footprint.sy
+
+
+def test_a_machine_without_a_dataset_record_carries_no_slots() -> None:
+    # "Unknown", not "none": a single-block machine and a plan adapted without the dataset both
+    # land here, and both must stay dockable on any face rather than refusing to place.
+    ir = adapt_file(_SAND)
+    assert all(m.hatch_slots == () for m in ir.machines)
 
 
 def test_adapter_sizes_a_tower_from_the_recipes_fluid_outputs() -> None:

@@ -30,6 +30,7 @@ from gtnh_solver.ir import (
     METoggles,
     Net,
     PinnedIO,
+    PlacedHatch,
     Placement,
     Port,
     Route,
@@ -273,6 +274,94 @@ def _terminal_duplicate(p: InputIR, layout: LayoutResult) -> tuple[InputIR, Layo
     )
 
 
+# ---------------------------------------------------- placed hatches (LayoutResult v1)
+#
+# The record is redundant with the Terminal on purpose, so these check the redundancy holds. A
+# hatch facing into its own structure is the one GT itself will not catch: the multiblock forms
+# and then moves nothing.
+
+
+def _good_hatch(**over: object) -> PlacedHatch:
+    """The hatch m1's routed output needs: its own body cell, facing the way its terminal docks."""
+    base: dict[str, object] = {
+        "machine_id": "m1",
+        "kind": "OutputBus",
+        "cell": _coord(1, 0, 1),
+        "facing": Facing.SOUTH,
+        "port_id": "out",
+    }
+    return PlacedHatch.model_validate({**base, **over})
+
+
+def _hatch_off_machine(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    return p, layout.model_copy(update={"hatches": [_good_hatch(cell=_coord(6, 0, 6))]})
+
+
+def _hatch_cell_collision(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    return p, layout.model_copy(
+        update={"hatches": [_good_hatch(), _good_hatch(kind="Maintenance", port_id=None)]}
+    )
+
+
+def _hatch_terminal_mismatch(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    # The terminal docks south; claiming the hatch faces east describes a different build.
+    return p, layout.model_copy(update={"hatches": [_good_hatch(facing=Facing.EAST)]})
+
+
+def _hatch_unknown_port(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    return p, layout.model_copy(update={"hatches": [_good_hatch(port_id="nope")]})
+
+
+def _hatch_on_ghost_machine(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    return p, layout.model_copy(update={"hatches": [_good_hatch(machine_id="ghost")]})
+
+
+def test_a_well_formed_hatch_passes() -> None:
+    # The redundancy has to be satisfiable, not just rejectable: the hatch that agrees with its own
+    # terminal must validate clean, or lane 4 would have nothing legal to emit.
+    problem, layout = _base()
+    report = validate(problem, layout.model_copy(update={"hatches": [_good_hatch()]}))
+    assert report.ok, str(report)
+
+
+def test_a_hatch_facing_into_its_own_structure_is_rejected() -> None:
+    """The failure GT will not catch for us.
+
+    ``IStructureElement.check`` takes no facing and every GT hatch returns ``isFacingValid = true``,
+    so a multiblock forms happily with a hatch pointing inward and then moves nothing. Needs a
+    machine more than one cell deep to express at all - on a 1x1x1 block every face points out.
+    """
+    machine = _item_machine("wide").model_copy(update={"footprint": CellBox(sx=2, sy=1, sz=1)})
+    problem = InputIR(bounding_region=CellBox(sx=8, sy=4, sz=8), machines=[machine], nets=[])
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[Placement(machine_id="wide", cell=_coord(0, 0, 0), orientation=Facing.NORTH)],
+        # (0,0,0) and (1,0,0) are its body; a hatch at (0,0,0) facing EAST points at (1,0,0), which
+        # is the machine's own other half.
+        hatches=[
+            PlacedHatch(
+                machine_id="wide", kind="InputBus", cell=_coord(0, 0, 0), facing=Facing.EAST
+            )
+        ],
+    )
+    report = validate(problem, layout)
+    assert not report.ok
+    assert ViolationCode.HATCH_FACES_INWARD in report.codes()
+
+    # The same hatch on the far cell faces open air, and is fine.
+    ok = layout.model_copy(
+        update={
+            "hatches": [
+                PlacedHatch(
+                    machine_id="wide", kind="InputBus", cell=_coord(1, 0, 0), facing=Facing.EAST
+                )
+            ]
+        }
+    )
+    assert ViolationCode.HATCH_FACES_INWARD not in validate(problem, ok).codes()
+
+
 BAD_CASES: list[tuple[str, Mutator, ViolationCode]] = [
     ("overlap", _overlap, ViolationCode.MACHINE_OVERLAP),
     ("machine_oob", _machine_oob, ViolationCode.MACHINE_OUT_OF_BOUNDS),
@@ -296,6 +385,11 @@ BAD_CASES: list[tuple[str, Mutator, ViolationCode]] = [
     ("terminal_on_front", _terminal_on_front, ViolationCode.TERMINAL_ON_FRONT_FACE),
     ("terminal_not_adjacent", _terminal_not_adjacent, ViolationCode.TERMINAL_NOT_ADJACENT),
     ("terminal_off_route", _terminal_off_route, ViolationCode.TERMINAL_NOT_ON_ROUTE),
+    ("hatch_off_machine", _hatch_off_machine, ViolationCode.HATCH_NOT_ON_MACHINE),
+    ("hatch_cell_collision", _hatch_cell_collision, ViolationCode.HATCH_CELL_COLLISION),
+    ("hatch_terminal_mismatch", _hatch_terminal_mismatch, ViolationCode.HATCH_TERMINAL_MISMATCH),
+    ("hatch_unknown_port", _hatch_unknown_port, ViolationCode.HATCH_UNKNOWN_PORT),
+    ("hatch_on_ghost_machine", _hatch_on_ghost_machine, ViolationCode.UNKNOWN_MACHINE),
 ]
 
 

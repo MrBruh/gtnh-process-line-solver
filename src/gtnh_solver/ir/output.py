@@ -17,7 +17,10 @@ from .enums import Commodity, Facing, LayoutStatus
 from .geometry import Cell, CellCoord
 
 #: Bump on any breaking change to the output contract; record it in ``ir/__init__.py``.
-LAYOUT_RESULT_VERSION = 0
+#: v1 added ``LayoutResult.hatches``. Additive, and yet a bump: a consumer that ignores it
+#: renders a build for a machine with no maintenance hatch and no muffler, which will not run.
+#: Omitting a required block is breaking even though nothing raises.
+LAYOUT_RESULT_VERSION = 1
 
 #: Allowed GT cable thicknesses, smallest first (1x/2x/4x/8x/12x/16x; docs/DOMAIN.md). The single
 #: source: this contract enforces membership on every power route, and ``dataset`` re-exports the
@@ -40,6 +43,33 @@ class Placement(StrictModel):
     machine_id: str = Field(min_length=1)
     cell: CellCoord
     orientation: Facing
+
+
+class PlacedHatch(StrictModel):
+    """One hatch or bus, at the casing cell it occupies and the way it faces.
+
+    Every hatch a build needs gets one of these, routed or not. The upkeep hatches are why the
+    record has to exist at all: a maintenance hatch and a muffler occupy a casing cell each and
+    belong to no net, so before this there was nowhere to put them and a layout silently described
+    a machine that would not run. ``port_id`` names the port a routed hatch serves and is ``None``
+    for those upkeep hatches.
+
+    ``cell`` is the **body** cell the hatch replaces, inside the machine's footprint - not the cell
+    outside it that a route docks at. A routed hatch is therefore described twice, here and by its
+    :class:`Terminal`, and the two must agree: ``terminal.cell - FACE_DELTAS[terminal.face]`` is
+    this cell, and ``terminal.face`` is this ``facing``. That redundancy is deliberate. The
+    validator re-derives it independently, which is the whole point of having a gate
+    (docs/ARCHITECTURE.md #4) - a hatch facing into its own machine forms in game and then moves
+    nothing, and GT itself never checks.
+    """
+
+    machine_id: str = Field(min_length=1)
+    #: The ``gregtech.api.enums.HatchElement`` kind this hatch is (``InputBus``, ``Energy``,
+    #: ``Maintenance``, ...), so the build guide and the previewer can name and skin the real block.
+    kind: str = Field(min_length=1)
+    cell: CellCoord
+    facing: Facing
+    port_id: str | None = None
 
 
 class Segment(StrictModel):
@@ -143,6 +173,9 @@ class LayoutResult(StrictModel):
     placements: list[Placement] = Field(default_factory=list)
     routes: list[Route] = Field(default_factory=list)
     auto_connections: list[AutoConnection] = Field(default_factory=list)
+    #: Every hatch and bus the build needs, routed and upkeep alike (v1). Empty until the
+    #: assignment stage fills it; a machine with no structural record never gets one.
+    hatches: list[PlacedHatch] = Field(default_factory=list)
     metrics: LayoutMetrics = Field(default_factory=LayoutMetrics)
     seed: int  # the RNG seed that produced this layout (for the seed-compare workflow)
 

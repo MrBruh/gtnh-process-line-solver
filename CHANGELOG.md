@@ -7,6 +7,32 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **A multiblock's hatch cells now say WHERE they are, and a layout says where each hatch went
+  (`ir/` LayoutResult v1, `dataset/`, `adapter/`, `validator/`).** `Machine.hatch_slots` carries
+  each hatch-capable casing cell as an offset from the machine's unrotated minimum corner plus the
+  kinds it accepts, taken from the same built form as the footprint and the ceiling so all three
+  describe one building. The dump measures those offsets from the *controller block*, which is not
+  generally the minimum corner (the Coke Oven records a slot at `[-1, 0, 0]`), so the translation
+  happens once in the dataset. `InputIR` stays at v3: the field is additive and an empty tuple
+  reads exactly as the old behaviour, which is also what a single-block machine, a plan adapted
+  without the dataset, and the 23 of 208 controllers that record no slots all get.
+
+  `LayoutResult` gains `hatches`, one `PlacedHatch` per hatch or bus the build needs, at the body
+  cell it occupies and the way it faces. **This bumps the output contract to v1, the first bump it
+  has had**, because the omission is the breakage: a maintenance hatch and a muffler belong to no
+  net and had nowhere to live, so a v0 layout described a machine that will not run, and a consumer
+  that ignores the new field keeps describing one. A routed hatch is deliberately recorded twice,
+  here and by its `Terminal`, and the validator re-derives the agreement rather than trusting it.
+
+  The validator gains the structural half of the hatch rules: a hatch sits on a body cell of its
+  own machine, faces *out* of it, shares its cell with nothing, and agrees with its port's terminal
+  (`HATCH_NOT_ON_MACHINE`, `HATCH_FACES_INWARD`, `HATCH_CELL_COLLISION`, `HATCH_TERMINAL_MISMATCH`,
+  `HATCH_UNKNOWN_PORT`). Facing outward is the one GT will not catch for us: `IStructureElement`
+  takes no facing and every hatch returns `isFacingValid = true`, so a multiblock forms happily
+  with a hatch pointing into itself and then moves nothing. `kinds` is documented at every level as
+  a **lower bound, never a whitelist** - 61 of 185 controllers record no `Energy`-capable cell, so
+  treating an absent kind as a prohibition would manufacture false infeasibilities across a third
+  of the dataset. Nothing emits hatches yet; the assignment stage is the next lane.
 - **A machine takes power through as many energy hatches as its draw needs, not one connection
   (`ir/` v3, `dataset/`, `adapter/`, `router/`, `validator/`, `system_io`).** A standard GT energy
   hatch accepts 2 amps (`MTEHatchEnergy.maxAmperesIn()`; its tooltip says so, and
