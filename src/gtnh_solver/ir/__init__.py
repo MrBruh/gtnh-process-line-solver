@@ -13,8 +13,8 @@ validator lanes. Only the value types (``CellCoord``, ``CellBox``) surface here.
 - ``input_ir``   - Port, FaceSpec, HatchSlot, Machine, MachineFaceRef, Net, METoggles, PinnedIO,
                    InputIR  (+ INPUT_IR_VERSION)
 - ``nets``       - net helpers shared by the router and the system-IO summary
-- ``output``     - Placement, PlacedHatch, Segment, Terminal, Route, LayoutMetrics,
-                   Infeasibility, LayoutResult  (+ LAYOUT_RESULT_VERSION)
+- ``output``     - Placement, PlacedHatch, Segment, Terminal, Route, RouteMaterial,
+                   LayoutMetrics, Infeasibility, LayoutResult  (+ LAYOUT_RESULT_VERSION)
 
 Both roots carry an int ``version``. Additive fields can land without a bump; any change
 that breaks an existing consumer bumps the relevant ``*_VERSION`` and updates all
@@ -23,7 +23,7 @@ consumers in the same PR. Keep the changelog at the bottom of this file current.
 
 from __future__ import annotations
 
-from .enums import Commodity, Facing, IODirection, LayoutStatus
+from .enums import Commodity, Facing, IODirection, LayoutStatus, PipeFamily
 from .geometry import CellBox, CellCoord
 from .input_ir import (
     INPUT_IR_VERSION,
@@ -46,6 +46,7 @@ from .output import (
     PlacedHatch,
     Placement,
     Route,
+    RouteMaterial,
     Segment,
     Terminal,
 )
@@ -59,6 +60,7 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
     "IODirection",
     "Facing",
     "LayoutStatus",
+    "PipeFamily",
     # geometry
     "CellCoord",
     "CellBox",
@@ -78,6 +80,7 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
     "Segment",
     "Terminal",
     "Route",
+    "RouteMaterial",
     "AutoConnection",
     "LayoutMetrics",
     "Infeasibility",
@@ -170,4 +173,19 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   power included, so these two say how far a draw may be split and how many connections the
 #   structure can physically host. Both default to None ("no ceiling known"), so a problem built
 #   without the physical dataset behaves exactly as before.
+#
+# LayoutResult v1 (additive, no version bump) - added `Route.material: RouteMaterial | None`, the
+#   tier-representative cable or pipe a route is drawn and costed as. It exists so the build guide's
+#   bill of materials and the previewer cannot disagree about what a route is made of: both read it
+#   rather than each deriving a guess. `None` means "unspecified pipe", which is exactly what every
+#   route said before the field existed, so a consumer that ignores it renders precisely today's
+#   build - correct, just less specific. That is the test the additive rule asks for, and it is why
+#   this does not bump where `hatches` did: a consumer ignoring `hatches` describes a structure that
+#   will not form, which is a different kind of wrong.
+#
+#   `stand_in` is True on every material v1 emits, enforced by the model. GT has many cable
+#   materials per tier (six at LV), the solver has never chosen between them, and inventing one is
+#   the failure docs/dataset-extraction/texture-resolution.md calls unrecoverable - so the flag
+#   travels on the contract for the sake of the consumer that must refuse it: `.schematic` export
+#   (#4, #96) may not lower a stand-in into a real block.
 # ---------------------------------------------------------------------------
