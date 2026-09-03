@@ -168,6 +168,53 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unchanged.
 
 ### Fixed
+- **A power source is now placed by the cable it actually costs (`solver/`).** A source's position
+  exists purely to serve a trunk, and it was the one machine the annealer had no gradient on: an
+  un-penalized power net never entered the placement cost, so a 1x1x1 source anywhere inside the
+  build's bounding box was cost-neutral to move. Ranking eight fully-routed attempts on real cable
+  cells is not the same as searching - no move inside an attempt was ever aimed at shortening a
+  trunk, so the grid picked the luckiest of eight accidents.
+
+  **The obvious fix was tried again and lost again.** PR #62 removed power's base wirelength term
+  after measuring that center-distance proxies steer AWAY from low-cable layouts, and re-measuring
+  that here confirmed it: giving power nets an MST pull at weights 1.0, 0.5, 0.25 and 0.1 made the
+  shipped sand line's cable go **up** at every one (3 cells to 4-6) and its floor area with it
+  (5 to 8-12). The proxy cannot see that sand's source sits *on top* of the machine row with the
+  hammers tapping its dock cell through their top faces - it scores a nearer, worse position
+  higher, and 0.1 breaks that layout as completely as 1.0, because the term flips a near-tie
+  rather than applying a gradual pull.
+
+  So the source is positioned where cable IS knowable, on a routed layout - the same decision as
+  #62, carried through rather than reversed. A new **repair pass** (`solver/repair.py`) runs after
+  the pipes are laid: each source is offered the free cells around the sinks it feeds, and every
+  candidate is **really routed** with `route_power` and ranked on the feedback loop's own quality
+  key (`solver/_structure.py`, now shared with the loop so the two cannot pull against each
+  other). A candidate is adopted only if it is strictly better on that key, so the pass either
+  improves a layout or leaves it exactly alone. It is cheap because the hard constraints do the
+  pruning: a source's feed face must stay flush on a region wall, which cuts the candidate set to
+  tens of poses (~95 on nitrobenzene, ~0.5s against a 20s solve).
+
+  Two rules keep it from doing harm. It declines a net carrying a **pinned** I/O, whose route is
+  constrained to ground the power router does not model. And it leaves a placement whose power
+  will not route **untouched**: such an attempt is on its way to the feedback loop as a diagnosis
+  ("these nets failed, penalize them and re-place"), and shuffling sources first changed which
+  nets failed each attempt - the loop gives up early when a failed-net set repeats, and that churn
+  alone cost nitrobenzene/balanced its valid layout, breaking off after three attempts instead of
+  eight. The fast (`optimize=False`) path is unchanged: it stays a single constructive placement.
+
+  Measured at seed 0, structure floor area / layers / power cable cells:
+
+  | example | objective | before | after |
+  |---|---|---|---|
+  | sand | footprint / volume / balanced | 5 / 2 / **3** | 5 / 2 / **3** |
+  | nitrobenzene | footprint | 154 / 10 / **60** | 136 / 10 / **44** |
+  | nitrobenzene | volume | 126 / 7 / **34** | 126 / 7 / **26** |
+  | nitrobenzene | balanced | 126 / 7 / **34** | 126 / 7 / **26** |
+
+  Sand holds its hand-built 3-cable target exactly; nitrobenzene drops 27% of its cable on the
+  default objective and 24% on the other two, and its floor area comes down 154 to 136 as well.
+  Refs #123.
+
 - **A machine starved of power is now something the feedback loop can fix, not a lost attempt
   (`solver/`, `validator/`).** A machine takes packets through hatches capped at `Port.max_amps`
   and cable loss shrinks every packet, so its real intake is `sum(max_amps * delivered_volts)`.
