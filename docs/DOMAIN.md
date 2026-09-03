@@ -154,6 +154,71 @@ where load **sums** along shared segments (Steiner-tree-like):
   face flush on the region boundary (validator-enforced), internal cables use the other five
   faces, and the builder runs power in through the wall the front touches.
 
+## Cables and pipes as blocks
+
+The sections above say how much flows and how thick the cable must be. This one says **which block
+that is** and what it looks like - what the previewer draws and what the build guide counts. All of
+it is read from the GT source and confirmed against an extractor run of pack 2.8.4.
+
+**A route is drawn as a tier-representative STAND-IN, never as a build spec.** GT gives one voltage
+tier many cable materials - at LV alone tin, lead, cobalt, zinc, soldering alloy and redstone alloy
+all carry 32 V, differing in amperage and loss, not in what they can power. The router sizes a cable
+by **gauge** (summed amperage) and never by material, and no dataset names one, so "the LV cable" is
+a choice rather than a fact. `dataset/pipes.py` makes that choice once - the community-standard
+ladder, the material a player actually builds at each tier - and every `RouteMaterial` it produces
+carries `stand_in=True`. The build guide prints it, the previewer's legend footnotes it, and a
+`.schematic` exporter must refuse to lower it into a real block. Counts, gauges and thicknesses are
+real; only the material is representative. A cable rendered in Tin when the build needs Aluminium is
+plausible, confident and wrong - the failure `docs/dataset-extraction/texture-resolution.md` calls
+unrecoverable.
+
+The ladder stops at **UV**, which is a fact and not an omission: above it GT ships no insulated
+cable at all. UHV and beyond are carried by superconductor **bare wire**, which is lossless and a
+different block family, so there is nothing to be representative of and the route keeps a bare bar.
+
+**A cell incident to two gauges is built at the thicker one.** A shared trunk that splits carries
+different summed amperage on either side of the split, so one cell can be incident to a 2x segment
+and a 1x segment at once (the sand line does this at cell `(2,0,1)`). A cell is one block, the
+fattest incident cable is the one that physically meets it, and under-sizing is what burns - so the
+cell is the maximum over its incident segments. As a coloured bar that was harmless smoothing; as a
+real block it is a build instruction, which is why it is written down here rather than left implicit
+in a render template.
+
+**Texture layers.** GT composites an ordered stack of `(sprite, RGBA multiply)`; `<SET>` below is
+the material's texture set under `materialicons/`, and bare names are under `iconsets/`. Sprites are
+**greyscale** - measured, not assumed - so the material's identity lives entirely in the multiplier,
+and a dumper that drops it renders the whole pack as grey noodles:
+
+| block | face | layers, bottom to top |
+|---|---|---|
+| insulated cable | an open end | `<SET>/wire` x material RGBA, then `INSULATION_<size>` x tint |
+| insulated cable | not connected | `INSULATION_FULL` x `CABLE_INSULATION`, alone |
+| bare wire | any | `<SET>/wire` x `getModulation(colorIndex, material RGBA)` |
+| fluid / item pipe | barrel | `pipeSide` from the material's texture set |
+| fluid / item pipe | the bore | the size sprite (`pipeTiny`..`pipeHuge`) |
+
+`Dyes.CABLE_INSULATION` is a flat **64/64/64** darkening that cannot be skipped (confirmed to hold
+on a dedicated server, where it is read from a client-config default). Painting a cable recolours
+only its insulation; painting a bare wire recolours the conductor.
+
+**Geometry.** For a pipe of thickness `t`: `pipeMin = (1 - t) / 2`, `pipeMax = (1 + t) / 2`. The
+shape is a uniform axis-aligned cross - a core cube plus one arm per **connected** side running to
+the block edge, with the **same cross-section as the core**; there is no fatter node. A straight run
+collapses to one full-length box, and `t >= 1` renders as a full cube. Thickness in blocks:
+
+| family | thicknesses |
+|---|---|
+| insulated cable, 1x/2x/4x/8x/12x/16x | 0.25 / 0.375 / 0.5 / 0.625 / 0.75 / 0.875 |
+| bare wire, 1x..16x | 0.125 / 0.25 / 0.375 / 0.5 / 0.625 / 0.75 |
+| fluid pipe, tiny..huge | 0.25 / 0.375 / 0.5 / 0.75 / 0.875 (quadruple, nonuple: full cubes) |
+| item pipe, tiny..large | 0.25 / 0.375 / 0.5 / 0.75 (huge: a full cube; restrictive huge 0.875) |
+
+**Which sides connect is player state, not a block property.** `mConnections` is set by the player
+with a wire cutter, soldering iron or wrench (the same reason a pipe never auto-connects, which is
+why pipe adjacency is not a silent-tap hazard for routing). It cannot be observed outside a world
+and should not be: the extractor **enumerates** the two looks GT's own inventory render uses, and
+the previewer synthesises the cross from the connection mask it derives from the route itself.
+
 ## Boundary storages (the adapter closes the line)
 
 A plan export names recipes and flows but not the containers at the line's edge, so the adapter
