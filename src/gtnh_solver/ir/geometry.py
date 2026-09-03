@@ -168,6 +168,32 @@ def in_region(cell: Cell, region: CellBox) -> bool:
     return 0 <= x < region.sx and 0 <= y < region.sy and 0 <= z < region.sz
 
 
+def box_in_region(
+    origin: CellCoord, footprint: CellBox, orientation: Facing, region: CellBox
+) -> bool:
+    """Whether a whole body placed at ``origin`` lies inside the origin-anchored bounding region.
+
+    Exactly ``all(in_region(c, region) for c in occupied_cells(origin, footprint, orientation))``,
+    answered from the rotated box: a solid box is in-bounds iff its minimum and maximum corners
+    are, so this is six comparisons rather than one per cell. Placement asks it of every candidate
+    origin x orientation it considers, which was 21.7M ``in_region`` calls and ~24% of a solve once
+    :func:`auto_output_faces` stopped dominating the profile (issue #110).
+
+    ``orientation`` is required for the reason :func:`occupied_cells` requires it: an east-facing
+    5x1x2 needs 2 of x and 5 of z, and a caller that passed the declared extents would be wrong
+    here in exactly the way it would be wrong there - silently, on a layout that still validates.
+    """
+    box = rotated_footprint(footprint, orientation)
+    return (
+        origin.x >= 0
+        and origin.x + box.sx <= region.sx
+        and origin.y >= 0
+        and origin.y + box.sy <= region.sy
+        and origin.z >= 0
+        and origin.z + box.sz <= region.sz
+    )
+
+
 # Unit step out of each block face. Minecraft axes: north -z, south +z, east +x, west -x,
 # up +y, down -y. Shared by the router (where a port docks) and the validator (face checks).
 FACE_DELTAS: dict[Facing, Cell] = {
@@ -240,15 +266,38 @@ def auto_output_faces(
     takes no IR model types, so it can be shared by the solver (which builds the connection) and
     the placement cost (which rewards orientations that enable one) without either importing the
     other. The validator deliberately re-derives this independently (docs/ARCHITECTURE.md #4).
+
+    Answered from the two rotated boxes, never from their cells. Both bodies are solid axis-aligned
+    boxes, so "some source cell has a neighbour across ``face`` inside the target" is exactly "the
+    source box stepped one cell along ``face`` overlaps the target box on all three axes" - six
+    integer comparisons, independent of machine volume. Enumerating instead made this 70% of a
+    solve (issue #110): the placement loop calls it ~1.5M times, and a 7x7x7 multiblock is 343
+    cells to build and hash on every one of them. A property test pins this against the cell-set
+    formulation over random boxes, origins and orientations.
     """
-    source_cells = set(occupied_cells(source_origin, source_footprint, source_front))
-    target_cells = set(occupied_cells(target_origin, target_footprint, target_front))
+    source_box = rotated_footprint(source_footprint, source_front)
+    target_box = rotated_footprint(target_footprint, target_front)
+    # Hoisted out of the loop: the same coordinates are re-read on every candidate face, and at this
+    # call count the attribute lookups are a measurable share of what is left.
+    ox, oy, oz = source_origin.x, source_origin.y, source_origin.z
+    tx, ty, tz = target_origin.x, target_origin.y, target_origin.z
+    tx_max, ty_max, tz_max = tx + target_box.sx, ty + target_box.sy, tz + target_box.sz
     for face, (dx, dy, dz) in FACE_DELTAS.items():
         if face is source_front:  # the source's front carries no I/O
             continue
         opposite = OPPOSITE_FACE[face]
         if opposite is target_front:  # the target's input face would be its front
             continue
-        if any((x + dx, y + dy, z + dz) in target_cells for x, y, z in source_cells):
+        # The stepped source box's minimum corner; half-open intervals on both sides, so the test
+        # is min < other_max on each axis in both directions.
+        ax, ay, az = ox + dx, oy + dy, oz + dz
+        if (
+            ax < tx_max
+            and tx < ax + source_box.sx
+            and ay < ty_max
+            and ty < ay + source_box.sy
+            and az < tz_max
+            and tz < az + source_box.sz
+        ):
             return face, opposite
     return None

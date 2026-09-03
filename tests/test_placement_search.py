@@ -7,6 +7,8 @@ where first-fit strings the spokes out in a row but the optimizer clusters them 
 
 from __future__ import annotations
 
+import random
+
 from gtnh_solver.ir import (
     CellBox,
     CellCoord,
@@ -23,9 +25,14 @@ from gtnh_solver.ir import (
     Placement,
     Port,
 )
-from gtnh_solver.ir.geometry import front_on_boundary, occupied_cells
+from gtnh_solver.ir.geometry import Cell, front_on_boundary, occupied_cells
 from gtnh_solver.placement import optimize_placement, place
-from gtnh_solver.placement.search import _apply_occupied_delta
+from gtnh_solver.placement.search import (
+    _apply_occupied_delta,
+    _relocate,
+    _SearchContext,
+    _turn_fits,
+)
 from gtnh_solver.validator import validate
 from tests._helpers import PLACEMENT_CODES, at, power_source
 
@@ -384,3 +391,75 @@ def test_apply_occupied_delta_follows_a_reorient_that_never_moves_the_cell() -> 
     _apply_occupied_delta(occupied, before, after, machines)
     assert occupied == rebuild(after)
     assert rebuild(before) != rebuild(after), "a turned 3x1x1 must cover different cells"
+
+
+def _fit_ctx(
+    region: CellBox, machines: list[Machine], reserved: set[Cell] | None = None
+) -> _SearchContext:
+    """A context carrying only what a fit test reads: the region, the machines, the reserved cells.
+
+    The net views stay empty - the two moves exercised below decide on geometry alone, and giving
+    them nets would only obscure which rejection the test is actually pinning.
+    """
+    return _SearchContext(
+        machines={m.id: m for m in machines},
+        region=region,
+        reserved=reserved or set(),
+        adjacency={},
+        machine_nets={},
+        machine_power={},
+        machine_auto={},
+    )
+
+
+def _wide(mid: str = "wide") -> Machine:
+    return Machine(
+        id=mid,
+        type="wide",
+        footprint=CellBox(sx=3, sy=1, sz=1),
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH, Facing.EAST],
+    )
+
+
+def test_turn_fits_rejects_a_turn_that_swings_the_body_out_of_the_region() -> None:
+    """A quarter turn swaps a non-cubic machine's horizontal extents, so a turn that sits happily
+    along x can need room along z the region does not have. The test is on the rotated box rather
+    than on the turned cells (issue #110) and has to give the cell walk's answer at the wall.
+    """
+    wide = _wide()
+    p = at("wide", 0, 0, 0)  # facing NORTH: 3 of x, 1 of z
+    slot = _fit_ctx(CellBox(sx=3, sy=1, sz=1), [wide])
+    assert _turn_fits(wide, p, Facing.NORTH, slot, set())  # same extents: the short-circuit
+    assert not _turn_fits(wide, p, Facing.EAST, slot, set())  # turned it needs 3 of z, there is 1
+    room = _fit_ctx(CellBox(sx=3, sy=1, sz=3), [wide])
+    assert _turn_fits(wide, p, Facing.EAST, room, set())
+    # In-region is necessary, not sufficient: the swept cells must also be free of everyone else.
+    # `occupied` is the whole layout's set, so the machine's own cells are excluded by the move.
+    assert not _turn_fits(wide, p, Facing.EAST, room, {(0, 0, 0), (1, 0, 0), (2, 0, 0), (0, 0, 2)})
+
+
+def test_relocate_rejects_an_origin_whose_feed_turn_leaves_the_region() -> None:
+    """The one path where a legally drawn origin still cannot take the body: a *source* that has to
+    be re-oriented to keep its feed face on the boundary is placed with extents the draw never
+    bounded (``_rand_origin`` bounds with the CURRENT orientation), and the turn can overrun.
+
+    A 1x1x3 source in a 1x1x8 corridor: only ``z == 0`` puts a NORTH front on the boundary and a
+    reserved cell blocks it, so every other draw turns WEST - which needs 3 of x where there is 1.
+    """
+    tall = Machine(
+        id="src",
+        type="Power Source (LV)",
+        footprint=CellBox(sx=1, sy=1, sz=3),
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH, Facing.WEST],
+        faces=FaceSpec(
+            ports=[Port(id="power:out", commodity=Commodity.POWER, direction=IODirection.OUTPUT)]
+        ),
+    )
+    assert tall.is_power_source, "the premise: only a source is ever re-oriented for its feed face"
+    ctx = _fit_ctx(CellBox(sx=1, sy=1, sz=8), [tall], reserved={(0, 0, 0)})
+    placed = [at("src", 0, 0, 5)]
+    occupied = {(0, 0, 5), (0, 0, 6), (0, 0, 7)}
+    assert _relocate(placed, ctx, occupied, random.Random(0)) is None
+    assert occupied == {(0, 0, 5), (0, 0, 6), (0, 0, 7)}, "the move must restore what it borrowed"

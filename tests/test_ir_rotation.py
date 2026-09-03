@@ -13,7 +13,12 @@ passes every other check.
    say that convincingly.
 3. **The fast path equals the general path.** ``occupied_cells`` rotates a box by swapping its
    extents; lane 2's hatch slots will rotate arbitrary offsets with ``rotate_offset``. Those two
-   must not drift, so the swap is checked against a from-scratch rotate-and-re-anchor.
+   must not drift, so the swap is checked against a from-scratch rotate-and-re-anchor. The same
+   argument covers ``auto_output_faces``, which answers a body-adjacency question from the two
+   rotated boxes (issue #110) where it used to expand and intersect both cell sets: the box
+   arithmetic is pinned against that cell-set formulation. ``box_in_region`` is the same trade in
+   the other direction - a whole body against the region wall - and is pinned against the cell walk
+   it replaced.
 """
 
 from __future__ import annotations
@@ -29,6 +34,11 @@ from gtnh_solver.ir import CellBox, CellCoord, Facing, HatchSlot
 from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 from gtnh_solver.ir.geometry import (
     CW_STEPS,
+    FACE_DELTAS,
+    OPPOSITE_FACE,
+    auto_output_faces,
+    box_in_region,
+    in_region,
     occupied_cells,
     rotate_offset,
     rotated_footprint,
@@ -242,3 +252,130 @@ def test_rotated_slot_is_injective(footprint: CellBox, orientation: Facing) -> N
         for dz in range(footprint.sz)
     ]
     assert len({rotated_slot(o, footprint, orientation) for o in offsets}) == len(offsets)
+
+
+def _auto_output_faces_by_cells(
+    source_origin: CellCoord,
+    source_footprint: CellBox,
+    source_front: Facing,
+    target_origin: CellCoord,
+    target_footprint: CellBox,
+    target_front: Facing,
+) -> tuple[Facing, Facing] | None:
+    """The cell-set formulation of :func:`auto_output_faces`: expand both bodies, then look for a
+    source cell whose neighbour across the face is a target cell.
+
+    This is what the function did before issue #110 turned it into box arithmetic. It is the
+    definition the box test has to reproduce - obviously correct, and far too slow to ship (it cost
+    70% of a solve), which is exactly the shape of thing that belongs in a test as the oracle.
+    """
+    source_cells = set(occupied_cells(source_origin, source_footprint, source_front))
+    target_cells = set(occupied_cells(target_origin, target_footprint, target_front))
+    for face, (dx, dy, dz) in FACE_DELTAS.items():
+        if face is source_front:
+            continue
+        opposite = OPPOSITE_FACE[face]
+        if opposite is target_front:
+            continue
+        if any((x + dx, y + dy, z + dz) in target_cells for x, y, z in source_cells):
+            return face, opposite
+    return None
+
+
+# Deliberately tighter than _ORIGINS: two bodies drawn from +-8 with extents up to 6 are rarely
+# touching, and a property test that only ever exercises the "no" answer proves nothing about the
+# face it picks. At +-4 both outcomes come up constantly.
+_NEAR_ORIGINS = st.builds(
+    CellCoord,
+    x=st.integers(min_value=-4, max_value=4),
+    y=st.integers(min_value=-4, max_value=4),
+    z=st.integers(min_value=-4, max_value=4),
+)
+
+
+@given(
+    source_origin=_NEAR_ORIGINS,
+    source_footprint=_FOOTPRINTS,
+    source_front=_FACINGS,
+    target_origin=_NEAR_ORIGINS,
+    target_footprint=_FOOTPRINTS,
+    target_front=_FACINGS,
+)
+def test_auto_output_faces_matches_the_cell_set_formulation(
+    source_origin: CellCoord,
+    source_footprint: CellBox,
+    source_front: Facing,
+    target_origin: CellCoord,
+    target_footprint: CellBox,
+    target_front: Facing,
+) -> None:
+    args = (
+        source_origin,
+        source_footprint,
+        source_front,
+        target_origin,
+        target_footprint,
+        target_front,
+    )
+    assert auto_output_faces(*args) == _auto_output_faces_by_cells(*args)
+
+
+def test_auto_output_faces_matches_the_cell_sets_over_a_whole_neighbourhood() -> None:
+    """The same equivalence swept exhaustively, so the corners hypothesis samples are all covered.
+
+    A 7x7x7 grid of relative positions covers every way two non-cubic bodies can miss, touch on a
+    face, meet only along an edge or a corner (which is NOT an auto-output), or overlap - at all
+    sixteen facing pairs. The counts are asserted so the sweep cannot quietly degenerate into one
+    answer, which is how an equivalence test stops testing anything.
+    """
+    source_footprint = CellBox(sx=2, sy=1, sz=3)
+    target_footprint = CellBox(sx=3, sy=2, sz=1)
+    origin = CellCoord(x=0, y=0, z=0)
+    hits = misses = 0
+    for source_front in HORIZONTAL_FACINGS_ORDERED:
+        for target_front in HORIZONTAL_FACINGS_ORDERED:
+            for dx in range(-3, 4):
+                for dy in range(-3, 4):
+                    for dz in range(-3, 4):
+                        target_origin = CellCoord(x=dx, y=dy, z=dz)
+                        args = (
+                            origin,
+                            source_footprint,
+                            source_front,
+                            target_origin,
+                            target_footprint,
+                            target_front,
+                        )
+                        got = auto_output_faces(*args)
+                        assert got == _auto_output_faces_by_cells(*args), args
+                        if got is None:
+                            misses += 1
+                        else:
+                            hits += 1
+    assert hits > 0
+    assert misses > 0
+
+
+# Small enough that a body drawn from _NEAR_ORIGINS lands out of bounds about as often as in, so
+# the equivalence below is exercised on both answers rather than on "no" over and over.
+_REGIONS = st.builds(
+    CellBox,
+    sx=st.integers(min_value=1, max_value=8),
+    sy=st.integers(min_value=1, max_value=8),
+    sz=st.integers(min_value=1, max_value=8),
+)
+
+
+@given(origin=_NEAR_ORIGINS, footprint=_FOOTPRINTS, orientation=_FACINGS, region=_REGIONS)
+def test_box_in_region_matches_the_cell_walk(
+    origin: CellCoord, footprint: CellBox, orientation: Facing, region: CellBox
+) -> None:
+    """``box_in_region`` is the corner test; the definition is every cell being in bounds.
+
+    Placement leans on the two being the same predicate: it now rejects a candidate on the box and
+    never expands it, so a box test that were merely *nearly* right would silently drop legal
+    placements (or, worse, keep bodies that hang out of the region) with nothing to catch it.
+    """
+    assert box_in_region(origin, footprint, orientation, region) == all(
+        in_region(c, region) for c in occupied_cells(origin, footprint, orientation)
+    )

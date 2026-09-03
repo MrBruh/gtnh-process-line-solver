@@ -134,7 +134,9 @@ doc as intent and reconcile.
    timeout). Router uses **A\*** (not Lee BFS) with a Manhattan heuristic on the bounded grid.
    *(Phase 2: the wall-clock/timeout budget. `solve()` already returns the best VALID layout by
    its quality ranking, but over a **deterministic bounded** multi-start grid keyed off the seed,
-   not a wall-clock timeout - see `solver/core.py`.)*
+   not a wall-clock timeout - see `solver/core.py`. The other half of this target is per-iteration
+   cost, which tracks machine **volume**, not machine count: box-arithmetic geometry (see Spatial
+   model, issue #110) brought a 23-machine solve from 86.5 s to 22.3 s.)*
 7. **Routing topology - free-form + realizability invariant.** Free-form capacitated routing
    plus a margin→max-channels-per-edge cap and cell→block realizability fed back into the
    loop, so the coarse-cell abstraction can't certify unbuildable layouts. *(Built: single-channel
@@ -195,6 +197,17 @@ is materialized only at export via a per-machine cell→block mapping, **never d
 The router is meant to enforce a **channels-per-edge** cap derived from the margin so cell routes
 lower to non-conflicting blocks. *(Phase 2, lane D: today the router enforces only single-channel
 capacity - one route per cell - not the per-edge multi-channel cap.)*
+
+A body being an integer **box** is also what the search leans on to stay fast: "does this body fit
+the region", "do these two bodies touch across a face" are answered by interval arithmetic on the
+boxes (`ir/geometry.py`), and a body is expanded into cells only for the tests that must intersect
+the occupied/reserved *sets*. That is not a micro-optimization. The placement inner loop asks those
+questions millions of times per solve and a cell walk costs machine **volume**, so enumerating made
+a solve slower exactly as the dataset gave machines their real footprints - the opposite of what
+the dataset is for. Issue #110 measured one such predicate at 70% of a profiled run; moving both to
+boxes took nitrobenzene's 23-machine solve from 86.5 s to 22.3 s with byte-identical layouts. New
+geometry predicates belong in `ir/geometry.py` in that form, with a property test pinning them
+against the cell walk they replace.
 
 ## Optimization objectives
 
