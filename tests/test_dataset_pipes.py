@@ -112,26 +112,46 @@ def test_dataset_names_match_gts_own_spelling() -> None:
 
 
 @pytest.mark.parametrize("tier", sorted(CABLE_MATERIAL_BY_TIER))
-def test_every_tiers_cable_exists_in_the_committed_manifest(tier: str) -> None:
+def test_every_shipped_cable_is_complete_and_correctly_rated(tier: str) -> None:
     """The ladder is asserted against extracted data, not against the comment that wrote it.
 
-    Each tier's material must ship all six gauges, be rated at or above the tier it stands for, and
-    record the thickness the previewer will draw it at.
+    The committed manifest is deliberately example-scoped, so most tiers are absent and that is not
+    a defect - ``derive_small_manifest`` keeps only what a preview of the shipped lines can draw.
+    What must hold is that a tier which IS shipped is shipped *whole*: all six gauges, rated at or
+    above the tier it stands for, at the thickness the previewer will draw. A half-shipped ladder
+    would lose a cable at one gauge and render it as a bare flat bar with no error anywhere.
     """
     pipes = _pipes_by_name()
-    if not any(name.startswith("cable.") for name in pipes):
-        pytest.skip("no cables in the committed manifest (fixture-only checkout)")
-
     material = CABLE_MATERIAL_BY_TIER[tier]
+    shipped = [g for g in CABLE_THICKNESS_BLOCKS if cable_display_name(material, g) in pipes]
+    if not shipped:
+        pytest.skip(f"no {tier} cable in the example-scoped manifest")
+
     for gauge, thickness in CABLE_THICKNESS_BLOCKS.items():
         name = cable_display_name(material, gauge)
         entry = pipes.get(name)
-        assert entry is not None, f"{tier} stands in for {name}, which is not in the manifest"
+        assert entry is not None, f"{tier} ships {shipped} but not gauge {gauge} ({name})"
         pipe = entry["pipe"]
         assert isinstance(pipe, dict)
         assert pipe["insulated"] is True, f"{name} is bare wire, not an insulated cable"
         assert pipe["voltage"] >= tier_voltage(tier), f"{name} is underrated for {tier}"
         assert pipe["thickness"] == pytest.approx(thickness), f"{name} thickness moved"
+
+
+def test_the_committed_manifest_ships_the_examples_own_cables() -> None:
+    """The pruning rule actually reaches cables - the hole this closed.
+
+    A cable's name carries no machine type, so the name rule in ``derive_small_manifest`` can never
+    keep one; without the dedicated rule the committed manifest would ship zero. The sand line is
+    LV and nitrobenzene reaches HV, so those two tiers are the floor.
+    """
+    pipes = _pipes_by_name()
+    if not any(name.startswith("cable.") for name in pipes):
+        pytest.skip("no cables in the committed manifest (fixture-only checkout)")
+
+    for tier in ("LV", "HV"):
+        name = cable_display_name(CABLE_MATERIAL_BY_TIER[tier], 1)
+        assert name in pipes, f"the examples use {tier}; {name} must ship"
 
 
 def test_both_pipe_stand_ins_exist_at_the_size_v1_draws() -> None:
