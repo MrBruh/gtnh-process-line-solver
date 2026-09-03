@@ -1229,8 +1229,23 @@ final class TextureDumper {
     private static String safeName(IMetaTileEntity imte) {
         try {
             String n = imte.getLocalName();
-            if (n != null && !n.trim().isEmpty()) {
+            // "Unknown" is not a name. IMetaTileEntity.getLocalName() has a DEFAULT that returns
+            // the translation of "GT5U.gui.title.unknown"; MetaTileEntity overrides it but
+            // MetaPipeEntity does not, so every cable and pipe in the pack arrives here with a
+            // non-empty string that says nothing. The old guard only rejected empty.
+            if (n != null && !n.trim().isEmpty() && !"Unknown".equals(n.trim())) {
                 return n;
+            }
+        } catch (Throwable ignored) {
+            // fall through
+        }
+        // The unlocalized name ("cableGt02Tin"), which is a better key than a display name anyway:
+        // stable across locales, and it carries the material and the gauge that the material policy
+        // has to join on.
+        try {
+            String meta = imte.getMetaName();
+            if (meta != null && !meta.trim().isEmpty()) {
+                return meta;
             }
         } catch (Throwable ignored) {
             // fall through
