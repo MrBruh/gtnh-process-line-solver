@@ -1,11 +1,11 @@
 """Adapter: schema-v2 multiblock facts -> the solver's physical-rules dataset.
 
-Design principle 3 of ``docs/dataset-extraction/plan.md``: the extractor emits raw facts
+Constraint 3 of ``docs/dataset-extraction/requirements.md``: the extractor emits raw facts
 (blocks, hints, variants, substitutions); **all interpretation lives here**, in Python, where
 the IR contracts and the tests are. Footprint bounding boxes, hint-derived face constraints, and
 coil-tier semantics are computed from those facts and re-expressed as IR-shaped types
 (``CellBox`` footprints, ``Facing`` faces). The moment this logic moved into the Java extractor
-it would become a second, untested codebase (the plan's explicit non-goal), so it does not.
+it would become a second, untested codebase (that constraint's whole point), so it does not.
 
 ::
 

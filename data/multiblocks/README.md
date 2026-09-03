@@ -2,15 +2,17 @@
 
 Committed JSON describing GregTech multiblock controllers: one `<registry_name>.json` file per
 controller plus a `_meta.json` run summary. The solver reads only this data; it never runs the
-extractor. See `docs/dataset-extraction/plan.md` for the full design.
+extractor. See `docs/dataset-extraction/` (requirements.md for the what, implementation.md for the
+how) for the full design.
 
 ## These files are ILLUSTRATIVE FIXTURES, not a real dump
 
 The Java extractor (`DumperMod`, `StructureDumper`, `JsonWriter`, `ErrorCollector`, `TextureDumper`
 under `tools/gtnh-extractor/`) is complete, but its full multiblock dump is **local-only**:
-regenerated on demand and **never committed** (see `docs/dataset-extraction/plan.md` and the
-`.gitignore` rule). Only these two curated fixtures ship, permanently, so the Python adapter
-(`gtnh_solver.dataset.multiblocks`) and its golden tests have something real-shaped to run against.
+regenerated on demand and **never committed** (see the commit and delivery policy in
+`docs/dataset-extraction/requirements.md`, and the `.gitignore` rule). Only these two curated
+fixtures ship, permanently, so the Python adapter (`gtnh_solver.dataset.multiblocks`) and its
+golden tests have something real-shaped to run against.
 They are **hand-authored to conform to schema v2** and encode true GTNH ground truth where the
 golden tests assert it (the Electric Blast Furnace is a 3x3x4 shell with two coil layers; the
 Vacuum Freezer is 3x3x3), but the exact block metas, hint colours, `hatch_slots` kinds, and
@@ -22,9 +24,9 @@ locally; the committed tree stays these two files.
 
 The canonical schema is the Pydantic model `gtnh_solver.dataset.schema.MultiblockDoc` (and
 `DatasetMeta` for `_meta.json`), which validates with `extra="forbid"` so a stray field fails loud.
-A language-agnostic JSON Schema for the future Java extractor's own tests is available from
+A language-agnostic JSON Schema for the Java extractor's own tests is available from
 `gtnh_solver.dataset.schema.multiblock_json_schema()` - it is generated from that model, so it can
-never drift from what the loader accepts. Fields follow `docs/dataset-extraction/plan.md` section 4.2:
+never drift from what the loader accepts. The fields, restated here for a reader of these files:
 
 - top-level `schema` (version int), `controller`, `variants`, `substitutions`, `failures`;
 - `controller`: `registry_name`, `meta`, `display_name`, `source_class`, `facing_convention`;

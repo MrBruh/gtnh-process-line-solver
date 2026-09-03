@@ -1,10 +1,11 @@
-"""Schema v1 for the extracted multiblock dataset (``data/multiblocks/``).
+"""Schema v2 for the extracted multiblock dataset (``data/multiblocks/``).
 
-A typed loader for the raw JSON the extractor emits (the Java tool of issue #45, lane 2 of
-the dataset-extraction plan). One file per controller plus a ``_meta.json`` run summary. The
-shape mirrors ``docs/dataset-extraction/plan.md`` section 4.2 exactly.
+A typed loader for the raw JSON the extractor emits (``tools/gtnh-extractor/``). One file per
+controller plus a ``_meta.json`` run summary. **These models are the field-level contract**:
+``docs/dataset-extraction/requirements.md`` says what the dump must produce and defers the exact
+keys to here, so a field is added or renamed in this file first.
 
-This is the **cross-language contract** between the (future) Java extractor and the Python
+This is the **cross-language contract** between the Java extractor and the Python
 solver, so it is validated the way the rest of the repo validates data: Pydantic models with
 ``extra="forbid"``, which makes a mis-spelled or dropped field fail loud rather than get
 silently ignored. A schema bump adds a field here in the same PR that bumps ``SCHEMA_VERSION``.

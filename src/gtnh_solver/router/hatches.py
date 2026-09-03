@@ -33,7 +33,7 @@ physical dataset.
 
 A machine that needs more hatches than its structure has room for is an explicit
 :class:`~gtnh_solver.ir.Infeasibility`, never a retry: the casing budget is a per-machine total, so
-no nearby cell and no re-placement can create one (docs/hatch-placement/implementation.md 4e).
+no nearby cell and no re-placement can create one (docs/DOMAIN.md, "Hatches ride casing cells").
 """
 
 from __future__ import annotations

@@ -42,11 +42,11 @@ as "safe to start on" rather than "unblocked".
 | Lane | Phase 2 work | Status |
 |------|--------------|--------|
 | A | adapter hardening: pin the plan-schema + recipe-dataset version | Open - Phase 1 adapter done; pinning not started |
-| B | full physical dataset (footprints / faces / tiers / cell->block) | In progress - the schema-v1 `dataset/` loader and the first per-machine footprints (Electric Blast Furnace, Vacuum Freezer) ship and are wired into the solve path; the Java extractor (`tools/gtnh-extractor/`) is built but not yet run to populate a full dump, and faces / tiers / cell->block interpretation is still ahead |
+| B | full physical dataset (footprints / faces / tiers / cell->block) | Largely landed - the schema-v2 `dataset/` loader ships real footprints, hint-derived I/O faces, coil tiers and per-cell hatch slots, all wired into the solve path; the Java extractor (`tools/gtnh-extractor/`) dumps structures and a layered texture manifest on demand, local-only and version-namespaced, with two fixtures committed so a fresh clone works offline. Ahead: cell->block realizability, and the third-party texture tail |
 | C | placement: SA/LNS + routing-aware cost | Largely landed - SA + LNS + the routing-aware (HPWL / compactness / auto-output) cost are in; the incremental congestion-aware cost is the remaining refinement |
 | D | router: negotiated-congestion, multi-channel cap, shared-amperage power optimization | In progress - negotiated-congestion routing (item/fluid nets), single-channel capacity, and size-or-reject power landed; power trunks keep failed-first rip-up/reroute. Ahead: the per-edge multi-channel cap and power optimization |
-| E | validator rule-half: tier caps, summed amperage, face reachability | Partly landed - summed-amperage + voltage-drop validation shipped independently; only the tier caps + dataset-specific face rules stay blocked on lane B |
-| F | previewer / build-guide polish | Previewer polish in progress; build-guide polish deferred |
+| E | validator rule-half: tier caps, summed amperage, face reachability | Largely landed - summed amperage, voltage drop, the does-enough-power-arrive check, the per-machine hatch-cell ceiling, and hatch/terminal legality all ship, each derived independently of the solver. Ahead: the per-net tier caps |
+| F | previewer / build-guide polish | Previewer polish in progress - real GT block textures and per-hatch blocks at their own facing have landed; pipe and cable textures are the open piece (#4, scoped by the spike in #105). Build-guide polish deferred |
 
 Pick a lane, comment on (or open) an issue to claim it, and ship one logical change per PR.
 

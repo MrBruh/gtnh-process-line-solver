@@ -9,7 +9,7 @@ The tool boots a **headless dedicated server** with GT5-Unofficial + StructureLi
 builds every multiblock controller into a void world, scans the result, and dumps JSON.
 Because it executes the same `construct(...)` code the in-game hologram projector runs, the
 output matches in-game behaviour by construction. See `docs/dataset-extraction/` (requirements.md,
-implementation.md, plan.md, texture-resolution.md) for the full rationale.
+implementation.md, texture-resolution.md) for the full rationale.
 
 ## Status
 
@@ -93,8 +93,9 @@ build multiblocks, so `dependencies.gradle` drops that one optional subtree; eve
 GT5U hard dependency still resolves and loads on the dev server.
 
 To bump: rewrite the two coordinates in `dependencies.gradle` and the entry in
-`gtnh.lock.json` from a newer manifest. The pin is hand-maintained: lane 4 (a structure-dump
-CI) was dropped, because the dump is local-only (see `docs/dataset-extraction/plan.md`).
+`gtnh.lock.json` from a newer manifest. The pin is hand-maintained: the structure-dump CI was
+dropped, because the dump is local-only (see the commit and delivery policy in
+`docs/dataset-extraction/requirements.md`).
 
 ## GT5U / StructureLib API surface
 
@@ -139,7 +140,7 @@ can skin machines and casings. It is a **separate pass** gated by `-PtextureOut`
 committed, see `docs/dataset-extraction/`). PNGs are never committed (LGPL), only the icon **name**
 and the asset **path inside the mod jar**, which the previewer fetches from the GTNH Nexus jar at
 preview time. The manifest is regenerated locally on demand (no CI: `update-textures.yml` was retired
-2026-07-17, see `docs/dataset-extraction/plan.md`).
+2026-07-17, see the commit and delivery policy in `docs/dataset-extraction/requirements.md`).
 
 **What it emits.** Per MetaTileEntity and per `(block, meta)`: the ordered bottom-to-top `ITexture`
 layer stack for each side and active state, every layer resolved to an iconset name + RGBA tint +

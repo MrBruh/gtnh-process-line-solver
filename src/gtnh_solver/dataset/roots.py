@@ -11,7 +11,7 @@ the newest local ``data/<version>/`` that actually provides it, else the committ
 So a fresh clone renders from the fixtures, a machine that has run the extractor renders from its
 full local dump, and a texture-only local run (textures but no multiblocks) still falls back to the
 committed multiblock fixtures. An explicit ``version`` pins one folder. See
-``docs/dataset-extraction/plan.md``.
+``docs/dataset-extraction/requirements.md`` (commit and delivery policy).
 """
 
 from __future__ import annotations
