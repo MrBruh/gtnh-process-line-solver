@@ -52,7 +52,9 @@ from collections import defaultdict
 
 from gtnh_solver.dataset import (
     CABLE_LOSS_PER_BLOCK,
+    CABLE_MATERIAL_BY_TIER,
     CABLE_THICKNESSES,
+    PIPE_MATERIAL,
     UnknownTierError,
     tier_voltage,
 )
@@ -65,6 +67,7 @@ from gtnh_solver.ir import (
     LayoutResult,
     Machine,
     Net,
+    PipeFamily,
     Placement,
     Segment,
 )
@@ -97,8 +100,72 @@ def validate(problem: InputIR, layout: LayoutResult) -> ValidationReport:
     _check_hatches(problem, layout, out)
     _check_mufflers(problem, layout, out)
     _check_route_capacity(problem, layout, out)
+    _check_route_materials(problem, layout, out)
     _check_pinned(problem, layout, out)
     return ValidationReport(tuple(out))
+
+
+def _check_route_materials(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
+    """Re-derive each route's published cable/pipe from the layout, sharing only the rule data.
+
+    ``docs/ARCHITECTURE.md`` decision 4: the gate must not ask the router what it decided, so this
+    reads the tier off the *machines the route actually terminates at* and compares, rather than
+    calling ``route_material``. That is the check with teeth - the router derives the tier from its
+    own sink list, and a route whose terminals moved without its material following would otherwise
+    describe a cable rated for a tier it no longer serves.
+
+    A route with no material is not a violation: ``None`` means "unspecified pipe", which is what
+    every route said before the field existed (docs/IR.md). Family-vs-commodity is enforced by the
+    contract itself and is not re-checked here; what the contract cannot see is which machines the
+    route ended up serving.
+    """
+    machines = {m.id: m for m in problem.machines}
+    for route in layout.routes:
+        material = route.material
+        if material is None:
+            continue
+        if material.family is not PipeFamily.CABLE:
+            # A pipe carries no tier (the contract enforces that), and v1 models no throughput, so
+            # there is nothing about it the layout could contradict.
+            if material.material != PIPE_MATERIAL.get(route.commodity):
+                out.append(
+                    Violation(
+                        ViolationCode.ROUTE_MATERIAL_UNKNOWN,
+                        f"route {route.net_id!r} is drawn as {material.material!r}, which is not "
+                        f"the sanctioned {route.commodity.value} pipe stand-in",
+                    )
+                )
+            continue
+        served = {
+            machines[t.machine_id].voltage_tier for t in route.terminals if t.machine_id in machines
+        }
+        if len(served) == 1 and material.tier not in served:
+            tier = next(iter(served))
+            out.append(
+                Violation(
+                    ViolationCode.ROUTE_MATERIAL_TIER_MISMATCH,
+                    f"route {route.net_id!r} publishes a {material.tier} cable but serves "
+                    f"{tier} machines",
+                )
+            )
+        elif len(served) > 1:
+            out.append(
+                Violation(
+                    ViolationCode.ROUTE_MATERIAL_TIER_MISMATCH,
+                    f"route {route.net_id!r} publishes a {material.tier} cable but serves "
+                    f"machines at {sorted(served)}, which have no single representative cable",
+                )
+            )
+        expected = CABLE_MATERIAL_BY_TIER.get(material.tier or "")
+        if material.material != expected:
+            out.append(
+                Violation(
+                    ViolationCode.ROUTE_MATERIAL_UNKNOWN,
+                    f"route {route.net_id!r} is drawn as {material.material!r}, which is not the "
+                    f"sanctioned stand-in for {material.tier} "
+                    f"({expected!r})",
+                )
+            )
 
 
 def _check_power_feed(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
