@@ -9,8 +9,8 @@ import java.util.Map;
  * Plain data holders mirroring the schema-v2 dataset contract (one file per controller plus a
  * run summary). These carry <em>raw facts only</em> - block registry names, metas, relative
  * offsets, hint positions - exactly as scanned from the world. All interpretation (footprint
- * math, I/O faces, tier semantics) lives in the Python adapter, per design principle 3 of
- * {@code docs/dataset-extraction/plan.md}; nothing here decides anything solver-shaped.
+ * math, I/O faces, tier semantics) lives in the Python adapter, per constraint 3 of
+ * {@code docs/dataset-extraction/requirements.md}; nothing here decides anything solver-shaped.
  *
  * <p>
  * The field names and nesting match {@code src/gtnh_solver/dataset/schema.py} so that

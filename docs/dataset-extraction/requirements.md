@@ -112,7 +112,7 @@ GT5-Unofficial version the resolved manifest's provenance records, so its icons 
 
 ## Output contracts
 
-- Structure dump: **schema v1**, the cross-language contract defined by the Pydantic models in
+- Structure dump: **schema v2**, the cross-language contract defined by the Pydantic models in
   `src/gtnh_solver/dataset/schema.py` (a JSON Schema is derived from them for non-Python
   consumers). A breaking change bumps `SCHEMA_VERSION` there and in the extractor together.
 - Texture manifest: **schema v2**, the layered stack described above.
