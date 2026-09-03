@@ -697,10 +697,7 @@ Questions 2, 6, 7 and 8 stand: cell == block is still accidental rather than rat
 *tier* is still unmodelled, and the fluid-lock / item-lock configuration still does not reach the
 build output.
 
-Also unrelated but unscheduled: issue #106 (the power router never checks a machine's intake), and
-from the `factory-flow-upstream` spike, the adapter not modelling `nodes[].recipeInputOverrides`
-and `schema_version` having no producer guard.
-
-Also unrelated to this work but unscheduled, from the `factory-flow-upstream` spike: the adapter
-does not model `nodes[].recipeInputOverrides` (both shipped fixtures carry it), and `schema_version`
-has no producer guard. Both are live defects today.
+Also unrelated to this work but unscheduled: issue #106 (the power router never checks a machine's
+intake), and from the `factory-flow-upstream` spike, the adapter does not model
+`nodes[].recipeInputOverrides` (both shipped fixtures carry it) and `schema_version` has no producer
+guard. All three are live defects today.
