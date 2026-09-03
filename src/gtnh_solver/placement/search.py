@@ -15,11 +15,15 @@ finalize an orientation BLOCKING auto-output.
 Power nets carry **no base cost term**: cheap center-distance proxies (HPWL, MST) cannot see
 dock faces or shared cable taps, and measurably steer AWAY from low-cable layouts (a source
 sitting on top of a machine row scores nearer its sinks than one whose dock cell the sinks can
-tap, yet needs more cable). The real per-segment cable cost is judged where it is knowable: the
-solver's feedback loop routes each candidate placement and keeps the best layout by (footprint,
-cable cells, volume). What remains here is the rescue path - a power net the router could NOT
-lay gets a feedback penalty, which switches on a minimum-spanning-tree pull over the net's
-members (a shared-amperage trunk is a tree) until it routes.
+tap, yet needs more cable). Re-measured under #123 at weights down to 0.1, the shipped sand line's
+cable still went UP at every one (3 -> 4..6 cells), so this stands. The real per-segment cable cost
+is judged where it is knowable, on a routed layout: the solver's feedback loop routes each
+candidate placement and keeps the best by (footprint, cable cells, volume), and its
+``solver.repair`` pass relocates each power source by really routing every candidate cell around
+the sinks it feeds - which is how a source gets positioned without a proxy having to guess.
+What remains here is the rescue path - a power net the router could NOT lay gets a feedback
+penalty, which switches on a minimum-spanning-tree pull over the net's members (a shared-amperage
+trunk is a tree) until it routes.
 
 The neighbourhood mixes small moves (relocate / swap / reorient; orientation is a search variable)
 with a **large neighbourhood search (LNS) ruin-and-recreate** move: rip out a *related* cluster of
@@ -347,8 +351,8 @@ def _cost(
     flat/cubic). ``power_nets`` holds only the nets the router failed and the solver penalized:
     each pays its penalty times the minimum-spanning-tree length over the member centers (a
     shared-amperage trunk is a tree), pulling the net tight until it routes. Un-penalized power
-    nets cost nothing here - the real cable cost is judged on routed layouts by the solver
-    (module docstring)."""
+    nets cost nothing here - the real cable cost is judged on routed layouts by the solver, whose
+    repair pass also places the sources themselves (module docstring)."""
     pos = {p.machine_id: p for p in placements}
     wire = 0.0
     for machine_ids, weight in wire_nets:
