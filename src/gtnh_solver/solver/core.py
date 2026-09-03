@@ -22,9 +22,10 @@ routed + validated and the best VALID layout by the requested objective's qualit
 (compactness metric, then real power cable cells, then the other metric) is kept, not
 first-valid-wins. The footprint weighting always participates as the explorer: it generates the
 stacked, cable-dense candidates whose routed structure often wins the volume/balanced rankings
-too. If an attempt leaves nets unrouted, it penalizes exactly those nets (so the next placement
-pulls their machines tighter - shorter routes, adjacency that auto-outputs, or an MST pull for a
-failed power trunk); with no valid layout yet in hand, it stops early when re-placing cannot
+too. If an attempt leaves nets unrouted - or lands a machine so far from its power source that
+validation proves it starved - it penalizes exactly those nets (so the next placement pulls their
+machines tighter - shorter routes, adjacency that auto-outputs, or an MST pull for a failed or
+starved power trunk); with no valid layout yet in hand, it stops early when re-placing cannot
 help (a non-routing defect, or the same nets failing again). It is **deterministic** (a bounded
 grid keyed off ``seed`` + the penalties, no wall-clock), so a given input always yields the same
 layout.
@@ -49,7 +50,7 @@ from gtnh_solver.ir import (
 from gtnh_solver.ir.geometry import occupied_cells
 from gtnh_solver.placement import Objective, optimize_placement, place
 from gtnh_solver.router import claims_by_machine, place_hatches, route, route_power
-from gtnh_solver.validator import ValidationReport, validate
+from gtnh_solver.validator import ValidationReport, ViolationCode, validate
 
 # Feedback loop bounds. Cycle detection on the failed-net set usually stops sooner when nothing
 # routes; this caps the work. The penalty step adds to a net's weight each time it fails to route.
@@ -241,6 +242,11 @@ def _assemble(
     fully routed). A layout that routes everything yet fails independent validation returns
     ``partial_invalid`` with *no* failed nets: that is a solver/router bug, not a routability
     problem, so re-placing would not help.
+
+    **One violation is the exception** (:func:`_starved_machines`): a machine too far from its
+    power source to take in its draw is a *placement* defect, not a bug - every cable is correctly
+    thick and only the distance is wrong - so its power net is named as a failed net and the loop
+    re-places it nearer, which is precisely the fix the constraint wants.
     """
     routing = route(problem, placements)  # auto-output where geometry allows + item/fluid pipes
     autos = list(routing.auto_connections)
@@ -292,26 +298,64 @@ def _assemble(
     )
     # The placer and router each report success on their own terms; the validator is the only
     # gate written independently of them, so run it on the assembled layout before claiming VALID.
-    # If it proves a violation, that is a bug in our own output - surface it as partial_invalid
-    # rather than handing back a silently-invalid layout.
+    # If it proves a violation, surface it as partial_invalid rather than handing back a
+    # silently-invalid layout: a bug in our own output, or - the one steerable case - a machine
+    # the placement left too far from its power source.
     report = validate(problem, layout)
     if not report.ok:
+        starved = _starved_machines(report)
         downgraded = LayoutResult(
             status=LayoutStatus.PARTIAL_INVALID,
             seed=seed,
-            infeasibility=_validation_infeasibility(report),
+            infeasibility=_validation_infeasibility(report, starved),
             placements=placement_list,
             routes=routes,
             auto_connections=autos,
             hatches=list(plan.hatches),
             metrics=metrics,
         )
-        return downgraded, ()
+        # A starved machine is steerable: hand back the power nets it sits on so the loop
+        # penalizes them and the next placement pulls it toward its source.
+        return downgraded, tuple(
+            n.id
+            for n in problem.nets
+            if n.commodity is Commodity.POWER
+            and not {e.machine_id for e in n.endpoints}.isdisjoint(starved)
+        )
     return layout, ()
 
 
-def _validation_infeasibility(report: ValidationReport) -> Infeasibility:
+def _starved_machines(report: ValidationReport) -> tuple[str, ...]:
+    """The machines ``report`` proves starved of power - but only when that is ALL it proves.
+
+    A starve is distance-driven: the cable loss over the run this placement implied leaves the
+    machine's hatches unable to take in its ``eut``, though every segment is correctly thick. So
+    penalizing its power net and re-placing it nearer its source is the fix. Any *other* violation
+    alongside it is a genuine placer/router bug, where re-placing cannot help - so a mixed report
+    steers nothing and takes the empty-failed-nets short circuit, as before.
+    """
+    starved = tuple(
+        v.machine_id
+        for v in report.violations
+        if v.code is ViolationCode.POWER_SUPPLY_INSUFFICIENT and v.machine_id is not None
+    )
+    return starved if len(starved) == len(report.violations) else ()
+
+
+def _validation_infeasibility(report: ValidationReport, starved: tuple[str, ...]) -> Infeasibility:
     """An Infeasibility describing why our own assembled layout failed independent validation."""
+    if starved:
+        # Nothing else is wrong with this layout: the machines are simply too far from their power
+        # source. The loop has already re-placed them and could not close the gap, so the advice is
+        # about the geometry the input allows, not about reporting a bug.
+        return Infeasibility(
+            constraint="power_supply",
+            detail="; ".join(v.message for v in report.violations),
+            suggested_relaxation=(
+                "shorten the power run - a smaller bounding region, or a power source nearer the "
+                "load; re-placing alone could not bring these machines close enough"
+            ),
+        )
     codes = ", ".join(v.code.value for v in report.violations)
     return Infeasibility(
         constraint="validation",

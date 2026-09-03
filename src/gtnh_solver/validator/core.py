@@ -875,7 +875,9 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
     that is reported (``POWER_SUPPLY_INSUFFICIENT``) even though every cable is thick enough. The
     hatches of one machine can sit on different routes at different distances, so the sum is
     accumulated across routes and checked once at the end; a machine on any route this could not
-    verify is skipped rather than reported on partial evidence.
+    verify is skipped rather than reported on partial evidence. That one violation also carries
+    its machine in ``Violation.machine_id``: the shortfall is driven by how far the cable ran, so
+    the solver re-places the machine and tries again, and it needs the id to know which one.
 
     Crucially the arithmetic is the validator's OWN (:func:`_required_amps` below, and the inline
     ``eut / (tier_voltage - loss * distance)`` per machine): it shares only the rule DATA with the
@@ -1020,6 +1022,7 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
                     f"machine {machine_id!r} draws {machine.eut:g} EU/t but its "
                     f"{len(machine.power_input_ports)} energy hatch(es) can take in only "
                     f"{delivered:g} EU/t after cable loss",
+                    machine_id=machine_id,
                 )
             )
 

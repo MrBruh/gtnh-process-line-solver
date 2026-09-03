@@ -109,9 +109,10 @@ where load **sums** along shared segments (Steiner-tree-like):
   passes a bounded number of them, so a machine's real intake is
   `sum(hatch_amps x delivered_volts)` over its hatches. A machine whose intake falls short of its
   `eut` cannot run its recipe even though every cable on the way is thick enough - the solver
-  reports that (`POWER_SUPPLY_INSUFFICIENT`) rather than certifying it. The reverse - a cable
-  offering a hatch more amps than it can take - is deliberately **not** treated as an error: the
-  hatch simply takes its 2 and the under-supply check is what catches a genuine shortfall.
+  re-places the machine nearer its source, and reports it (`POWER_SUPPLY_INSUFFICIENT`) if that
+  cannot close the gap, rather than certifying it. The reverse - a cable offering a hatch more
+  amps than it can take - is deliberately **not** treated as an error: the hatch simply takes its
+  2 and the under-supply check is what catches a genuine shortfall.
 - **Thickness** (1x / 2x / 4x / 8x / 12x / 16x, **16x max**) is sized to the **summed load** through
   that segment, rounded up to whole amps.
 - A segment needing **> 16x** must split into **parallel runs** or move to a **higher voltage

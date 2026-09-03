@@ -671,7 +671,9 @@ Added after lane 4:
   so it can emit a layout the validator kills with `POWER_SUPPLY_INSUFFICIENT` - returned as
   `partial_invalid` with an empty `failed_nets`, so the feedback loop cannot even penalize it. Two
   of nitrobenzene's eight grid attempts hit it after lane 3. Pre-existing and unrelated to hatches;
-  filed as issue #106, with the detail in [`implementation.md` 5.2](implementation.md).
+  filed as issue #106, with the detail in [`implementation.md` 5.2](implementation.md). **Fixed in
+  #106**, though the missing router check turned out to be by design: only the empty `failed_nets`
+  was the defect, and the loop now steers on it.
 
 ### 11.4 Still open
 
