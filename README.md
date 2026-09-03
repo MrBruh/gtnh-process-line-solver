@@ -2,19 +2,25 @@
 
 **Physical place-and-route solver for GregTech: New Horizons process lines.**
 
-> **Status: Phase 1 complete - crude but end-to-end.** A real gtnh-factory-flow export now
-> goes all the way to a validated, buildable layout: the IR contracts (`ir/`), adapter,
-> dataset (voltage ladder + amp helpers, a schema-v1 physical-rules loader, and the first
-> multiblock footprints), placement, router, solver, validator, previewer,
-> and build guide are all implemented - each is an `Added` entry in
-> [`CHANGELOG.md`](CHANGELOG.md). Some pieces stay deliberately crude (single-channel routing,
-> size-or-reject power), so **Phase 2 is quality**: SA/LNS placement polish, the multi-channel
-> realizability invariant, power optimization, the full physical dataset (the extractor is built,
-> but only the first footprint entries ship today), and previewer polish. See
-> [`docs/ROADMAP.md`](docs/ROADMAP.md).
+> **Status: Phase 1 shipped end to end; Phase 2 quality work is landing.** A real
+> gtnh-factory-flow export goes all the way to a validated, buildable layout: adapter, physical
+> dataset, annealed placement, per-commodity routing, shared-amperage power, hatch placement, the
+> independent validator, a 3D previewer and a build guide. Machines place at their real multiblock
+> footprints, every routed connection lands on a casing cell as the GT hatch it would actually be,
+> and the previewer draws each block with its in-game texture.
+>
+> **The generated dataset is deliberately local-only.** The Java extractor
+> (`tools/gtnh-extractor/`) regenerates the multiblock dump and the texture manifest on demand into
+> gitignored `data/<version>/` folders, so several pack versions can sit side by side; the repo
+> ships two multiblock fixtures plus a small example-scoped texture manifest, so a fresh clone
+> still solves and renders without running anything.
+>
+> Still ahead: the multi-channel realizability invariant, power optimization beyond
+> size-or-reject, the anytime wall-clock budget, and pipe/cable textures. See
+> [`docs/ROADMAP.md`](docs/ROADMAP.md) and [`CHANGELOG.md`](CHANGELOG.md).
 
-Yes, this project is heavily vibe coded. If you see any areas in the code or documentation that can be
-de-slopified, feel free to contribute and make issues or PR's!
+If you see any areas in the code or documentation that can be improved, feel free to contribute
+and make issues or PR's!
 
 **Input comes from [gtnh-factory-flow](https://github.com/Samiracle64/gtnh-factory-flow)** (MIT):
 you design and balance a production line there, export it as plan JSON, and `gtnh_solver` turns
@@ -29,17 +35,21 @@ with the shared-amperage power net and the per-tick system I/O the line consumes
 
 ```
    gtnh-factory-flow (exported plan JSON) ──adapter──► IR ◄── physical-rules dataset
-                                             │      (footprints, faces, tiers, ME)
+                                             │    (footprints, hatch slots, tiers, ME)
                                              ▼
                         placement (SA/LNS) ◄─routing-aware cost─► router (A*, 3D,
                                   │            + feedback loop     per-commodity, power)
                                   └──────────────┬─────────────────┘
                                                  ▼
+                                     hatch placement (each connection
+                                     takes a casing cell and a facing)
+                                                 ▼
                                            validator (independent checks)
                                           ┌──────┴──────┐
                                           ▼             ▼
                                      previewer      build guide
-                                     (three.js)     (BoM, layers)
+                                  (three.js, real    (BoM, layers)
+                                   GT textures)
 ```
 
 ## Quickstart
@@ -56,6 +66,8 @@ gtnh-solve plan.json --preview view.html  # ...or a double-clickable 3D preview 
 gtnh-solve plan.json --fast               # skip optimization: a near-instant constructive layout
 gtnh-solve plan.json --seed 3             # pick the solver seed (deterministic per seed)
 gtnh-solve plan.json --objective volume   # what "compact" means: footprint|volume|balanced
+gtnh-solve plan.json --dataset-version 2.8.4   # pin a locally generated data/<version>/ dump
+gtnh-solve --list-dataset-versions             # ...or see which ones you have
 ```
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md#setup) for the full dev setup (hooks, tests, lint).
@@ -75,6 +87,9 @@ three.js are Phase 2 (see the roadmap).
 | [`docs/DOMAIN.md`](docs/DOMAIN.md) | GT:NH rules the solver encodes |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | v1 scope, deferrals, milestones, parallel lanes |
 | [`docs/TESTING.md`](docs/TESTING.md) | Test strategy and ground-truth approach |
+| [`docs/dataset-extraction/`](docs/dataset-extraction/) | How the physical dataset and textures are extracted from GT5-Unofficial |
+
+[`docs/README.md`](docs/README.md) is the full index, with a one-line summary of every file.
 
 ## Contributing
 
