@@ -65,6 +65,22 @@ Two more structural facts follow from a hatch *being* a casing cell:
   (`Machine.hatch_slots`), and those kinds are a **lower bound**: an adder built from a bare method
   reference exposes no filter, so a cell is recorded without a kind rather than as refusing it.
 
+Two more bind the machine at **runtime**, where a structure that formed perfectly still misbehaves:
+
+- **A muffler needs literal air in front of it.** `MTEHatchMuffler` tests `getAirAtSide(front)`, so
+  a cable, a pipe, a casing or a neighbouring machine in that cell makes `polluteEnvironment` fail
+  and stops the machine with `POLLUTION_FAIL`. The cell in front of a muffler is therefore a routing
+  **keep-out** (`MUFFLER_BLOCKED`), a constraint class nothing else in the solver has. GT offers the
+  muffler element only to a controller that pollutes, so "the dump records a `Muffler`-capable cell"
+  is the usable proxy for "this machine needs one" (`MUFFLER_MISSING`) - it over-places on the few
+  that accept one without asserting it, which is the safe direction: a spare muffler costs a casing
+  cell, a missing one stops the machine.
+- **Which hatch a product lands in is the machine's choice, not ours.** `addOutput` takes the first
+  hatch that can store the stack, so with two output hatches nothing guarantees the pipe we routed
+  from one carries the product we routed it for. Pinning it is a player action (fluid-lock or
+  item-lock the hatch), so a deterministic build eventually has to emit that lock configuration.
+  It does not today.
+
 ## Fluids and items (pipes)
 
 - A fluid pipe line carries **one fluid type**; a pipe has a per-tick throughput cap by tier

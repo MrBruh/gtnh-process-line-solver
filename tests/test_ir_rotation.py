@@ -9,8 +9,8 @@ passes every other check.
    and the dump disagree about which cells a machine covers, the solver is wrong.
 2. **The two implementations agree.** ``ir.geometry.occupied_cells`` (the solver) and
    ``validator._geometry.body_cells`` (the gate) are written independently, per
-   docs/ARCHITECTURE.md #4 and section 0.1 of docs/hatch-placement/implementation.md. They must
-   agree everywhere, and a property test is the only way to say that convincingly.
+   docs/ARCHITECTURE.md #4. They must agree everywhere, and a property test is the only way to
+   say that convincingly.
 3. **The fast path equals the general path.** ``occupied_cells`` rotates a box by swapping its
    extents; lane 2's hatch slots will rotate arbitrary offsets with ``rotate_offset``. Those two
    must not drift, so the swap is checked against a from-scratch rotate-and-re-anchor.
