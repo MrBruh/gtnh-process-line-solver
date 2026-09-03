@@ -65,6 +65,7 @@ from gtnh_solver.ir.geometry import (
     FACE_OFFSETS,
     Cell,
     auto_output_faces,
+    box_in_region,
     front_on_boundary,
     in_region,
     occupied_cells,
@@ -506,12 +507,10 @@ def _relocate(
             orientation = _feed_orientation(m, origin, p.orientation, ctx.region)
             if orientation is None:
                 continue  # a source relocated off the boundary: no legal feed face, keep trying
+            if not box_in_region(origin, m.footprint, orientation, ctx.region):
+                continue  # the body would hang off the region: cheaper to reject than to expand
             cells = list(occupied_cells(origin, m.footprint, orientation))
-            if (
-                all(in_region(c, ctx.region) for c in cells)
-                and ctx.reserved.isdisjoint(cells)
-                and occupied.isdisjoint(cells)
-            ):
+            if ctx.reserved.isdisjoint(cells) and occupied.isdisjoint(cells):
                 new = list(placements)
                 new[i] = p.model_copy(update={"cell": origin, "orientation": orientation})
                 return new
@@ -542,12 +541,17 @@ def _swap(
         oj = _feed_orientation(mj, pi.cell, pj.orientation, ctx.region)
         if oi is None or oj is None:
             return None  # the swap would strand a source's feed face off the boundary
+        # Each body's own in-region test first, off the boxes: a swap that lands a bigger machine
+        # in a smaller one's slot usually fails right here, and then neither body is ever expanded.
+        if not box_in_region(pj.cell, mi.footprint, oi, ctx.region) or not box_in_region(
+            pi.cell, mj.footprint, oj, ctx.region
+        ):
+            return None
         moved = list(occupied_cells(pj.cell, mi.footprint, oi)) + list(
             occupied_cells(pi.cell, mj.footprint, oj)
         )
         if (
-            not all(in_region(c, ctx.region) for c in moved)
-            or len(set(moved)) != len(moved)  # the two swapped bodies overlap each other
+            len(set(moved)) != len(moved)  # the two swapped bodies overlap each other
             or not ctx.reserved.isdisjoint(moved)
             or not occupied.isdisjoint(moved)
         ):
@@ -571,13 +575,11 @@ def _turn_fits(
     """
     if rotated_footprint(m.footprint, orientation) == rotated_footprint(m.footprint, p.orientation):
         return True
+    if not box_in_region(p.cell, m.footprint, orientation, ctx.region):
+        return False  # the turn swings the body out of the region; no need to expand either set
     own = set(occupied_cells(p.cell, m.footprint, p.orientation))
     cells = list(occupied_cells(p.cell, m.footprint, orientation))
-    return (
-        all(in_region(c, ctx.region) for c in cells)
-        and ctx.reserved.isdisjoint(cells)
-        and (occupied - own).isdisjoint(cells)
-    )
+    return ctx.reserved.isdisjoint(cells) and (occupied - own).isdisjoint(cells)
 
 
 def _reorient(
@@ -723,12 +725,13 @@ def _best_insertion(
             key = (box.sx, box.sy, box.sz)
             ok = fits.get(key)
             if ok is None:
-                cells = list(occupied_cells(origin, m.footprint, orientation))
-                ok = (
-                    all(in_region(c, ctx.region) for c in cells)
-                    and ctx.reserved.isdisjoint(cells)
-                    and occupied.isdisjoint(cells)
-                )
+                # In-region off the box first: this is the hottest fit test in the solve (one per
+                # candidate origin, and _candidate_origins offers plenty that hang off the region),
+                # and only a candidate that clears it is worth expanding into cells.
+                ok = box_in_region(origin, m.footprint, orientation, ctx.region)
+                if ok:
+                    cells = list(occupied_cells(origin, m.footprint, orientation))
+                    ok = ctx.reserved.isdisjoint(cells) and occupied.isdisjoint(cells)
                 fits[key] = ok
             if not ok:
                 continue

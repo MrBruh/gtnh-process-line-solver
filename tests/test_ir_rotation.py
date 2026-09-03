@@ -16,7 +16,9 @@ passes every other check.
    must not drift, so the swap is checked against a from-scratch rotate-and-re-anchor. The same
    argument covers ``auto_output_faces``, which answers a body-adjacency question from the two
    rotated boxes (issue #110) where it used to expand and intersect both cell sets: the box
-   arithmetic is pinned against that cell-set formulation.
+   arithmetic is pinned against that cell-set formulation. ``box_in_region`` is the same trade in
+   the other direction - a whole body against the region wall - and is pinned against the cell walk
+   it replaced.
 """
 
 from __future__ import annotations
@@ -35,6 +37,8 @@ from gtnh_solver.ir.geometry import (
     FACE_DELTAS,
     OPPOSITE_FACE,
     auto_output_faces,
+    box_in_region,
+    in_region,
     occupied_cells,
     rotate_offset,
     rotated_footprint,
@@ -350,3 +354,28 @@ def test_auto_output_faces_matches_the_cell_sets_over_a_whole_neighbourhood() ->
                             hits += 1
     assert hits > 0
     assert misses > 0
+
+
+# Small enough that a body drawn from _NEAR_ORIGINS lands out of bounds about as often as in, so
+# the equivalence below is exercised on both answers rather than on "no" over and over.
+_REGIONS = st.builds(
+    CellBox,
+    sx=st.integers(min_value=1, max_value=8),
+    sy=st.integers(min_value=1, max_value=8),
+    sz=st.integers(min_value=1, max_value=8),
+)
+
+
+@given(origin=_NEAR_ORIGINS, footprint=_FOOTPRINTS, orientation=_FACINGS, region=_REGIONS)
+def test_box_in_region_matches_the_cell_walk(
+    origin: CellCoord, footprint: CellBox, orientation: Facing, region: CellBox
+) -> None:
+    """``box_in_region`` is the corner test; the definition is every cell being in bounds.
+
+    Placement leans on the two being the same predicate: it now rejects a candidate on the box and
+    never expands it, so a box test that were merely *nearly* right would silently drop legal
+    placements (or, worse, keep bodies that hang out of the region) with nothing to catch it.
+    """
+    assert box_in_region(origin, footprint, orientation, region) == all(
+        in_region(c, region) for c in occupied_cells(origin, footprint, orientation)
+    )

@@ -70,6 +70,32 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   names the machine and what it ran out of room for.
 
 ### Changed
+- **Placement asks its geometry questions of the boxes, not of every cell (`ir/`, `placement/`).**
+  Two predicates in the hot loop walked cell sets whose size is machine *volume*, so a solve got
+  slower as the physical dataset gave machines their real footprints - exactly backwards, since
+  that dataset is what makes a layout buildable.
+
+  `auto_output_faces` materialized both machines' complete cell sets and scanned for a touching
+  pair on each candidate face. The placement loop asks it about 1.5M times per solve, and the
+  largest machine in nitrobenzene is 7x7x7: issue #110 profiled it at **70% of a solve**, driving
+  88% of every `occupied_cells` step in the run. Two solid axis-aligned boxes touch across a face
+  iff the source box stepped one cell that way overlaps the target on all three axes - six integer
+  comparisons, independent of volume.
+
+  The fit test beside it (`_best_insertion`, `_relocate`, `_swap`, `_turn_fits`) walked a
+  candidate's cells to ask whether the body lies inside the bounding region: 21.7M `in_region`
+  calls, about a quarter of what was left. A solid box is in-region iff its two corners are, so the
+  new `ir.geometry.box_in_region` answers in six comparisons and the cells are expanded only for a
+  candidate that has already cleared it - the overlap tests against `reserved`/`occupied` still
+  need them, the region test never did.
+
+  Nitrobenzene (seed 0, physical dataset): **86.5 s -> 22.3 s, 3.9x**; sand 1.0 s -> 0.8 s. Both
+  shipped examples produce byte-identical VALID layouts - nitrobenzene over two seeds x all three
+  objectives, sand over four - so this is a pure speed change: the search makes the same decisions
+  in the same order, and no layout moves. Property tests pin both box formulations against the
+  cell-set ones they replace, alongside the existing rotation-equivalence test, plus an exhaustive
+  sweep of one body's whole neighbourhood at every facing pair.
+
 - **Two touching machines are no longer enough for a free auto-output.** A multiblock ejects
   through an output hatch's own front face and receives through an input bus's, so the connection
   needs a touching pair of casing cells that can *host* those two hatches - not merely two bodies

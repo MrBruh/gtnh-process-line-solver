@@ -168,6 +168,32 @@ def in_region(cell: Cell, region: CellBox) -> bool:
     return 0 <= x < region.sx and 0 <= y < region.sy and 0 <= z < region.sz
 
 
+def box_in_region(
+    origin: CellCoord, footprint: CellBox, orientation: Facing, region: CellBox
+) -> bool:
+    """Whether a whole body placed at ``origin`` lies inside the origin-anchored bounding region.
+
+    Exactly ``all(in_region(c, region) for c in occupied_cells(origin, footprint, orientation))``,
+    answered from the rotated box: a solid box is in-bounds iff its minimum and maximum corners
+    are, so this is six comparisons rather than one per cell. Placement asks it of every candidate
+    origin x orientation it considers, which was 21.7M ``in_region`` calls and ~24% of a solve once
+    :func:`auto_output_faces` stopped dominating the profile (issue #110).
+
+    ``orientation`` is required for the reason :func:`occupied_cells` requires it: an east-facing
+    5x1x2 needs 2 of x and 5 of z, and a caller that passed the declared extents would be wrong
+    here in exactly the way it would be wrong there - silently, on a layout that still validates.
+    """
+    box = rotated_footprint(footprint, orientation)
+    return (
+        origin.x >= 0
+        and origin.x + box.sx <= region.sx
+        and origin.y >= 0
+        and origin.y + box.sy <= region.sy
+        and origin.z >= 0
+        and origin.z + box.sz <= region.sz
+    )
+
+
 # Unit step out of each block face. Minecraft axes: north -z, south +z, east +x, west -x,
 # up +y, down -y. Shared by the router (where a port docks) and the validator (face checks).
 FACE_DELTAS: dict[Facing, Cell] = {
