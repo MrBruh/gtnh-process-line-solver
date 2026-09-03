@@ -27,16 +27,17 @@ from gtnh_solver.ir import (
     Machine,
     MachineFaceRef,
     Net,
+    Placement,
     Port,
     Route,
     Segment,
 )
-from gtnh_solver.placement import optimize_placement, place
+from gtnh_solver.placement import PlacementResult, optimize_placement, place
 from gtnh_solver.router import RouteResult, assign_auto_outputs
 from gtnh_solver.solver import core as solver_core
 from gtnh_solver.solver import solve
-from gtnh_solver.validator import validate
-from tests._helpers import consumer, net, producer
+from gtnh_solver.validator import ValidationReport, Violation, ViolationCode, validate
+from tests._helpers import at, consumer, net, power_source, producer
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 _SAND = _EXAMPLES / "gtnh-sand.json"
@@ -408,3 +409,124 @@ def test_solve_gives_up_when_the_same_net_fails_every_attempt(
     assert validate(problem, layout).ok is False  # ...and the stalled net is never certified valid
     # It broke on the second attempt's repeated failed-net set, not after exhausting the full grid.
     assert 1 < attempts < solver_core._MAX_FEEDBACK_PASSES
+
+
+# ------------------------------------------------- a starved machine is a PLACEMENT defect (#106)
+
+
+def _starving_power_line() -> tuple[InputIR, tuple[Placement, ...], tuple[Placement, ...]]:
+    """One LV machine on a long region, plus the placements that starve it and that do not.
+
+    The machine draws 32 EU/t through a single 2 A energy hatch, so its intake is
+    ``2 A * delivered_volts`` and cable loss costs 1 V a block. The far placement routes 22 cable
+    blocks, leaving 10 V and so 20 EU/t of the 32 it needs, while every segment of the trunk is
+    correctly 1x - the shortfall is distance, nothing else. The hatch allowance is designed against
+    a 16-block run (``dataset.DESIGN_RUN_BLOCKS``), so anything past that starves; past ~31 the
+    voltage-drop rejection fires first and masks it, which is why the far placement sits at 24.
+    The source faces WEST from x=0 so its feed face is on the region boundary, and nothing else is
+    wrong with either layout.
+    """
+    sink = Machine(
+        id="m",
+        type="t",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        eut=32.0,
+        faces=FaceSpec(
+            ports=[
+                Port(
+                    id="power:in",
+                    commodity=Commodity.POWER,
+                    direction=IODirection.INPUT,
+                    rate=32.0,
+                    # Load-bearing: the adapter fills max_amps in only for a dataset-resolved
+                    # machine, and a port without it contributes nothing to the supply sum - so a
+                    # fixture that omits it passes for the wrong reason, the check never running.
+                    max_amps=2.0,
+                )
+            ]
+        ),
+    )
+    problem = InputIR(
+        bounding_region=CellBox(sx=28, sy=3, sz=3),
+        machines=[power_source("src", orientations=[Facing.WEST]), sink],
+        nets=[
+            Net(
+                id="power:LV",
+                commodity=Commodity.POWER,
+                throughput=32.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="src", port_id="power:out"),
+                    MachineFaceRef(machine_id="m", port_id="power:in"),
+                ],
+            )
+        ],
+    )
+    source = at("src", 0, 0, 1, orientation=Facing.WEST)
+    return problem, (source, at("m", 24, 0, 1)), (source, at("m", 4, 0, 1))
+
+
+def test_a_starved_machine_names_its_power_net_as_the_failed_net() -> None:
+    # The bug: every cable is thick enough, the router reports ok, and the validator kills the
+    # layout for a shortfall that is purely distance-driven - so returning it with NO failed net
+    # (the "a validation failure is a solver bug" rule) denied the loop the one signal that fixes
+    # it. It must name the machine's power net, and say power_supply rather than blaming a bug.
+    problem, far, near = _starving_power_line()
+    layout, failed = solver_core._assemble(problem, far, 0)
+    assert layout.status is LayoutStatus.PARTIAL_INVALID
+    assert failed == ("power:LV",)
+    assert layout.infeasibility is not None
+    assert layout.infeasibility.constraint == "power_supply"
+    assert "'m'" in layout.infeasibility.detail  # names the machine, and its shortfall
+    assert "20 EU/t" in layout.infeasibility.detail
+    # ...and the same machine 20 blocks nearer its source is simply valid: only distance differs.
+    close, no_failures = solver_core._assemble(problem, near, 0)
+    assert close.status is LayoutStatus.VALID, close.infeasibility
+    assert no_failures == ()
+
+
+def test_the_loop_penalizes_a_starved_power_net_and_re_places(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The recovery the constraint wants: attempt 0 strands the machine 24 blocks out, the loop
+    # penalizes its power net, and the next placement pulls it in. The placer is stubbed rather
+    # than annealed so the test pins the STEERING, not whatever SA happens to do spatially - the
+    # dependency that rotted the original nitrobenzene reproduction of this bug.
+    problem, far, near = _starving_power_line()
+    seen: list[dict[str, float]] = []
+
+    def stub_placer(prob: InputIR, **kwargs: object) -> PlacementResult:
+        penalties = kwargs.get("net_penalties") or {}
+        assert isinstance(penalties, dict)
+        seen.append(dict(penalties))  # snapshot: solve() mutates one dict across attempts
+        return PlacementResult(placements=far if len(seen) == 1 else near)
+
+    monkeypatch.setattr(solver_core, "optimize_placement", stub_placer)
+
+    layout = solve(problem)
+    assert layout.status is LayoutStatus.VALID, layout.infeasibility
+    assert validate(problem, layout).ok
+    assert seen[0] == {}  # attempt 0 starts clean...
+    assert seen[1]["power:LV"] > 0  # ...and attempt 1 is told which net to pull tighter
+
+
+def test_a_starve_alongside_a_real_bug_still_steers_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The short-circuit stays the backstop it was written for. A report that proves anything else
+    # as well is a genuine placer/router bug, where re-placing cannot help, so the layout comes
+    # back with no failed net and the generic validation infeasibility - not a power_supply one.
+    problem, _far, near = _starving_power_line()
+    mixed = ValidationReport(
+        violations=(
+            Violation(ViolationCode.POWER_SUPPLY_INSUFFICIENT, "starved", machine_id="m"),
+            Violation(ViolationCode.MACHINE_OVERLAP, "rigged: a real geometric bug"),
+        )
+    )
+    monkeypatch.setattr(solver_core, "validate", lambda *a, **k: mixed)
+
+    layout, failed = solver_core._assemble(problem, near, 0)
+    assert layout.status is LayoutStatus.PARTIAL_INVALID
+    assert failed == ()
+    assert layout.infeasibility is not None
+    assert layout.infeasibility.constraint == "validation"

@@ -314,6 +314,12 @@ what re-placing fixes. Two of nitrobenzene's eight grid attempts now hit it.
 Lane 3 did not cause this and does not touch power sizing; longer trunks simply made it reachable.
 Filed as issue #106 rather than fixed here.
 
+**Resolved in #106**, but not as framed above: the router having no intake check is deliberate
+(`dataset/voltage.py` designs the hatch allowance against a nominal 16-block run and names the
+validator as the backstop for anything longer). The defect was the second half alone - the empty
+`failed_nets`. `_assemble` now names the starved machine's power net, so the loop penalizes it and
+re-places, which is the recovery the constraint always wanted.
+
 ---
 
 ## 6. Lane 4: assignment, legalize, upkeep, keep-out

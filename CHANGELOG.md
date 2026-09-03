@@ -141,6 +141,28 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the regression is recorded there rather than absorbed into a loosened assertion. Sand is
   unchanged.
 
+### Fixed
+- **A machine starved of power is now something the feedback loop can fix, not a lost attempt
+  (`solver/`, `validator/`).** A machine takes packets through hatches capped at `Port.max_amps`
+  and cable loss shrinks every packet, so its real intake is `sum(max_amps * delivered_volts)`.
+  The hatch allowance is designed against a nominal 16-block run, and the validator re-checks it
+  at the distance actually routed (`POWER_SUPPLY_INSUFFICIENT`) - deliberately, since only a
+  routed layout knows that distance.
+
+  But the solver returned that rejection as `partial_invalid` with an **empty** `failed_nets`, on
+  the rule that a layout which routed everything yet failed validation is a solver bug and
+  re-placing cannot help. For this one violation that rule is inverted: the shortfall is driven by
+  cable distance, so re-placing the machine nearer its source is precisely the fix. With no failed
+  net nothing was penalized and the loop wrote the whole attempt off. It now names the starved
+  machine's power net, so the placement cost gains its MST trunk-length pull and the next attempt
+  pulls the machine in. The empty-`failed_nets` short circuit stays exactly as it was for every
+  other violation, including a report that proves a starve *alongside* a real geometric bug.
+
+  A layout rejected only for this reports a `power_supply` infeasibility rather than the generic
+  `validation` one, so the advice names the real fix (shorten the run) instead of asking for a bug
+  report. `Violation` gained an optional `machine_id` so the machine it names travels structurally
+  rather than only in the message prose. Refs #106.
+
 ### Added
 - **A multiblock's hatch cells now say WHERE they are, and a layout says where each hatch went
   (`ir/` LayoutResult v1, `dataset/`, `adapter/`, `validator/`).** `Machine.hatch_slots` carries

@@ -72,9 +72,9 @@ doc as intent and reconcile.
   + an **objective-weighted compactness** term (floor footprint and/or bounding-box volume, the
   weights set by the selected objective). There is deliberately **no** per-layer / flat-build
   bias: height is paid only through the volume term. Power nets carry no base wirelength term; a
-  failed power net enters the cost as an MST trunk-length pull only once the feedback penalizes
-  it. *(Phase 2, lane C: SA + LNS are in; the cheaper incremental routing/congestion estimate the
-  cost is meant to grow into is still ahead.)*
+  failed *or starved* power net enters the cost as an MST trunk-length pull only once the
+  feedback penalizes it. *(Phase 2, lane C: SA + LNS are in; the cheaper incremental
+  routing/congestion estimate the cost is meant to grow into is still ahead.)*
 - **router/** - free-form per-commodity A* on the **full-3D** cell grid (all six faces are
   neighbours); single-channel capacity; **negotiated-congestion routing** for item/fluid nets
   (priced A*, PathFinder-style; power trunks keep failed-first rip-up/reroute); ME-toggle
@@ -84,9 +84,11 @@ doc as intent and reconcile.
   realizability, and power optimization beyond size-or-reject.)*
 - **solver/** - orchestrates the place↔route feedback loop (built: a bounded **multi-start grid**
   - SA weight modes x seeds - that fully routes + validates every attempt and keeps the best
-  VALID layout by a quality ranking, penalizing the nets a pass leaves unrouted so the next
-  placement pulls them tighter - `solver/core.py`). *(Phase 2: the anytime **wall-clock** budget;
-  today it runs a deterministic bounded grid keyed off the seed, not a timeout.)*
+  VALID layout by a quality ranking, penalizing the nets a pass leaves unrouted - and the power
+  net of any machine validation proves starved of power, which is a placement defect, not a bug -
+  so the next placement pulls them tighter - `solver/core.py`). *(Phase 2: the anytime
+  **wall-clock** budget; today it runs a deterministic bounded grid keyed off the seed, not a
+  timeout.)*
 - **system_io.py** - the single source of truth for the line's **boundary I/O** (what to feed in,
   what to collect) and the **power-feed spec** (EU/t plus amperage per voltage tier). Pure over
   the `InputIR` + `LayoutResult`; both the build guide and the previewer read it, so the two
@@ -106,14 +108,15 @@ doc as intent and reconcile.
    *Built: the feedback loop - `solve()` runs a bounded **multi-start grid** (SA weight modes x
    seeds), fully routes + validates every attempt, and keeps the best VALID layout by a quality
    ranking (the objective's compactness metric, then real power-cable cells, then the other
-   compactness metric); a pass's unrouted nets are penalized so the next placement pulls them
-   tighter (`solver/core.py`). This replaced the earlier first-valid-wins, coarse
-   penalize-and-re-place behaviour: cheap placement-time proxies cannot see dock faces or shared
-   cable taps, so a layout's real quality is only knowable once it is routed, hence ranking fully
-   routed attempts rather than stopping at the first valid one. Phase 2: the O(1) incremental
-   routing estimate - today the SA cost is per-net HPWL + an objective-weighted compactness term +
-   an auto-output reward (no per-move routing/congestion term, and deliberately no per-layer bias -
-   height is paid only through the volume term).*
+   compactness metric); a pass's unrouted nets - plus the power net of any machine the validator
+   proves **starved**, whose shortfall is distance-driven and so is exactly what re-placing fixes -
+   are penalized so the next placement pulls them tighter (`solver/core.py`). This replaced the
+   earlier first-valid-wins, coarse penalize-and-re-place behaviour: cheap placement-time proxies
+   cannot see dock faces or shared cable taps, so a layout's real quality is only knowable once it
+   is routed, hence ranking fully routed attempts rather than stopping at the first valid one.
+   Phase 2: the O(1) incremental routing estimate - today the SA cost is per-net HPWL + an
+   objective-weighted compactness term + an auto-output reward (no per-move routing/congestion
+   term, and deliberately no per-layer bias - height is paid only through the volume term).*
 2. **IR - minimal, versioned, up front.** Defined before the integration spike; grows with
    explicit versioning.
 3. **Input - consume a maintained fork of gtnh-factory-flow's exported plan JSON** (MIT; the
@@ -170,15 +173,18 @@ doc as intent and reconcile.
     real intake is `sum(max_amps · delivered_volts)` over its hatches, so it can sit on cables
     that are all thick enough and still not take in its `eut`; nothing else catches that, and a
     machine that cannot take in its draw does not run the recipe the plan balanced, so the
-    validator flags it (`POWER_SUPPLY_INSUFFICIENT`). The reverse, a cable offering a hatch more
-    amps than it accepts, is deliberately **not** an error: the hatch just takes its 2 A and
-    nothing burns (only a cable over its *own* rating does, which the thickness check already
-    covers), so flagging it would reject layouts that work in game. *Temporary:* a machine that
-    would need more than three hatches is supplied at a **higher voltage tier** instead, because
-    some upstream gtnh-factory-flow exports compute EU/t against a wrong recipe model
-    (gtnh-factory-flow #44, #45); it changes only the voltage the layout supplies, never the
-    recipe (a real tier change re-overclocks, which only the exporter can do), and it comes out
-    once those upstream fixes land. See [`DOMAIN.md`](DOMAIN.md).
+    validator flags it (`POWER_SUPPLY_INSUFFICIENT`). That verdict is the one the solver acts on
+    rather than merely reports: the shortfall is set by how far the cable ran, so the loop
+    penalizes the machine's power net and re-places it nearer its source before giving up
+    (decision 1). The reverse, a cable offering a hatch more amps than it accepts, is deliberately
+    **not** an error: the hatch just takes its 2 A and nothing burns (only a cable over its *own*
+    rating does, which the thickness check already covers), so flagging it would reject layouts
+    that work in game. *Temporary:* a machine that would need more than three hatches is supplied
+    at a **higher voltage tier** instead, because some upstream gtnh-factory-flow exports compute
+    EU/t against a wrong recipe model (gtnh-factory-flow #44, #45); it changes only the voltage
+    the layout supplies, never the recipe (a real tier change re-overclocks, which only the
+    exporter can do), and it comes out once those upstream fixes land. See
+    [`DOMAIN.md`](DOMAIN.md).
 
 ## Spatial model
 

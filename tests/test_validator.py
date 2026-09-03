@@ -1326,8 +1326,12 @@ def _summed_trunk_with_a_short_hatch() -> tuple[InputIR, LayoutResult]:
 
 
 def test_a_short_hatch_on_a_shared_trunk_is_flagged() -> None:
-    codes = validate(*_summed_trunk_with_a_short_hatch()).codes()
-    assert ViolationCode.POWER_SUPPLY_INSUFFICIENT in codes, codes
+    report = validate(*_summed_trunk_with_a_short_hatch())
+    assert ViolationCode.POWER_SUPPLY_INSUFFICIENT in report.codes(), report.codes()
+    # The starved machine travels structurally, not just in the prose: the shortfall is driven by
+    # how far the cable ran, so the solver re-places that machine and needs to know which it is.
+    starved = [v for v in report.violations if v.code is ViolationCode.POWER_SUPPLY_INSUFFICIENT]
+    assert [v.machine_id for v in starved] == ["mA"]
 
 
 def test_a_machine_on_an_unverifiable_route_is_not_reported_as_starved() -> None:

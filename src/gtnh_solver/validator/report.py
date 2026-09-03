@@ -94,10 +94,19 @@ class ViolationCode(str, Enum):
 
 @dataclass(frozen=True)
 class Violation:
-    """One proven defect: a stable ``code`` plus a human-readable ``message``."""
+    """One proven defect: a stable ``code`` plus a human-readable ``message``.
+
+    ``machine_id`` names the machine the violation is about, when it is about one. The message
+    already says so in prose, but prose is for a human; a consumer that has to *act* on a
+    violation needs it structurally. Today that consumer is the solver's feedback loop, which
+    maps a starved machine back to its power net and penalizes it (``solver/core``). Optional,
+    so a violation that names no single machine (or whose consumers do not need one) leaves it
+    ``None``.
+    """
 
     code: ViolationCode
     message: str
+    machine_id: str | None = None
 
 
 @dataclass(frozen=True)
