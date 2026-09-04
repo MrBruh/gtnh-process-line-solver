@@ -12,11 +12,13 @@ its idle and running
 skin where the two differ (the running faces ride ``scene.texturesActive``, default idle); routes
 (cables and
 pipes) are drawn GT-style, a small cube at each cell centre with a uniform arm out to the block edge
-for every connection (an adjacent route cell or a docked machine face), power sized by cable
-thickness - each wire->machine lead by the terminal's incident-segment thickness the scene emits
-(#6); auto-output is a small arrow on each source-machine face perpendicular to the ejecting
+for every connection (an adjacent route cell or a docked machine face), at GT's own cross-section
+for the gauge - the cells, their connections and their size all resolved in ``route_blocks`` and
+read straight off ``scene.routes[].cells``, so the build guide and the preview cannot disagree about
+what a layout is made of (#4); auto-output is a small arrow on each source-machine face
+perpendicular to the ejecting
 direction (so one stays visible however the machines are packed). A side panel lists the
-machine/route legend plus the
+machine/route legend (materials footnoted as stand-ins where they are) plus the
 system's boundary inputs, outputs, and power (``scene.io``), with a per-tick / per-second rate
 toggle. The view frames the layout's *actual* extent (``scene.bounds``), not the solver's
 oversized search region.
@@ -48,6 +50,7 @@ _TEMPLATE = (
                border: 1px solid #333a44; border-radius: 6px; padding: 8px 10px; }
   #hud { top: 10px; left: 10px; }
   #hint { color: #8b94a0; margin-top: 4px; }
+  #standin { color: #8b94a0; }
   #legend { top: 10px; right: 10px; max-height: 80vh; overflow: auto; }
   #controls { bottom: 10px; left: 10px; display: flex; gap: 12px; align-items: center; }
   #controls input[type=range] { width: 180px; }
@@ -354,34 +357,19 @@ for (const b of (SCENE.blocks || [])) {
 
 // A route is drawn GT-style: a small cube at each cell centre, with a UNIFORM cross-section arm from
 // that cube out to the block edge for every connection - an adjacent route cell, or a docked machine
-// face. One node per cell keeps the run readable however tightly the routes are packed.
+// face. That is GT's own pipe shape (a core cube plus one arm per connected side, no fatter node),
+// and `size` is its real thickness in blocks for the gauge, so a 1x cable is 0.25 wide because that
+// is what it is in game rather than because a bar looked right at that width.
+//
+// The cells, their connections and their size are resolved in Python (route_blocks) and read
+// straight off the scene. They used to be derived HERE, which put a real build instruction - a cell
+// incident to two gauges is built at the thicker one - inside the one file no test can reach, where
+// it could silently disagree with the build guide's bill of materials.
 for (const r of SCENE.routes) {
-  const isPower = r.commodity === 'power';
-  const cells = new Map();   // "x,y,z" -> { cell, dirs: Set of "dx,dy,dz", thick }
-  const touch = (c, thick) => {
-    const k = c.join(',');
-    let e = cells.get(k);
-    if (!e) { e = { cell: c, dirs: new Set(), thick: 1 }; cells.set(k, e); }
-    e.thick = Math.max(e.thick, thick);
-    return e;
-  };
-  for (const s of r.segments) {
-    const a = s.from, b = s.to, th = s.thickness || 1;
-    touch(a, th).dirs.add([b[0] - a[0], b[1] - a[1], b[2] - a[2]].join(','));
-    touch(b, th).dirs.add([a[0] - b[0], a[1] - b[1], a[2] - b[2]].join(','));
-  }
-  for (const t of (r.terminals || [])) {
-    const nrm = FACE_NORMAL[t.face]; if (!nrm) continue;
-    // an arm toward the machine - the lead - sized by the incident segment's thickness, computed
-    // in build_scene (#6). Null (item/fluid) falls back to 1, keeping those leads the fixed size.
-    touch(t.cell, t.thickness || 1).dirs.add([-nrm[0], -nrm[1], -nrm[2]].join(','));
-  }
-  for (const e of cells.values()) {
-    const cross = isPower ? 0.09 * Math.sqrt(e.thick) : 0.07;
-    const c = cc(e.cell);
+  for (const e of (r.cells || [])) {
+    const c = cc(e.cell), cross = e.size;
     track(node(c, cross, r.color), e.cell[1], e.cell[1]);
-    for (const dk of e.dirs) {
-      const d = dk.split(',').map(Number);
+    for (const d of e.dirs) {
       const end = c.clone().add(new THREE.Vector3(d[0] * 0.5, d[1] * 0.5, d[2] * 0.5));
       track(bar(c, end, cross, r.color), e.cell[1], e.cell[1]);
     }
@@ -490,6 +478,22 @@ function renderLegend() {
   html += '<b>routes</b><br>';
   for (const k of ['item', 'fluid', 'power']) html += '<span class="sw" style="background:' + COMMODITY[k] + '"></span>' + k + '<br>';
   html += '<span class="sw" style="background:#00e5ff"></span>auto-output<br>';
+  // Which cable/pipe material the routes above are DRAWN as, and - the point of the line - that the
+  // choice is representative. GT ships several cables per voltage tier and the solver sizes by
+  // gauge, never by material, so a preview that shows Tin without saying so reads as a spec
+  // (docs/DOMAIN.md). Counts, gauges and thicknesses are real; only the material stands in.
+  const mats = new Map();
+  for (const r of SCENE.routes)
+    if (r.material) mats.set(r.material.material + '|' + (r.material.tier || ''), r.material);
+  if (mats.size) {
+    html += '<b>materials</b><br>';
+    let anyStandIn = false;
+    for (const m of mats.values()) {
+      anyStandIn = anyStandIn || m.standIn;
+      html += m.material + (m.tier ? ' (' + m.tier + ')' : '') + (m.standIn ? ' *' : '') + '<br>';
+    }
+    if (anyStandIn) html += '<span id="standin">* representative stand-in, not a spec</span><br>';
+  }
   if (SCENE.io) {
     const io = SCENE.io, sfx = perSecond ? '/s' : '/t';
     html += '<b>system i/o</b><br>';

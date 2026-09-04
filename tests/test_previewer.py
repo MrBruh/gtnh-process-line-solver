@@ -78,8 +78,11 @@ def test_scene_item_pipe_segments_have_null_thickness() -> None:
     item_routes = [r for r in scene["routes"] if r["commodity"] == "item"]
     assert item_routes  # the piped fan-out leg
     assert all(seg["thickness"] is None for r in item_routes for seg in r["segments"])
-    # item/fluid terminals carry no thickness either, so their leads keep the fixed pipe size
-    assert all(t["thickness"] is None for r in item_routes for t in r["terminals"])
+    # ...and every cell of one is a normal item pipe: gauge 1, GT's own 0.5-block cross-section.
+    cells = [c for r in item_routes for c in r["cells"]]
+    assert cells
+    assert all(c["thickness"] == 1 and c["size"] == pytest.approx(0.5) for c in cells)
+    assert all(c["block"] == "gt_pipe_tin" for c in cells)
 
 
 def test_scene_bounds_are_tight_not_the_search_region() -> None:
@@ -103,15 +106,50 @@ def test_scene_routes_carry_terminals() -> None:
     power = next(r for r in _sand_scene()["routes"] if r["commodity"] == "power")
     assert power["terminals"]  # so the viewer can draw a lead to each machine face
     term = power["terminals"][0]
-    assert set(term) == {"machine", "port", "face", "cell", "thickness"}
+    assert set(term) == {"machine", "port", "face", "cell"}
     assert term["port"]  # which port it serves, so a viewer can tie it to its hatch
     assert len(term["cell"]) == 3
-    # every power terminal sizes its lead from a real cable thickness (GitHub #6)
-    assert all(t["thickness"] in {1, 2, 4, 8, 12, 16} for t in power["terminals"])
+    # A terminal no longer carries its own thickness: the cell it docks at does, and the lead is an
+    # arm of that block (GitHub #6, now one derivation instead of two - see the fork test below).
+    by_cell = {tuple(c["cell"]): c for c in power["cells"]}
+    assert all(
+        by_cell[tuple(t["cell"])]["thickness"] in {1, 2, 4, 8, 12, 16} for t in power["terminals"]
+    )
 
 
-def test_scene_power_terminal_thickness_is_the_fattest_incident_segment() -> None:
-    # A hand-built trunk with known per-segment thicknesses (GitHub #6):
+def test_scene_route_cells_carry_the_block_and_its_real_size() -> None:
+    """What the viewer draws with. ``size`` is GT's own cross-section for the gauge rather than a
+    bar scaled to look right, and ``block`` is the manifest join key the texture pass resolves."""
+    power = next(r for r in _sand_scene()["routes"] if r["commodity"] == "power")
+    assert {k for c in power["cells"] for k in c} == {
+        "cell",
+        "dirs",
+        "thickness",
+        "size",
+        "block",
+        "label",
+    }
+    sizes = {c["thickness"]: c["size"] for c in power["cells"]}
+    assert sizes == {1: pytest.approx(0.25), 2: pytest.approx(0.375)}  # GT's insulated ladder
+    assert {c["block"] for c in power["cells"]} == {"cable.tin.01", "cable.tin.02"}
+    assert all(sum(abs(d) for d in dirs) == 1 for c in power["cells"] for dirs in c["dirs"])
+
+
+def test_scene_route_carries_its_material_and_says_it_stands_in() -> None:
+    """The legend footnotes this. A preview that draws Tin without saying the material was chosen
+    for recognisability reads as a specification (docs/DOMAIN.md), which is the one failure
+    nothing downstream can detect."""
+    power = next(r for r in _sand_scene()["routes"] if r["commodity"] == "power")
+    assert power["material"] == {
+        "family": "cable",
+        "material": "tin",
+        "tier": "LV",
+        "standIn": True,
+    }
+
+
+def test_scene_route_cell_takes_the_fattest_cable_that_meets_it() -> None:
+    # A hand-built trunk with known per-segment thicknesses (GitHub #6, docs/DOMAIN.md):
     #
     #   src ==4x== [tap] ==2x== m1
     #               |
@@ -119,10 +157,11 @@ def test_scene_power_terminal_thickness_is_the_fattest_incident_segment() -> Non
     #               |
     #               m3
     #
-    # Each terminal must report the thickness of the segment incident to its cell; m2 taps the
-    # branch cell, which 4x/2x/1x segments all touch, so the THICKEST (4) wins - that is the
-    # cable that visually meets the block. build_scene's route mapping never looks placements
-    # up, so a routes-only layout keeps the fixture minimal.
+    # Each cell is built at the thickest cable incident to it; the fork is touched by the 4x, 2x
+    # and 1x segments at once, so it is a 4x block - that is the cable that physically meets it,
+    # and under-sizing is what burns. A terminal docking there gets its lead from the same cell,
+    # so the #6 guarantee holds with one derivation rather than two. build_scene's route mapping
+    # never looks placements up, so a routes-only layout keeps the fixture minimal.
     def cell(x: int, y: int, z: int) -> CellCoord:
         return CellCoord(x=x, y=y, z=z)
 
@@ -143,7 +182,15 @@ def test_scene_power_terminal_thickness_is_the_fattest_incident_segment() -> Non
     problem = InputIR(bounding_region=CellBox(sx=4, sy=2, sz=4))
     layout = LayoutResult(status=LayoutStatus.VALID, seed=0, routes=[route])
     (scene_route,) = build_scene(problem, layout)["routes"]
-    assert [t["thickness"] for t in scene_route["terminals"]] == [4, 2, 4, 1]
+    by_cell = {tuple(c["cell"]): c for c in scene_route["cells"]}
+    assert [by_cell[(c.x, c.y, c.z)]["thickness"] for c in (src, m1, fork, m3)] == [4, 2, 4, 1]
+    # ...and the fork is BUILT as the 4x cable, which is the half that is a build instruction
+    # rather than a rendering detail: it is one block and the fattest incident cable meets it.
+    # This fixture publishes no material, so the label degrades to the wording the build guide used
+    # before any of this - the gauge is real either way, and that is the half being pinned here.
+    assert by_cell[(1, 0, 0)]["label"] == "4x power cable"
+    assert by_cell[(1, 0, 0)]["block"] is None
+    assert scene_route["material"] is None
 
 
 def test_scene_reports_system_io() -> None:
@@ -187,7 +234,8 @@ def test_render_html_wires_the_requested_viewer_features() -> None:
     assert "BoxGeometry" in html  # cables/pipes are rectangular bars, not cylinders (#2)
     assert "PlaneGeometry" in html  # machine names live on the front face (#3)
     assert "faceArrow" in html  # per-face auto-output direction arrows (#4)
-    assert "t.thickness" in html  # leads sized from the scene's terminal thickness (#6)
+    assert "r.cells" in html  # routes drawn from the blocks route_blocks resolved (#4)...
+    assert "e.size" in html  # ...at GT's real cross-section, not a bar scaled to look right
     assert "Raycaster" in html  # hover a block -> its machine name tag
     assert 'id="nametag"' in html  # ...shown in the floating name-tag element
 
