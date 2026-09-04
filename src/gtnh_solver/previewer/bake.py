@@ -13,6 +13,15 @@ tier colour from the ``mRGBa`` multiply the layer carries (``Dyes.MACHINE_METAL`
 bake that dropped the multiply would render every machine grey, so the multiply is applied here and
 pinned by a golden test (plan section 7).
 
+**Two kinds of multiply, and they need different arithmetic.** A casing sprite already carries its
+own colour and the tint is a hue nudge on top, so a raw ``value / 255`` crushes a dark-neutral tint
+like bronze's ``[32, 32, 32]`` to near-black; ``normalize_tint`` (the default) divides by the tint's
+brightest channel instead, keeping the hue shift and the sprite's brightness. A **cable or pipe**
+sprite is the opposite case: those sprites are greyscale and the material's whole identity lives in
+the multiply (docs/DOMAIN.md), so normalising it away renders the pack as pale grey noodles and, worse,
+collapses a cable's dark insulation into its bright wire core until the two look alike. Those stacks
+bake with ``normalize_tint=False``, which is the arithmetic GT itself does.
+
 Pillow is an optional dependency (the ``preview`` extra). :func:`bake_layers` imports it lazily and
 raises :class:`BakeUnavailableError` if it is missing, so the previewer can catch that and degrade
 to placeholder boxes rather than hard-failing a solver-only install.
@@ -55,8 +64,12 @@ def _require_pillow() -> Any:
     return Image
 
 
-def _multiplier(rgba: Sequence[int]) -> tuple[float, float, float, float]:
+def _multiplier(rgba: Sequence[int], normalize: bool = True) -> tuple[float, float, float, float]:
     """Turn a GT ``[r, g, b, a]`` (0-255) layer colour into per-channel multipliers in ``[0, 1]``.
+
+    With ``normalize=False`` the value is used as GT uses it - a plain ``/ 255`` - which is correct
+    when the sprite underneath is greyscale and the tint IS its colour (cables, pipes). The
+    normalising default is for sprites that already carry their colour; see the module docstring.
 
     GT's ``mRGBa`` tints a casing's HUE, but the tier sprites we bake already carry their full
     colour, so applying the raw value as a ``value / 255`` brightness multiply crushes dark-neutral
@@ -71,7 +84,7 @@ def _multiplier(rgba: Sequence[int]) -> tuple[float, float, float, float]:
     """
     r, g, b, a = [*rgba, 255, 255, 255, 255][:4]
     alpha = 1.0 if a == 0 else a / 255.0
-    peak = max(r, g, b)
+    peak = max(r, g, b) if normalize else 255
     if peak <= 0:
         return (1.0, 1.0, 1.0, alpha)
     return (r / peak, g / peak, b / peak, alpha)
@@ -87,10 +100,10 @@ def _frame0(image: Any, image_mod: Any) -> Any:
     return image
 
 
-def _tinted(png: bytes, rgba: Sequence[int], image_mod: Any) -> Any:
+def _tinted(png: bytes, rgba: Sequence[int], image_mod: Any, normalize: bool = True) -> Any:
     """Open ``png``, take frame 0, and apply the layer's RGBA multiply, returning an RGBA image."""
     img = _frame0(image_mod.open(io.BytesIO(png)).convert("RGBA"), image_mod)
-    mr, mg, mb, ma = _multiplier(rgba)
+    mr, mg, mb, ma = _multiplier(rgba, normalize)
     if (mr, mg, mb, ma) == (1.0, 1.0, 1.0, 1.0):
         return img
     px = img.load()
@@ -101,7 +114,12 @@ def _tinted(png: bytes, rgba: Sequence[int], image_mod: Any) -> Any:
     return img
 
 
-def bake_layers(layers: Sequence[Mapping[str, Any]], icon_png: Mapping[str, bytes]) -> bytes | None:
+def bake_layers(
+    layers: Sequence[Mapping[str, Any]],
+    icon_png: Mapping[str, bytes],
+    *,
+    normalize_tint: bool = True,
+) -> bytes | None:
     """Composite an ordered ``layers`` stack into one flat 16x16 PNG, or ``None`` if nothing resolves.
 
     Each layer is drawn bottom-to-top: its iconset sprite (looked up in ``icon_png`` by ``icon``)
@@ -110,6 +128,9 @@ def bake_layers(layers: Sequence[Mapping[str, Any]], icon_png: Mapping[str, byte
     layers are composited flat (v1 does not model emissive glow, plan section 10). Returns the PNG
     bytes, or ``None`` when not a single layer's sprite was available (the caller then keeps a
     placeholder for that face).
+
+    ``normalize_tint=False`` applies the multiply raw, for stacks whose sprites are greyscale and
+    whose colour therefore lives entirely in the tint - cables and pipes. See the module docstring.
     """
     image_mod = _require_pillow()
     base: Any | None = None
@@ -117,7 +138,7 @@ def bake_layers(layers: Sequence[Mapping[str, Any]], icon_png: Mapping[str, byte
         png = icon_png.get(layer["icon"])
         if png is None:
             continue
-        tinted = _tinted(png, layer.get("rgba", []), image_mod)
+        tinted = _tinted(png, layer.get("rgba", []), image_mod, normalize_tint)
         base = tinted if base is None else image_mod.alpha_composite(base, tinted)
     if base is None:
         return None

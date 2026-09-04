@@ -17,8 +17,10 @@ from typing import Any
 
 import pytest
 
+from gtnh_solver.adapter import adapt_file
 from gtnh_solver.dataset.schema import MultiblockDoc
 from gtnh_solver.previewer.bake import bake_layers
+from gtnh_solver.previewer.scene import build_scene
 from gtnh_solver.previewer.textures import (
     _GT_SIDE_TO_THREE_SLOT,
     TextureManifest,
@@ -26,6 +28,7 @@ from gtnh_solver.previewer.textures import (
     primary_variant,
     texturize_scene,
 )
+from gtnh_solver.solver import solve
 
 pytest.importorskip("PIL")
 from PIL import Image
@@ -64,6 +67,12 @@ OVERLAY = "gregtech:iconsets/OVERLAY_FRONT_MACERATOR"
 #: A fully-transparent overlay: an active layer that differs in the STACK but composites to nothing,
 #: so its bake is byte-identical to idle - the case the byte-level active dedup must drop.
 CLEAR = "gregtech:iconsets/OVERLAY_CLEAR"
+#: Cable sprites. GT ships these GREYSCALE and the material's whole identity is the RGBA multiply
+#: (docs/DOMAIN.md), which is why the route bake applies the tint raw - so these are bright here and
+#: a correctly baked cable comes out dark.
+WIRE = "gregtech:materialicons/DULL/wire"
+INSUL_SMALL = "gregtech:iconsets/INSULATION_SMALL"
+INSUL_FULL = "gregtech:iconsets/INSULATION_FULL"
 
 #: A png_provider: white base sprites so a tint multiply shows through as the tint colour, and a
 #: half-alpha overlay so compositing is observable.
@@ -73,6 +82,9 @@ _ICON_PNG = {
     MACH_SIDE: _png((255, 255, 255, 255)),
     OVERLAY: _png((0, 0, 0, 128)),
     CLEAR: _png((0, 0, 0, 0)),
+    WIRE: _png((200, 200, 200, 255)),
+    INSUL_SMALL: _png((200, 200, 200, 255)),
+    INSUL_FULL: _png((200, 200, 200, 255)),
 }
 
 
@@ -207,6 +219,43 @@ def _manifest_dict() -> dict[str, Any]:
                     }
                 },
             },
+            # An ordinary isotropic cable: one look for an open end, one for a closed face, both
+            # under "all" because the shape comes from geometry rather than from the sprite.
+            "gregtech:gt.blockmachines|1247": {
+                "kind": "pipe",
+                "display_name": "cable.tin.02",
+                "pipe": {"thickness": 0.375, "insulated": True, "voltage": 32},
+                "sides": {
+                    "all": {
+                        "open": [
+                            {"icon": WIRE, "rgba": [220, 220, 220, 0], "glow": False},
+                            {"icon": INSUL_SMALL, "rgba": [64, 64, 64, 0], "glow": False},
+                        ],
+                        "closed": [{"icon": INSUL_FULL, "rgba": [64, 64, 64, 0], "glow": False}],
+                    }
+                },
+            },
+            # A pipe the extractor found NOT isotropic, so it wrote per side and filed a gap. The
+            # route lookup must refuse it rather than paint one side's sprite on all six.
+            "gregtech:gt.blockmachines|1290": {
+                "kind": "pipe",
+                "display_name": "cable.lopsided.01",
+                "sides": {
+                    "NORTH": {
+                        "open": [{"icon": WIRE, "rgba": [220, 220, 220, 0], "glow": False}],
+                        "closed": [{"icon": INSUL_FULL, "rgba": [64, 64, 64, 0], "glow": False}],
+                    }
+                },
+            },
+            # Only one of the two looks. Half a pipe reads as a bug where the flat bar reads as
+            # missing data, so this must be refused whole.
+            "gregtech:gt.blockmachines|1291": {
+                "kind": "pipe",
+                "display_name": "cable.halfbaked.01",
+                "sides": {
+                    "all": {"open": [{"icon": WIRE, "rgba": [220, 220, 220, 0], "glow": False}]}
+                },
+            },
             "gregtech:gt.blockcasings|11": {
                 "kind": "block",
                 "sides": {
@@ -230,6 +279,9 @@ def _manifest_dict() -> dict[str, Any]:
             MACH_SIDE: "assets/gregtech/textures/blocks/iconsets/MACHINE_LV_SIDE.png",
             OVERLAY: "assets/gregtech/textures/blocks/iconsets/OVERLAY_FRONT_MACERATOR.png",
             CLEAR: "assets/gregtech/textures/blocks/iconsets/OVERLAY_CLEAR.png",
+            WIRE: "assets/gregtech/textures/blocks/materialicons/DULL/wire.png",
+            INSUL_SMALL: "assets/gregtech/textures/blocks/iconsets/INSULATION_SMALL.png",
+            INSUL_FULL: "assets/gregtech/textures/blocks/iconsets/INSULATION_FULL.png",
         },
     }
 
@@ -279,6 +331,28 @@ def dataset(tmp_path: Path) -> tuple[Path, Path]:
 
 def _scene(machines: list[dict[str, Any]]) -> dict[str, Any]:
     return {"version": 1, "machines": machines}
+
+
+def _route(*blocks: str | None) -> dict[str, Any]:
+    """A power route with one cell per named block - the shape ``build_scene`` emits."""
+    return {
+        "netId": "power:LV",
+        "commodity": "power",
+        "color": "#ffd000",
+        "segments": [],
+        "terminals": [],
+        "cells": [
+            {
+                "cell": [i, 0, 0],
+                "dirs": [[1, 0, 0]],
+                "thickness": 2,
+                "size": 0.375,
+                "block": block,
+                "label": "2x tin cable",
+            }
+            for i, block in enumerate(blocks)
+        ],
+    }
 
 
 def _machine(
@@ -957,3 +1031,173 @@ def test_committed_basic_machine_front_carries_overlay() -> None:
         manifest["icons"]["gregtech:basicmachines/hammer/OVERLAY_FRONT"]
         == "assets/gregtech/textures/blocks/basicmachines/hammer/OVERLAY_FRONT.png"
     )
+
+
+# --------------------------------------------------------------------------------------------------
+# Routes: a cable is a block too (#4)
+# --------------------------------------------------------------------------------------------------
+
+
+def test_bake_applies_a_dark_tint_raw_when_the_sprite_is_greyscale() -> None:
+    """A cable's insulation is a [64,64,64] multiply on a GREYSCALE sprite, so the multiply IS its
+    colour (docs/DOMAIN.md). The casing normalisation - which turns any neutral tint into identity -
+    is right for a tier casing and wrong here twice over: it washes the cable out, and it collapses
+    the dark insulated face into the bright open end until the two roles bake to nearly one image.
+    """
+    layer = [{"icon": INSUL_FULL, "rgba": [64, 64, 64, 0], "glow": False}]
+    raw = bake_layers(layer, _ICON_PNG, normalize_tint=False)
+    normalized = bake_layers(layer, _ICON_PNG)
+    assert raw is not None
+    assert normalized is not None
+    assert _pixel(raw)[:3] == (50, 50, 50), "GT's own arithmetic: 200 * 64/255"
+    assert _pixel(normalized)[:3] == (200, 200, 200), "the casing default is unchanged"
+
+
+def _texturized(scene: dict[str, Any], dataset: tuple[Path, Path]) -> Any:
+    mb, manifest = dataset
+    return texturize_scene(
+        scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider
+    )
+
+
+def test_route_cells_are_skinned_with_their_cable_sprites(dataset: tuple[Path, Path]) -> None:
+    scene = _scene([])
+    scene["routes"] = [_route("cable.tin.02", "cable.tin.02")]
+    summary = _texturized(scene, dataset)
+
+    assert summary.route_cells_textured == 2
+    assert summary.route_cells_flat == 0
+    assert summary.unresolved_route_blocks == ()
+    tex = scene["routes"][0]["cells"][0]["tex"]
+    assert set(tex) == {"open", "closed"}
+    assert tex["open"] != tex["closed"], "the two looks must be distinct pool keys"
+    assert all(key in scene["textures"] for key in tex.values())
+    # Both cells name one block, so they share one pair of bakes rather than baking per cell.
+    assert scene["routes"][0]["cells"][1]["tex"] == tex
+
+
+def test_a_baked_cable_is_dark_insulation_with_a_bright_core(dataset: tuple[Path, Path]) -> None:
+    """The end-to-end proof that the raw tint survives the pass: the closed face is uniformly dark
+    and the open end carries the wire showing through the insulation's centre. If this ever inverts
+    or flattens, cables render as pale grey noodles - visible, plausible and wrong."""
+    scene = _scene([])
+    scene["routes"] = [_route("cable.tin.02")]
+    _texturized(scene, dataset)
+    tex = scene["routes"][0]["cells"][0]["tex"]
+    closed = _pixel(base64.b64decode(scene["textures"][tex["closed"]].split(",", 1)[1]))
+    assert sum(closed[:3]) / 3 < 80, "insulation must stay dark, not normalise to the raw sprite"
+
+
+def test_an_unknown_route_block_keeps_its_flat_bar_and_is_reported(
+    dataset: tuple[Path, Path],
+) -> None:
+    """The degradation contract, and it differs from a machine's on purpose: a checkerboarded casing
+    reads as "no sprite" beside the casings that have one, but a checkerboarded noodle threaded
+    through a layout reads as damage. The flat coloured bar is a correct render, which is exactly
+    why the gap has to be *reported* - nothing else would say the manifest is short (cf. #98).
+    """
+    scene = _scene([])
+    scene["routes"] = [_route("cable.unobtainium.04")]
+    summary = _texturized(scene, dataset)
+
+    assert scene["routes"][0]["cells"][0]["tex"] is None
+    assert summary.route_cells_textured == 0
+    assert summary.route_cells_flat == 1
+    assert summary.unresolved_route_blocks == ("cable.unobtainium.04",)
+
+
+def test_a_non_isotropic_pipe_is_refused_not_painted_on_six_faces(
+    dataset: tuple[Path, Path],
+) -> None:
+    """The extractor writes a pipe per side when its own isotropy check fails, and files a gap. The
+    previewer must not then take one side's sprite for all six - a plausible wrong sprite is the
+    failure nothing downstream can detect, where a flat bar is merely plain."""
+    scene = _scene([])
+    scene["routes"] = [_route("cable.lopsided.01")]
+    summary = _texturized(scene, dataset)
+
+    assert scene["routes"][0]["cells"][0]["tex"] is None
+    assert summary.unresolved_route_blocks == ("cable.lopsided.01",)
+
+
+def test_a_pipe_with_only_one_look_is_refused_whole(dataset: tuple[Path, Path]) -> None:
+    """Both roles or neither. An open end with no barrel is the render that looks broken, and
+    answering "closed" with the open stack would draw a cable open on every face."""
+    scene = _scene([])
+    scene["routes"] = [_route("cable.halfbaked.01")]
+    summary = _texturized(scene, dataset)
+
+    assert scene["routes"][0]["cells"][0]["tex"] is None
+    assert summary.unresolved_route_blocks == ("cable.halfbaked.01",)
+
+
+def test_a_route_with_no_material_is_flat_but_not_a_gap(dataset: tuple[Path, Path]) -> None:
+    """``block: None`` means the route published no material at all - a trunk with no single tier,
+    or anything above UV. That is a real answer, not a missing manifest entry, so it keeps the flat
+    bar without being reported as something to re-dump."""
+    scene = _scene([])
+    scene["routes"] = [_route(None)]
+    summary = _texturized(scene, dataset)
+
+    assert scene["routes"][0]["cells"][0]["tex"] is None
+    assert summary.route_cells_flat == 1
+    assert summary.unresolved_route_blocks == ()
+
+
+def test_routes_and_machines_share_one_icon_fetch(dataset: tuple[Path, Path]) -> None:
+    """A page with cables in it still makes exactly one jar call - the expensive part of the pass -
+    with the cable sprites in the same request as the casings."""
+    calls: list[set[str]] = []
+
+    def spy(paths: Any) -> dict[str, bytes]:
+        calls.append(set(paths))
+        return _provider(paths)
+
+    scene = _scene([_machine("m1", "Test Macerator", [0, 0, 0], [1, 1, 1])])
+    scene["routes"] = [_route("cable.tin.02")]
+    mb, manifest = dataset
+    texturize_scene(scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=spy)
+
+    assert len(calls) == 1
+    assert {WIRE, INSUL_SMALL, INSUL_FULL, MACH_SIDE} <= calls[0]
+
+
+def test_routes_skin_even_with_no_multiblock_dump(tmp_path: Path) -> None:
+    """A checkout with a manifest but no structure docs used to texturize nothing at all. Routes
+    need no doc - and neither do single-block machines - so only a missing MANIFEST is fatal now."""
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(_manifest_dict()), encoding="utf-8")
+    scene = _scene([])
+    scene["routes"] = [_route("cable.tin.02")]
+    summary = texturize_scene(
+        scene,
+        multiblocks_dir=tmp_path / "absent",
+        manifest_path=manifest,
+        png_provider=_provider,
+    )
+    assert summary.route_cells_textured == 1
+
+
+def test_the_shipped_lines_texture_every_route_cell_they_draw() -> None:
+    """The whole chain on a real artifact, against the committed manifest: solve, build the scene,
+    and resolve every route cell's block the way the texture pass does.
+
+    Nitrobenzene is the fixture because it is the only shipped line that lays actual **pipes** -
+    sand's item chain all auto-outputs, so it routes power alone. It solves ``PARTIAL_INVALID``
+    against the example-scoped dataset, which is deliberately not asserted away: the routes are real
+    and drawn either way, and pinning a status here would make this test fail for a reason that has
+    nothing to do with textures.
+    """
+    manifest = TextureManifest.load(_COMMITTED_MANIFEST)
+    problem = adapt_file("examples/gtnh-nitrobenzene.json")
+    scene = build_scene(problem, solve(problem))
+
+    blocks = {c["block"] for r in scene["routes"] for c in r["cells"]}
+    assert blocks, "nitrobenzene routes power and fluids; both must name a block"
+    assert any(b.startswith("gt_pipe_") for b in blocks), "the fluid pipes are the point of it"
+    assert any(b.startswith("cable.") for b in blocks)
+    for name in sorted(blocks):
+        found = manifest.pipe_block(name)
+        assert found is not None, f"{name} is missing from the committed manifest"
+        for role in ("open", "closed"):
+            assert manifest.pipe_layers(*found, role), f"{name} has no {role} face"
