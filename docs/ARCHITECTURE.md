@@ -88,12 +88,16 @@ doc as intent and reconcile.
   net of any machine validation proves starved of power, which is a placement defect, not a bug -
   so the next placement pulls them tighter - `solver/core.py`). It also owns the **power-source
   repair pass** (`solver/repair.py`): the annealer has no gradient on a source (a 1x1x1 block
-  inside the bounding box is cost-neutral to move), so after the pipes are laid each source is
-  offered the free cells around its sinks and every candidate is **really routed** and ranked on
-  the loop's own quality key. That is the same decision as the missing placement-cost term, not a
-  reversal of it - cable is judged where it is knowable, on a routed layout. *(Phase 2: the
-  anytime **wall-clock** budget; today it runs a deterministic bounded grid keyed off the seed,
-  not a timeout.)*
+  inside the bounding box is cost-neutral to move), so after the pipes are laid each source
+  **aims at the load it serves** - its trunk's first branch, or its only connection - takes the
+  nearest legal poses on the region walls its feed face must sit flush against, and every one of
+  those is **really routed** and ranked on the loop's own quality key. Aim first, *then* project
+  to the wall: choosing candidates by adjacency to a sink intersects two constraints that often
+  miss entirely (a load two cells clear of the nearest usable wall yields no candidate at all).
+  The aim only shortlists; routing decides, so this is the same decision as the missing
+  placement-cost term, not a reversal of it - cable is judged where it is knowable, on a routed
+  layout. *(Phase 2: the anytime **wall-clock** budget; today it runs a deterministic bounded grid
+  keyed off the seed, not a timeout.)*
 - **system_io.py** - the single source of truth for the line's **boundary I/O** (what to feed in,
   what to collect) and the **power-feed spec** (EU/t plus amperage per voltage tier). Pure over
   the `InputIR` + `LayoutResult`; both the build guide and the previewer read it, so the two

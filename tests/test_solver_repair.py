@@ -10,6 +10,9 @@ would reject (off-wall feed face, undeclared orientation, a body on a pipe or a 
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from gtnh_solver.adapter import adapt_file
 from gtnh_solver.ir import (
     CellBox,
     CellCoord,
@@ -18,6 +21,8 @@ from gtnh_solver.ir import (
     Facing,
     InputIR,
     IODirection,
+    LayoutResult,
+    LayoutStatus,
     Machine,
     MachineFaceRef,
     METoggles,
@@ -28,15 +33,24 @@ from gtnh_solver.ir import (
     Route,
     Segment,
 )
-from gtnh_solver.ir.geometry import front_on_boundary
+from gtnh_solver.ir.geometry import box_in_region, front_on_boundary
 from gtnh_solver.placement import Objective
 from gtnh_solver.router import route_power
+from gtnh_solver.solver import solve
 from gtnh_solver.solver._structure import structure_quality
-from gtnh_solver.solver.repair import repair_power_sources
-from tests._helpers import at, power_source
+from gtnh_solver.solver.repair import _wall_poses, repair_power_sources
+from gtnh_solver.validator import validate
+from tests._helpers import PLACEMENT_CODES, at, power_source
 
 _POWER = Commodity.POWER
 _OBJECTIVES: tuple[Objective, ...] = ("footprint", "volume", "balanced")
+_SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
+
+
+def _validates(problem: InputIR, placements: list[Placement]) -> bool:
+    """Whether these placements are free of every geometry/placement violation."""
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=list(placements))
+    return PLACEMENT_CODES.isdisjoint(validate(problem, layout).codes())
 
 
 def _load(mid: str, *, eut: float = 32.0) -> Machine:
@@ -171,7 +185,8 @@ def test_repair_keeps_the_feed_face_on_the_boundary_and_a_declared_orientation()
 
 def test_repair_will_not_stand_a_source_on_a_laid_pipe() -> None:
     # The pipes are routed before power, and a machine body over a route cell is a validator
-    # violation - so the one cell that would otherwise win is off the table and the source stays.
+    # violation - so the cell that would otherwise win is off the table. The source still gets to
+    # move (the next-nearest pose is legal); it just may not stand on the pipe.
     problem = _stranded()
     pipe = Route(
         net_id="n",
@@ -180,7 +195,7 @@ def test_repair_will_not_stand_a_source_on_a_laid_pipe() -> None:
     )
     after, _ = _repair(problem, _STRANDED_START, item_routes=(pipe,))
 
-    assert _source(after).cell == CellCoord(x=0, y=0, z=0), "source moved onto a pipe cell"
+    assert _source(after).cell != CellCoord(x=6, y=0, z=0), "source stood on a pipe cell"
 
 
 def test_repair_will_not_stand_a_source_on_a_reserved_cell() -> None:
@@ -189,7 +204,7 @@ def test_repair_will_not_stand_a_source_on_a_reserved_cell() -> None:
     problem = _stranded(reserved=[CellCoord(x=6, y=0, z=0)])
     after, _ = _repair(problem, _STRANDED_START)
 
-    assert _source(after).cell == CellCoord(x=0, y=0, z=0), "source moved onto a reserved cell"
+    assert _source(after).cell != CellCoord(x=6, y=0, z=0), "source stood on a reserved cell"
 
 
 def test_repair_leaves_a_pinned_power_net_alone() -> None:
@@ -284,3 +299,74 @@ def test_repair_leaves_a_placement_whose_power_will_not_route_untouched() -> Non
 
     assert power.failed_nets, "fixture no longer exercises an unroutable power net"
     assert repaired == before
+
+
+def test_repair_reaches_a_load_that_touches_no_wall() -> None:
+    # The nitrobenzene MV bug (#123 follow-up). A source's feed face must stay flush on a region
+    # wall, so its legal ground is the wall planes; its load here sits at z=2, two steps clear of
+    # the only wall a NORTH face can use. Picking candidates by adjacency to the load intersects
+    # those two constraints and yields NOTHING, so the source used to sit stranded along the wall
+    # dragging a long trunk. Aiming at the load and projecting to the wall always finds a pose.
+    problem = InputIR(
+        bounding_region=CellBox(sx=12, sy=1, sz=3),
+        machines=[power_source("src", orientations=[Facing.NORTH]), _load("k")],
+        nets=[_pnet("src", "k")],
+    )
+    before = [at("src", 0, 0, 0), at("k", 10, 0, 2)]
+    baseline = _cable(problem, before)
+    after, cable = _repair(problem, before)
+    moved = _source(after)
+
+    assert moved.cell.z == 0, "the feed face left the only wall a NORTH facing can use"
+    assert moved.cell.x > 5, f"source stayed stranded at x={moved.cell.x}, far from its load"
+    assert cable < baseline, f"cable did not improve ({baseline} -> {cable})"
+
+
+def test_repair_recovers_the_sand_layout_from_a_bad_start() -> None:
+    # The real sand line, with its source deliberately parked mid-row. The hand-built optimum puts
+    # it past the END of the machine row (above the boundary chest) so the trunk runs straight over
+    # the hammers and they tap it through their top faces - a cell no sink is adjacent to, which is
+    # why an adjacency shell could only reach 4 cable cells here. Aiming at the trunk gets all 3.
+    ir = adapt_file(str(_SAND))
+    layout = solve(ir, seed=0)
+    src_id = next(m.id for m in ir.machines if m.is_power_source)
+    parked = [p for p in layout.placements if p.machine_id != src_id]
+    parked.append(at(src_id, 2, 1, 0))
+
+    after, cable = _repair(ir, parked)
+
+    assert cable == 3, f"expected the hand-built 3-cable trunk, got {cable}"
+    assert _validates(ir, after)
+
+
+def test_wall_poses_agree_with_the_boundary_predicate_on_every_facing() -> None:
+    # _wall_poses walks the wall planes instead of scanning the region, on the reasoning that a
+    # flush feed face pins exactly one coordinate. That is a shortcut around
+    # ir.geometry.front_on_boundary, so it has to agree with it exactly - here over all four
+    # fronts the IR permits (it rejects a vertical machine front outright) and a non-cubic body,
+    # whose rotated depth differs per axis and so pins a different coordinate on each wall.
+    horizontals = [Facing.NORTH, Facing.SOUTH, Facing.EAST, Facing.WEST]
+    machine = Machine(
+        id="four",
+        type="M",
+        voltage_tier="LV",
+        orientation_options=horizontals,
+        footprint=CellBox(sx=2, sy=1, sz=3),
+        faces=FaceSpec(
+            ports=[Port(id="power:out", commodity=_POWER, direction=IODirection.OUTPUT)]
+        ),
+    )
+    region = CellBox(sx=5, sy=4, sz=6)
+    got = set(_wall_poses(machine, region))
+    want = {
+        (CellCoord(x=x, y=y, z=z), facing)
+        for x in range(region.sx)
+        for y in range(region.sy)
+        for z in range(region.sz)
+        for facing in horizontals
+        if box_in_region(CellCoord(x=x, y=y, z=z), machine.footprint, facing, region)
+        and front_on_boundary(CellCoord(x=x, y=y, z=z), machine.footprint, facing, region)
+    }
+
+    assert got == want, "the wall-plane enumeration disagrees with front_on_boundary"
+    assert {f for _, f in got} == set(horizontals), "some facing produced no pose at all"
