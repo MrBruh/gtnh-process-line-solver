@@ -186,13 +186,23 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
   So the source is positioned where cable IS knowable, on a routed layout - the same decision as
   #62, carried through rather than reversed. A new **repair pass** (`solver/repair.py`) runs after
-  the pipes are laid: each source is offered the free cells around the sinks it feeds, and every
-  candidate is **really routed** with `route_power` and ranked on the feedback loop's own quality
-  key (`solver/_structure.py`, now shared with the loop so the two cannot pull against each
-  other). A candidate is adopted only if it is strictly better on that key, so the pass either
-  improves a layout or leaves it exactly alone. It is cheap because the hard constraints do the
-  pruning: a source's feed face must stay flush on a region wall, which cuts the candidate set to
-  tens of poses (~95 on nitrobenzene, ~0.5s against a 20s solve).
+  the pipes are laid: each source **aims at the load it serves** (its trunk's first branch, or its
+  only connection), takes the nearest legal poses on the region walls its feed face must sit flush
+  against, and every one of those is **really routed** with `route_power` and ranked on the
+  feedback loop's own quality key (`solver/_structure.py`, now shared with the loop so the two
+  cannot pull against each other). A candidate is adopted only if it is strictly better on that
+  key, so the pass either improves a layout or leaves it exactly alone.
+
+  **Aim first, then project to the wall** - the order matters. Picking candidates by adjacency to
+  a sink instead intersects two constraints that often miss each other entirely: nitrobenzene's MV
+  consumer spans z3..5 while the nearest wall a horizontal feed face can use is z=0, so a radius-1
+  adjacency shell offered that source **no pose at all** and it sat 10 cells along the wall from
+  its load behind a 14-cell trunk. The nearest wall pose to a point, by contrast, always exists.
+  The aim only shortlists; `route_power` still decides, which is what keeps #62's finding from
+  creeping back in - a ranking proxy can miss a good candidate but cannot promote a bad one past a
+  real routing. Twenty candidates per source was measured, not guessed: it matches an exhaustive
+  scan of every legal pose on both examples and all three objectives, for about 60 routings per
+  attempt instead of 5200.
 
   Two rules keep it from doing harm. It declines a net carrying a **pinned** I/O, whose route is
   constrained to ground the power router does not model. And it leaves a placement whose power
@@ -207,12 +217,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   | example | objective | before | after |
   |---|---|---|---|
   | sand | footprint / volume / balanced | 5 / 2 / **3** | 5 / 2 / **3** |
-  | nitrobenzene | footprint | 154 / 10 / **60** | 136 / 10 / **44** |
-  | nitrobenzene | volume | 126 / 7 / **34** | 126 / 7 / **26** |
-  | nitrobenzene | balanced | 126 / 7 / **34** | 126 / 7 / **26** |
+  | nitrobenzene | footprint | 154 / 10 / **60** | 136 / 10 / **33** |
+  | nitrobenzene | volume | 126 / 7 / **34** | 126 / 7 / **25** |
+  | nitrobenzene | balanced | 126 / 7 / **34** | 126 / 7 / **25** |
 
-  Sand holds its hand-built 3-cable target exactly; nitrobenzene drops 27% of its cable on the
-  default objective and 24% on the other two, and its floor area comes down 154 to 136 as well.
+  Sand holds its hand-built 3-cable target exactly; nitrobenzene drops 45% of its cable on the
+  default objective and 26% on the other two, and its floor area comes down 154 to 136 as well.
+  Every one of those matches what an exhaustive scan of all ~5200 legal source poses finds, so
+  there is no further win available from moving sources alone.
   Refs #123.
 
 - **A machine starved of power is now something the feedback loop can fix, not a lost attempt
