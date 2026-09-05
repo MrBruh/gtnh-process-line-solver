@@ -40,7 +40,13 @@ from gtnh_solver.ir import (
     Terminal,
 )
 from gtnh_solver.ir.geometry import FACE_DELTAS
-from gtnh_solver.route_blocks import route_block, route_block_counts, route_cells
+from gtnh_solver.route_blocks import (
+    RouteBox,
+    route_block,
+    route_block_counts,
+    route_boxes,
+    route_cells,
+)
 from gtnh_solver.solver import solve
 
 _COMMITTED_MANIFEST = Path(__file__).resolve().parents[1] / "data" / "textures" / "manifest.json"
@@ -272,3 +278,107 @@ def _sand() -> LayoutResult:
     return solve(
         adapt_file("examples/gtnh-sand.json", physical=load_physical_dataset()), optimize=False
     )
+
+
+# ------------------------------------------------------------------------------------------- 4
+# The shape. This is where the render bug was, so these are regression tests before they are
+# anything else: the arms used to grow from the cell CENTRE, swallowing half the core.
+# ------------------------------------------------------------------------------------------- 4
+
+
+def _span(box: RouteBox, axis: int) -> tuple[float, float]:
+    return (box.center[axis] - box.size[axis] / 2, box.center[axis] + box.size[axis] / 2)
+
+
+def _overlap(a: RouteBox, b: RouteBox) -> float:
+    """The volume the two boxes share. Zero when they merely touch, which is the legal case."""
+    volume = 1.0
+    for axis in range(3):
+        alo, ahi = _span(a, axis)
+        blo, bhi = _span(b, axis)
+        volume *= max(0.0, min(ahi, bhi) - max(alo, blo))
+    return volume
+
+
+@given(_power_routes())
+def test_no_two_boxes_of_a_cell_overlap(route: Route) -> None:
+    """The bug, as a property. Two boxes sharing a volume also share the coplanar side faces on the
+    outside of the shape, and the renderer has no way to choose between them: the faces tear against
+    each other and each stretches the sprite over a different length. Touching is fine and expected -
+    an arm starts exactly where the core's surface is - so the test is on shared VOLUME, not on
+    whether the spans meet.
+    """
+    for rc in route_cells(route):
+        for i, a in enumerate(rc.boxes):
+            for b in rc.boxes[i + 1 :]:
+                assert _overlap(a, b) == pytest.approx(0.0), f"{rc.cell}: {a} overlaps {b}"
+
+
+@given(_power_routes())
+def test_the_shape_reaches_every_connection_and_stays_inside_the_cell(route: Route) -> None:
+    """An arm has to touch the block edge or the run breaks at every joint, and it must not cross
+    it or it grows into the neighbour's cell."""
+    for rc in route_cells(route):
+        for axis in range(3):
+            lo = min(_span(b, axis)[0] for b in rc.boxes)
+            hi = max(_span(b, axis)[1] for b in rc.boxes)
+            assert lo >= rc.cell[axis] - 1e-9
+            assert hi <= rc.cell[axis] + 1 + 1e-9
+        for step in rc.dirs:
+            axis = next(i for i, d in enumerate(step) if d)
+            edge = rc.cell[axis] + (1 if step[axis] > 0 else 0)
+            reach = [b for b in rc.boxes if _span(b, axis)[step[axis] > 0] == pytest.approx(edge)]
+            assert reach, f"{rc.cell}: nothing reaches the {step} edge"
+
+
+@given(_power_routes())
+def test_every_connection_is_an_open_end_on_exactly_one_box(route: Route) -> None:
+    """The open end is the wire core showing through the insulation. One per connection: none and
+    the run looks sealed where it joins, two and a box claims a face it does not own."""
+    for rc in route_cells(route):
+        claimed = [step for b in rc.boxes for step in b.open_faces]
+        assert sorted(claimed) == sorted(rc.dirs)
+
+
+def test_a_straight_run_is_one_box_through_the_block() -> None:
+    """GT collapses it the same way. It is the commonest cell in any layout, and a core plus two
+    arms puts two seams through a shape that has no joint in it."""
+    boxes = route_boxes((3, 0, 1), frozenset({(1, 0, 0), (-1, 0, 0)}), 0.375)
+    assert len(boxes) == 1
+    assert boxes[0].size == (1.0, 0.375, 0.375)
+    assert boxes[0].center == (3.5, 0.5, 1.5)
+    assert boxes[0].open_faces == frozenset({(1, 0, 0), (-1, 0, 0)})
+
+
+def test_an_elbow_is_a_core_and_two_arms_that_start_at_its_surface() -> None:
+    """The exact numbers the bug got wrong. With t=0.375 the core spans 0.1875 either side of the
+    centre, so an arm runs from there to the block edge - length 0.3125, NOT the 0.5 it would be
+    from the centre."""
+    boxes = route_boxes((0, 0, 0), frozenset({(1, 0, 0), (0, 0, -1)}), 0.375)
+    assert len(boxes) == 3
+    core, *arms = boxes
+    assert core.size == (0.375, 0.375, 0.375)
+    assert core.open_faces == frozenset()
+
+    east = next(b for b in arms if b.open_faces == frozenset({(1, 0, 0)}))
+    assert east.size == pytest.approx((0.3125, 0.375, 0.375))
+    assert _span(east, 0) == pytest.approx((0.6875, 1.0))  # core surface -> block edge
+    assert _span(core, 0) == pytest.approx((0.3125, 0.6875))
+
+
+def test_a_cell_with_no_connections_is_still_its_core_cube() -> None:
+    """A route can leave an isolated cell (a non-unit segment's endpoint). It is a block either way,
+    so it draws as one rather than vanishing."""
+    boxes = route_boxes((2, 1, 4), frozenset(), 0.25)
+    assert len(boxes) == 1
+    assert boxes[0].size == (0.25, 0.25, 0.25)
+    assert boxes[0].open_faces == frozenset()
+
+
+def test_the_sand_lines_split_cell_is_a_core_and_three_arms() -> None:
+    layout = _sand()
+    power = next(r for r in layout.routes if r.commodity is Commodity.POWER)
+    split = next(rc for rc in route_cells(power) if rc.cell == (2, 0, 1))
+    assert len(split.dirs) == 3
+    assert len(split.boxes) == 4  # the core plus one arm each
+    assert sum(_overlap(a, b) for a in split.boxes for b in split.boxes if a is not b) == 0.0

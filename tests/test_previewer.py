@@ -128,11 +128,30 @@ def test_scene_route_cells_carry_the_block_and_its_real_size() -> None:
         "size",
         "block",
         "label",
+        "boxes",
     }
     sizes = {c["thickness"]: c["size"] for c in power["cells"]}
     assert sizes == {1: pytest.approx(0.25), 2: pytest.approx(0.375)}  # GT's insulated ladder
     assert {c["block"] for c in power["cells"]} == {"cable.tin.01", "cable.tin.02"}
     assert all(sum(abs(d) for d in dirs) == 1 for c in power["cells"] for dirs in c["dirs"])
+
+
+def test_scene_route_cells_carry_the_gt_shape_as_boxes() -> None:
+    """The viewer draws these and decides nothing about the shape itself. A straight run is one box
+    through the block; a cell that turns or branches is a core plus an arm per connection."""
+    power = next(r for r in _sand_scene()["routes"] if r["commodity"] == "power")
+    by_cell = {tuple(c["cell"]): c for c in power["cells"]}
+
+    straight = by_cell[(4, 0, 1)]  # the trunk runs east-west through it, nothing else attached
+    assert [tuple(d) for d in straight["dirs"]] == [(-1, 0, 0), (1, 0, 0)]
+    (box,) = straight["boxes"]
+    assert box["size"] == [1.0, pytest.approx(0.375), pytest.approx(0.375)]
+    assert box["open"] == [True, True, False, False, False, False]  # +x, -x: the two block faces
+
+    split = by_cell[(2, 0, 1)]  # the branch cell: three connections
+    assert len(split["boxes"]) == 4  # a core plus one arm each
+    ends = [i for b in split["boxes"] for i, is_end in enumerate(b["open"]) if is_end]
+    assert sorted(ends) == [0, 1, 5]  # +x, -x, -z - one open end per connection, no more
 
 
 def test_scene_route_carries_its_material_and_says_it_stands_in() -> None:
@@ -235,7 +254,8 @@ def test_render_html_wires_the_requested_viewer_features() -> None:
     assert "PlaneGeometry" in html  # machine names live on the front face (#3)
     assert "faceArrow" in html  # per-face auto-output direction arrows (#4)
     assert "r.cells" in html  # routes drawn from the blocks route_blocks resolved (#4)...
-    assert "e.size" in html  # ...at GT's real cross-section, not a bar scaled to look right
+    assert "e.boxes" in html  # ...as the boxes it resolved, at GT's real cross-section
+    assert "b.open" in html  # ...each box's open ends coming from the scene, not decided here
     assert "Raycaster" in html  # hover a block -> its machine name tag
     assert 'id="nametag"' in html  # ...shown in the floating name-tag element
 

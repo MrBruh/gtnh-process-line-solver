@@ -144,36 +144,12 @@ const layered = [];   // { obj, minY, maxY }
 function track(obj, minY, maxY) { layered.push({ obj, minY, maxY }); scene.add(obj); }
 function cc(c) { return new THREE.Vector3(c[0] + 0.5, c[1] + 0.5, c[2] + 0.5); }
 
-// A square-cross-section bar from a to b (cables, pipes, leads are rectangular, not round). The box
-// is built along LOCAL +y and rotated onto the connection, so its outward end cap is always slot 2
-// whichever way the arm points - which is what lets pipeFaces below place the open end without
-// caring about direction. `faces` (six materials) skins it; without one it is a flat coloured bar.
-function bar(a, b, cross, color, faces) {
-  const d = new THREE.Vector3().subVectors(b, a);
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(cross, d.length() || 0.001, cross),
-    faces || new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.1 }));
-  mesh.position.copy(a).add(b).multiplyScalar(0.5);
-  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.clone().normalize());
-  return mesh;
-}
-
-// A small cube at a cell centre - the node a route's connection arms fan out from.
-function node(pos, size, color, faces) {
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(size, size, size),
-    faces || new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.1 }));
-  mesh.position.copy(pos);
-  return mesh;
-}
-
 // A cable or pipe is materially ISOTROPIC - one sprite on all six faces, its shape coming from the
-// geometry - so a cell needs only the two looks GT itself draws: the OPEN end the cable runs out of
+// geometry - so a box needs only the two looks GT itself draws: the OPEN end the cable runs out of
 // (wire core + insulation ring, or the pipe's bore) and the CLOSED face it does not (solid
-// insulation, or the barrel). `openSlot` is the one face showing the open end: slot 2 for an arm
-// (its outward cap, see bar) and none for the core cube, whose connected faces are covered by the
-// arms attached to them. Returns null unless BOTH looks baked - half a pipe reads as a bug, where
-// the flat coloured bar beside it is a correct answer (docs/DOMAIN.md, the stand-in rule).
+// insulation, or the barrel). `open` is the scene's six-slot list saying which faces are ends.
+// Returns null unless BOTH looks baked - half a pipe reads as a bug, where the flat coloured bar
+// beside it is a correct answer (docs/DOMAIN.md, the stand-in rule).
 const _pipeMats = {};
 function pipeMaterial(key) {
   if (!key) return null;
@@ -185,11 +161,19 @@ function pipeMaterial(key) {
   }
   return _pipeMats[key];
 }
-function pipeFaces(tex, openSlot) {
+function pipeFaces(tex, open) {
   if (!tex) return null;
-  const open = pipeMaterial(tex.open), closed = pipeMaterial(tex.closed);
-  if (!open || !closed) return null;
-  return [0, 1, 2, 3, 4, 5].map((slot) => (slot === openSlot ? open : closed));
+  const o = pipeMaterial(tex.open), c = pipeMaterial(tex.closed);
+  if (!o || !c) return null;
+  return open.map((isEnd) => (isEnd ? o : c));
+}
+
+// The flat coloured fallback, one material per commodity colour rather than one per box.
+const _routeFlat = {};
+function routeFlat(color) {
+  if (!(color in _routeFlat))
+    _routeFlat[color] = new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.1 });
+  return _routeFlat[color];
 }
 
 // A small flat arrow decal (a canvas texture on a plane) pointing along the plane's local +x.
@@ -385,24 +369,27 @@ for (const b of (SCENE.blocks || [])) {
   track(cube, b.cell[1], b.cell[1]);
 }
 
-// A route is drawn GT-style: a small cube at each cell centre, with a UNIFORM cross-section arm from
-// that cube out to the block edge for every connection - an adjacent route cell, or a docked machine
-// face. That is GT's own pipe shape (a core cube plus one arm per connected side, no fatter node),
-// and `size` is its real thickness in blocks for the gauge, so a 1x cable is 0.25 wide because that
-// is what it is in game rather than because a bar looked right at that width.
+// A route is a run of axis-aligned boxes: per cell, a uniform cross-section core plus one arm from
+// the core's SURFACE out to the block edge for every connection - an adjacent route cell or a docked
+// machine face - and a single box straight through for a straight run. That is GT's own pipe shape
+// (no fatter node), at GT's real thickness for the gauge, so a 1x cable is 0.25 wide because that is
+// what it is in game rather than because a bar looked right at that width.
 //
-// The cells, their connections and their size are resolved in Python (route_blocks) and read
-// straight off the scene. They used to be derived HERE, which put a real build instruction - a cell
-// incident to two gauges is built at the thicker one - inside the one file no test can reach, where
-// it could silently disagree with the build guide's bill of materials.
+// Every box comes from the scene (route_blocks), including its size and which of its faces are open
+// ends. Nothing about the shape is decided here, and that is the point: the shape that WAS decided
+// here grew each arm from the cell centre, so every arm swallowed half its core and their side
+// faces - coplanar and overlapping on the outside of the run - tore against each other. Flat
+// coloured bars hid it completely; it surfaced the instant those faces carried textures. In Python
+// "no two boxes of a cell overlap" is a property test.
 for (const r of SCENE.routes) {
   for (const e of (r.cells || [])) {
-    const c = cc(e.cell), cross = e.size;
-    track(node(c, cross, r.color, pipeFaces(e.tex, -1)), e.cell[1], e.cell[1]);
-    const armFaces = pipeFaces(e.tex, 2);
-    for (const d of e.dirs) {
-      const end = c.clone().add(new THREE.Vector3(d[0] * 0.5, d[1] * 0.5, d[2] * 0.5));
-      track(bar(c, end, cross, r.color, armFaces), e.cell[1], e.cell[1]);
+    const y = e.cell[1];
+    for (const b of e.boxes) {
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(b.size[0], b.size[1], b.size[2]),
+        pipeFaces(e.tex, b.open) || routeFlat(r.color));
+      mesh.position.set(b.center[0], b.center[1], b.center[2]);
+      track(mesh, y, y);
     }
   }
 }

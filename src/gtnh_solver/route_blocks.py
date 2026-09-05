@@ -1,8 +1,8 @@
 """route_blocks - a route as the blocks it is built from: one per cell, with its connections.
 
 A ``Route`` is a list of hops; a *build* is a list of blocks. Turning one into the other means
-answering three questions per cell - which sides connect, which gauge the cable is, and which block
-that is - and both first-party consumers need all three:
+answering four questions per cell - which sides connect, which gauge the cable is, which block that
+is, and what shape it occupies - and both first-party consumers need them:
 
 - the **build guide** counts them ("12 x 2x tin cable"), and
 - the **previewer** draws them (a cross with one arm per connected side, at GT's real thickness).
@@ -15,6 +15,13 @@ format the answer.
 It also *moves* the derivation. Until now the per-cell connection mask lived in the viewer template
 (``previewer/html.py``) as a JavaScript ``Map`` keyed ``"x,y,z"`` - the un-CI-testable last mile, so
 the one rule in it that is a real build instruction (below) was pinned by nothing at all.
+
+**The boxes moved for the same reason, and less theoretically.** The shape was assembled in the
+template too, and it was wrong: each arm was grown from the cell *centre* rather than from the core's
+surface, so every arm overlapped the core and their side faces fought for the same pixels. Flat
+coloured bars hid it perfectly - both quads were one colour - and it became a mess of tearing stripes
+the instant those faces carried textures. :func:`route_boxes` builds the shape here instead, where
+"no two boxes of a cell overlap" is a test rather than a hope.
 
 **Two rules decide the block, both from docs/DOMAIN.md:**
 
@@ -72,6 +79,24 @@ class RouteBlock:
 
 
 @dataclass(frozen=True)
+class RouteBox:
+    """One axis-aligned box of a cell's GT shape, in world coordinates.
+
+    GT draws a pipe as a core cube plus one arm per connected side running out to the block edge,
+    every part at the *same* cross-section - there is no fatter node (docs/DOMAIN.md). A straight
+    run collapses to a single box through the block, which is how GT draws it too.
+    """
+
+    #: Centre of the box in world space (a cell's own centre is ``cell + 0.5`` on each axis).
+    center: tuple[float, float, float]
+    #: Full extent on each axis. Never zero: a cell with no connections is still its core cube.
+    size: tuple[float, float, float]
+    #: Unit normals of the faces showing an **open end** - the wire core, or the pipe's bore. Every
+    #: other face of the box is closed (solid insulation, or the barrel).
+    open_faces: frozenset[Cell]
+
+
+@dataclass(frozen=True)
 class RouteCell:
     """One cell of a route, as the block that gets built there."""
 
@@ -92,6 +117,9 @@ class RouteCell:
     thickness_blocks: float
 
     block: RouteBlock
+
+    #: The GT shape of this cell, as axis-aligned boxes that do not overlap each other.
+    boxes: tuple[RouteBox, ...]
 
 
 def route_cells(route: Route) -> list[RouteCell]:
@@ -127,16 +155,73 @@ def route_cells(route: Route) -> list[RouteCell]:
         dx, dy, dz = FACE_DELTAS[terminal.face]
         dirs[cell].add((-dx, -dy, -dz))  # the lead runs from the cell *into* the machine face
 
-    return [
-        RouteCell(
-            cell=cell,
-            dirs=frozenset(dirs[cell]),
-            thickness=thickness[cell],
-            thickness_blocks=_thickness_blocks(route.commodity, thickness[cell]),
-            block=route_block(route.commodity, thickness[cell], route.material),
+    out = []
+    for cell in sorted(dirs):
+        connections = frozenset(dirs[cell])
+        blocks_thick = _thickness_blocks(route.commodity, thickness[cell])
+        out.append(
+            RouteCell(
+                cell=cell,
+                dirs=connections,
+                thickness=thickness[cell],
+                thickness_blocks=blocks_thick,
+                block=route_block(route.commodity, thickness[cell], route.material),
+                boxes=route_boxes(cell, connections, blocks_thick),
+            )
         )
-        for cell in sorted(dirs)
-    ]
+    return out
+
+
+def route_boxes(cell: Cell, dirs: frozenset[Cell], thickness_blocks: float) -> tuple[RouteBox, ...]:
+    """The GT shape of one cell: a core cube plus an arm per connection, or one box for a straight run.
+
+    Every box is axis-aligned and **no two of them overlap**, which is the whole point of computing
+    this here. An arm starts at the core's surface rather than at the cell centre: grown from the
+    centre it would swallow half the core, and the two boxes' side faces would then be coplanar *and*
+    overlapping on the outside of the shape - two quads fighting for the same pixels, each stretching
+    the sprite over a different length.
+
+    A straight run - exactly two connections, opposite each other - is one box spanning the block,
+    matching GT and sparing the commonest cell in any layout a seam that says nothing. Both of its
+    end faces are open ends; an arm's single outward face is; a core cube has none, its connected
+    faces being covered by the arms attached to them.
+    """
+    center = (cell[0] + 0.5, cell[1] + 0.5, cell[2] + 0.5)
+    half = thickness_blocks / 2
+    ordered = sorted(dirs)
+
+    if len(ordered) == 2 and ordered[0] == tuple(-d for d in ordered[1]):
+        axis = next(i for i, d in enumerate(ordered[1]) if d)
+        size = [thickness_blocks, thickness_blocks, thickness_blocks]
+        size[axis] = 1.0
+        return (RouteBox(center, (size[0], size[1], size[2]), frozenset(ordered)),)
+
+    core = RouteBox(center, (thickness_blocks, thickness_blocks, thickness_blocks), frozenset())
+    length = 0.5 - half
+    if length <= 0:
+        # A pipe at least a block thick already fills its cell; GT renders it as a full cube and
+        # there is no arm left to draw (docs/DOMAIN.md). Nothing in v1's ladders reaches this.
+        return (core,)
+    boxes = [core]
+    offset = half + length / 2  # from the cell centre to the arm's own centre
+    for step in ordered:
+        dx, dy, dz = step
+        boxes.append(
+            RouteBox(
+                center=(
+                    center[0] + dx * offset,
+                    center[1] + dy * offset,
+                    center[2] + dz * offset,
+                ),
+                size=(
+                    length if dx else thickness_blocks,
+                    length if dy else thickness_blocks,
+                    length if dz else thickness_blocks,
+                ),
+                open_faces=frozenset({step}),
+            )
+        )
+    return tuple(boxes)
 
 
 def route_block_counts(layout: LayoutResult) -> list[tuple[RouteBlock, int]]:

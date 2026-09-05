@@ -25,7 +25,7 @@ from gtnh_solver.ir import (
     Machine,
     Route,
 )
-from gtnh_solver.ir.geometry import rotated_footprint
+from gtnh_solver.ir.geometry import Cell, rotated_footprint
 from gtnh_solver.route_blocks import route_cells
 from gtnh_solver.system_io import RATE_STEM, is_boundary_storage, system_io
 
@@ -45,6 +45,20 @@ _MACHINE_PALETTE = (
     "#a3b18a",
     "#e29578",
     "#bc6c25",
+)
+
+
+#: three.js ``BoxGeometry`` takes its six materials in this face order. A route box's open ends are
+#: emitted as a matching six-slot list, so the viewer needs no normal lookup of its own - the same
+#: split as ``textures._GT_SIDE_TO_THREE_SLOT``, which keeps renderer detail out of ``route_blocks``
+#: (shared with the build guide, which has no idea what three.js is).
+_THREE_SLOT_NORMALS: tuple[Cell, ...] = (
+    (1, 0, 0),
+    (-1, 0, 0),
+    (0, 1, 0),
+    (0, -1, 0),
+    (0, 0, 1),
+    (0, 0, -1),
 )
 
 
@@ -156,6 +170,19 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
                         # guide prints; ``None`` when the route published no material.
                         "block": rc.block.dataset_name,
                         "label": rc.block.label,
+                        # The cell's GT shape: a core cube plus an arm per connection, or one box
+                        # for a straight run, none of them overlapping. Built in ``route_blocks``
+                        # because a shape assembled in the template is a shape no test can check -
+                        # and the one that was there grew its arms from the cell centre, so every
+                        # arm swallowed half the core and their faces tore against each other.
+                        "boxes": [
+                            {
+                                "center": list(b.center),
+                                "size": list(b.size),
+                                "open": [n in b.open_faces for n in _THREE_SLOT_NORMALS],
+                            }
+                            for b in rc.boxes
+                        ],
                     }
                     for rc in route_cells(route)
                 ],
