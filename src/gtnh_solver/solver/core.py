@@ -6,7 +6,9 @@ One *attempt* assembles a layout (docs/ROADMAP.md):
   2. route the item/fluid nets (router.route): the **router** decides from the final geometry
      which nets GT's free **auto-output** connection covers (router.auto) and lays pipes only
      for the rest;
-  3. route the synthesized power nets as shared-amperage cable trunks (router.power);
+  3. route the synthesized power nets as shared-amperage cable trunks (router.power) - through
+     the **repair pass** (solver.repair), which first relocates each power source onto the
+     cheapest cable a real routing can find for it, since the placement cost cannot see cable;
   4. assemble the LayoutResult (or surface the placement/routing/power infeasibility);
   5. **validate the assembled layout against the independent validator** and downgrade a
      VALID result to ``partial_invalid`` if it proves any violation. The validator's logic is
@@ -47,10 +49,12 @@ from gtnh_solver.ir import (
     Placement,
     Route,
 )
-from gtnh_solver.ir.geometry import occupied_cells
 from gtnh_solver.placement import Objective, optimize_placement, place
 from gtnh_solver.router import claims_by_machine, place_hatches, route, route_power
 from gtnh_solver.validator import ValidationReport, ViolationCode, validate
+
+from ._structure import footprint_and_layers, structure_cells, structure_quality
+from .repair import repair_power_sources
 
 # Feedback loop bounds. Cycle detection on the failed-net set usually stops sooner when nothing
 # routes; this caps the work. The penalty step adds to a net's weight each time it fails to route.
@@ -76,7 +80,8 @@ def solve(
     - ``False`` (**fast**): a single constructive first-fit placement, no optimization and no
       feedback loop - near-instant and simple. Its layout is still validated, so it is VALID or an
       explicit partial/infeasibility, never silently invalid; but it will not cluster machines for
-      auto-output or re-place to rescue an unroutable net the way the optimizer can.
+      auto-output, relocate a power source onto shorter cable, or re-place to rescue an unroutable
+      net the way the optimizer can.
 
     ``objective`` selects what "compact" means (the site's *second* control, next to optimize or
     not): ``footprint`` (default) minimizes the floor area and stacks tall, ``volume`` minimizes
@@ -85,7 +90,7 @@ def solve(
     by construction).
     """
     if not optimize:
-        return _solve_fast(problem, seed)
+        return _solve_fast(problem, seed, objective)
     penalties: dict[str, float] = {}
     seen_failed: set[frozenset[str]] = set()
     best_valid: LayoutResult | None = None
@@ -116,7 +121,7 @@ def solve(
                 infeasibility=placement.infeasibility,
             )
 
-        layout, failed_nets = _assemble(problem, placement.placements, attempt_seed)
+        layout, failed_nets = _assemble(problem, placement.placements, attempt_seed, objective)
         if layout.status is LayoutStatus.VALID:
             # Valid, but maybe not the best the remaining seeds can do: rank it on the real,
             # routed structure and keep exploring (ties keep the earliest attempt).
@@ -145,35 +150,6 @@ def solve(
     return best_partial
 
 
-def _occupied_cells(
-    problem: InputIR, placements: list[Placement], routes: list[Route]
-) -> set[tuple[int, int, int]]:
-    """Every grid cell the build occupies - machine footprints plus route hops. The shared basis
-    for the compactness ranking (``_quality``) and the reported metrics (``_layout_metrics``), so
-    the previewer's footprint and the loop's ranking footprint are computed the same way."""
-    machines = {m.id: m for m in problem.machines}
-    cells: set[tuple[int, int, int]] = set()
-    for p in placements:
-        machine = machines.get(p.machine_id)
-        if machine is not None:
-            cells.update(occupied_cells(p.cell, machine.footprint, p.orientation))
-    for r in routes:
-        cells.update(r.cells())
-    return cells
-
-
-def _footprint_and_layers(cells: set[tuple[int, int, int]]) -> tuple[int, int]:
-    """(floor-area footprint, layer count) for a non-empty occupied-cell set. ``volume`` is
-    ``footprint * layers`` - the enclosing box - since the floor area already spans x/z.
-    Precondition: ``cells`` is non-empty; both callers return early on an empty layout."""
-    xs = [c[0] for c in cells]
-    ys = [c[1] for c in cells]
-    zs = [c[2] for c in cells]
-    footprint = (max(xs) - min(xs) + 1) * (max(zs) - min(zs) + 1)
-    layers = max(ys) - min(ys) + 1
-    return footprint, layers
-
-
 def _layout_metrics(
     problem: InputIR, placements: list[Placement], routes: list[Route]
 ) -> LayoutMetrics:
@@ -182,40 +158,21 @@ def _layout_metrics(
     layout (nothing placed, e.g. an infeasible result) leaves them ``None``. ``buildability`` /
     ``congestion`` stay ``None`` too - they need a defined scoring model (docs/ROADMAP.md), so
     they are left deferred rather than faked."""
-    cells = _occupied_cells(problem, placements, routes)
+    cells = structure_cells(problem, placements, routes)
     if not cells:
         return LayoutMetrics()
-    footprint, layers = _footprint_and_layers(cells)
+    footprint, layers = footprint_and_layers(cells)
     return LayoutMetrics(footprint=footprint, layers=layers)
 
 
 def _quality(problem: InputIR, layout: LayoutResult, objective: Objective) -> tuple[int, int, int]:
-    """Rank a VALID layout for the feedback loop; smaller-lexicographic is better.
-
-    The *structure* is every machine and route cell - what the builder actually erects, so a
-    trunk sprawling outside the machine block counts against the layout. The ``objective``'s
-    compactness metric leads (``footprint`` = floor area, ``volume`` = enclosing box,
-    ``balanced`` = their sum); real power cable cells come second - only a routed layout knows
-    them (placement-time proxies cannot see dock faces or shared taps) - and the other
-    compactness metric breaks ties toward the smaller build.
-    """
-    cells = _occupied_cells(problem, layout.placements, layout.routes)
-    power_cells: set[tuple[int, int, int]] = set()
-    for r in layout.routes:
-        if r.commodity is Commodity.POWER:
-            power_cells.update(r.cells())
-    if not cells:
-        return (0, 0, 0)
-    footprint, layers = _footprint_and_layers(cells)
-    volume = footprint * layers
-    if objective == "volume":
-        return (volume, len(power_cells), footprint)
-    if objective == "balanced":
-        return (footprint + volume, len(power_cells), volume)
-    return (footprint, len(power_cells), volume)
+    """Rank a VALID layout for the feedback loop; smaller-lexicographic is better
+    (``_structure.structure_quality`` - the same key the power-source repair pass ranks its own
+    candidates on, so the two cannot pull against each other)."""
+    return structure_quality(problem, layout.placements, layout.routes, objective)
 
 
-def _solve_fast(problem: InputIR, seed: int) -> LayoutResult:
+def _solve_fast(problem: InputIR, seed: int, objective: Objective) -> LayoutResult:
     """One deterministic attempt over the constructive placement - the fast (no-optimize) path.
 
     Constructive placement is seed-independent, so there is no annealing to run and no point re-
@@ -228,12 +185,17 @@ def _solve_fast(problem: InputIR, seed: int) -> LayoutResult:
         return LayoutResult(
             status=LayoutStatus.INFEASIBLE, seed=seed, infeasibility=placement.infeasibility
         )
-    layout, _ = _assemble(problem, placement.placements, seed)
+    layout, _ = _assemble(problem, placement.placements, seed, objective, repair=False)
     return layout
 
 
 def _assemble(
-    problem: InputIR, placements: tuple[Placement, ...], seed: int
+    problem: InputIR,
+    placements: tuple[Placement, ...],
+    seed: int,
+    objective: Objective = "footprint",
+    *,
+    repair: bool = True,
 ) -> tuple[LayoutResult, tuple[str, ...]]:
     """Route, validate, and compose the layout; return it plus the unrouted net ids.
 
@@ -243,6 +205,11 @@ def _assemble(
     ``partial_invalid`` with *no* failed nets: that is a solver/router bug, not a routability
     problem, so re-placing would not help.
 
+    The placements it returns are not always the ones handed in: with ``repair`` (the optimize
+    path) laying power is the repair pass (solver.repair), which may relocate a power source onto
+    shorter cable, ranked by ``objective`` - the same key the loop ranks whole attempts on. The
+    fast path passes ``repair=False`` and keeps the constructive placement exactly as it is.
+
     **One violation is the exception** (:func:`_starved_machines`): a machine too far from its
     power source to take in its draw is a *placement* defect, not a bug - every cable is correctly
     thick and only the distance is wrong - so its power net is named as a failed net and the loop
@@ -251,26 +218,39 @@ def _assemble(
     routing = route(problem, placements)  # auto-output where geometry allows + item/fluid pipes
     autos = list(routing.auto_connections)
     # Power cables route around the item/fluid pipes already laid, so no cell carries two routes
-    # (the crude single-channel capacity the validator enforces). docs/ARCHITECTURE.md #7.
-    item_cells = {cell for r in routing.routes for cell in r.cells()}
-    # ...and around the CASING cells those pipes' hatches occupy, which is a different resource: a
+    # (the crude single-channel capacity the validator enforces). docs/ARCHITECTURE.md #7 - and
+    # around the CASING cells those pipes' hatches occupy, which is a different resource: a
     # machine's hatch cells are one shared pool an input bus and an energy hatch compete for, and
-    # a single casing cell has up to five free faces, so ``item_cells`` cannot stand in for it.
-    power = route_power(
-        problem,
-        placements,
-        extra_obstacles=item_cells,
-        claimed_cells=claims_by_machine(routing.routes, {m.id: m for m in problem.machines}),
-    )
+    # a single casing cell has up to five free faces, so the pipe cells cannot stand in for it.
+    claims = claims_by_machine(routing.routes, {m.id: m for m in problem.machines})
+    if repair:
+        # The power router runs inside the repair pass, which relocates each source to the cell
+        # its really-routed cable likes best (solver.repair, #123) and hands back that routing.
+        placement_list, power = repair_power_sources(
+            problem,
+            placements,
+            item_routes=routing.routes,
+            claimed_cells=claims,
+            objective=objective,
+        )
+    else:
+        # The fast path is a single constructive placement by definition, so it routes power
+        # where the placer put the sources and relocates nothing.
+        placement_list = list(placements)
+        power = route_power(
+            problem,
+            placement_list,
+            extra_obstacles={cell for r in routing.routes for cell in r.cells()},
+            claimed_cells=claims,
+        )
     routes = [*routing.routes, *power.routes]
-    placement_list = list(placements)
     metrics = _layout_metrics(problem, placement_list, routes)  # footprint/layers for every result
 
     # Which casing cell each connection turns into a hatch, plus the maintenance hatch and muffler
     # that belong to no net. Last, because a muffler needs empty air in front of it and only a
     # finished routing knows which cells are still empty.
     plan = place_hatches(
-        problem, placement_list, routes, autos, _occupied_cells(problem, placement_list, routes)
+        problem, placement_list, routes, autos, structure_cells(problem, placement_list, routes)
     )
 
     infeasibility = routing.infeasibility or power.infeasibility or plan.infeasibility
