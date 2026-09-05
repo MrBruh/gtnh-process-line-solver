@@ -74,6 +74,13 @@ class ViolationCode(str, Enum):
     POWER_SUPPLY_INSUFFICIENT = (
         "power_supply_insufficient"  # after cable loss, a machine's hatches cannot deliver its EU/t
     )
+    # route material (the stand-in a route is drawn and costed as; docs/DOMAIN.md)
+    ROUTE_MATERIAL_TIER_MISMATCH = (
+        "route_material_tier_mismatch"  # published tier is not the tier its machines run at
+    )
+    ROUTE_MATERIAL_UNKNOWN = (
+        "route_material_unknown"  # a material outside the sanctioned stand-in policy - invented
+    )
     # placed hatches (LayoutResult v1): the record must describe a hatch that could actually exist
     HATCH_NOT_ON_MACHINE = "hatch_not_on_machine"  # its cell is not a body cell of its machine
     HATCH_FACES_INWARD = "hatch_faces_inward"  # it faces its own structure, so it moves nothing

@@ -12,11 +12,15 @@ its idle and running
 skin where the two differ (the running faces ride ``scene.texturesActive``, default idle); routes
 (cables and
 pipes) are drawn GT-style, a small cube at each cell centre with a uniform arm out to the block edge
-for every connection (an adjacent route cell or a docked machine face), power sized by cable
-thickness - each wire->machine lead by the terminal's incident-segment thickness the scene emits
-(#6); auto-output is a small arrow on each source-machine face perpendicular to the ejecting
+for every connection (an adjacent route cell or a docked machine face), at GT's own cross-section
+for the gauge and skinned with the real cable/pipe sprite where the manifest resolves one (an
+unresolved route keeps its flat coloured bar - never a checkerboard, which on a noodle threaded
+through a layout reads as damage rather than as missing data) - the cells, their connections, their
+size and their two baked looks all resolved in Python and read straight off ``scene.routes[].cells``,
+so the build guide and the preview cannot disagree about what a layout is made of (#4); auto-output is a small arrow on each source-machine face
+perpendicular to the ejecting
 direction (so one stays visible however the machines are packed). A side panel lists the
-machine/route legend plus the
+machine/route legend (materials footnoted as stand-ins where they are) plus the
 system's boundary inputs, outputs, and power (``scene.io``), with a per-tick / per-second rate
 toggle. The view frames the layout's *actual* extent (``scene.bounds``), not the solver's
 oversized search region.
@@ -48,6 +52,7 @@ _TEMPLATE = (
                border: 1px solid #333a44; border-radius: 6px; padding: 8px 10px; }
   #hud { top: 10px; left: 10px; }
   #hint { color: #8b94a0; margin-top: 4px; }
+  #standin { color: #8b94a0; }
   #legend { top: 10px; right: 10px; max-height: 80vh; overflow: auto; }
   #controls { bottom: 10px; left: 10px; display: flex; gap: 12px; align-items: center; }
   #controls input[type=range] { width: 180px; }
@@ -139,24 +144,36 @@ const layered = [];   // { obj, minY, maxY }
 function track(obj, minY, maxY) { layered.push({ obj, minY, maxY }); scene.add(obj); }
 function cc(c) { return new THREE.Vector3(c[0] + 0.5, c[1] + 0.5, c[2] + 0.5); }
 
-// A square-cross-section bar from a to b (cables, pipes, leads are rectangular, not round).
-function bar(a, b, cross, color) {
-  const d = new THREE.Vector3().subVectors(b, a);
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(cross, d.length() || 0.001, cross),
-    new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.1 }));
-  mesh.position.copy(a).add(b).multiplyScalar(0.5);
-  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.clone().normalize());
-  return mesh;
+// A cable or pipe is materially ISOTROPIC - one sprite on all six faces, its shape coming from the
+// geometry - so a box needs only the two looks GT itself draws: the OPEN end the cable runs out of
+// (wire core + insulation ring, or the pipe's bore) and the CLOSED face it does not (solid
+// insulation, or the barrel). `open` is the scene's six-slot list saying which faces are ends.
+// Returns null unless BOTH looks baked - half a pipe reads as a bug, where the flat coloured bar
+// beside it is a correct answer (docs/DOMAIN.md, the stand-in rule).
+const _pipeMats = {};
+function pipeMaterial(key) {
+  if (!key) return null;
+  if (!(key in _pipeMats)) {
+    const tex = faceTexture(key);
+    _pipeMats[key] = tex
+      ? new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, metalness: 0.03 })
+      : null;
+  }
+  return _pipeMats[key];
+}
+function pipeFaces(tex, open) {
+  if (!tex) return null;
+  const o = pipeMaterial(tex.open), c = pipeMaterial(tex.closed);
+  if (!o || !c) return null;
+  return open.map((isEnd) => (isEnd ? o : c));
 }
 
-// A small cube at a cell centre - the node a route's connection arms fan out from.
-function node(pos, size, color) {
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(size, size, size),
-    new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.1 }));
-  mesh.position.copy(pos);
-  return mesh;
+// The flat coloured fallback, one material per commodity colour rather than one per box.
+const _routeFlat = {};
+function routeFlat(color) {
+  if (!(color in _routeFlat))
+    _routeFlat[color] = new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.1 });
+  return _routeFlat[color];
 }
 
 // A small flat arrow decal (a canvas texture on a plane) pointing along the plane's local +x.
@@ -352,38 +369,27 @@ for (const b of (SCENE.blocks || [])) {
   track(cube, b.cell[1], b.cell[1]);
 }
 
-// A route is drawn GT-style: a small cube at each cell centre, with a UNIFORM cross-section arm from
-// that cube out to the block edge for every connection - an adjacent route cell, or a docked machine
-// face. One node per cell keeps the run readable however tightly the routes are packed.
+// A route is a run of axis-aligned boxes: per cell, a uniform cross-section core plus one arm from
+// the core's SURFACE out to the block edge for every connection - an adjacent route cell or a docked
+// machine face - and a single box straight through for a straight run. That is GT's own pipe shape
+// (no fatter node), at GT's real thickness for the gauge, so a 1x cable is 0.25 wide because that is
+// what it is in game rather than because a bar looked right at that width.
+//
+// Every box comes from the scene (route_blocks), including its size and which of its faces are open
+// ends. Nothing about the shape is decided here, and that is the point: the shape that WAS decided
+// here grew each arm from the cell centre, so every arm swallowed half its core and their side
+// faces - coplanar and overlapping on the outside of the run - tore against each other. Flat
+// coloured bars hid it completely; it surfaced the instant those faces carried textures. In Python
+// "no two boxes of a cell overlap" is a property test.
 for (const r of SCENE.routes) {
-  const isPower = r.commodity === 'power';
-  const cells = new Map();   // "x,y,z" -> { cell, dirs: Set of "dx,dy,dz", thick }
-  const touch = (c, thick) => {
-    const k = c.join(',');
-    let e = cells.get(k);
-    if (!e) { e = { cell: c, dirs: new Set(), thick: 1 }; cells.set(k, e); }
-    e.thick = Math.max(e.thick, thick);
-    return e;
-  };
-  for (const s of r.segments) {
-    const a = s.from, b = s.to, th = s.thickness || 1;
-    touch(a, th).dirs.add([b[0] - a[0], b[1] - a[1], b[2] - a[2]].join(','));
-    touch(b, th).dirs.add([a[0] - b[0], a[1] - b[1], a[2] - b[2]].join(','));
-  }
-  for (const t of (r.terminals || [])) {
-    const nrm = FACE_NORMAL[t.face]; if (!nrm) continue;
-    // an arm toward the machine - the lead - sized by the incident segment's thickness, computed
-    // in build_scene (#6). Null (item/fluid) falls back to 1, keeping those leads the fixed size.
-    touch(t.cell, t.thickness || 1).dirs.add([-nrm[0], -nrm[1], -nrm[2]].join(','));
-  }
-  for (const e of cells.values()) {
-    const cross = isPower ? 0.09 * Math.sqrt(e.thick) : 0.07;
-    const c = cc(e.cell);
-    track(node(c, cross, r.color), e.cell[1], e.cell[1]);
-    for (const dk of e.dirs) {
-      const d = dk.split(',').map(Number);
-      const end = c.clone().add(new THREE.Vector3(d[0] * 0.5, d[1] * 0.5, d[2] * 0.5));
-      track(bar(c, end, cross, r.color), e.cell[1], e.cell[1]);
+  for (const e of (r.cells || [])) {
+    const y = e.cell[1];
+    for (const b of e.boxes) {
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(b.size[0], b.size[1], b.size[2]),
+        pipeFaces(e.tex, b.open) || routeFlat(r.color));
+      mesh.position.set(b.center[0], b.center[1], b.center[2]);
+      track(mesh, y, y);
     }
   }
 }
@@ -490,6 +496,22 @@ function renderLegend() {
   html += '<b>routes</b><br>';
   for (const k of ['item', 'fluid', 'power']) html += '<span class="sw" style="background:' + COMMODITY[k] + '"></span>' + k + '<br>';
   html += '<span class="sw" style="background:#00e5ff"></span>auto-output<br>';
+  // Which cable/pipe material the routes above are DRAWN as, and - the point of the line - that the
+  // choice is representative. GT ships several cables per voltage tier and the solver sizes by
+  // gauge, never by material, so a preview that shows Tin without saying so reads as a spec
+  // (docs/DOMAIN.md). Counts, gauges and thicknesses are real; only the material stands in.
+  const mats = new Map();
+  for (const r of SCENE.routes)
+    if (r.material) mats.set(r.material.material + '|' + (r.material.tier || ''), r.material);
+  if (mats.size) {
+    html += '<b>materials</b><br>';
+    let anyStandIn = false;
+    for (const m of mats.values()) {
+      anyStandIn = anyStandIn || m.standIn;
+      html += m.material + (m.tier ? ' (' + m.tier + ')' : '') + (m.standIn ? ' *' : '') + '<br>';
+    }
+    if (anyStandIn) html += '<span id="standin">* representative stand-in, not a spec</span><br>';
+  }
   if (SCENE.io) {
     const io = SCENE.io, sfx = perSecond ? '/s' : '/t';
     html += '<b>system i/o</b><br>';

@@ -61,6 +61,7 @@ from gtnh_solver.dataset import (
     UnknownTierError,
     UnpowerableError,
     amp_load,
+    route_material,
     whole_amps,
 )
 from gtnh_solver.ir import (
@@ -372,12 +373,19 @@ def _route_trunk(
     if isinstance(sized, Infeasibility):
         return sized
     segments, thickness = sized
+    # The tier this trunk serves, which is otherwise dropped here and never reaches the previewer or
+    # the build guide: a route records its cells and its gauges but has never said what those gauges
+    # are rated for. Sinks that disagree get no material at all rather than an arbitrary one - a
+    # mixed-tier trunk has no single representative cable, and saying nothing is the honest answer
+    # (`route_material` and docs/DOMAIN.md, "Cables and pipes").
+    tiers = {tier for _, tier in loads}
     return Route(
         net_id=net_id,
         commodity=Commodity.POWER,
         terminals=tuple(terminals),
         segments=segments,
         thickness_per_segment=thickness,
+        material=route_material(Commodity.POWER, next(iter(tiers)) if len(tiers) == 1 else None),
     )
 
 

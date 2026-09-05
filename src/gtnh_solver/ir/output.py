@@ -13,7 +13,7 @@ from __future__ import annotations
 from pydantic import ConfigDict, Field, model_validator
 
 from ._base import StrictModel
-from .enums import Commodity, Facing, LayoutStatus
+from .enums import Commodity, Facing, LayoutStatus, PipeFamily
 from .geometry import Cell, CellCoord
 
 #: Bump on any breaking change to the output contract; record it in ``ir/__init__.py``.
@@ -93,16 +93,53 @@ class Terminal(StrictModel):
     cell: CellCoord
 
 
+class RouteMaterial(StrictModel):
+    """The tier-representative **stand-in** a route is drawn and costed as - NOT a build spec.
+
+    GT has many cable materials per voltage tier (at LV alone: tin, lead, cobalt, zinc, soldering
+    alloy, redstone alloy), so "the LV cable" is not canonical, and nothing in this solver has ever
+    chosen between them. This carries the representative one so the build guide's bill of materials
+    and the previewer cannot disagree about what a route is made of - both read this field instead
+    of each deriving a guess.
+
+    ``stand_in`` is the honesty mechanism and is True for every route v1 emits. It is load-bearing,
+    not decorative: a consumer that lowers a route to real blocks (the ``.schematic`` export, #96)
+    must refuse a stand-in rather than have a player build Tin because the preview drew Tin.
+    Counts, gauges and thicknesses are real; only the material is representative.
+
+    ``material`` is GT's unlocalized name (``"tin"``, ``"niobiumtitanium"``), which is stable across
+    locales and is what the texture manifest keys on. See docs/DOMAIN.md, "Cables and pipes".
+    """
+
+    family: PipeFamily
+    material: str = Field(min_length=1)
+    tier: str | None = None  # cables only: the voltage tier this gauge ladder is rated for
+    stand_in: bool = True
+
+
+#: Which transport family carries each commodity. One-to-one in v1, but the two are different
+#: axes (see :class:`PipeFamily`), so the mapping is stated rather than assumed by the reader.
+_FAMILY_FOR: dict[Commodity, PipeFamily] = {
+    Commodity.ITEM: PipeFamily.ITEM_PIPE,
+    Commodity.FLUID: PipeFamily.FLUID_PIPE,
+    Commodity.POWER: PipeFamily.CABLE,
+}
+
+
 class Route(StrictModel):
     """The path taken by one net. ``terminals`` pin where it meets its machines (one per net
     endpoint). For power, ``thickness_per_segment`` is required and aligns 1:1 with
-    ``segments``; for items/fluids it must be omitted."""
+    ``segments``; for items/fluids it must be omitted.
+
+    ``material`` is optional and additive: ``None`` means "unspecified pipe", which is exactly what
+    every route said before it existed, so a producer that omits it is as correct as it ever was."""
 
     net_id: str = Field(min_length=1)
     commodity: Commodity
     terminals: list[Terminal] = Field(default_factory=list)
     segments: list[Segment] = Field(default_factory=list)
     thickness_per_segment: list[int] | None = None  # power only; 1/2/4/8/12/16 per segment
+    material: RouteMaterial | None = None  # the stand-in it is drawn as; None = unspecified
 
     def cells(self) -> set[Cell]:
         """Every grid cell this route's segments touch (both endpoints of each hop). The
@@ -125,6 +162,19 @@ class Route(StrictModel):
                 raise ValueError(f"cable thickness must be one of 1/2/4/8/12/16, got {bad}")
         elif self.thickness_per_segment is not None:
             raise ValueError("thickness_per_segment is only valid on power routes")
+        if self.material is not None:
+            expected = _FAMILY_FOR[self.commodity]
+            if self.material.family is not expected:
+                raise ValueError(
+                    f"{self.commodity.value} route must be family {expected.value}, "
+                    f"got {self.material.family.value}"
+                )
+            # A tier rates a cable's gauge ladder; a pipe has no voltage, so a tier on one is a
+            # producer that filled the field in by rote rather than because it knew something.
+            if (self.material.tier is None) is (self.material.family is PipeFamily.CABLE):
+                raise ValueError("material.tier is required on cables and invalid on pipes")
+            if not self.material.stand_in:
+                raise ValueError("v1 route materials are stand-ins; stand_in must be True")
         return self
 
 

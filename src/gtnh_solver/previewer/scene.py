@@ -3,10 +3,10 @@
 The output-layout contract (``LayoutResult``) references machines by id and leaves their
 geometry in the ``InputIR``; a renderer needs it all in one place. ``build_scene`` flattens both
 into a plain dict the three.js viewer can draw with no further lookups (machine boxes, the hatches
-and buses built into each one's casing, route segments coloured by commodity + sized by cable
-thickness, terminals carrying their port and their incident segment's thickness so the
-wire->machine leads match the trunk they join, auto-output links, the region, a legend, and the
-``io`` boundary summary - inputs to load, outputs to collect, summed power). This
+and buses built into each one's casing, routes as the blocks they are built from - each cell with
+the sides that connect, its gauge and GT's real cross-section (``route_blocks``) - plus the raw
+segments and terminals behind them, auto-output links, the region, a legend, and the ``io`` boundary
+summary - inputs to load, outputs to collect, summed power). This
 is a *previewer-internal* format - NOT the versioned contract - so the un-testable
 WebGL last mile stays a thin static template while the mapping here is pure and fully tested.
 """
@@ -24,9 +24,9 @@ from gtnh_solver.ir import (
     LayoutResult,
     Machine,
     Route,
-    Terminal,
 )
-from gtnh_solver.ir.geometry import rotated_footprint
+from gtnh_solver.ir.geometry import Cell, rotated_footprint
+from gtnh_solver.route_blocks import route_cells
 from gtnh_solver.system_io import RATE_STEM, is_boundary_storage, system_io
 
 #: Bump if the scene shape the viewer template expects changes.
@@ -45,6 +45,20 @@ _MACHINE_PALETTE = (
     "#a3b18a",
     "#e29578",
     "#bc6c25",
+)
+
+
+#: three.js ``BoxGeometry`` takes its six materials in this face order. A route box's open ends are
+#: emitted as a matching six-slot list, so the viewer needs no normal lookup of its own - the same
+#: split as ``textures._GT_SIDE_TO_THREE_SLOT``, which keeps renderer detail out of ``route_blocks``
+#: (shared with the build guide, which has no idea what three.js is).
+_THREE_SLOT_NORMALS: tuple[Cell, ...] = (
+    (1, 0, 0),
+    (-1, 0, 0),
+    (0, 1, 0),
+    (0, -1, 0),
+    (0, 0, 1),
+    (0, 0, -1),
 )
 
 
@@ -130,7 +144,6 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
                 "port": t.port_id,
                 "face": t.face.value,
                 "cell": [t.cell.x, t.cell.y, t.cell.z],
-                "thickness": _terminal_thickness(route, t),
             }
             for t in route.terminals
         ]
@@ -141,6 +154,39 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
                 "color": _COMMODITY_COLOR[route.commodity],
                 "segments": segments,
                 "terminals": terminals,
+                # The blocks this route is built from, one per cell - the shape the viewer draws.
+                # Derived in ``route_blocks`` rather than in the template's JavaScript, which is
+                # where it used to live: the max-thickness rule in it is a build instruction
+                # (docs/DOMAIN.md) and the build guide has to agree with it block for block.
+                "cells": [
+                    {
+                        "cell": list(rc.cell),
+                        "dirs": [list(d) for d in sorted(rc.dirs)],
+                        "thickness": rc.thickness,
+                        # GT's own cross-section in blocks, so a 1x cable is the size it is in
+                        # game rather than a bar scaled to look right.
+                        "size": rc.thickness_blocks,
+                        # The manifest join key the texture pass resolves, and the label a build
+                        # guide prints; ``None`` when the route published no material.
+                        "block": rc.block.dataset_name,
+                        "label": rc.block.label,
+                        # The cell's GT shape: a core cube plus an arm per connection, or one box
+                        # for a straight run, none of them overlapping. Built in ``route_blocks``
+                        # because a shape assembled in the template is a shape no test can check -
+                        # and the one that was there grew its arms from the cell centre, so every
+                        # arm swallowed half the core and their faces tore against each other.
+                        "boxes": [
+                            {
+                                "center": list(b.center),
+                                "size": list(b.size),
+                                "open": [n in b.open_faces for n in _THREE_SLOT_NORMALS],
+                            }
+                            for b in rc.boxes
+                        ],
+                    }
+                    for rc in route_cells(route)
+                ],
+                "material": _scene_material(route),
             }
         )
 
@@ -210,29 +256,21 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
     }
 
 
-def _terminal_thickness(route: Route, terminal: Terminal) -> int | None:
-    """Thickness of the fattest route segment incident to ``terminal``'s cell, or ``None``.
+def _scene_material(route: Route) -> dict[str, Any] | None:
+    """The cable or pipe material this route is drawn as, for the legend's stand-in footnote.
 
-    Sizes the viewer's short lead from the terminal cell into the machine face it docks on
-    (GitHub #6): a power trunk varies in thickness along its run, so the lead should match the
-    cable that actually meets the block, not a fixed size. Power segments are single-cell hops,
-    so every terminal cell - a docked leg end or a tap on an existing trunk cell - is the start
-    or end of at least one segment; when several touch it (a mid-trunk tap), the THICKEST wins:
-    the lead feeds a machine drawing through that cell, and the fattest incident cable is what
-    visually meets the block. Item/fluid routes carry no ``thickness_per_segment``, so their
-    terminals get ``None`` and the viewer keeps its fixed-size leads.
+    Route-level, unlike ``cells[].block``, because the *identity* is one per route while the block
+    changes with the gauge. ``standIn`` rides along because a preview that draws Tin without saying
+    the material was chosen for recognisability reads as a specification (docs/DOMAIN.md).
     """
-    tps = route.thickness_per_segment
-    if tps is None:
+    if route.material is None:
         return None
-    return max(
-        (
-            thickness
-            for seg, thickness in zip(route.segments, tps, strict=True)
-            if terminal.cell in (seg.start, seg.end)
-        ),
-        default=None,
-    )
+    return {
+        "family": route.material.family.value,
+        "material": route.material.material,
+        "tier": route.material.tier,
+        "standIn": route.material.stand_in,
+    }
 
 
 def _content_bounds(

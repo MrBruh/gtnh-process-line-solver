@@ -28,6 +28,7 @@ from gtnh_solver.ir import (
 )
 from gtnh_solver.ir.geometry import Cell, occupied_cells, rotated_footprint
 from gtnh_solver.ir.nets import port_direction_map
+from gtnh_solver.route_blocks import RouteBlock, route_block_counts
 from gtnh_solver.system_io import (
     RATE_UNIT,
     BoundaryFlow,
@@ -39,10 +40,23 @@ from gtnh_solver.system_io import (
 # Single-char machine markers (upper, lower, digits = 62; covers the ~30-50 machine target).
 _MARKERS = string.ascii_uppercase + string.ascii_lowercase + string.digits
 _PIPE_CHAR = {"item": "+", "fluid": "~", "power": "="}
-_PIPE_LABEL = {"item": "item pipe", "fluid": "fluid pipe", "power": "power cable"}
+# The bill of materials no longer labels a route by commodity alone: ``route_blocks`` resolves each
+# cell to the block it is built as, which is where that wording now lives (it degrades to the same
+# "power cable" / "item pipe" when a route publishes no material).
 # The GT cover a physical pipe terminal needs, by commodity (docs/DOMAIN.md). Power cables connect
 # bare (no cover); auto-output needs none either.
 _COVER = {"item": "conveyor cover", "fluid": "pump cover"}
+
+#: Printed under the routing list whenever a block above names a stand-in material. This is the
+#: labelling half of docs/DOMAIN.md's stand-in rule: GT gives a voltage tier several cables and this
+#: solver sizes by gauge, never by material, so naming one is a choice made for recognisability.
+#: Saying so is what keeps a builder from reading "tin" as a specification.
+_STAND_IN_NOTE = (
+    "  The MATERIALS above are representative stand-ins, not a specification: GT ships several",
+    "  cable materials per voltage tier and this solver sizes by gauge, never by material. The",
+    "  counts, gauges and covers are real. See docs/DOMAIN.md before substituting - materials",
+    "  differ in amperage per wire and in loss per block.",
+)
 
 
 def build_guide(problem: InputIR, layout: LayoutResult) -> str:
@@ -81,26 +95,39 @@ def _bom(layout: LayoutResult, machines: dict[str, Machine]) -> list[str]:
         machine = machines.get(p.machine_id)
         by_type[machine.type if machine else "(unknown)"] += 1
 
-    pipe_cells: dict[str, set[Cell]] = {}
-    covers = 0
-    for r in layout.routes:
-        pipe_cells.setdefault(r.commodity.value, set()).update(r.cells())
-        if r.commodity is not Commodity.POWER:
-            covers += len(r.terminals)  # power cables connect bare; covers are item/fluid only
+    # One block per route CELL, at the gauge that meets it - not one line per commodity. A player
+    # buying cable needs the split by gauge ("4 x 2x tin cable, 1 x 1x"), because a trunk that
+    # thickens where the load sums is the normal case and a single total cannot be shopped from.
+    blocks = route_block_counts(layout)
+    covers = sum(
+        len(r.terminals) for r in layout.routes if r.commodity is not Commodity.POWER
+    )  # power cables connect bare; covers are item/fluid only
 
     lines = ["## Bill of materials", "", "Machines:"]
     lines += [f"  {n:>3}  x  {typ}" for typ, n in sorted(by_type.items())]
     lines += ["", "Routing:"]
-    if pipe_cells:
-        lines += [f"  {len(c):>3}  x  {_PIPE_LABEL[k]}" for k, c in sorted(pipe_cells.items())]
+    if blocks:
+        lines += [f"  {n:>3}  x  {_block_label(b)}" for b, n in blocks]
     else:
         lines.append("  (no pipes)")
     lines.append(f"  {covers:>3}  x  I/O cover (one per pipe terminal)")
     lines.append(
         f"  {len(layout.auto_connections):>3}  x  auto-output connection (adjacent, no pipe)"
     )
+    if any(b.stand_in for b, _ in blocks):
+        lines += ["", *_STAND_IN_NOTE]
     lines.append("")
     return lines
+
+
+def _block_label(block: RouteBlock) -> str:
+    """``"2x tin cable (cable.tin.02)"`` - the readable name plus the exact block it resolves to.
+
+    The parenthetical is GT's own unlocalized id, so a builder searching NEI (or a later
+    ``.schematic`` export) has something unambiguous to match on rather than a name this project
+    capitalised to taste. A route with no material has no id and prints the name alone.
+    """
+    return f"{block.label} ({block.dataset_name})" if block.dataset_name else block.label
 
 
 def _placement_table(layout: LayoutResult, machines: dict[str, Machine]) -> list[str]:
