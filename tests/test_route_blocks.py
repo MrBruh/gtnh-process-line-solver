@@ -39,9 +39,10 @@ from gtnh_solver.ir import (
     Segment,
     Terminal,
 )
-from gtnh_solver.ir.geometry import FACE_DELTAS
+from gtnh_solver.ir.geometry import FACE_DELTAS, FACE_OFFSETS
 from gtnh_solver.route_blocks import (
     RouteBox,
+    open_end_faces,
     route_block,
     route_block_counts,
     route_boxes,
@@ -332,12 +333,14 @@ def test_the_shape_reaches_every_connection_and_stays_inside_the_cell(route: Rou
 
 
 @given(_power_routes())
-def test_every_connection_is_an_open_end_on_exactly_one_box(route: Route) -> None:
-    """The open end is the wire core showing through the insulation. One per connection: none and
-    the run looks sealed where it joins, two and a box claims a face it does not own."""
+def test_every_open_end_is_claimed_by_exactly_one_box(route: Route) -> None:
+    """The open end is the wire core showing through the insulation. Exactly one box owns each:
+    none and the run looks sealed where it joins, two and a box claims a face it does not own.
+
+    The set is GT's normalised mask, not the raw connections - see ``open_end_faces``."""
     for rc in route_cells(route):
         claimed = [step for b in rc.boxes for step in b.open_faces]
-        assert sorted(claimed) == sorted(rc.dirs)
+        assert sorted(claimed) == sorted(open_end_faces(rc.dirs))
 
 
 def test_a_straight_run_is_one_box_through_the_block() -> None:
@@ -366,13 +369,39 @@ def test_an_elbow_is_a_core_and_two_arms_that_start_at_its_surface() -> None:
     assert _span(core, 0) == pytest.approx((0.3125, 0.6875))
 
 
-def test_a_cell_with_no_connections_is_still_its_core_cube() -> None:
+def test_a_cell_with_no_connections_is_a_cube_open_on_every_face() -> None:
     """A route can leave an isolated cell (a non-unit segment's endpoint). It is a block either way,
-    so it draws as one rather than vanishing."""
+    so it draws as one rather than vanishing - and GT draws an unconnected cable open all round,
+    which is the block you hold in your hand: ``connections == 0`` makes every side read connected
+    (``BaseMetaPipeEntity.getTextureUncovered``)."""
     boxes = route_boxes((2, 1, 4), frozenset(), 0.25)
     assert len(boxes) == 1
     assert boxes[0].size == (0.25, 0.25, 0.25)
-    assert boxes[0].open_faces == frozenset()
+    assert boxes[0].open_faces == frozenset(FACE_OFFSETS)
+
+
+def test_a_stub_shows_its_conductor_at_the_free_end() -> None:
+    """GT folds a lone connection onto its whole axis before choosing textures, so a dead-end stub
+    is open at BOTH ends - the way a cut cable hanging off a machine looks - while its geometry
+    stays a core plus one arm, because ``renderInWorld`` switches on the raw mask instead.
+    """
+    assert open_end_faces(frozenset({(1, 0, 0)})) == frozenset({(1, 0, 0), (-1, 0, 0)})
+
+    boxes = route_boxes((0, 0, 0), frozenset({(1, 0, 0)}), 0.25)
+    assert len(boxes) == 2  # a core and one arm, NOT a box through the block
+    core, arm = boxes
+    assert core.open_faces == frozenset({(-1, 0, 0)})  # the free end, uncovered by any arm
+    assert arm.open_faces == frozenset({(1, 0, 0)})
+
+
+def test_a_normal_cell_is_open_exactly_where_it_connects() -> None:
+    """The normalisation is only for the two degenerate masks; anything else is left alone."""
+    for connections in (
+        frozenset({(1, 0, 0), (-1, 0, 0)}),
+        frozenset({(1, 0, 0), (0, 0, -1)}),
+        frozenset({(1, 0, 0), (-1, 0, 0), (0, 1, 0)}),
+    ):
+        assert open_end_faces(connections) == connections
 
 
 def test_the_sand_lines_split_cell_is_a_core_and_three_arms() -> None:

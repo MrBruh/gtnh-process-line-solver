@@ -219,6 +219,31 @@ why pipe adjacency is not a silent-tap hazard for routing). It cannot be observe
 and should not be: the extractor **enumerates** the two looks GT's own inventory render uses, and
 the previewer synthesises the cross from the connection mask it derives from the route itself.
 
+**The mask is normalised before textures, but not before geometry** - the one asymmetry in the
+render, and it is deliberate. `BaseMetaPipeEntity.getTextureUncovered` folds a lone connection onto
+its whole axis (DOWN alone is textured DOWN|UP, and so on) and then calls a face an open end when
+`connections == 0 || (connections & side) != 0`, while `MetaPipeEntity.renderInWorld` switches its
+boxes on the **raw** mask. So:
+
+- a **stub** (one connection) is a core plus one arm, yet shows its conductor at the *free* end as
+  well - a cut cable hanging off a machine, not one capped in insulation;
+- a cable with **no** connections is open on all six faces: the block you hold in your hand;
+- a run of two opposite connections is one box through the block, open at both faces.
+
+**Sprites are sampled by position, not stretched.** `RenderBlocks.renderFaceXPos` and its five
+siblings take each face's UVs from the current render bounds - `getInterpolatedU(renderMinZ * 16)`,
+`getInterpolatedV(16 - renderMaxY * 16)` - so a sub-block box shows the part of the sprite belonging
+at its place inside the block, and a pipe's texture runs unbroken from core into arm. The axis pairs
+are (u, v) = (x, z) for the horizontal faces and (x or z, y) for the vertical ones. A renderer that
+maps 0..1 across every face instead draws the whole sprite squeezed onto each box, breaking the
+pattern at every joint.
+
+**The tint is a plain multiply.** `SBRContextBase.setupColor` converts the layer's RGBA to
+`channel / 255` with the alpha slot dropped entirely, then scales by a per-face constant
+`LIGHTNESS = {DOWN 0.5, UP 1.0, NORTH 0.8, SOUTH 0.8, WEST 0.6, EAST 0.6}` - vanilla's directional
+shading. There is no normalisation or brightness compensation anywhere in the path, which is what
+makes `CABLE_INSULATION`'s 64/64/64 the dark casing it looks like in game.
+
 ## Boundary storages (the adapter closes the line)
 
 A plan export names recipes and flows but not the containers at the line's edge, so the adapter

@@ -168,6 +168,56 @@ function pipeFaces(tex, open) {
   return open.map((isEnd) => (isEnd ? o : c));
 }
 
+// Minecraft does NOT stretch a sprite across a sub-block box. RenderBlocks derives each face's UVs
+// from the render bounds - `getInterpolatedU(renderMinZ * 16)` and friends - so a box shows the part
+// of the sprite that belongs at its position inside the block, and a pipe's texture therefore runs
+// continuously from its core into each arm. three.js maps 0..1 across every face instead, which
+// would draw the whole 16x16 sprite squeezed onto each box and break the pattern at every joint.
+//
+// So re-derive the UVs from each vertex's position INSIDE its cell. The per-face axis and sign are
+// read off a reference cube rather than assumed: BoxGeometry's own UVs are correct for a full block
+// (they are what the machine cubes use), so calibrating against them keeps the orientation that
+// already works and changes only the window. A full-block box therefore maps to itself exactly.
+const _UV_FACES = (() => {
+  const g = new THREE.BoxGeometry(1, 1, 1);
+  const p = g.attributes.position, n = g.attributes.normal, uv = g.attributes.uv;
+  const local = (i, a) => [p.getX(i), p.getY(i), p.getZ(i)][a] + 0.5;   // cell-local, 0..1
+  const faces = [];
+  for (let f = 0; f < 6; f++) {
+    const i0 = f * 4;
+    // Fit `coord = slope * cellLocal[axis] + offset` from a corner that moves along ONE axis only.
+    const fit = (get) => {
+      for (let j = i0 + 1; j < i0 + 4; j++) {
+        const moved = [0, 1, 2].filter((a) => Math.abs(local(j, a) - local(i0, a)) > 1e-6);
+        if (moved.length !== 1 || Math.abs(get(j) - get(i0)) < 1e-6) continue;
+        const a = moved[0], s = (get(j) - get(i0)) / (local(j, a) - local(i0, a));
+        return { axis: a, s, o: get(i0) - s * local(i0, a) };
+      }
+      return null;
+    };
+    faces.push({
+      key: [n.getX(i0), n.getY(i0), n.getZ(i0)].join(','),
+      u: fit((i) => uv.getX(i)),
+      v: fit((i) => uv.getY(i)),
+    });
+  }
+  g.dispose();
+  return faces;
+})();
+function gtBlockUVs(geo, center, cell) {
+  const p = geo.attributes.position, n = geo.attributes.normal, uv = geo.attributes.uv;
+  for (let i = 0; i < p.count; i++) {
+    const face = _UV_FACES.find(
+      (f) => f.key === [n.getX(i), n.getY(i), n.getZ(i)].join(','));
+    if (!face || !face.u || !face.v) continue;
+    const cl = [p.getX(i) + center[0] - cell[0],
+                p.getY(i) + center[1] - cell[1],
+                p.getZ(i) + center[2] - cell[2]];
+    uv.setXY(i, face.u.s * cl[face.u.axis] + face.u.o, face.v.s * cl[face.v.axis] + face.v.o);
+  }
+  uv.needsUpdate = true;
+}
+
 // The flat coloured fallback, one material per commodity colour rather than one per box.
 const _routeFlat = {};
 function routeFlat(color) {
@@ -385,9 +435,10 @@ for (const r of SCENE.routes) {
   for (const e of (r.cells || [])) {
     const y = e.cell[1];
     for (const b of e.boxes) {
-      const mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(b.size[0], b.size[1], b.size[2]),
-        pipeFaces(e.tex, b.open) || routeFlat(r.color));
+      const geo = new THREE.BoxGeometry(b.size[0], b.size[1], b.size[2]);
+      const faces = pipeFaces(e.tex, b.open);
+      if (faces) gtBlockUVs(geo, b.center, e.cell);   // sample the sprite the way Minecraft does
+      const mesh = new THREE.Mesh(geo, faces || routeFlat(r.color));
       mesh.position.set(b.center[0], b.center[1], b.center[2]);
       track(mesh, y, y);
     }

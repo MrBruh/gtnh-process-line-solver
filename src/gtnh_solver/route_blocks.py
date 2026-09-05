@@ -50,7 +50,7 @@ from gtnh_solver.dataset import (
     pipe_display_name,
 )
 from gtnh_solver.ir import Commodity, LayoutResult, Route, RouteMaterial
-from gtnh_solver.ir.geometry import FACE_DELTAS, Cell
+from gtnh_solver.ir.geometry import FACE_DELTAS, FACE_OFFSETS, Cell
 
 
 @dataclass(frozen=True)
@@ -182,21 +182,29 @@ def route_boxes(cell: Cell, dirs: frozenset[Cell], thickness_blocks: float) -> t
     the sprite over a different length.
 
     A straight run - exactly two connections, opposite each other - is one box spanning the block,
-    matching GT and sparing the commonest cell in any layout a seam that says nothing. Both of its
-    end faces are open ends; an arm's single outward face is; a core cube has none, its connected
-    faces being covered by the arms attached to them.
+    matching GT and sparing the commonest cell in any layout a seam that says nothing.
+
+    Which faces read as open ends is :func:`open_end_faces`, not simply ``dirs``: GT normalises the
+    mask first, so a stub shows its conductor at the free end and a lone block shows it all round.
     """
     center = (cell[0] + 0.5, cell[1] + 0.5, cell[2] + 0.5)
     half = thickness_blocks / 2
     ordered = sorted(dirs)
+    ends = open_end_faces(dirs)
 
     if len(ordered) == 2 and ordered[0] == tuple(-d for d in ordered[1]):
         axis = next(i for i, d in enumerate(ordered[1]) if d)
         size = [thickness_blocks, thickness_blocks, thickness_blocks]
         size[axis] = 1.0
-        return (RouteBox(center, (size[0], size[1], size[2]), frozenset(ordered)),)
+        return (RouteBox(center, (size[0], size[1], size[2]), ends),)
 
-    core = RouteBox(center, (thickness_blocks, thickness_blocks, thickness_blocks), frozenset())
+    # The core shows a face only where no arm covers it, and that face is an open end when the
+    # normalised mask says so - which is how a dead-end stub shows its conductor at the free end.
+    core = RouteBox(
+        center,
+        (thickness_blocks, thickness_blocks, thickness_blocks),
+        frozenset(ends - dirs),
+    )
     length = 0.5 - half
     if length <= 0:
         # A pipe at least a block thick already fills its cell; GT renders it as a full cube and
@@ -222,6 +230,30 @@ def route_boxes(cell: Cell, dirs: frozenset[Cell], thickness_blocks: float) -> t
             )
         )
     return tuple(boxes)
+
+
+def open_end_faces(dirs: frozenset[Cell]) -> frozenset[Cell]:
+    """Which of a cell's faces show an **open end** - GT's normalised connection mask.
+
+    ``BaseMetaPipeEntity.getTextureUncovered`` does not hand the raw mask to ``getTexture``. It
+    folds a lone connection onto its whole axis (DOWN alone is textured as DOWN|UP, and so on) and
+    then calls a face open when ``connections == 0 || (connections & side) != 0``. Two consequences
+    that the raw mask does not give, both of them GT's real look:
+
+    - a **stub** - one connection - shows its conductor at the *free* end too, the way a cut cable
+      hanging off a machine does, rather than being capped in insulation;
+    - a cable with **no** connections at all is open on all six faces, which is the lone block you
+      hold in your hand.
+
+    The geometry deliberately does not follow the same normalisation: ``renderInWorld`` switches on
+    the *raw* mask, so a stub is still a core plus one arm rather than a box through the block.
+    """
+    if not dirs:
+        return frozenset(FACE_OFFSETS)
+    if len(dirs) == 1:
+        step = next(iter(dirs))
+        return frozenset({step, (-step[0], -step[1], -step[2])})
+    return dirs
 
 
 def route_block_counts(layout: LayoutResult) -> list[tuple[RouteBlock, int]]:

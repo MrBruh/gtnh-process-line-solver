@@ -256,6 +256,7 @@ def test_render_html_wires_the_requested_viewer_features() -> None:
     assert "r.cells" in html  # routes drawn from the blocks route_blocks resolved (#4)...
     assert "e.boxes" in html  # ...as the boxes it resolved, at GT's real cross-section
     assert "b.open" in html  # ...each box's open ends coming from the scene, not decided here
+    assert "gtBlockUVs" in html  # sprites sampled at the box's position in the block, MC-style
     assert "Raycaster" in html  # hover a block -> its machine name tag
     assert 'id="nametag"' in html  # ...shown in the floating name-tag element
 
