@@ -69,6 +69,59 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The budget is a per-machine total, so no nearby cell and no re-placement can create one; it
   names the machine and what it ran out of room for.
 
+- **Routed cables and pipes render as real GT blocks, and the build guide counts them** (`#4`).
+  Routes were the last untextured geometry in the preview - flat coloured bars, sized
+  `0.09 * sqrt(thickness)`, which drew a 1x cable at roughly a third of its in-game size with the
+  wrong ladder shape besides. They now draw at GT's own cross-section, skinned with the real cable
+  and pipe sprites. Nitrobenzene's MV trunk and both bronze fluid pipes resolve; sand's LV trunk
+  does too.
+
+  **The extractor was dumping none of them.** `data/2.8.4/textures/manifest.json` carried exactly
+  **1185 gaps** reading `place threw NullPointerException`, and zero pipe entries, from two bugs
+  that had to be fixed together: the dump path placed each block in a world (a `MetaPipeEntity` is a
+  *sibling* of `MetaTileEntity` and NPEs there), and the `getTexture` overload it called returns
+  `ERROR_RENDERING` for every pipe. Fixing placement alone would have turned 1185 honest gaps into
+  1185 blocks of confident garbage. Pipes now dump from the registered prototype through the
+  `int connections` overload, which every pipe's body answers as a pure function of its own fields.
+  A re-dump: **1185 -> 0**, 1179 pipe entries, 0 isotropy failures, 0 key collisions.
+
+  **The material a route is drawn in is a labelled STAND-IN, not a build spec.** GT gives one
+  voltage tier many cable materials - at LV alone tin, lead, cobalt, zinc, soldering alloy and
+  redstone alloy all carry 32 V - and this solver sizes a cable by *gauge*, never by material, so
+  "the LV cable" is a choice rather than a fact. `dataset/pipes.py` makes that choice once (the
+  community-standard ladder, stopping at UV because above it GT ships only superconductor bare
+  wire), and every `RouteMaterial` it produces carries `stand_in=True`. The build guide prints the
+  caveat, the previewer's legend footnotes it, and a `.schematic` exporter (#96) must refuse to
+  lower one into a real block: a cable rendered in Tin when the build needs Aluminium is plausible,
+  confident and wrong, the one failure nothing downstream can detect.
+
+  **A cell incident to two gauges is built at the thicker one.** A shared trunk that splits carries
+  different summed amperage either side of the split, so one cell can meet a 2x hop and a 1x hop at
+  once (sand's cell `(2,0,1)` does). As a coloured bar that was harmless smoothing; as a real block
+  it is a build instruction, and under-sizing is what burns. The rule now lives in `docs/DOMAIN.md`
+  and is pinned by a test, where it used to live only in the viewer template's JavaScript.
+
+  **The bill of materials is shoppable.** `5 x power cable` becomes `1 x 1x tin cable
+  (cable.tin.01)` and `4 x 2x tin cable (cable.tin.02)` - split by gauge, because a trunk that
+  thickens where the load sums is two different blocks, with GT's own unlocalized id so the name is
+  matchable rather than merely readable. Counting moved from cells-per-commodity to blocks-per-cell,
+  so a terminal cell no segment touches is now charged the block it needs.
+
+  New `route_blocks.py` does the per-cell derivation for both surfaces, beside `system_io.py` and
+  for the same reason: the guide and the preview must not be able to disagree about what one layout
+  is made of. The validator re-derives each route's tier **independently**, from the machines the
+  route terminates at rather than from the router's answer (`route_material_tier_mismatch`,
+  `route_material_unknown`), which catches a route whose terminals moved without its material
+  following - something neither the contract nor the router can see.
+
+  Two things about the render are deliberate. Cable stacks bake with the tint applied **raw** rather
+  than peak-normalised: those sprites are greyscale and the multiply *is* the material, so the
+  casing normalisation both washed cables out and collapsed the dark insulated face into the bright
+  open end until the two looked alike. And an unresolvable route keeps its **flat coloured bar**,
+  never a checkerboard - a checkerboarded casing reads as "no sprite" beside the casings that have
+  one, but a checkerboarded noodle threaded through a layout reads as damage. Because the bar is a
+  correct render, the gap is reported in the texture summary instead.
+
 ### Changed
 - **Placement asks its geometry questions of the boxes, not of every cell (`ir/`, `placement/`).**
   Two predicates in the hot loop walked cell sets whose size is machine *volume*, so a solve got

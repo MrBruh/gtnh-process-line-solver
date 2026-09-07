@@ -93,6 +93,12 @@ doc as intent and reconcile.
   what to collect) and the **power-feed spec** (EU/t plus amperage per voltage tier). Pure over
   the `InputIR` + `LayoutResult`; both the build guide and the previewer read it, so the two
   render surfaces cannot drift on what crosses the line's edge.
+- **route_blocks.py** - the same trade for the line's *routing*: a `Route` is a list of hops, a
+  build is a list of blocks, and this resolves one into the other - the per-cell connection mask,
+  the gauge (a cell incident to two takes the **thicker**, docs/DOMAIN.md), and the cable/pipe it is
+  drawn as. The build guide counts those blocks and the previewer draws them. The mask used to be
+  JavaScript inside the viewer template, where the one rule in it that is a real build instruction
+  was pinned by nothing.
 - **validator/** - independent geometric + rule checks (shares rule *data* with the router,
   not its *logic*). The only automated correctness gate.
 - **buildguide/**, **previewer/**, **cli.py** - outputs and entry point. The previewer skins each

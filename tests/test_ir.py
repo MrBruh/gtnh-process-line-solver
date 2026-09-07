@@ -31,9 +31,11 @@ from gtnh_solver.ir import (
     METoggles,
     Net,
     PinnedIO,
+    PipeFamily,
     Placement,
     Port,
     Route,
+    RouteMaterial,
     Segment,
 )
 
@@ -446,6 +448,68 @@ def test_non_power_route_must_not_carry_thickness() -> None:
     segs = [Segment(start=CellCoord(x=0, y=0, z=0), end=CellCoord(x=1, y=0, z=0), channel=0)]
     with pytest.raises(ValidationError):
         Route(net_id="i", commodity=Commodity.ITEM, segments=segs, thickness_per_segment=[1])
+
+
+def _cable(**over: object) -> RouteMaterial:
+    kwargs: dict[str, object] = {"family": PipeFamily.CABLE, "material": "tin", "tier": "LV"}
+    kwargs.update(over)
+    return RouteMaterial(**kwargs)  # type: ignore[arg-type]
+
+
+def _power(material: RouteMaterial | None) -> Route:
+    return Route(net_id="p", commodity=Commodity.POWER, thickness_per_segment=[], material=material)
+
+
+def test_route_material_is_optional_and_absent_means_unspecified() -> None:
+    """The additive rule's own test: a route without one is exactly as valid as it always was.
+
+    Every hand-built ``Route`` in this suite, the golden corpus, and any layout produced before the
+    field existed rely on this - which is the argument for not bumping LAYOUT_RESULT_VERSION.
+    """
+    assert _power(None).material is None
+    assert Route(net_id="i", commodity=Commodity.ITEM).material is None
+
+
+def test_route_material_family_must_match_its_commodity() -> None:
+    assert _power(_cable()).material == _cable()
+    item = RouteMaterial(family=PipeFamily.ITEM_PIPE, material="tin")
+    assert Route(net_id="i", commodity=Commodity.ITEM, material=item).material is item
+    fluid = RouteMaterial(family=PipeFamily.FLUID_PIPE, material="bronze")
+    assert Route(net_id="f", commodity=Commodity.FLUID, material=fluid).material is fluid
+    with pytest.raises(ValidationError):  # an item pipe cannot carry power
+        _power(RouteMaterial(family=PipeFamily.ITEM_PIPE, material="tin"))
+    with pytest.raises(ValidationError):  # nor a cable items
+        Route(net_id="i", commodity=Commodity.ITEM, material=_cable())
+
+
+def test_route_material_tier_is_a_cable_fact_only() -> None:
+    """A tier rates a cable's gauge ladder. A pipe has no voltage, so a tier on one is a producer
+    filling the field in by rote rather than because it knew something."""
+    with pytest.raises(ValidationError):
+        _power(_cable(tier=None))
+    with pytest.raises(ValidationError):
+        Route(
+            net_id="i",
+            commodity=Commodity.ITEM,
+            material=RouteMaterial(family=PipeFamily.ITEM_PIPE, material="tin", tier="LV"),
+        )
+
+
+def test_route_material_must_admit_it_is_a_stand_in() -> None:
+    """v1 chooses a representative material and never claims a real one - the flag is what a
+    ``.schematic`` exporter refuses on, so a producer cannot quietly clear it."""
+    assert _power(_cable()).material is not None
+    with pytest.raises(ValidationError):
+        _power(_cable(stand_in=False))
+
+
+def test_route_material_round_trips() -> None:
+    route = _power(_cable(material="niobiumtitanium", tier="LuV"))
+    again = Route.model_validate_json(route.model_dump_json())
+    assert again.material is not None
+    assert again.material.material == "niobiumtitanium"
+    assert again.material.family is PipeFamily.CABLE
+    assert again == route
 
 
 def test_segment_channel_non_negative() -> None:

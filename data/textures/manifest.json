@@ -7,14 +7,26 @@
       "GT5-Unofficial": "5.09.51.482",
       "StructureLib": "1.4.23"
     },
-    "generated_at": "2026-07-22T21:05:21.062Z",
+    "generated_at": "2026-09-03T19:14:53.752Z",
     "extractor_sha": "unknown",
     "note": "SMALL committed manifest: only the blocks the shipped example lines and the two multiblock fixtures need - plus every hatch kind at the tiers those lines use, since a hatch matches no machine name - so `gtnh-solve --preview examples/*.json` skins out of the box. The full dump is local and version-namespaced (data/<version>/textures/manifest.json), never committed. Regenerate with tools/derive_small_manifest.py.",
     "coverage": {
-      "blocks": 52,
+      "blocks": 72,
       "mte": 46,
-      "icons": 113,
+      "icons": 126,
       "gaps": 0
+    },
+    "extractor_checks": {
+      "pipes_checked": 1179,
+      "pipe_isotropy_failures": 0,
+      "pipe_roles_differ": 558,
+      "key_collisions": 0,
+      "cable_insulation_rgba": [
+        64,
+        64,
+        64,
+        0
+      ]
     }
   },
   "asset_root": "assets/{modid}/textures/blocks/",
@@ -2955,6 +2967,312 @@
         }
       }
     },
+    "gregtech:gt.blockmachines|1246": {
+      "kind": "pipe",
+      "display_name": "cable.tin.01",
+      "source_class": "gregtech.api.metatileentity.implementations.MTECable",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:iconsets/INSULATION_FULL",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/DULL/wire",
+              "rgba": [
+                220,
+                220,
+                220,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/INSULATION_TINY",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 0.25,
+        "insulated": true,
+        "restrictive": false,
+        "voltage": 32,
+        "amps": 1,
+        "loss": 1
+      }
+    },
+    "gregtech:gt.blockmachines|1247": {
+      "kind": "pipe",
+      "display_name": "cable.tin.02",
+      "source_class": "gregtech.api.metatileentity.implementations.MTECable",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:iconsets/INSULATION_FULL",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/DULL/wire",
+              "rgba": [
+                220,
+                220,
+                220,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/INSULATION_SMALL",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 0.375,
+        "insulated": true,
+        "restrictive": false,
+        "voltage": 32,
+        "amps": 2,
+        "loss": 1
+      }
+    },
+    "gregtech:gt.blockmachines|1248": {
+      "kind": "pipe",
+      "display_name": "cable.tin.04",
+      "source_class": "gregtech.api.metatileentity.implementations.MTECable",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:iconsets/INSULATION_FULL",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/DULL/wire",
+              "rgba": [
+                220,
+                220,
+                220,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/INSULATION_MEDIUM",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 0.5,
+        "insulated": true,
+        "restrictive": false,
+        "voltage": 32,
+        "amps": 4,
+        "loss": 1
+      }
+    },
+    "gregtech:gt.blockmachines|1249": {
+      "kind": "pipe",
+      "display_name": "cable.tin.08",
+      "source_class": "gregtech.api.metatileentity.implementations.MTECable",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:iconsets/INSULATION_FULL",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/DULL/wire",
+              "rgba": [
+                220,
+                220,
+                220,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/INSULATION_MEDIUM_PLUS",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 0.625,
+        "insulated": true,
+        "restrictive": false,
+        "voltage": 32,
+        "amps": 8,
+        "loss": 1
+      }
+    },
+    "gregtech:gt.blockmachines|1250": {
+      "kind": "pipe",
+      "display_name": "cable.tin.12",
+      "source_class": "gregtech.api.metatileentity.implementations.MTECable",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:iconsets/INSULATION_FULL",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/DULL/wire",
+              "rgba": [
+                220,
+                220,
+                220,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/INSULATION_LARGE",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 0.75,
+        "insulated": true,
+        "restrictive": false,
+        "voltage": 32,
+        "amps": 12,
+        "loss": 1
+      }
+    },
+    "gregtech:gt.blockmachines|1251": {
+      "kind": "pipe",
+      "display_name": "cable.tin.16",
+      "source_class": "gregtech.api.metatileentity.implementations.MTECable",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:iconsets/INSULATION_FULL",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/DULL/wire",
+              "rgba": [
+                220,
+                220,
+                220,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/INSULATION_HUGE",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 0.875,
+        "insulated": true,
+        "restrictive": false,
+        "voltage": 32,
+        "amps": 16,
+        "loss": 1
+      }
+    },
     "gregtech:gt.blockmachines|12738": {
       "kind": "mte",
       "display_name": "Mega Distillation Tower",
@@ -4679,6 +4997,210 @@
         }
       }
     },
+    "gregtech:gt.blockmachines|1366": {
+      "kind": "pipe",
+      "display_name": "cable.copper.01",
+      "source_class": "gregtech.api.metatileentity.implementations.MTECable",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:iconsets/INSULATION_FULL",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/DULL/wire",
+              "rgba": [
+                255,
+                100,
+                0,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/INSULATION_TINY",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 0.25,
+        "insulated": true,
+        "restrictive": false,
+        "voltage": 128,
+        "amps": 1,
+        "loss": 2
+      }
+    },
+    "gregtech:gt.blockmachines|1367": {
+      "kind": "pipe",
+      "display_name": "cable.copper.02",
+      "source_class": "gregtech.api.metatileentity.implementations.MTECable",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:iconsets/INSULATION_FULL",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/DULL/wire",
+              "rgba": [
+                255,
+                100,
+                0,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/INSULATION_SMALL",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 0.375,
+        "insulated": true,
+        "restrictive": false,
+        "voltage": 128,
+        "amps": 2,
+        "loss": 2
+      }
+    },
+    "gregtech:gt.blockmachines|1368": {
+      "kind": "pipe",
+      "display_name": "cable.copper.04",
+      "source_class": "gregtech.api.metatileentity.implementations.MTECable",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:iconsets/INSULATION_FULL",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/DULL/wire",
+              "rgba": [
+                255,
+                100,
+                0,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/INSULATION_MEDIUM",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 0.5,
+        "insulated": true,
+        "restrictive": false,
+        "voltage": 128,
+        "amps": 4,
+        "loss": 2
+      }
+    },
+    "gregtech:gt.blockmachines|1369": {
+      "kind": "pipe",
+      "display_name": "cable.copper.08",
+      "source_class": "gregtech.api.metatileentity.implementations.MTECable",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:iconsets/INSULATION_FULL",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/DULL/wire",
+              "rgba": [
+                255,
+                100,
+                0,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/INSULATION_MEDIUM_PLUS",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 0.625,
+        "insulated": true,
+        "restrictive": false,
+        "voltage": 128,
+        "amps": 8,
+        "loss": 2
+      }
+    },
     "gregtech:gt.blockmachines|137": {
       "kind": "mte",
       "display_name": "Super Chest III",
@@ -4880,6 +5402,108 @@
             }
           ]
         }
+      }
+    },
+    "gregtech:gt.blockmachines|1370": {
+      "kind": "pipe",
+      "display_name": "cable.copper.12",
+      "source_class": "gregtech.api.metatileentity.implementations.MTECable",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:iconsets/INSULATION_FULL",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/DULL/wire",
+              "rgba": [
+                255,
+                100,
+                0,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/INSULATION_LARGE",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 0.75,
+        "insulated": true,
+        "restrictive": false,
+        "voltage": 128,
+        "amps": 12,
+        "loss": 2
+      }
+    },
+    "gregtech:gt.blockmachines|1371": {
+      "kind": "pipe",
+      "display_name": "cable.copper.16",
+      "source_class": "gregtech.api.metatileentity.implementations.MTECable",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:iconsets/INSULATION_FULL",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/DULL/wire",
+              "rgba": [
+                255,
+                100,
+                0,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/INSULATION_HUGE",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 0.875,
+        "insulated": true,
+        "restrictive": false,
+        "voltage": 128,
+        "amps": 16,
+        "loss": 2
       }
     },
     "gregtech:gt.blockmachines|138": {
@@ -5286,6 +5910,312 @@
             }
           ]
         }
+      }
+    },
+    "gregtech:gt.blockmachines|1426": {
+      "kind": "pipe",
+      "display_name": "cable.gold.01",
+      "source_class": "gregtech.api.metatileentity.implementations.MTECable",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:iconsets/INSULATION_FULL",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/SHINY/wire",
+              "rgba": [
+                255,
+                255,
+                30,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/INSULATION_TINY",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 0.25,
+        "insulated": true,
+        "restrictive": false,
+        "voltage": 512,
+        "amps": 3,
+        "loss": 2
+      }
+    },
+    "gregtech:gt.blockmachines|1427": {
+      "kind": "pipe",
+      "display_name": "cable.gold.02",
+      "source_class": "gregtech.api.metatileentity.implementations.MTECable",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:iconsets/INSULATION_FULL",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/SHINY/wire",
+              "rgba": [
+                255,
+                255,
+                30,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/INSULATION_SMALL",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 0.375,
+        "insulated": true,
+        "restrictive": false,
+        "voltage": 512,
+        "amps": 6,
+        "loss": 2
+      }
+    },
+    "gregtech:gt.blockmachines|1428": {
+      "kind": "pipe",
+      "display_name": "cable.gold.04",
+      "source_class": "gregtech.api.metatileentity.implementations.MTECable",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:iconsets/INSULATION_FULL",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/SHINY/wire",
+              "rgba": [
+                255,
+                255,
+                30,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/INSULATION_MEDIUM",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 0.5,
+        "insulated": true,
+        "restrictive": false,
+        "voltage": 512,
+        "amps": 12,
+        "loss": 2
+      }
+    },
+    "gregtech:gt.blockmachines|1429": {
+      "kind": "pipe",
+      "display_name": "cable.gold.08",
+      "source_class": "gregtech.api.metatileentity.implementations.MTECable",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:iconsets/INSULATION_FULL",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/SHINY/wire",
+              "rgba": [
+                255,
+                255,
+                30,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/INSULATION_MEDIUM_PLUS",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 0.625,
+        "insulated": true,
+        "restrictive": false,
+        "voltage": 512,
+        "amps": 24,
+        "loss": 2
+      }
+    },
+    "gregtech:gt.blockmachines|1430": {
+      "kind": "pipe",
+      "display_name": "cable.gold.12",
+      "source_class": "gregtech.api.metatileentity.implementations.MTECable",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:iconsets/INSULATION_FULL",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/SHINY/wire",
+              "rgba": [
+                255,
+                255,
+                30,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/INSULATION_LARGE",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 0.75,
+        "insulated": true,
+        "restrictive": false,
+        "voltage": 512,
+        "amps": 36,
+        "loss": 2
+      }
+    },
+    "gregtech:gt.blockmachines|1431": {
+      "kind": "pipe",
+      "display_name": "cable.gold.16",
+      "source_class": "gregtech.api.metatileentity.implementations.MTECable",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:iconsets/INSULATION_FULL",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/SHINY/wire",
+              "rgba": [
+                255,
+                255,
+                30,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/INSULATION_HUGE",
+              "rgba": [
+                64,
+                64,
+                64,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 0.875,
+        "insulated": true,
+        "restrictive": false,
+        "voltage": 512,
+        "amps": 48,
+        "loss": 2
       }
     },
     "gregtech:gt.blockmachines|31": {
@@ -6609,6 +7539,44 @@
         }
       }
     },
+    "gregtech:gt.blockmachines|5122": {
+      "kind": "pipe",
+      "display_name": "gt_pipe_bronze",
+      "source_class": "gregtech.api.metatileentity.implementations.MTEFluidPipe",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:materialicons/METALLIC/pipeSide",
+              "rgba": [
+                255,
+                128,
+                0,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/METALLIC/pipeMedium",
+              "rgba": [
+                255,
+                128,
+                0,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 0.5,
+        "insulated": false,
+        "restrictive": false
+      }
+    },
     "gregtech:gt.blockmachines|52": {
       "kind": "mte",
       "display_name": "Input Hatch (MV)",
@@ -7053,6 +8021,44 @@
             }
           ]
         }
+      }
+    },
+    "gregtech:gt.blockmachines|5591": {
+      "kind": "pipe",
+      "display_name": "gt_pipe_tin",
+      "source_class": "gregtech.api.metatileentity.implementations.MTEItemPipe",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:materialicons/DULL/pipeSide",
+              "rgba": [
+                220,
+                220,
+                220,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/DULL/pipeMedium",
+              "rgba": [
+                220,
+                220,
+                220,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 0.5,
+        "insulated": false,
+        "restrictive": false
       }
     },
     "gregtech:gt.blockmachines|61": {
@@ -12125,6 +13131,13 @@
     "gregtech:basicmachines/hammer/OVERLAY_TOP_GLOW": "assets/gregtech/textures/blocks/basicmachines/hammer/OVERLAY_TOP_GLOW.png",
     "gregtech:iconsets/FLUID_IN_SIGN": "assets/gregtech/textures/blocks/iconsets/FLUID_IN_SIGN.png",
     "gregtech:iconsets/FLUID_OUT_SIGN": "assets/gregtech/textures/blocks/iconsets/FLUID_OUT_SIGN.png",
+    "gregtech:iconsets/INSULATION_FULL": "assets/gregtech/textures/blocks/iconsets/INSULATION_FULL.png",
+    "gregtech:iconsets/INSULATION_HUGE": "assets/gregtech/textures/blocks/iconsets/INSULATION_HUGE.png",
+    "gregtech:iconsets/INSULATION_LARGE": "assets/gregtech/textures/blocks/iconsets/INSULATION_LARGE.png",
+    "gregtech:iconsets/INSULATION_MEDIUM": "assets/gregtech/textures/blocks/iconsets/INSULATION_MEDIUM.png",
+    "gregtech:iconsets/INSULATION_MEDIUM_PLUS": "assets/gregtech/textures/blocks/iconsets/INSULATION_MEDIUM_PLUS.png",
+    "gregtech:iconsets/INSULATION_SMALL": "assets/gregtech/textures/blocks/iconsets/INSULATION_SMALL.png",
+    "gregtech:iconsets/INSULATION_TINY": "assets/gregtech/textures/blocks/iconsets/INSULATION_TINY.png",
     "gregtech:iconsets/ITEM_IN_SIGN": "assets/gregtech/textures/blocks/iconsets/ITEM_IN_SIGN.png",
     "gregtech:iconsets/ITEM_OUT_SIGN": "assets/gregtech/textures/blocks/iconsets/ITEM_OUT_SIGN.png",
     "gregtech:iconsets/MACHINE_BRONZEPLATEDBRICKS": "assets/gregtech/textures/blocks/iconsets/MACHINE_BRONZEPLATEDBRICKS.png",
@@ -12211,6 +13224,12 @@
     "gregtech:iconsets/OVERLAY_TOP_STEAM_HAMMER_ACTIVE": "assets/gregtech/textures/blocks/iconsets/OVERLAY_TOP_STEAM_HAMMER_ACTIVE.png",
     "gregtech:iconsets/OVERLAY_TOP_STEAM_HAMMER_ACTIVE_GLOW": "assets/gregtech/textures/blocks/iconsets/OVERLAY_TOP_STEAM_HAMMER_ACTIVE_GLOW.png",
     "gregtech:iconsets/OVERLAY_TOP_STEAM_HAMMER_GLOW": "assets/gregtech/textures/blocks/iconsets/OVERLAY_TOP_STEAM_HAMMER_GLOW.png",
+    "gregtech:materialicons/DULL/pipeMedium": "assets/gregtech/textures/blocks/materialicons/DULL/pipeMedium.png",
+    "gregtech:materialicons/DULL/pipeSide": "assets/gregtech/textures/blocks/materialicons/DULL/pipeSide.png",
+    "gregtech:materialicons/DULL/wire": "assets/gregtech/textures/blocks/materialicons/DULL/wire.png",
+    "gregtech:materialicons/METALLIC/pipeMedium": "assets/gregtech/textures/blocks/materialicons/METALLIC/pipeMedium.png",
+    "gregtech:materialicons/METALLIC/pipeSide": "assets/gregtech/textures/blocks/materialicons/METALLIC/pipeSide.png",
+    "gregtech:materialicons/SHINY/wire": "assets/gregtech/textures/blocks/materialicons/SHINY/wire.png",
     "miscutils:TileEntities/MACHINE_CASING_STABLE_TANTALLOY61": "assets/miscutils/textures/blocks/TileEntities/MACHINE_CASING_STABLE_TANTALLOY61.png",
     "miscutils:iconsets/controllerFaces/chemicalPlant": "assets/miscutils/textures/blocks/iconsets/controllerFaces/chemicalPlant.png",
     "miscutils:iconsets/controllerFaces/chemicalPlantActive": "assets/miscutils/textures/blocks/iconsets/controllerFaces/chemicalPlantActive.png",

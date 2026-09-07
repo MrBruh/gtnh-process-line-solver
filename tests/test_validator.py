@@ -14,6 +14,8 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from gtnh_solver.adapter import adapt_file
+from gtnh_solver.dataset import load_physical_dataset
 from gtnh_solver.ir import (
     AutoConnection,
     CellBox,
@@ -30,13 +32,16 @@ from gtnh_solver.ir import (
     METoggles,
     Net,
     PinnedIO,
+    PipeFamily,
     PlacedHatch,
     Placement,
     Port,
     Route,
+    RouteMaterial,
     Segment,
     Terminal,
 )
+from gtnh_solver.solver import solve
 from gtnh_solver.validator import ValidationReport, validate
 from gtnh_solver.validator.report import ViolationCode
 
@@ -1517,3 +1522,65 @@ def test_out_of_bounds_detected_iff_machine_outside_region(region: int, x: int) 
     in_bounds = 0 <= x < region
     has_oob = ViolationCode.MACHINE_OUT_OF_BOUNDS in validate(problem, layout).codes()
     assert has_oob is not in_bounds
+
+
+# ------------------------------------------------------------------------------------------------
+# Route material: the gate re-derives the stand-in from the layout, not from the router (#4)
+# ------------------------------------------------------------------------------------------------
+
+
+def _sand_power_layout() -> tuple[InputIR, LayoutResult]:
+    """A solved sand line - the smallest real layout that publishes a cable material."""
+    problem = adapt_file("examples/gtnh-sand.json", physical=load_physical_dataset())
+    return problem, solve(problem, optimize=False)
+
+
+def _codes(problem: InputIR, layout: LayoutResult) -> set[ViolationCode]:
+    return {v.code for v in validate(problem, layout).violations}
+
+
+def _with_material(layout: LayoutResult, material: RouteMaterial | None) -> LayoutResult:
+    power = next(r for r in layout.routes if r.commodity is Commodity.POWER)
+    others = [r for r in layout.routes if r is not power]
+    return layout.model_copy(
+        update={"routes": [*others, power.model_copy(update={"material": material})]}
+    )
+
+
+def test_a_real_solve_publishes_a_material_the_validator_accepts() -> None:
+    problem, layout = _sand_power_layout()
+    power = next(r for r in layout.routes if r.commodity is Commodity.POWER)
+    assert power.material is not None
+    assert power.material.material == "tin"
+    assert power.material.tier == "LV"
+    assert not _codes(problem, layout) & {
+        ViolationCode.ROUTE_MATERIAL_TIER_MISMATCH,
+        ViolationCode.ROUTE_MATERIAL_UNKNOWN,
+    }
+
+
+def test_no_material_is_not_a_violation() -> None:
+    """``None`` is what every route said before the field existed, so it stays valid - otherwise
+    the golden corpus and every hand-built Route in this suite would start failing."""
+    problem, layout = _sand_power_layout()
+    assert not _codes(problem, _with_material(layout, None)) & {
+        ViolationCode.ROUTE_MATERIAL_TIER_MISMATCH,
+        ViolationCode.ROUTE_MATERIAL_UNKNOWN,
+    }
+
+
+def test_a_cable_rated_for_the_wrong_tier_is_caught() -> None:
+    """The check with teeth: the tier is re-derived from the machines the route terminates at, so a
+    route whose terminals moved without its material following is caught even though the router and
+    the contract both think it is fine."""
+    problem, layout = _sand_power_layout()
+    hv = RouteMaterial(family=PipeFamily.CABLE, material="gold", tier="HV")
+    assert ViolationCode.ROUTE_MATERIAL_TIER_MISMATCH in _codes(problem, _with_material(layout, hv))
+
+
+def test_an_invented_material_is_caught() -> None:
+    """A cable drawn in a material outside the policy is the unrecoverable failure - plausible,
+    confident and wrong - so the gate refuses it rather than trusting the producer."""
+    problem, layout = _sand_power_layout()
+    invented = RouteMaterial(family=PipeFamily.CABLE, material="cobalt", tier="LV")
+    assert ViolationCode.ROUTE_MATERIAL_UNKNOWN in _codes(problem, _with_material(layout, invented))

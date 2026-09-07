@@ -37,13 +37,18 @@ import com.google.gson.JsonPrimitive;
 import cpw.mods.fml.common.registry.FMLControlledNamespacedRegistry;
 import cpw.mods.fml.common.registry.GameData;
 import gregtech.api.GregTechAPI;
+import gregtech.api.enums.Dyes;
 import gregtech.api.enums.Textures;
 import gregtech.api.interfaces.IIconContainer;
 import gregtech.api.interfaces.ITexture;
+import gregtech.api.interfaces.metatileentity.IConnectable;
 import gregtech.api.interfaces.metatileentity.IMetaTileEntity;
 import gregtech.api.interfaces.tileentity.IGregTechTileEntity;
 import gregtech.api.metatileentity.BaseMetaTileEntity;
+import gregtech.api.metatileentity.MetaPipeEntity;
 import gregtech.api.metatileentity.implementations.MTEBasicMachine;
+import gregtech.api.metatileentity.implementations.MTECable;
+import gregtech.api.metatileentity.implementations.MTEItemPipe;
 
 /**
  * The texture pass, v2 (lane 6 v2, issue #79). Emits the <b>layered</b> texture manifest (plan
@@ -111,6 +116,15 @@ final class TextureDumper {
         this.world = world;
     }
 
+    // Self-check tallies for provenance.extractor_checks. There is no Java test rig, so the run
+    // reports on itself: a dump whose pipes are not isotropic, or whose two roles never differ, is
+    // one whose output must not be trusted.
+    private int pipeIsotropyChecked;
+    private int pipeIsotropyFailures;
+    private int pipeRolesDiffer;
+    private int keyCollisions;
+    private short[] cableInsulationRgba = new short[] { -1, -1, -1, -1 };
+
     /** One resolved texture layer: iconset name, RGBA multiply (r,g,b,a 0-255), and the glow flag. */
     private static final class Layer {
 
@@ -141,6 +155,36 @@ final class TextureDumper {
         }
     }
 
+    /**
+     * A cable or pipe's own shape and its two distinguishable looks.
+     *
+     * <p>A pipe is not a cube, and its appearance is keyed on the CONNECTION MASK rather than on
+     * the inactive/active axis every other block uses - so it cannot be described by {@code sides}
+     * alone without overloading a field whose values mean something else. The mask is player state
+     * (wire cutter, soldering iron), so this ENUMERATES the two looks GT's own inventory render
+     * uses instead of observing one: the barrel a face shows along a run, and the bore an open end
+     * shows. The previewer synthesises the geometry from the mask it already computes for itself.
+     */
+    private static final class PipeInfo {
+
+        final float thickness;
+        final boolean insulated;
+        final boolean restrictive;
+        final long voltage;    // cables only; 0 elsewhere
+        final long amperage;   // cables only; 0 elsewhere
+        final long loss;       // cables only; 0 elsewhere
+
+        PipeInfo(float thickness, boolean insulated, boolean restrictive, long voltage, long amperage,
+            long loss) {
+            this.thickness = thickness;
+            this.insulated = insulated;
+            this.restrictive = restrictive;
+            this.voltage = voltage;
+            this.amperage = amperage;
+            this.loss = loss;
+        }
+    }
+
     /** A manifest block entry: its kind, display name (MTEs), source class, and per-side/state layers. */
     private static final class Entry {
 
@@ -149,6 +193,7 @@ final class TextureDumper {
         final String sourceClass;
         // side name -> state ("inactive"/"active") -> ordered layer list
         final Map<String, Map<String, List<Layer>>> sides = new TreeMap<>();
+        PipeInfo pipe;  // cables and pipes only; null for every other block
 
         Entry(String kind, String displayName, String sourceClass) {
             this.kind = kind;
@@ -167,6 +212,8 @@ final class TextureDumper {
         populateIconNames();
         verifyCasingTable();
         enumerateBasicMachineOverlays();
+
+        checkCableInsulation();
 
         Map<String, Entry> blocks = new TreeMap<>();
         int mteStacks = dumpMetaTileEntities(blocks);
@@ -373,8 +420,26 @@ final class TextureDumper {
             return 0;
         }
         String key = nameObj + "|" + id;
-        Entry entry = new Entry("mte", safeName(imte), imte.getClass().getName());
 
+        // A cable or pipe is never placed - see pipeEntry. This branch has to come BEFORE the
+        // placement path below, which is what files the 1185 NullPointerException gaps today.
+        //
+        // Its kind is "pipe", NOT "mte", and that is load-bearing rather than cosmetic: the
+        // previewer indexes every mte entry's display name for machine lookup
+        // (previewer/textures.py, _mte_by_name) and resolves a machine type through a normalizing
+        // fallback ladder. Adding ~950 cable and pipe names to that index would give an unresolved
+        // machine a chance to fuzzy-match a cable and render as one - a confident wrong sprite,
+        // which docs/dataset-extraction/texture-resolution.md names as the unrecoverable failure.
+        if (imte instanceof MetaPipeEntity) {
+            Entry pipe = new Entry("pipe", safeName(imte), imte.getClass().getName());
+            int pipeStacks = pipeEntry((MetaPipeEntity) imte, pipe, nameObj.toString(), id);
+            if (pipeStacks > 0) {
+                blocks.put(key, pipe);
+            }
+            return pipeStacks;
+        }
+
+        Entry entry = new Entry("mte", safeName(imte), imte.getClass().getName());
         boolean basic = imte instanceof MTEBasicMachine;
         // Non-basic MTEs (hulls/hatches) read their layers off a live getTexture, so place ONCE and
         // reuse the base TE for all 12 side/state queries instead of re-placing per query.
@@ -478,6 +543,198 @@ final class TextureDumper {
             if (side == 0 && active) {
                 gaps.add(new Gap(registryName, id, "all", "getTexture threw " + t.getClass().getSimpleName()));
             }
+            return null;
+        }
+    }
+
+    /**
+     * Fill a cable or pipe's entry from the REGISTERED PROTOTYPE, placing no block at all.
+     *
+     * <p>Two bugs meet here and both have to move together. {@link #place} hardcodes block metadata
+     * 0, but GT picks the tile-entity CLASS from that metadata and a pipe needs 4-11 to get a
+     * {@code BaseMetaPipeEntity}; the mismatch throws inside {@code setMetaTileEntity}, which is why
+     * every cable and pipe in the pack came out as a gap. And {@link #getTextureLayers} calls the
+     * {@code ForgeDirection facing} overload, which {@code MetaPipeEntity} answers with
+     * {@code ERROR_RENDERING} because pipes override only the {@code int connections} one - so
+     * fixing placement alone would have turned honest gaps into confident garbage.
+     *
+     * <p>Placement is unnecessary in the first place: every pipe {@code getTexture} body is a pure
+     * function of its own fields and arguments, and none dereferences the tile entity, so a null
+     * base is safe. {@code getThickness()} is server-safe for the same kind of reason - it
+     * short-circuits on {@code isClientSide()} before it can reach the client proxy.
+     *
+     * <p>Material is read through {@code getTexture} and never off {@code mMaterial}: GT++ pipes
+     * pass that up as null, so a field read would NPE on every one of them.
+     */
+    private int pipeEntry(MetaPipeEntity pipe, Entry entry, String registryName, int id) {
+        // A straight run along the Z axis: its two Z faces are open ends and the other four are
+        // barrel, which is the pair of looks GT's own inventory render uses.
+        final int mask = IConnectable.CONNECTED_NORTH | IConnectable.CONNECTED_SOUTH;
+        // Every side is queried in BOTH roles so isotropy is checked rather than assumed. A cable
+        // is meant to carry one sprite on all six faces - that is what lets the manifest collapse
+        // the side axis to "all" and the previewer synthesise the cross from its own connection
+        // mask. If some addon pipe is not isotropic, saying so is the whole point of asking.
+        List<List<Layer>> open = new ArrayList<>();
+        List<List<Layer>> closed = new ArrayList<>();
+        for (int side = 0; side < 6; side++) {
+            ForgeDirection dir = ForgeDirection.getOrientation(side);
+            open.add(pipeFace(pipe, dir, mask, true, registryName, id));
+            closed.add(pipeFace(pipe, dir, mask, false, registryName, id));
+        }
+        if (isBlank(open.get(0)) && isBlank(closed.get(0))) {
+            gaps.add(new Gap(registryName, id, "all",
+                "pipe resolved no layer (" + safeName(pipe) + "; last: " + lastIconError + ")"));
+            return 0;
+        }
+        float thickness;
+        try {
+            thickness = pipe.getThickness();
+        } catch (Throwable t) {
+            gaps.add(new Gap(registryName, id, "all", "getThickness threw " + t.getClass().getSimpleName()));
+            return 0;
+        }
+        entry.pipe = pipeInfo(pipe, thickness);
+        pipeIsotropyChecked++;
+        if (isotropic(open) && isotropic(closed)) {
+            entry.sides.put("all", roles(open.get(0), closed.get(0)));
+        } else {
+            // Loud, never silently wrong: write it per side and file a gap. The previewer's route
+            // lookup passes the literal "all", so a per-side entry resolves nothing there and the
+            // route degrades to its honest flat bar instead of drawing one face's sprite on six.
+            pipeIsotropyFailures++;
+            gaps.add(new Gap(registryName, id, "all",
+                "pipe is not isotropic (" + safeName(pipe) + "); written per side"));
+            for (int side = 0; side < 6; side++) {
+                Map<String, List<Layer>> perRole = roles(open.get(side), closed.get(side));
+                if (!perRole.isEmpty()) {
+                    entry.sides.put(SIDE_NAMES[side], perRole);
+                }
+            }
+        }
+        // The open-end argument must actually change the answer. If every cable agrees on both
+        // roles, GT is not honouring the fifth boolean and the whole dump is confident garbage -
+        // exactly what fixing placement alone would have produced.
+        if (!isBlank(open.get(0)) && !isBlank(closed.get(0)) && !sameLayers(open.get(0), closed.get(0))) {
+            pipeRolesDiffer++;
+        }
+        int stacks = 0;
+        for (Map<String, List<Layer>> perRole : entry.sides.values()) {
+            stacks += perRole.size();
+        }
+        return stacks;
+    }
+
+    /**
+     * Read and record {@code Dyes.CABLE_INSULATION}, the tint every insulated cable's outer layer
+     * is multiplied by.
+     *
+     * <p>Its 64/64/64 default is built from {@code Client.colorModulation} in an enum initializer,
+     * and nothing had ever confirmed that runs on a DEDICATED server. If it reads 0/0/0 the dump
+     * records black insulation for the entire pack - plausible, confident and wrong, which is the
+     * one failure mode nothing downstream can detect. So read it once, log it, and file a gap when
+     * it is black. Recorded rather than fatal, because this dumper's rule is to fail loud per item
+     * and never abort the run.
+     */
+    private void checkCableInsulation() {
+        try {
+            cableInsulationRgba = Dyes.CABLE_INSULATION.mRGBa;
+        } catch (Throwable t) {
+            gaps.add(new Gap("gregtech:dyes", -1, "all",
+                "Dyes.CABLE_INSULATION unreadable: " + t.getClass().getSimpleName()));
+            return;
+        }
+        short[] rgba = cableInsulationRgba;
+        LOG.info("gtnh-extractor: Dyes.CABLE_INSULATION = [{}, {}, {}, {}]", rgba[0], rgba[1], rgba[2],
+            rgba[3]);
+        if (rgba[0] == 0 && rgba[1] == 0 && rgba[2] == 0) {
+            LOG.error("gtnh-extractor: CABLE_INSULATION is black; every insulated cable would be wrong");
+            gaps.add(new Gap("gregtech:dyes", -1, "all",
+                "Dyes.CABLE_INSULATION read as 0/0/0 - insulated cable layers are not trustworthy"));
+        }
+    }
+
+    /**
+     * The plain-block pass's entry for {@code registry|meta}, which never merges onto an MTE's.
+     *
+     * <p>MTE ids and block metas share one {@code <registry>|<meta>} key namespace (issue #102),
+     * with no live collisions today - but the cable and pipe ids this pass now emits land in the
+     * 1200-5800 band, which is precisely what turns that latent ambiguity live. A
+     * {@code computeIfAbsent} would quietly staple a plain block's sides onto a cable's entry and
+     * nothing downstream could tell the difference. On a collision the plain data goes to a
+     * DETACHED entry that never reaches the manifest: the MTE keeps its key, and the gap says what
+     * was dropped.
+     */
+    private Entry plainEntry(Map<String, Entry> blocks, String registryName, int meta, Block block) {
+        String key = registryName + "|" + meta;
+        Entry existing = blocks.get(key);
+        if (existing != null && !"block".equals(existing.kind)) {
+            keyCollisions++;
+            gaps.add(new Gap(registryName, meta, "all",
+                "key collides with the " + existing.kind + " entry '" + existing.displayName
+                    + "' (issue #102); plain block dropped"));
+            return new Entry("block", null, block.getClass().getName());
+        }
+        return blocks.computeIfAbsent(key, k -> new Entry("block", null, block.getClass().getName()));
+    }
+
+    /** The ratings the material policy is derived from; never reads {@code mMaterial} (null on GT++). */
+    private PipeInfo pipeInfo(MetaPipeEntity pipe, float thickness) {
+        if (pipe instanceof MTECable) {
+            MTECable cable = (MTECable) pipe;
+            return new PipeInfo(thickness, cable.mInsulated, false, cable.mVoltage, cable.mAmperage,
+                cable.mCableLossPerMeter);
+        }
+        boolean restrictive = pipe instanceof MTEItemPipe && ((MTEItemPipe) pipe).mIsRestrictive;
+        return new PipeInfo(thickness, false, restrictive, 0L, 0L, 0L);
+    }
+
+    /** The two roles of one face, omitting either if it resolved to nothing. */
+    private static Map<String, List<Layer>> roles(List<Layer> open, List<Layer> closed) {
+        Map<String, List<Layer>> perRole = new TreeMap<>();
+        if (!isBlank(open)) {
+            perRole.put("open", open);
+        }
+        if (!isBlank(closed)) {
+            perRole.put("closed", closed);
+        }
+        return perRole;
+    }
+
+    private static boolean isBlank(List<Layer> layers) {
+        return layers == null || layers.isEmpty();
+    }
+
+    /**
+     * Whether all six sides resolved to the same stack.
+     *
+     * <p>Null-tolerant on purpose: {@link #pipeFace} answers null when {@code getTexture} throws,
+     * and a side that failed is not the same as a side that resolved, so the two must not compare
+     * equal. {@link #sameLayers} itself assumes both stacks exist.
+     */
+    private static boolean isotropic(List<List<Layer>> perSide) {
+        List<Layer> first = perSide.get(0);
+        for (int i = 1; i < perSide.size(); i++) {
+            List<Layer> other = perSide.get(i);
+            if (isBlank(first) != isBlank(other)) {
+                return false;
+            }
+            if (!isBlank(first) && !sameLayers(first, other)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** One face of a pipe at a given connection mask, via the {@code int connections} overload. */
+    private List<Layer> pipeFace(MetaPipeEntity pipe, ForgeDirection side, int connections, boolean openEnd,
+        String registryName, int id) {
+        try {
+            // Null base: safe here and only here, because a pipe's getTexture never dereferences it.
+            ITexture[] layers = pipe.getTexture(null, side, connections, -1, openEnd, false);
+            return layers == null ? null : describeAll(layers, side.ordinal());
+        } catch (Throwable t) {
+            gaps.add(new Gap(registryName, id, side.name(),
+                "pipe getTexture threw " + t.getClass().getSimpleName()));
             return null;
         }
     }
@@ -771,9 +1028,7 @@ final class TextureDumper {
             }
             uniform &= perSide[side].iconName.equals(perSide[0].iconName);
         }
-        Entry entry = blocks.computeIfAbsent(
-            registryName + "|" + meta,
-            k -> new Entry("block", null, block.getClass().getName()));
+        Entry entry = plainEntry(blocks, registryName, meta, block);
         if (uniform) {
             entry.sides.put("all", singleLayerState(perSide[0], tint));
         } else {
@@ -974,8 +1229,23 @@ final class TextureDumper {
     private static String safeName(IMetaTileEntity imte) {
         try {
             String n = imte.getLocalName();
-            if (n != null && !n.trim().isEmpty()) {
+            // "Unknown" is not a name. IMetaTileEntity.getLocalName() has a DEFAULT that returns
+            // the translation of "GT5U.gui.title.unknown"; MetaTileEntity overrides it but
+            // MetaPipeEntity does not, so every cable and pipe in the pack arrives here with a
+            // non-empty string that says nothing. The old guard only rejected empty.
+            if (n != null && !n.trim().isEmpty() && !"Unknown".equals(n.trim())) {
                 return n;
+            }
+        } catch (Throwable ignored) {
+            // fall through
+        }
+        // The unlocalized name ("cableGt02Tin"), which is a better key than a display name anyway:
+        // stable across locales, and it carries the material and the gauge that the material policy
+        // has to join on.
+        try {
+            String meta = imte.getMetaName();
+            if (meta != null && !meta.trim().isEmpty()) {
+                return meta;
             }
         } catch (Throwable ignored) {
             // fall through
@@ -1033,10 +1303,8 @@ final class TextureDumper {
                     // A werkstoff casing stores neither icon nor name; its sprite is recomputed.
                     NamedIcon computed = werkstoffCasingIcon(registryName, meta);
                     if (computed != null) {
-                        blocks.computeIfAbsent(
-                            registryName + "|" + meta,
-                            k -> new Entry("block", null, block.getClass().getName()))
-                            .sides.put("all", singleLayerState(computed, werkstoffTint(meta)));
+                        plainEntry(blocks, registryName, meta, block).sides
+                            .put("all", singleLayerState(computed, werkstoffTint(meta)));
                         stacks++;
                         continue;
                     }
@@ -1052,9 +1320,7 @@ final class TextureDumper {
                     gaps.add(new Gap(registryName, meta, "all", why));
                     continue;
                 }
-                Entry entry = blocks.computeIfAbsent(
-                    registryName + "|" + meta,
-                    k -> new Entry("block", null, block.getClass().getName()));
+                Entry entry = plainEntry(blocks, registryName, meta, block);
                 entry.sides.put("all", singleLayerState(icon));
                 stacks++;
             }
@@ -1179,9 +1445,7 @@ final class TextureDumper {
         Map<String, List<Layer>> active = accessor.perSide
             ? textureAccessorLayers(block, accessor, meta + ACTIVE_META_OFFSET)
             : null;
-        Entry entry = blocks.computeIfAbsent(
-            registryName + "|" + meta,
-            k -> new Entry("block", null, block.getClass().getName()));
+        Entry entry = plainEntry(blocks, registryName, meta, block);
         for (Map.Entry<String, List<Layer>> side : inactive.entrySet()) {
             Map<String, List<Layer>> perState = new TreeMap<>();
             perState.put("inactive", side.getValue());
@@ -1523,9 +1787,7 @@ final class TextureDumper {
                 sides.put(SIDE_NAMES[side], singleLayerState(icon));
             }
         }
-        Entry entry = blocks.computeIfAbsent(
-            registryName + "|" + meta,
-            k -> new Entry("block", null, block.getClass().getName()));
+        Entry entry = plainEntry(blocks, registryName, meta, block);
         entry.sides.putAll(sides);
         return true;
     }
@@ -1763,6 +2025,19 @@ final class TextureDumper {
         coverage.addProperty("icons", icons.size());
         coverage.addProperty("gaps", gaps.size());
         provenance.add("coverage", coverage);
+        // The run reports on itself: there is no Java test rig, so these are what a reviewer (and
+        // the Python manifest gate) reads to decide whether this dump can be trusted.
+        JsonObject checks = new JsonObject();
+        checks.addProperty("pipes_checked", pipeIsotropyChecked);
+        checks.addProperty("pipe_isotropy_failures", pipeIsotropyFailures);
+        checks.addProperty("pipe_roles_differ", pipeRolesDiffer);
+        checks.addProperty("key_collisions", keyCollisions);
+        JsonArray insulation = new JsonArray();
+        for (short channel : cableInsulationRgba) {
+            insulation.add(new JsonPrimitive(channel));
+        }
+        checks.add("cable_insulation_rgba", insulation);
+        provenance.add("extractor_checks", checks);
         root.add("provenance", provenance);
 
         root.addProperty("asset_root", "assets/{modid}/textures/blocks/");
@@ -1787,6 +2062,18 @@ final class TextureDumper {
                 sidesJson.add(side.getKey(), statesJson);
             }
             bj.add("sides", sidesJson);
+            if (entry.pipe != null) {
+                JsonObject pipeJson = new JsonObject();
+                pipeJson.addProperty("thickness", entry.pipe.thickness);
+                pipeJson.addProperty("insulated", entry.pipe.insulated);
+                pipeJson.addProperty("restrictive", entry.pipe.restrictive);
+                if (entry.pipe.voltage > 0) {
+                    pipeJson.addProperty("voltage", entry.pipe.voltage);
+                    pipeJson.addProperty("amps", entry.pipe.amperage);
+                    pipeJson.addProperty("loss", entry.pipe.loss);
+                }
+                bj.add("pipe", pipeJson);
+            }
             blocksJson.add(e.getKey(), bj);
         }
         root.add("blocks", blocksJson);

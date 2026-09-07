@@ -154,6 +154,12 @@ Route
   terminals: [Terminal]                  # where the route meets each machine endpoint (covers ride here)
   segments: [Segment]                    # cell-path; lowered to blocks only at export
   thickness_per_segment: [int] | null    # power only (else null); 1/2/4/8/12/16, summed amperage
+  material: RouteMaterial | null         # the STAND-IN it is drawn as; null = unspecified pipe
+RouteMaterial
+  family: "cable" | "fluid_pipe" | "item_pipe"   # must match commodity (cable<->power, ...)
+  material: str                          # GT's unlocalized name ("tin"); the manifest keys on it
+  tier: str | null                       # cables only (required); the voltage tier the gauge rates
+  stand_in: bool                         # always true in v1 - representative, NOT a build spec
 Terminal    { machine_id, port_id, face: Facing, cell: CellCoord }  # non-front face; cell just outside
 PlacedHatch { machine_id, kind: str, cell: CellCoord, facing: Facing, port_id: str | null }
               # cell is the BODY cell the hatch replaces, inside the footprint - not the dock

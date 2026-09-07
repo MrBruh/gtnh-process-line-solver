@@ -30,6 +30,16 @@ from .multiblocks import (
     load_physical_dataset,
     to_physical,
 )
+from .pipes import (
+    CABLE_MATERIAL_BY_TIER,
+    CABLE_THICKNESS_BLOCKS,
+    DEFAULT_PIPE_SIZE,
+    DEFAULT_PIPE_THICKNESS_BLOCKS,
+    PIPE_MATERIAL,
+    cable_display_name,
+    pipe_display_name,
+    route_material,
+)
 from .roots import DEFAULT_DATA, list_versions, resolve_dataset_path
 from .schema import (
     SCHEMA_VERSION,
@@ -61,6 +71,15 @@ from .voltage import (
 )
 
 __all__ = [  # noqa: RUF022 - grouped by submodule, not alphabetized
+    # cable / pipe stand-in policy
+    "CABLE_MATERIAL_BY_TIER",
+    "CABLE_THICKNESS_BLOCKS",
+    "DEFAULT_PIPE_SIZE",
+    "DEFAULT_PIPE_THICKNESS_BLOCKS",
+    "PIPE_MATERIAL",
+    "cable_display_name",
+    "pipe_display_name",
+    "route_material",
     # voltage / power sizing
     "CABLE_LOSS_PER_BLOCK",
     "CABLE_THICKNESSES",

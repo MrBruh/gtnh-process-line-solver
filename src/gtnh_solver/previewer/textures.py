@@ -10,10 +10,19 @@ and embedded as a ``data:`` URI. A single stretched casing box over the whole mu
 the v1 defect this replaces (principle 6): it erased the coils, glass, and hatch faces that make a
 layout readable.
 
+**Routes are skinned the same way** (#4). A cable or pipe is materially isotropic - one sprite on
+all six faces, its shape coming from geometry - so it needs only the two looks GT itself draws: the
+**open end** the cable runs out of (the wire core plus its insulation ring) and the **closed** face
+it does not (solid insulation, or the pipe's barrel). Two bakes per block, shared by every cell of
+that gauge, riding the same icon fetch and the same pool as the machine faces.
+
 The pipeline is pure and unit-tested end to end given PNG *bytes*; the 135 MB jar fetch is the one
 untested shim (:mod:`.jar`), injected as ``png_provider``. **Graceful degradation is the contract**:
 a machine with no committed doc, or whose blocks all fail to resolve, keeps its flat placeholder box;
-a single unresolved face on an otherwise-textured cube draws the missing-texture checkerboard. Nothing
+a single unresolved face on an otherwise-textured cube draws the missing-texture checkerboard. A
+route degrades differently and deliberately: an unresolved cable keeps its **flat coloured bar**,
+never a checkerboard. A checkerboarded casing reads as "this block has no sprite" against the blocks
+around it that do; a checkerboarded noodle threaded through a layout reads as damage. Nothing
 here raises on a miss, and a Pillow-less install (no ``preview`` extra) degrades the whole pass to
 placeholders rather than failing. PNGs are LGPL and never committed; they are fetched at preview
 time and embedded only in the emitted HTML.
@@ -53,6 +62,17 @@ PngProvider = Callable[[Mapping[str, str]], dict[str, bytes]]
 #: GT/Minecraft ForgeDirection face order: 0 down (-Y), 1 up (+Y), 2 north (-Z), 3 south (+Z),
 #: 4 west (-X), 5 east (+X). The manifest keys per-side layers by these names.
 _SIDE_NAMES = ("DOWN", "UP", "NORTH", "SOUTH", "WEST", "EAST")
+
+#: The two looks a cable or pipe has, which is GT's own axis for them: the face an open end shows
+#: (``materialicons/<SET>/wire`` plus ``INSULATION_<size>`` on a cable, the bore sprite on a pipe)
+#: and the face a closed side shows (``INSULATION_FULL``, or the pipe's barrel). The extractor
+#: writes both under ``sides.all`` for an isotropic pipe; see docs/DOMAIN.md.
+_PIPE_ROLES = ("open", "closed")
+
+#: The side key an isotropic pipe's layers live under. A pipe the extractor found **not** isotropic
+#: is written per side and files a gap, so this lookup then resolves nothing and the route keeps its
+#: honest flat bar - rather than one face's sprite being painted on all six.
+_PIPE_SIDE = "all"
 
 #: three.js ``BoxGeometry`` takes six materials in the order [+X east, -X west, +Y up, -Y down,
 #: +Z south, -Z north]. This maps a GT side index to the slot it occupies, so a face's texture
@@ -196,6 +216,14 @@ class TextureSummary:
     #: (GitHub #98). A non-empty list means the texture manifest needs a re-dump, not that the
     #: structure is wrong.
     unskinned_blocks: tuple[str, ...] = ()
+    #: Route cells drawn as real GT cable/pipe blocks, and cells that kept the flat coloured bar.
+    route_cells_textured: int = 0
+    route_cells_flat: int = 0
+    #: Dataset names (``"cable.tin.02"``) a route asked for that the manifest could not supply - a
+    #: missing entry, or a pipe the extractor found non-isotropic. Reported for the same reason as
+    #: ``unskinned_blocks``: the flat bar is a *correct* render, so nothing else would say the
+    #: manifest is short, and the fix is a re-dump rather than a code change.
+    unresolved_route_blocks: tuple[str, ...] = ()
 
 
 class TextureManifest:
@@ -242,6 +270,17 @@ class TextureManifest:
             block, meta = key.rsplit("|", 1)
             hatch_names[index] = name
             self._hatches[index] = (block, int(meta))
+        # Pipe index: a cable/pipe dataset name ("cable.tin.02", "gt_pipe_bronze") -> its
+        # (block, meta). EXACT names only, with none of ``mte_block``'s normalizing fallback ladder:
+        # both sides of this join are generated from the same policy table (``dataset/pipes.py``),
+        # so a near-miss means the manifest is short, not that the name needs massaging - and a
+        # fuzzy match here is precisely how a route would render as a confidently wrong cable.
+        self._pipes_by_name: dict[str, tuple[str, int]] = {}
+        for key, entry in self._blocks.items():
+            name = entry.get("display_name")
+            if entry.get("kind") == "pipe" and name and "|" in key:
+                block, meta = key.rsplit("|", 1)
+                self._pipes_by_name.setdefault(name, (block, int(meta)))
         # Tiered-storage index: "super tank" (generic) -> the LOWEST "Super Tank I".."IX" variant,
         # since the plan names such families generically and the tiers share a skin (see mte_block).
         self._mte_tiered: dict[str, tuple[str, int]] = {}
@@ -301,6 +340,37 @@ class TextureManifest:
         wanted = _TIER_LADDER.index(tier) if tier in _TIER_LADDER else len(_TIER_LADDER)
         below = [t for t in ladder if _TIER_LADDER.index(t) <= wanted]
         return self._hatches[(kind, below[-1] if below else ladder[0])]
+
+    def pipe_layers(self, block: str, meta: int, role: str) -> list[dict[str, Any]]:
+        """The layer stack for one look of a cable or pipe, or ``[]`` - an EXACT lookup.
+
+        Deliberately not :meth:`layers`, whose fallbacks are wrong here in both directions. Its
+        side fallback (exact side, else ``"all"``) would let a pipe the extractor found *not*
+        isotropic - written per side, with a gap filed - resolve one face's sprite onto all six.
+        Its state fallback (any single stored state when the asked-for one is absent) would answer
+        "closed" with the open end's stack, drawing a cable that is open on every face. Both are
+        reasonable for a casing and neither is here, so this reads ``sides.all[role]`` or nothing
+        and lets the caller keep the flat bar.
+        """
+        entry = self._blocks.get(f"{block}|{meta}")
+        if entry is None:
+            return []
+        side = entry.get("sides", {}).get(_PIPE_SIDE)
+        if not isinstance(side, dict):
+            return []
+        return list(side.get(role) or [])
+
+    def pipe_block(self, display_name: str) -> tuple[str, int] | None:
+        """The ``(block, meta)`` of the cable or pipe named ``display_name``, or ``None``.
+
+        The analogue of :meth:`hatch_block` for routes, and deliberately the strictest lookup in
+        this class: an exact name or nothing. ``dataset/pipes.py`` generates the name a route
+        publishes and the extractor recorded the same string, so there is no locale, tier prefix or
+        flavour word to reconcile - and a route that resolves to *some other* cable is the
+        unrecoverable failure (docs/dataset-extraction/texture-resolution.md), where a route that
+        resolves to nothing merely keeps its flat bar.
+        """
+        return self._pipes_by_name.get(display_name)
 
     def icon_path(self, icon: str) -> str | None:
         """The path inside the mod jar for ``icon`` (e.g. ``assets/gregtech/.../NAME.png``)."""
@@ -691,6 +761,54 @@ def _png_data_uri(png: bytes) -> str:
     return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
 
 
+def _route_face_keys(
+    scene: Mapping[str, Any],
+    manifest: TextureManifest,
+    key_layers: dict[str, list[dict[str, Any]]],
+    needed_icons: set[str],
+) -> tuple[dict[str, dict[str, str]], set[str]]:
+    """Resolve every cable/pipe the scene's routes name into its two baked-face keys.
+
+    Returns ``{dataset name: {role: pool key}}`` for the blocks that resolved, and the set of names
+    that did not. Fills ``key_layers`` with the stacks to bake and adds their icons to
+    ``needed_icons``, which the machine pass shares, so the whole page is still one jar fetch and
+    one texture pool - but the stacks are kept apart from the machine ones because they bake
+    differently (``normalize_tint``; see :func:`~gtnh_solver.previewer.bake.bake_layers`).
+
+    A block is taken **only if both roles resolve**. Half a pipe - an open end with no barrel - is
+    the render that looks like a bug rather than like missing data, and the flat bar beside it is
+    already a correct answer.
+    """
+    resolved: dict[str, dict[str, str]] = {}
+    unresolved: set[str] = set()
+    for route in scene.get("routes", []):
+        for cell in route.get("cells", []):
+            name = cell.get("block")
+            if not name or name in resolved or name in unresolved:
+                continue
+            found = manifest.pipe_block(name)
+            if found is None:
+                unresolved.add(name)
+                continue
+            block, meta = found
+            roles: dict[str, str] = {}
+            stacks: dict[str, list[dict[str, Any]]] = {}
+            for role in _PIPE_ROLES:
+                layers = manifest.pipe_layers(block, meta, role)
+                if not layers:
+                    break
+                roles[role] = f"{block}|{meta}|{role}"
+                stacks[roles[role]] = layers
+            if len(roles) != len(_PIPE_ROLES):
+                unresolved.add(name)
+                continue
+            resolved[name] = roles
+            for key, layers in stacks.items():
+                key_layers.setdefault(key, layers)
+                needed_icons.update(layer["icon"] for layer in layers)
+    return resolved, unresolved
+
+
 def texturize_scene(
     scene: dict[str, Any],
     *,
@@ -730,8 +848,11 @@ def texturize_scene(
     scene.setdefault("textures", {})
     scene.setdefault("texturesActive", {})
     docs = load_multiblock_docs(mb_dir)
-    if not docs or not Path(mf_path).is_file():
-        _log.info("textures: no dataset/manifest; all %d types placeholder", len(all_types))
+    # The manifest is the one hard requirement - nothing resolves without it. A missing *multiblock*
+    # dump is no longer fatal to the whole pass: single-block machines resolve straight off the
+    # manifest, and so do routes, neither of which needs a structure doc.
+    if not Path(mf_path).is_file():
+        _log.info("textures: no manifest; all %d types placeholder", len(all_types))
         return TextureSummary((), all_types, 0, 0)
 
     manifest = TextureManifest.load(mf_path)
@@ -782,6 +903,13 @@ def texturize_scene(
                 }
             )
 
+    # Routes join the machine pass here, before the fetch, so a page with cables in it still makes
+    # exactly one jar call and shares one texture pool with the casings.
+    route_key_layers: dict[str, list[dict[str, Any]]] = {}
+    route_faces, unresolved_routes = _route_face_keys(
+        scene, manifest, route_key_layers, needed_icons
+    )
+
     # Fetch only the icons actually referenced, then bake each distinct (block, meta, side, state)
     # face once into a flat PNG data URI pool. A scene of undocumented types fetches nothing.
     icon_paths = {i: p for i in needed_icons if (p := manifest.icon_path(i)) is not None}
@@ -807,11 +935,31 @@ def texturize_scene(
             baked = bake_layers(layers, icon_png)
             if baked is not None and baked != idle_png:
                 pool_active[key] = _png_data_uri(baked)
+        # Cable and pipe sprites are greyscale - the material IS the multiply (docs/DOMAIN.md) - so
+        # they bake with the tint applied raw, GT's own arithmetic. Under the casing normalisation a
+        # cable's [64,64,64] insulation becomes identity, which both washes the block out and
+        # collapses the dark insulated face into the bright open end until the two look alike.
+        for key, layers in route_key_layers.items():
+            baked = bake_layers(layers, icon_png, normalize_tint=False)
+            if baked is not None:
+                pool[key] = _png_data_uri(baked)
     except BakeUnavailableError as exc:
         _log.warning("textures: %s; falling back to placeholder boxes", exc)
         for machine in scene["machines"]:
             machine.pop("expanded", None)
         return TextureSummary((), all_types, 0, 0)
+
+    # Hand each route cell the two pool keys its block baked to, or nothing - in which case the
+    # viewer keeps the flat coloured bar it drew before any of this. Both roles or neither.
+    textured_cells = flat_cells = 0
+    for route in scene.get("routes", []):
+        for cell in route.get("cells", []):
+            roles = route_faces.get(cell.get("block") or "")
+            usable = roles is not None and all(key in pool for key in roles.values())
+            cell["tex"] = dict(roles) if usable and roles is not None else None
+            textured_cells, flat_cells = (
+                (textured_cells + 1, flat_cells) if usable else (textured_cells, flat_cells + 1)
+            )
 
     # Null out face keys that did not bake so the viewer draws a neutral placeholder there, but keep
     # every cube so the machine's full block structure renders (never a single stretched box).
@@ -829,6 +977,9 @@ def texturize_scene(
         embedded_icons=len(pool),
         embedded_active_icons=len(pool_active),
         unskinned_blocks=tuple(sorted(unskinned)),
+        route_cells_textured=textured_cells,
+        route_cells_flat=flat_cells,
+        unresolved_route_blocks=tuple(sorted(unresolved_routes)),
     )
     _log.info(
         "textures: %d/%d machine types expanded to %d textured cubes (%s); placeholder: %s; "
@@ -841,6 +992,15 @@ def texturize_scene(
         summary.embedded_icons,
         summary.embedded_active_icons,
     )
+    if textured_cells or flat_cells:
+        _log.info(
+            "textures: %d/%d route cell(s) drawn as real cable/pipe blocks%s",
+            textured_cells,
+            textured_cells + flat_cells,
+            f"; unresolved: {', '.join(summary.unresolved_route_blocks)}"
+            if summary.unresolved_route_blocks
+            else "",
+        )
     if summary.unskinned_blocks:
         # The checkerboard makes the gap visible in the render; this warning is what makes it
         # actionable in a build log. Warn, not info: it means the manifest needs a re-dump.

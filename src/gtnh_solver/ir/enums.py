@@ -17,6 +17,20 @@ class Commodity(str, Enum):
     POWER = "power"
 
 
+class PipeFamily(str, Enum):
+    """Which GT transport family a route is built from.
+
+    Not the same axis as :class:`Commodity`, even though v1 maps one to one: a commodity is what
+    flows, a family is what it flows through. GT has separate blocks for fluid and item pipes with
+    their own size ladders, and cables are a third family whose gauge is amperage rather than
+    throughput.
+    """
+
+    CABLE = "cable"
+    FLUID_PIPE = "fluid_pipe"
+    ITEM_PIPE = "item_pipe"
+
+
 class IODirection(str, Enum):
     """Direction of a machine port or a pinned external I/O point."""
 

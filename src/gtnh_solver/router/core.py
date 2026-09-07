@@ -58,6 +58,7 @@ from dataclasses import dataclass
 from itertools import pairwise
 from types import MappingProxyType
 
+from gtnh_solver.dataset import route_material
 from gtnh_solver.ir import (
     AutoConnection,
     CellBox,
@@ -310,6 +311,9 @@ def _negotiate(
             commodity=net.commodity,
             terminals=terminals_by_net[net.id],
             segments=segments_by_net[net.id],
+            # A pipe's material carries no tier - v1 models no throughput, so every item or fluid
+            # route is the one representative pipe of its family (docs/DOMAIN.md).
+            material=route_material(net.commodity),
         )
         for net in nets
         if net.id in routed_ids

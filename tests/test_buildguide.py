@@ -65,8 +65,37 @@ def test_build_guide_sand_auto_feeds_items_and_cables_power() -> None:
     guide = _sand_guide()
     assert "minecraft:gravel" in guide
     assert "(auto-output)" in guide  # the item chain auto-feeds (no item pipes)...
-    assert "power cable" in guide  # ...but the synthesized power net still needs a cable
+    assert "x  2x tin cable" in guide  # ...but the synthesized power net still needs a cable
     assert "## Power" in guide  # and the guide tells the builder to feed it externally
+
+
+def test_build_guide_bom_counts_cable_by_gauge_and_names_the_block() -> None:
+    """The bill of materials is shoppable: a trunk that thickens where the load sums is two
+    different blocks, and a player buying one total of "power cable" buys the wrong thing. The
+    parenthetical is GT's own unlocalized id, so the name is matchable rather than merely readable.
+    """
+    guide = _sand_guide()
+    assert "    1  x  1x tin cable (cable.tin.01)" in guide
+    assert "    4  x  2x tin cable (cable.tin.02)" in guide
+
+
+def test_build_guide_says_the_material_is_a_stand_in() -> None:
+    """docs/DOMAIN.md's stand-in rule is only honoured if it reaches the reader. A guide that names
+    Tin without saying the material was chosen for recognisability reads as a specification, which
+    is the one failure downstream cannot detect."""
+    guide = _sand_guide()
+    assert "representative stand-ins, not a specification" in guide
+    assert "docs/DOMAIN.md" in guide
+
+
+def test_build_guide_omits_the_stand_in_note_when_nothing_stands_in() -> None:
+    """The note is tied to the blocks actually listed, not printed unconditionally: a layout with
+    no routes has no material to caveat, and a standing disclaimer is one readers learn to skip."""
+    ir = adapt_file(_SAND)
+    layout = solve(ir, optimize=False)
+    guide = build_guide(ir, layout.model_copy(update={"routes": []}))
+    assert "(no pipes)" in guide
+    assert "stand-ins" not in guide
 
 
 def test_build_guide_is_deterministic() -> None:
@@ -253,6 +282,6 @@ def test_build_guide_renders_power_route_with_fallback_label() -> None:
         status=LayoutStatus.VALID, seed=0, placements=placements, routes=list(rr.routes)
     )
     guide = build_guide(problem, layout)
-    assert "power cable" in guide  # BoM label
+    assert "x  1x tin cable (cable.tin.01)" in guide  # BoM label: the block, at its gauge
     assert "power" in guide  # connections falls back to the commodity (power has no fluid_or_item)
     assert "## Power" in guide  # the external-power-source note (a is a power source)

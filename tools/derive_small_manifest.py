@@ -6,6 +6,11 @@ shipped example lines and the two committed multiblock fixtures need, plus the i
 reference, and writes the small committed ``data/textures/manifest.json`` so
 ``gtnh-solve --preview examples/*.json`` skins out of the box. Rerun when the examples change.
 
+**Cables and pipes are kept the same way, and for the same reason.** ``cable.tin.02`` contains
+no machine-type name either, so the name rule can never reach one. The stand-in policy in
+``dataset/pipes.py`` says which material each tier is drawn as; this asks it, for every tier the
+examples use and every gauge the router can size to, and keeps exactly those.
+
 **Hatches are kept by resolution, not by name.** A hatch can never match an example machine's name
 ("Input Bus (LV)" contains no machine type), so keeping them needs a second rule: for every hatch
 kind at every voltage tier the examples use, ask the previewer's own
@@ -29,7 +34,16 @@ from pathlib import Path
 from typing import Any
 
 from gtnh_solver.adapter import adapt_file
-from gtnh_solver.dataset import list_versions, load_physical_dataset
+from gtnh_solver.dataset import (
+    CABLE_MATERIAL_BY_TIER,
+    CABLE_THICKNESSES,
+    DEFAULT_PIPE_SIZE,
+    PIPE_MATERIAL,
+    cable_display_name,
+    list_versions,
+    load_physical_dataset,
+    pipe_display_name,
+)
 from gtnh_solver.previewer.textures import HATCH_KIND_BY_CLASS, TextureManifest
 
 REPO = Path.cwd()
@@ -86,6 +100,36 @@ def _hatch_keys(full: dict[str, Any], tiers: set[str]) -> set[str]:
     return keys
 
 
+def _route_keys(full: dict[str, Any], tiers: set[str]) -> set[str]:
+    """``"<block>|<meta>"`` for every cable and pipe a preview of the examples could draw.
+
+    Cables and pipes are ``kind: "pipe"`` entries whose names ("cable.tin.02", "gt_pipe_bronze")
+    contain no machine type, so the name rule at the call site can never keep one - the same hole
+    hatches have, closed the same way. The policy in ``dataset/pipes.py`` is asked directly rather
+    than a list being kept here, so the committed manifest cannot drift from what a preview looks up.
+
+    Every gauge is kept for each tier the examples use, not just the gauges those lines happen to
+    route today: cable thickness follows summed amperage, so re-solving a line at a different seed
+    can move a segment between gauges, and a preview that silently lost its cable at 8x would be a
+    puzzling bug rather than an obvious one. Six entries per tier is a rounding error in the file.
+    """
+    by_name = {
+        str(entry["display_name"]): key
+        for key, entry in full["blocks"].items()
+        if entry.get("kind") == "pipe" and entry.get("display_name")
+    }
+    wanted = {
+        cable_display_name(CABLE_MATERIAL_BY_TIER[tier], gauge)
+        for tier in tiers
+        if tier in CABLE_MATERIAL_BY_TIER
+        for gauge in CABLE_THICKNESSES
+    }
+    wanted |= {
+        pipe_display_name(material, DEFAULT_PIPE_SIZE) for material in PIPE_MATERIAL.values()
+    }
+    return {by_name[name] for name in wanted if name in by_name}
+
+
 def _fixture_block_keys() -> set[str]:
     """``"<block>|<meta>"`` keys the two committed multiblock fixtures place."""
     keys: set[str] = set()
@@ -113,10 +157,11 @@ def main() -> None:
     types, tiers = _example_types_and_tiers()
     fixture_keys = _fixture_block_keys()
     hatch_keys = _hatch_keys(full, tiers)
+    route_keys = _route_keys(full, tiers)
     keep: dict[str, Any] = {}
     for key, entry in full["blocks"].items():
-        if key in hatch_keys:
-            keep[key] = entry  # a hatch never matches a machine name; see the module docstring
+        if key in hatch_keys or key in route_keys:
+            keep[key] = entry  # neither matches a machine name; see the module docstring
         elif entry.get("kind") == "mte":
             name = _norm(entry.get("display_name") or "")
             if name and any(t and t in name for t in types):
