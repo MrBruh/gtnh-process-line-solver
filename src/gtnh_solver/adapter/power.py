@@ -44,6 +44,7 @@ from gtnh_solver.dataset import (
     UnpowerableError,
     amp_load,
     energy_hatches_for,
+    machine_amps_in,
     tiers_above,
     whole_amps,
 )
@@ -156,9 +157,21 @@ def _power_ports(machine: Machine) -> list[Port]:
     hatches than its casing can host is a real infeasibility, and the validator reports it against
     ``hatch_cells``. Silently allocating fewer would under-size the feed and certify a layout that
     cannot draw its own load.
+
+    Either way the port states a ceiling. The single connection gets the machine's **own** energy
+    input rather than a hatch's (:func:`_own_input_amps`), because a machine with no structural
+    record has no hatch to speak of. Leaving it unstated is what made the validator's under-supply
+    check inert for every such machine, and so for every run without the dataset (#114).
     """
     if machine.hatch_cells is None:
-        return [Port(id=POWER_IN, commodity=Commodity.POWER, direction=IODirection.INPUT)]
+        return [
+            Port(
+                id=POWER_IN,
+                commodity=Commodity.POWER,
+                direction=IODirection.INPUT,
+                max_amps=_own_input_amps(machine),
+            )
+        ]
     try:
         count = energy_hatches_for(machine.eut, machine.voltage_tier)
     except UnknownTierError:
@@ -174,6 +187,25 @@ def _power_ports(machine: Machine) -> list[Port]:
         )
         for i in range(count)
     ]
+
+
+def _own_input_amps(machine: Machine) -> float | None:
+    """The ceiling on the single connection of a machine with no structural record.
+
+    Such a machine is modelled as one block feeding itself, so what bounds its intake is GT's own
+    ``maxAmperesIn`` for a basic machine (``dataset.machine_amps_in``) and not the 2 A of an energy
+    hatch it does not have. The two differ in kind: a hatch's ceiling is fixed, while a machine's
+    scales with the recipe it runs, which is why a single-block machine can be fed a draw that
+    would need several hatches.
+
+    ``None`` only for a tier off the ladder, where the voltage the ceiling is derived from is
+    itself unknown. The validator treats an absent ceiling as unverifiable rather than unlimited,
+    so an unknown tier stays unmeasured instead of being waved through.
+    """
+    try:
+        return float(machine_amps_in(machine.eut, machine.voltage_tier))
+    except UnknownTierError:
+        return None
 
 
 def _feeds_for(tier: str, machines_at_tier: list[tuple[Machine, list[Port]]]) -> list[_Feed]:

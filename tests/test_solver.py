@@ -439,9 +439,10 @@ def _starving_power_line() -> tuple[InputIR, tuple[Placement, ...], tuple[Placem
                     commodity=Commodity.POWER,
                     direction=IODirection.INPUT,
                     rate=32.0,
-                    # Load-bearing: the adapter fills max_amps in only for a dataset-resolved
-                    # machine, and a port without it contributes nothing to the supply sum - so a
-                    # fixture that omits it passes for the wrong reason, the check never running.
+                    # Load-bearing: a port that states no ceiling contributes nothing to the
+                    # supply sum and marks its machine unverifiable, so a fixture that omits it
+                    # would pass for the wrong reason, with the check never running. 2 A is what
+                    # an energy hatch takes; a machine with no structural record states its own.
                     max_amps=2.0,
                 )
             ]

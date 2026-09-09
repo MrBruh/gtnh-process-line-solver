@@ -52,6 +52,30 @@ VOLTAGE_BY_TIER: dict[str, int] = {
 #: dump would have to select, so they are not modelled and every hatch here is the standard 2 A.
 ENERGY_HATCH_AMPS = 2
 
+
+def machine_amps_in(eut: float, tier: str) -> int:
+    """Amps a **single-block** machine's own energy input accepts per tick - GT's own formula.
+
+    ``MTEBasicMachine.maxAmperesIn()`` returns ``(mEUt * 2) / V[tier] + 1`` (integer division),
+    where ``mEUt`` is the consumption of the recipe the machine is currently running. So a basic
+    machine's intake **scales with its draw** and always leaves room for it, unlike the fixed 2 A
+    of an energy hatch (:data:`ENERGY_HATCH_AMPS`). ``BaseMetaTileEntity.injectEnergyUnits`` caps
+    each tick's accepted amperes at that value, which is what makes it a real per-connection
+    ceiling rather than a preference.
+
+    Read off the GT source rather than assumed. The flat ``1`` that ``MetaTileEntity.maxAmperesIn``
+    returns is the default for a *block*, and every basic processing machine overrides it: pricing
+    a single-block machine at one amp would report a machine as starved that GT feeds perfectly
+    well, and a false infeasibility is the worse of the two failures.
+
+    Raises :class:`UnknownTierError` for a tier off the ladder.
+    """
+    volts = tier_voltage(tier)
+    if eut <= 0:
+        return 1  # idle: mEUt is 0, and the block still takes a packet a tick to fill its buffer
+    return math.floor(2.0 * eut / volts) + 1
+
+
 #: EU lost per cable block a power packet travels. GT cables lose voltage over distance; the
 #: voltage a machine receives is the source voltage minus this loss times the block distance
 #: (docs/DOMAIN.md). Simplifying assumption for now (maintainer call): every tier has a 1-loss

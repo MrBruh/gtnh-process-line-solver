@@ -15,7 +15,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from gtnh_solver.adapter import adapt_file
-from gtnh_solver.dataset import load_physical_dataset
+from gtnh_solver.dataset import load_physical_dataset, machine_amps_in
 from gtnh_solver.ir import (
     AutoConnection,
     CellBox,
@@ -997,6 +997,15 @@ def test_power_run_too_long_for_its_tier_is_flagged_as_voltage_drop() -> None:
     )
     assert ViolationCode.POWER_VOLTAGE_DROP_EXCESSIVE in validate(problem, layout).codes()
 
+    # The same run with a rated hatch. A collapsed voltage delivers nothing whatever the ceiling,
+    # so the machine must be reported unpowerable rather than measured for intake against 0 volts
+    # (which would bill it a 0 EU/t supply and report a shortfall on top of the real violation).
+    hatch = Port(id="pi", commodity=Commodity.POWER, direction=IODirection.INPUT, max_amps=2.0)
+    rated = m0.model_copy(update={"faces": FaceSpec(ports=[hatch])})
+    codes = validate(problem.model_copy(update={"machines": [src, rated]}), layout).codes()
+    assert ViolationCode.POWER_VOLTAGE_DROP_EXCESSIVE in codes
+    assert ViolationCode.POWER_SUPPLY_INSUFFICIENT not in codes
+
 
 def _power_summed_trunk() -> tuple[InputIR, LayoutResult]:
     """A source feeding TWO sinks on a shared trunk, so the root segment carries their summed load.
@@ -1172,9 +1181,44 @@ def test_a_hatch_that_can_take_the_whole_draw_passes() -> None:
 def test_an_unrated_hatch_is_not_measured_for_supply() -> None:
     # Every pre-v3 problem leaves max_amps unset. With no per-connection ceiling there is nothing
     # to measure, so the check must stay silent rather than read the absence as a 0 A hatch and
-    # declare every machine in every older problem starved.
+    # declare every machine in every older problem starved. The machine is marked unverifiable
+    # rather than passed over silently (#114); the difference shows on a machine whose OTHER
+    # hatches are rated, below.
     codes = validate(*_power_trunk()).codes()
     assert ViolationCode.POWER_SUPPLY_INSUFFICIENT not in codes, codes
+
+
+def test_a_machine_with_one_unrated_hatch_is_not_judged_on_the_others() -> None:
+    """An unmeasurable connection makes the whole MACHINE unmeasurable, not a smaller machine.
+
+    ``mp`` draws 48 EU/t through two hatches. Drop the ceiling from the second and the first alone
+    takes in 29 EU/t, which was enough to report the machine starved - on part of its intake,
+    against a connection that states no limit at all. That is a false infeasibility, and the
+    validator's own rule is that a machine it could not verify on some route is skipped rather
+    than reported on partial evidence (#114).
+    """
+    problem, layout = _split_hatch_pair(1.0)
+    mp = problem.machines[1]
+    ports = [mp.faces.ports[0], mp.faces.ports[1].model_copy(update={"max_amps": None})]
+    partial = mp.model_copy(update={"faces": FaceSpec(ports=ports)})
+    problem = problem.model_copy(update={"machines": [problem.machines[0], partial]})
+    codes = validate(problem, layout).codes()
+    assert ViolationCode.POWER_SUPPLY_INSUFFICIENT not in codes, codes
+
+
+def test_gts_own_ceiling_feeds_a_machine_a_flat_one_amp_would_starve() -> None:
+    """The modelling choice, pinned. ``_rated_trunk`` is a 48 EU/t LV machine 2 cable-blocks out.
+
+    At a flat 1 A it takes in 30 EU/t and is reported starved. At the ceiling GT actually gives a
+    machine's own energy input - ``(mEUt * 2) / V + 1``, so 4 A here - it takes in 120 EU/t and
+    runs. Pricing a machine with no structural record at one amp would have manufactured that
+    shortfall for every single-block machine and every run without the dataset, which is why the
+    adapter states GT's number instead (``dataset.machine_amps_in``).
+    """
+    assert ViolationCode.POWER_SUPPLY_INSUFFICIENT in validate(*_rated_trunk(1.0)).codes()
+    assert machine_amps_in(48.0, "LV") == 4
+    report = validate(*_rated_trunk(float(machine_amps_in(48.0, "LV"))))
+    assert report.ok, str(report)
 
 
 def test_hatches_that_cannot_take_the_draw_in_after_loss_are_flagged() -> None:

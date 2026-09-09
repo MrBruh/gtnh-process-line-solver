@@ -942,7 +942,16 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
     that is reported (``POWER_SUPPLY_INSUFFICIENT``) even though every cable is thick enough. The
     hatches of one machine can sit on different routes at different distances, so the sum is
     accumulated across routes and checked once at the end; a machine on any route this could not
-    verify is skipped rather than reported on partial evidence. That one violation also carries
+    verify is skipped rather than reported on partial evidence.
+
+    **What that half actually covers**, since a skip is easy to mistake for a pass: a machine is
+    measured when every power connection on it declares a ``max_amps``, and marked unverifiable
+    otherwise - an undeclared ceiling, an off-ladder tier, or a run whose voltage has already
+    dropped to nothing. Undeclared is the case that used to disappear silently (#114): the adapter
+    left it unset on every machine with no structural record, which is every single-block machine
+    and every machine in a run without the physical dataset, so for those the check never ran at
+    all. It now states the ceiling GT gives such a machine's own energy input
+    (``dataset.machine_amps_in``), and they are measured like any other. That one violation also carries
     its machine in ``Violation.machine_id``: the shortfall is driven by how far the cable ran, so
     the solver re-places the machine and tries again, and it needs the id to know which one.
 
@@ -1044,7 +1053,13 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
             # ``volts``. Summed over the machine's hatches - which may sit on different routes at
             # different distances - this is the power that reaches it.
             port_cap = _port_max_amps(machine, t.port_id)
-            if port_cap is not None and volts > 0:
+            if port_cap is None:
+                # A connection that declares no ceiling cannot be measured, and a machine judged
+                # on its OTHER connections alone would be reported starved on part of its intake.
+                # So the machine is marked unverifiable rather than quietly contributing nothing:
+                # that skip used to be silent and indistinguishable from "checked and fine" (#114).
+                unverified.add(t.machine_id)
+            elif volts > 0:
                 supply[t.machine_id] = supply.get(t.machine_id, 0.0) + port_cap * volts
             if volts <= 0:
                 out.append(

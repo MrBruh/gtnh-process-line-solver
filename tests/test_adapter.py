@@ -345,6 +345,18 @@ def test_a_machine_with_no_structural_record_keeps_one_connection() -> None:
     assert _hatches(ir, "n0") == ["power:in"]
     port = next(p for p in ir.machines[0].faces.ports if p.id == "power:in")
     assert port.rate is None
+    # The one connection still states a ceiling, and it is the machine's OWN energy input rather
+    # than a hatch's: 60 EU/t at LV is (60 * 2) / 32 + 1 = 4 A by GT's MTEBasicMachine formula.
+    # Leaving it unset made the validator's under-supply check inert for every such machine (#114).
+    assert port.max_amps == 4.0
+
+
+def test_a_no_record_machine_on_an_off_ladder_tier_states_no_ceiling() -> None:
+    # The ceiling comes from the tier voltage, so a tier off the ladder leaves it genuinely
+    # unknown. Inventing one would be worse than saying nothing: the validator reads an absent
+    # ceiling as unverifiable and skips the machine rather than passing or failing it on a guess.
+    ir = to_input_ir(_powered_plan(60.0, tier="OpV"))
+    port = next(p for p in ir.machines[0].faces.ports if p.id == "power:in")
     assert port.max_amps is None
 
 

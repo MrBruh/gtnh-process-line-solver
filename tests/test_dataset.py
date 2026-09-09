@@ -27,6 +27,7 @@ from gtnh_solver.dataset import (
     amp_load,
     delivered_voltage,
     energy_hatches_for,
+    machine_amps_in,
     tier_voltage,
     tiers_above,
     to_physical,
@@ -165,6 +166,45 @@ def test_energy_hatches_for_a_run_the_tier_cannot_survive_raises() -> None:
     # machine there, so sizing must fail loudly rather than return a hatch count that cannot work.
     with pytest.raises(UnpowerableError):
         energy_hatches_for(32, "LV", distance=40)
+
+
+def test_machine_amps_in_is_gts_own_formula_not_a_flat_one_amp() -> None:
+    # ``MTEBasicMachine.maxAmperesIn()`` is ``(mEUt * 2) / V + 1`` on integer division, so a
+    # single-block machine's intake scales with the recipe it runs. The flat 1 A belongs to
+    # ``MetaTileEntity``, the default for a bare block, and every basic machine overrides it.
+    assert machine_amps_in(16, "LV") == 2  # a Forge Hammer: 32 / 32 = 1, plus one
+    assert machine_amps_in(30, "LV") == 2  # 60 / 32 floors to 1, plus one
+    assert machine_amps_in(32, "LV") == 3  # 64 / 32 = 2, plus one
+    assert machine_amps_in(2355.0159865343994, "MV") == 37
+
+
+def test_machine_amps_in_always_covers_the_draw_at_source_voltage() -> None:
+    # The doubling and the +1 are what keep the ceiling non-binding at the source: a machine can
+    # always take in the recipe it is running. That is exactly why pricing a machine with no
+    # structural record at one amp would report it starved where GT feeds it perfectly well.
+    for tier in ("LV", "MV", "HV", "EV"):
+        volts = tier_voltage(tier)
+        for eut in (1, volts // 3, volts, volts * 4, volts * 40):
+            assert machine_amps_in(eut, tier) * volts >= eut, (tier, eut)
+
+
+def test_machine_amps_in_is_still_a_real_ceiling_once_cable_loss_bites() -> None:
+    # Not vacuous, which is the other half of choosing it: 22 blocks of LV cable deliver 10 V a
+    # packet, and three of those are 30 EU/t against a 32 EU/t draw. A run that long starves even
+    # a machine the same ceiling feeds at the source, so the supply check still has teeth.
+    assert machine_amps_in(32, "LV") * delivered_voltage("LV", 22) < 32
+
+
+def test_machine_amps_in_idle_is_one_packet_a_tick() -> None:
+    # ``mEUt`` is 0 while a machine is idle, so GT's formula gives it exactly one - enough to fill
+    # its buffer and start the recipe that raises the ceiling.
+    assert machine_amps_in(0, "LV") == 1
+    assert machine_amps_in(-5, "MV") == 1
+
+
+def test_machine_amps_in_unknown_tier_raises() -> None:
+    with pytest.raises(UnknownTierError):
+        machine_amps_in(100, "OpV")
 
 
 def test_tiers_above_is_the_rest_of_the_ladder_lowest_first() -> None:
