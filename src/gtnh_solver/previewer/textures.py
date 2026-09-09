@@ -34,6 +34,7 @@ import base64
 import json
 import logging
 import re
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -224,6 +225,12 @@ class TextureSummary:
     #: ``unskinned_blocks``: the flat bar is a *correct* render, so nothing else would say the
     #: manifest is short, and the fix is a re-dump rather than a code change.
     unresolved_route_blocks: tuple[str, ...] = ()
+    #: Hatch cubes drawn in their multiblock's own casing rather than the standalone skin the dump
+    #: recorded, and hatch cubes that kept that standalone skin because the casing was unknown (see
+    #: :func:`_hatch_layers`). Reported because the difference is invisible in a gap list: both
+    #: render a full, plausible hatch, and only the count says which of the two a page shows.
+    hatches_recased: int = 0
+    hatches_standalone: int = 0
 
 
 class TextureManifest:
@@ -317,6 +324,16 @@ class TextureManifest:
         if chosen is None and side_entry:
             chosen = next(iter(side_entry.values()))
         return list(chosen or [])
+
+    def has_block(self, block: str, meta: int) -> bool:
+        """Whether the manifest carries an entry for ``(block, meta)`` at all.
+
+        Distinct from ``layers(...) != []``, which is a per-side question: this asks only whether
+        the dump knows the block. It is what decides a formed hatch's casing is *known* (see
+        :func:`_hatch_casing`), so the reported count of re-skinned hatches cannot claim a
+        casing the manifest could never draw.
+        """
+        return f"{block}|{meta}" in self._blocks
 
     def hatch_block(self, kind: str, tier: str | None) -> tuple[str, int] | None:
         """The ``(block, meta)`` of the ``kind`` hatch at ``tier``, or ``None`` if unresolvable.
@@ -507,6 +524,10 @@ class BlockCube:
     ``active`` the moment it joins a formed multiblock, so its dumped ``inactive`` stack is
     ``OVERLAY_MAINTENANCE + OVERLAY_DUCTTAPE`` - the *broken* look - and the previewer's plain
     default would draw every machine in the line as needing repair.
+
+    ``casing`` is the multiblock casing a **formed** hatch is re-skinned to (see
+    :func:`_hatch_layers`). It is ``None`` on an ordinary structure block, and on a hatch whose
+    casing the manifest does not know - which then keeps the standalone look the dump recorded.
     """
 
     cell: tuple[int, int, int]
@@ -516,18 +537,17 @@ class BlockCube:
     facing: str | None = None  # a hatch's own world-space front side, e.g. "WEST"
     idle_state: str = _STATE
     active_state: str = _STATE_ACTIVE
+    casing: tuple[str, int] | None = None  # the (block, meta) casing a formed hatch wears
 
 
-def _place_blocks(
-    doc: MultiblockDoc, cell: list[int], steps: int, size: Sequence[int] | None = None
-) -> list[BlockCube]:
-    """Rotate the chosen variant's blocks by ``steps`` and land the min corner on ``cell``.
+def _place_blocks(variant: Variant, cell: list[int], steps: int) -> list[BlockCube]:
+    """Rotate ``variant``'s blocks by ``steps`` and land the min corner on ``cell``.
 
-    ``size`` selects WHICH form to place (see :func:`variant_for_size`); without it the largest one
-    stands, as before.
+    WHICH form is placed is the caller's choice (see :func:`variant_for_size`), because the same
+    variant also answers what casing the machine's hatches wear (:func:`_hatch_casing`).
     """
     placed: list[tuple[tuple[int, int, int], str, int]] = []
-    for b in variant_for_size(doc, size).blocks:
+    for b in variant.blocks:
         dx, dy, dz = b.d
         rx, rz = _rotate(dx, dz, steps)
         placed.append(((rx, dy, rz), b.block, b.meta))
@@ -575,35 +595,88 @@ def expand_machine(
     cell = machine["cell"]
     size = machine.get("size", [1, 1, 1])
     steps = _FRONT_CW_STEPS.get(str(machine.get("front", "north")), 0)
+    variant = variant_for_size(doc, size)
     cubes = [
-        c for c in _place_blocks(doc, cell, steps, size) if _within_footprint(c.cell, cell, size)
+        c for c in _place_blocks(variant, cell, steps) if _within_footprint(c.cell, cell, size)
     ]
     if manifest is None:
         return cubes
-    return _substitute_hatches(cubes, machine, manifest)
+    return _substitute_hatches(cubes, machine, manifest, variant)
+
+
+def _hatch_cell(hatch: Mapping[str, Any]) -> tuple[int, int, int]:
+    """A scene hatch's world cell as an integer triple."""
+    return (int(hatch["cell"][0]), int(hatch["cell"][1]), int(hatch["cell"][2]))
+
+
+def _hatch_casing(
+    variant: Variant,
+    manifest: TextureManifest,
+    at_cell: Mapping[tuple[int, int, int], BlockCube],
+    hatches: Sequence[Mapping[str, Any]],
+) -> tuple[str, int] | None:
+    """The one casing this multiblock re-skins its hatches to, or ``None`` if undeterminable.
+
+    **One casing per machine, not one per cell**, because that is GT's own shape: a controller
+    declares a single ``CASING_INDEX`` and hands it to every hatch through ``updateTexture`` (see
+    :func:`_hatch_layers`). The dump does not record that id, but it records the blocks at the cells
+    the hatch elements govern, and those elements chain the casing the id names - so the block that
+    **dominates** a machine's hatch cells is the estimator for it.
+
+    The mode, and not the individual cell, is what makes this right. The Large Chemical Reactor's
+    ``x`` element chains ``activeCoils(..)`` ahead of its casing, so one of its 25 hatch cells holds
+    a cupronickel coil: read per cell, a hatch landing there would be drawn as coil rather than as
+    the chemically inert casing GT actually gives it.
+
+    The population is the variant's own ``hatch_slots`` where the dump recorded them (complete, and
+    independent of which cells the router happened to pick), else the cells this machine's hatches
+    occupy. Only blocks the manifest can skin are counted, so an unskinnable casing yields ``None``
+    and the hatches keep the standalone look rather than losing a face. Ties break on the lowest
+    ``(block, meta)`` for determinism.
+    """
+    by_offset = {tuple(b.d): (b.block, b.meta) for b in variant.blocks}
+    candidates = [by_offset.get(tuple(slot.d)) for slot in variant.hatch_slots]
+    if not any(c is not None for c in candidates):
+        candidates = [
+            (cube.block, cube.meta)
+            for hatch in hatches
+            if (cube := at_cell.get(_hatch_cell(hatch))) is not None
+        ]
+    counts = Counter(c for c in candidates if c is not None and manifest.has_block(c[0], c[1]))
+    if not counts:
+        return None
+    return min(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0]
 
 
 def _substitute_hatches(
-    cubes: list[BlockCube], machine: Mapping[str, Any], manifest: TextureManifest
+    cubes: list[BlockCube],
+    machine: Mapping[str, Any],
+    manifest: TextureManifest,
+    variant: Variant,
 ) -> list[BlockCube]:
     """Replace each casing cube the machine's hatches occupy with that hatch's own block.
 
     A hatch whose block cannot be resolved is left as plain casing rather than dropped: the cell is
     genuinely occupied either way, and losing the cube would open a hole in the structure. That is
     the same graceful-degradation contract the rest of the module keeps.
+
+    Every hatch also carries the machine's casing (:func:`_hatch_casing`), because GT re-skins it to
+    that casing once the multiblock forms - see :func:`_hatch_layers`.
     """
     hatches = machine.get("hatches") or ()
     if not hatches:
         return cubes
     tier = machine.get("voltage_tier")
+    at_cell = {c.cell: c for c in cubes}
+    casing = _hatch_casing(variant, manifest, at_cell, hatches)
     replacement: dict[tuple[int, int, int], BlockCube] = {}
     for hatch in hatches:
         found = manifest.hatch_block(str(hatch["kind"]), tier if isinstance(tier, str) else None)
         if found is None:
             continue
         block, meta = found
-        at = (int(hatch["cell"][0]), int(hatch["cell"][1]), int(hatch["cell"][2]))
         idle, active = _hatch_states(str(hatch["kind"]))
+        at = _hatch_cell(hatch)
         replacement[at] = BlockCube(
             cell=at,
             block=block,
@@ -612,6 +685,7 @@ def _substitute_hatches(
             facing=_SIDE_NAMES[_FACING_TO_SIDE[str(hatch["facing"])]],
             idle_state=idle,
             active_state=active,
+            casing=casing,
         )
     return [replacement.pop(c.cell, c) for c in cubes] + list(replacement.values())
 
@@ -709,10 +783,9 @@ def _face_icons(
                    = own background ++ NORTH's overlays          if side == facing
 
     Both halves are facing-invariant, which is what makes this exact rather than approximate - a
-    six-facing re-dump would write byte-identical stacks. Taking the background from the target
-    side's **own** layer 0 is essential and not a detail: UP and DOWN carry ``MACHINE_<TIER>_TOP`` /
-    ``_BOTTOM`` against the horizontals' ``_SIDE`` in every hatch entry in the pack, so reading it
-    off a fixed side would be wrong on all of them - and 75% of sand's terminals are vertical.
+    six-facing re-dump would write byte-identical stacks. The **background** is the half the dump
+    cannot answer alone, because it depends on the multiblock the hatch joins; see
+    :func:`_hatch_layers`.
     """
     faces: list[str | None] = [None] * _FACE_SLOTS
     stacks: dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {}
@@ -728,7 +801,11 @@ def _face_icons(
             running = _hatch_layers(manifest, cube, source, cube.active_state)
             # The facing MUST be in the key. Without it an UP-facing and a NORTH-facing hatch of
             # the same type collide in the texture pool and one silently gets the other's bake.
+            # The casing is in for the same reason: one bus kind serves every multiblock in the
+            # line, and each wears its own machine's casing.
             key = f"{cube.block}|{cube.meta}|{source}|{cube.idle_state}|{cube.facing}"
+            if cube.casing is not None:
+                key += f"|{cube.casing[0]}|{cube.casing[1]}"
         if not idle:
             continue
         faces[_GT_SIDE_TO_THREE_SLOT[side]] = key
@@ -739,21 +816,55 @@ def _face_icons(
 def _hatch_layers(
     manifest: TextureManifest, cube: BlockCube, render_side: str, state: str
 ) -> list[dict[str, Any]]:
-    """One hatch face: its own background, plus the dump's front overlays where it faces us.
+    """One hatch face: its multiblock's casing, plus the dump's front overlays where it faces us.
 
-    Layer 0 alone on a non-facing side, never the recorded stack: the dump's own NORTH entry
-    already carries the front overlays, so handing it back would leave a hatch wearing its sign on
-    whichever side happened to be north regardless of where the router pointed it.
+    The overlays are one layer alone on a non-facing side, never the recorded stack: the dump's own
+    NORTH entry already carries the front overlays, so handing it back would leave a hatch wearing
+    its sign on whichever side happened to be north regardless of where the router pointed it.
+
+    **The background is the multiblock's casing, not the hatch's own** (GitHub #109 part 2).
+    ``MTEHatch.getTexture`` reads it from ``casingTexturePages[page][index]``, an id GT hands the
+    hatch through ``updateTexture`` the moment it joins a *formed* multiblock, falling back to
+    ``MACHINE_CASINGS[mTier]`` only while the hatch stands alone. The extractor dumps hatches
+    standing alone, so the recorded background is that fallback - which is why an input bus on the
+    Industrial Coke Oven came out in HV machine casing instead of the oven's own.
+
+    The casing id is not in the dump, but the block it names is; :func:`_hatch_casing` recovers it
+    from the structure and :func:`_substitute_hatches` carries it across as ``cube.casing``.
+
+    Two limits, both deliberate. A controller that chains its hatch elements to something other than
+    the block its ``casingIndex`` names - the T.F.F.T., whose glass ring accepts hatches that wear
+    the storage-field casing - draws the chained block instead; the render then still matches the
+    cells around it, which is the failure a builder can read. And a casing the manifest cannot skin
+    leaves ``cube.casing`` unset, so the face falls back to the **target side's own** layer 0 rather
+    than losing its texture - the target side's, and not a fixed one, because UP and DOWN carry
+    ``MACHINE_<TIER>_TOP`` / ``_BOTTOM`` against the horizontals' ``_SIDE`` in every hatch entry in
+    the pack, and 75% of sand's terminals are vertical.
+
+    The casing is read at the resting state and at the render side: GT's copied block texture is
+    per-side (``mBlock.getIcon(side, meta)``) and carries no active variant. The machine's yaw is
+    not applied to it, because no casing entry in the pack differs across its four horizontal faces
+    (measured: 0 of the 53 that record all four).
     """
     own = manifest.layers(cube.block, cube.meta, render_side, state)
     if not own:
         return own
+    background = _casing_layers(manifest, cube, render_side) or [own[0]]
     if render_side != cube.facing:
-        return [own[0]]
+        return background
     front = manifest.layers(cube.block, cube.meta, _FRONT_IN_DUMP, state)
     # front[1:] is safe: a hatch's front layer 0 is the same background as its horizontal sides in
     # every entry in the pack, so the slice never eats an overlay.
-    return [own[0], *front[1:]]
+    return [*background, *front[1:]]
+
+
+def _casing_layers(
+    manifest: TextureManifest, cube: BlockCube, render_side: str
+) -> list[dict[str, Any]]:
+    """The layer stack of the multiblock casing ``cube`` wears on ``render_side``, or ``[]``."""
+    if cube.casing is None:
+        return []
+    return manifest.layers(cube.casing[0], cube.casing[1], render_side, _STATE)
 
 
 def _png_data_uri(png: bytes) -> str:
@@ -876,12 +987,17 @@ def texturize_scene(
     key_layers_active: dict[str, list[dict[str, Any]]] = {}
     # Constituent blocks that resolve no face at all (see TextureSummary).
     unskinned: set[str] = set()
+    recased = standalone = 0
     for machine in scene["machines"]:
         machine_cubes = _machine_cubes(machine, docs, manifest, auto_out_face)
         if not machine_cubes:
             continue  # no doc and not a known single-block machine -> keep the placeholder box
         machine["expanded"] = True
         for cube in machine_cubes:
+            if cube.facing is not None:
+                recased, standalone = (
+                    (recased + 1, standalone) if cube.casing else (recased, standalone + 1)
+                )
             faces, stacks = _face_icons(cube, manifest)
             if all(face is None for face in faces):
                 unskinned.add(f"{cube.block}|{cube.meta}")
@@ -980,6 +1096,8 @@ def texturize_scene(
         route_cells_textured=textured_cells,
         route_cells_flat=flat_cells,
         unresolved_route_blocks=tuple(sorted(unresolved_routes)),
+        hatches_recased=recased,
+        hatches_standalone=standalone,
     )
     _log.info(
         "textures: %d/%d machine types expanded to %d textured cubes (%s); placeholder: %s; "
@@ -992,6 +1110,13 @@ def texturize_scene(
         summary.embedded_icons,
         summary.embedded_active_icons,
     )
+    if recased or standalone:
+        # Both looks are a complete hatch, so nothing else in the run says which one a page got.
+        _log.info(
+            "textures: %d/%d hatch cube(s) re-skinned to their multiblock's casing",
+            recased,
+            recased + standalone,
+        )
     if textured_cells or flat_cells:
         _log.info(
             "textures: %d/%d route cell(s) drawn as real cable/pipe blocks%s",

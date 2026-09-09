@@ -55,6 +55,11 @@ def _strip(frames: list[tuple[int, int, int, int]]) -> bytes:
     return out.getvalue()
 
 
+def _decode(data_uri: str) -> bytes:
+    """The raw PNG bytes behind a ``data:image/png;base64,...`` texture-pool entry."""
+    return base64.b64decode(data_uri.split(",", 1)[1])
+
+
 def _pixel(png: bytes, xy: tuple[int, int] = (0, 0)) -> tuple[int, int, int, int]:
     return Image.open(io.BytesIO(png)).convert("RGBA").getpixel(xy)
 
@@ -256,6 +261,27 @@ def _manifest_dict() -> dict[str, Any]:
                     "all": {"open": [{"icon": WIRE, "rgba": [220, 220, 220, 0], "glow": False}]}
                 },
             },
+            # An input bus, recorded the way the extractor records one: standing UNATTACHED, so its
+            # background is MACHINE_LV_SIDE (the mTier fallback) rather than any multiblock's
+            # casing, and the front overlay sits on NORTH because aFacing is pinned there.
+            "gregtech:gt.blockmachines|73": {
+                "kind": "mte",
+                "display_name": "Input Bus (LV)",
+                "source_class": "gregtech.api.metatileentity.implementations.MTEHatchInputBus",
+                "sides": {
+                    "NORTH": {
+                        "inactive": [
+                            {"icon": MACH_SIDE, "rgba": [255, 255, 255, 255], "glow": False},
+                            {"icon": OVERLAY, "rgba": [255, 255, 255, 0], "glow": False},
+                        ]
+                    },
+                    "all": {
+                        "inactive": [
+                            {"icon": MACH_SIDE, "rgba": [255, 255, 255, 255], "glow": False}
+                        ]
+                    },
+                },
+            },
             "gregtech:gt.blockcasings|11": {
                 "kind": "block",
                 "sides": {
@@ -363,6 +389,7 @@ def _machine(
     front: str = "north",
     voltage_tier: str = "LV",
     block_key: str | None = None,
+    hatches: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": mid,
@@ -374,6 +401,7 @@ def _machine(
         "voltage_tier": voltage_tier,
         "role": "machine",
         "color": "#6ca0dc",
+        "hatches": hatches or [],
     }
 
 
@@ -662,6 +690,75 @@ def test_interior_coil_texture_distinct_from_casing(dataset: tuple[Path, Path]) 
     assert coil_keys
     assert casing_keys
     assert pool[coil_keys[0]] != pool[casing_keys[0]], "coil and casing must bake to different PNGs"
+
+
+def test_a_hatch_bakes_its_multiblocks_casing_and_the_run_reports_it(
+    dataset: tuple[Path, Path],
+) -> None:
+    """End to end for GitHub #109 part 2: the baked hatch face carries the CASING sprite.
+
+    The dump records a hatch unattached, so its own background is ``MACHINE_LV_SIDE``; GT re-skins
+    it to the controller's casing the moment the multiblock forms. Both are complete, plausible
+    hatches, so the bake itself is the only thing that says which one a page got - and the summary
+    counter is the only thing that says it in a build log.
+    """
+    mb, manifest = dataset
+    scene = _scene(
+        [
+            _machine(
+                "m1",
+                "Test EBF",
+                [0, 0, 0],
+                [2, 2, 2],
+                hatches=[{"cell": [1, 0, 0], "kind": "InputBus", "facing": "east", "port": "p"}],
+            )
+        ]
+    )
+    summary = texturize_scene(
+        scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider
+    )
+    assert (summary.hatches_recased, summary.hatches_standalone) == (1, 0)
+
+    hatch = next(b for b in scene["blocks"] if b["meta"] == 73)  # the bus, not the controller
+    assert hatch["cell"] == [1, 0, 0]
+    keys = [k for k in hatch["texture"] if k]
+    assert keys, "the hatch resolved at least one face"
+    assert all(k.endswith("|gregtech:gt.blockcasings|11") for k in keys)
+
+    # The bake, not just the key: the casing sprite is 200-grey where the standalone machine side
+    # is pure white, so the pixels say which background actually went down.
+    casing_key = next(k for k in scene["textures"] if k.startswith("gregtech:gt.blockcasings|11|"))
+    casing_px = _pixel(_decode(scene["textures"][casing_key]))
+    side = hatch["texture"][_GT_SIDE_TO_THREE_SLOT[4]]  # WEST: a face the hatch does not face
+    assert side is not None
+    assert _pixel(_decode(scene["textures"][side])) == casing_px == (200, 200, 200, 255)
+    # And the face it DOES face keeps the front overlay on top of that same casing.
+    front = hatch["texture"][_GT_SIDE_TO_THREE_SLOT[5]]  # EAST
+    assert front is not None
+    assert _pixel(_decode(scene["textures"][front])) == (100, 100, 100, 255)
+
+
+def test_a_hatch_on_a_docless_casing_is_reported_as_standalone(
+    dataset: tuple[Path, Path],
+) -> None:
+    """A hatch whose casing the manifest cannot skin keeps the unattached look, and says so."""
+    mb, manifest = dataset
+    scene = _scene(
+        [
+            _machine(
+                "m1",
+                "Test EBF",
+                [0, 0, 0],
+                [2, 2, 2],
+                # A cell the structure does not place, so there is no casing cube to inherit.
+                hatches=[{"cell": [9, 9, 9], "kind": "InputBus", "facing": "east", "port": "p"}],
+            )
+        ]
+    )
+    summary = texturize_scene(
+        scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider
+    )
+    assert (summary.hatches_recased, summary.hatches_standalone) == (0, 1)
 
 
 def test_single_block_machine_renders_one_textured_cube(dataset: tuple[Path, Path]) -> None:

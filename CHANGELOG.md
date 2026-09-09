@@ -221,6 +221,41 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unchanged.
 
 ### Fixed
+- **A hatch on a formed multiblock now wears that machine's casing, not the standalone skin
+  (`previewer/`).** GT re-skins a hatch when it joins a *formed* multiblock:
+  `MTEHatch.getTexture` reads its background from `casingTexturePages[page][index]`, an id the
+  controller hands over through `updateTexture` in `add***ToMachineList`, and falls back to
+  `MACHINE_CASINGS[mTier]` only while the hatch stands alone. The extractor dumps hatches standing
+  alone, so the manifest holds that fallback - which drew an input bus on the Industrial Coke Oven
+  in HV machine casing rather than the oven's own Coke Oven Frame, on every hatch of every
+  multiblock (GitHub #109 part 2).
+
+  **It is fixed in the splice, with no extractor change and no re-dump.** The casing id is not in
+  the dump, but the block it names is: a GT hatch element is written
+  `buildHatchAdder(..).casingIndex(CASING_INDEX).buildAndChain(ofBlock(CASING, META))`, and that
+  `casingIndex` is the `TextureFactory.of(CASING, META)` the same casing registered - so the blocks
+  at a machine's hatch-capable cells name the casing GT re-skins its hatches to. Checked against GT
+  source for the Distillation Tower (`CASING_INDEX = 49`, page 0 index 49, `gt.blockcasings4|1`),
+  the Large Chemical Reactor (`176`, page 1 index 48, `gt.blockcasings8|0`), the Industrial Coke
+  Oven (`TAE.GTPP_INDEX(1)`, `miscutils.blockcasings|1`) and the ExxonMobil Chemical Plant
+  (`getCasingTextureID()`, its own solid casing).
+
+  **One casing per machine, taken as the mode over its hatch cells, not the block under each
+  hatch.** GT declares a single `CASING_INDEX` per controller and hands it to every hatch, and
+  reading the cell instead is wrong on a shipped example: the Large Chemical Reactor's `x` element
+  chains `activeCoils(..)` ahead of its casing, so 1 of its 25 hatch-capable cells holds a
+  cupronickel coil and a hatch landing there came out coil-skinned. The population is the dump's
+  `hatch_slots` where it recorded them, else the cells the machine's own hatches occupy.
+  Nitrobenzene's 45 hatch cubes now resolve to exactly four casings, one per machine type, and a
+  run reports the count, because both looks are a complete and plausible hatch and nothing else
+  would say which one a page got.
+
+  Where the casing is undeterminable - no hatch cell resolves, or the casing is one the manifest
+  cannot skin - the face keeps the hatch's own background rather than losing its texture, taken per
+  side so an UP-facing hatch still gets `MACHINE_<TIER>_TOP`. The texture pool key gained the
+  casing: one bus kind serves several machines in a line and each wears its own, so without it the
+  dedupe would paint them all in whichever machine baked first.
+
 - **A power source is now placed by the cable it actually costs (`solver/`).** A source's position
   exists purely to serve a trunk, and it was the one machine the annealer had no gradient on: an
   un-penalized power net never entered the placement cost, so a 1x1x1 source anywhere inside the
