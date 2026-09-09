@@ -23,6 +23,7 @@ from gtnh_solver.ir import (
     Commodity,
     FaceSpec,
     Facing,
+    HatchSlot,
     InputIR,
     IODirection,
     LayoutResult,
@@ -1584,3 +1585,351 @@ def test_an_invented_material_is_caught() -> None:
     problem, layout = _sand_power_layout()
     invented = RouteMaterial(family=PipeFamily.CABLE, material="cobalt", tier="LV")
     assert ViolationCode.ROUTE_MATERIAL_UNKNOWN in _codes(problem, _with_material(layout, invented))
+
+
+# ------------------------------------------- the hatches a layout NEEDS (as opposed to has)
+#
+# ``_check_hatches`` above validates the hatches a layout *records*. These cover the other
+# direction: a connection, or a machine's own upkeep, that needs a block and was given none. A
+# multiblock does no I/O itself - the connection IS a hatch - so a route docked against plain
+# casing forms a structure that then moves nothing, and a controller with no maintenance hatch
+# does not form at all.
+
+
+def _slot(x: int, y: int, z: int, *kinds: str) -> HatchSlot:
+    return HatchSlot(offset=_coord(x, y, z), kinds=kinds)
+
+
+def _multiblock(mid: str, ports: list[Port], slots: list[HatchSlot], *, width: int) -> Machine:
+    """A ``width`` x 1 x 1 multiblock whose structure records ``slots`` (so it wants hatches)."""
+    return Machine(
+        id=mid,
+        type="gt.large_chemical_reactor",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        footprint=CellBox(sx=width, sy=1, sz=1),
+        faces=FaceSpec(ports=ports),
+        hatch_slots=tuple(slots),
+        hatch_cells=len(slots),
+    )
+
+
+#: The three ports of ``_multiblock_line``'s multiblock, in the order their hatches are emitted.
+_MB_PORTS = ("in1", "in2", "out")
+
+
+def _multiblock_line() -> tuple[InputIR, LayoutResult]:
+    """A valid line whose one multiblock is wired through three hatches, plus its maintenance one.
+
+    ``mb`` spans (2..5, 0, 2) facing north, with a recorded casing cell per connection and a
+    fourth that accepts a ``Maintenance`` hatch. Each of its three single-block partners docks on
+    its own column, so no two routes share a cell.
+    """
+    partners = [
+        _item_machine("p1"),
+        _item_machine("p2"),
+        _item_machine("p3", direction=IODirection.INPUT, port="in"),
+    ]
+    mb = _multiblock(
+        "mb",
+        [
+            Port(id="in1", commodity=Commodity.ITEM, direction=IODirection.INPUT),
+            Port(id="in2", commodity=Commodity.ITEM, direction=IODirection.INPUT),
+            Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT),
+        ],
+        [
+            _slot(0, 0, 0, "InputBus"),
+            _slot(1, 0, 0, "InputBus"),
+            _slot(2, 0, 0, "OutputBus"),
+            _slot(3, 0, 0, "Maintenance"),
+        ],
+        width=4,
+    )
+    wiring = [("n1", "p1", "out", "mb", "in1", 2), ("n2", "p2", "out", "mb", "in2", 3)]
+    wiring.append(("n3", "mb", "out", "p3", "in", 4))
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[*partners, mb],
+        nets=[
+            Net(
+                id=nid,
+                commodity=Commodity.ITEM,
+                fluid_or_item="gt.dust.iron",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id=src, port_id=src_port),
+                    MachineFaceRef(machine_id=dst, port_id=dst_port),
+                ],
+            )
+            for nid, src, src_port, dst, dst_port, _ in wiring
+        ],
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            # the partners face south, so their usable north face looks back at mb
+            Placement(machine_id="p1", cell=_coord(2, 0, 5), orientation=Facing.SOUTH),
+            Placement(machine_id="p2", cell=_coord(3, 0, 5), orientation=Facing.SOUTH),
+            Placement(machine_id="p3", cell=_coord(4, 0, 5), orientation=Facing.SOUTH),
+            Placement(machine_id="mb", cell=_coord(2, 0, 2), orientation=Facing.NORTH),
+        ],
+        routes=[
+            Route(
+                net_id=nid,
+                commodity=Commodity.ITEM,
+                terminals=[
+                    Terminal(
+                        machine_id=partner,
+                        port_id=partner_port,
+                        face=Facing.NORTH,
+                        cell=_coord(x, 0, 4),
+                    ),
+                    Terminal(
+                        machine_id="mb", port_id=mb_port, face=Facing.SOUTH, cell=_coord(x, 0, 3)
+                    ),
+                ],
+                segments=[Segment(start=_coord(x, 0, 4), end=_coord(x, 0, 3), channel=0)],
+            )
+            for nid, partner, partner_port, mb_port, x in (
+                ("n1", "p1", "out", "in1", 2),
+                ("n2", "p2", "out", "in2", 3),
+                ("n3", "p3", "in", "out", 4),
+            )
+        ],
+        hatches=[
+            PlacedHatch(
+                machine_id="mb",
+                kind=kind,
+                cell=_coord(x, 0, 2),
+                facing=Facing.SOUTH,
+                port_id=port_id,
+            )
+            for kind, x, port_id in (
+                ("InputBus", 2, "in1"),
+                ("InputBus", 3, "in2"),
+                ("OutputBus", 4, "out"),
+                ("Maintenance", 5, None),
+            )
+        ],
+    )
+    return problem, layout
+
+
+def _without_hatches(layout: LayoutResult, *port_ids: str | None) -> LayoutResult:
+    return layout.model_copy(
+        update={"hatches": [h for h in layout.hatches if h.port_id not in port_ids]}
+    )
+
+
+def test_a_multiblock_wired_through_every_hatch_it_needs_passes() -> None:
+    # The satisfiable direction first: the gate has to accept the layout a correct producer emits,
+    # or the check it adds is a false infeasibility rather than a safety net.
+    problem, layout = _multiblock_line()
+    report = validate(problem, layout)
+    assert report.ok, str(report)
+
+
+def test_a_routed_port_whose_hatch_was_removed_is_rejected() -> None:
+    """The gap #119 describes: routing docks a pipe there, and nothing is there to receive it.
+
+    Every other hatch check passes on this layout - the remaining hatches sit on real body cells,
+    face outward, collide with nothing, and agree with their terminals. Only the absence is wrong.
+    """
+    problem, layout = _multiblock_line()
+    report = validate(problem, _without_hatches(layout, "in2"))
+    assert not report.ok
+    assert ViolationCode.PORT_HATCH_MISSING in report.codes()
+    assert "'in2'" in str(report)
+
+
+@given(st.lists(st.booleans(), min_size=3, max_size=3))
+def test_exactly_the_ports_left_without_a_hatch_are_reported(dropped: list[bool]) -> None:
+    """Both directions at once, over every subset: each hatch removed is reported once, and each
+    hatch kept is reported not at all. A check that fired on a port that HAS its hatch would turn
+    valid layouts infeasible, which is the failure the solver's contract cannot absorb."""
+    problem, layout = _multiblock_line()
+    gone = {port for port, drop in zip(_MB_PORTS, dropped, strict=True) if drop}
+    report = validate(problem, _without_hatches(layout, *gone))
+    missing = [v for v in report.violations if v.code is ViolationCode.PORT_HATCH_MISSING]
+    assert len(missing) == len(gone)
+    assert all(v.machine_id == "mb" for v in missing)
+    for port in gone:
+        assert any(f"'{port}'" in v.message for v in missing)
+    if not gone:
+        assert report.ok, str(report)
+
+
+def test_a_single_block_machines_port_needs_no_hatch() -> None:
+    """A single-block machine IS its own I/O: its faces are the machine's, not a hatch's, so a
+    bus at its cell would describe replacing the machine with a bus. ``_base`` records no hatch
+    slots and no hatches, and must stay clean - as must every plan adapted with no dataset."""
+    problem, layout = _base()
+    assert layout.hatches == []
+    assert ViolationCode.PORT_HATCH_MISSING not in _codes(problem, layout)
+
+
+def test_an_me_toggled_port_needs_no_hatch() -> None:
+    """A toggled commodity is removed from physical routing, so its ports attach to nothing.
+
+    Demanding a hatch here would reject a layout that is not merely valid but *required* to look
+    like this (a routed ME net is ``UNEXPECTED_ME_ROUTE``).
+    """
+    problem, layout = _multiblock_line()
+    toggled = problem.model_copy(update={"me_toggles": METoggles(items=True)})
+    unrouted = _without_hatches(layout, *_MB_PORTS).model_copy(update={"routes": []})
+    report = validate(toggled, unrouted)
+    assert report.ok, str(report)
+
+
+def test_a_port_no_net_names_needs_no_hatch() -> None:
+    """Having a port does not imply needing a hatch: an output no net consumes is closed by a
+    boundary storage rather than a route, and a feed the plan never drew is wired by hand."""
+    problem, layout = _multiblock_line()
+    mb = next(m for m in problem.machines if m.id == "mb")
+    spare = Port(id="spare", commodity=Commodity.FLUID, direction=IODirection.OUTPUT)
+    widened = mb.model_copy(
+        update={
+            "faces": FaceSpec(ports=[*mb.faces.ports, spare]),
+            "hatch_cells": len(mb.hatch_slots),
+        }
+    )
+    others = [m for m in problem.machines if m.id != "mb"]
+    report = validate(problem.model_copy(update={"machines": [*others, widened]}), layout)
+    assert report.ok, str(report)
+
+
+def test_a_net_that_was_never_connected_reports_the_connection_not_the_hatch() -> None:
+    """Nothing was built for an unrealized net, so there is no connection to host: reporting a
+    missing hatch on top would double-report ``MISSING_CONNECTION`` and point at the wrong fix."""
+    problem, layout = _multiblock_line()
+    kept = [r for r in layout.routes if r.net_id != "n2"]
+    codes = _codes(problem, _without_hatches(layout, "in2").model_copy(update={"routes": kept}))
+    assert ViolationCode.MISSING_CONNECTION in codes
+    assert ViolationCode.PORT_HATCH_MISSING not in codes
+
+
+def _auto_multiblocks() -> tuple[InputIR, LayoutResult]:
+    """Two multiblocks that eject into each other with no pipe: an output bus meeting an input bus.
+
+    GT's output bus pushes into whatever inventory sits on its own front face, so a free
+    connection is still two casing cells spent - which is exactly what a producer could forget.
+    """
+    source = _multiblock(
+        "src",
+        [Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)],
+        [_slot(1, 0, 0, "OutputBus")],
+        width=2,
+    )
+    target = _multiblock(
+        "dst",
+        [Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT)],
+        [_slot(0, 0, 0, "InputBus")],
+        width=2,
+    )
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[source, target],
+        nets=[
+            Net(
+                id="n",
+                commodity=Commodity.ITEM,
+                fluid_or_item="gt.dust.iron",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="src", port_id="out"),
+                    MachineFaceRef(machine_id="dst", port_id="in"),
+                ],
+            )
+        ],
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id="src", cell=_coord(2, 0, 2), orientation=Facing.NORTH),
+            Placement(machine_id="dst", cell=_coord(4, 0, 2), orientation=Facing.NORTH),
+        ],
+        auto_connections=[
+            AutoConnection(
+                net_id="n",
+                source_machine_id="src",
+                source_face=Facing.EAST,
+                target_machine_id="dst",
+                target_face=Facing.WEST,
+            )
+        ],
+        hatches=[
+            PlacedHatch(
+                machine_id="src",
+                kind="OutputBus",
+                cell=_coord(3, 0, 2),
+                facing=Facing.EAST,
+                port_id="out",
+            ),
+            PlacedHatch(
+                machine_id="dst",
+                kind="InputBus",
+                cell=_coord(4, 0, 2),
+                facing=Facing.WEST,
+                port_id="in",
+            ),
+        ],
+    )
+    return problem, layout
+
+
+def test_a_free_auto_output_between_multiblocks_still_needs_both_hatches() -> None:
+    problem, layout = _auto_multiblocks()
+    assert validate(problem, layout).ok
+
+
+@pytest.mark.parametrize("port", ["out", "in"])
+def test_an_auto_output_side_with_no_hatch_is_rejected(port: str) -> None:
+    # No pipe is laid, so no terminal exists to check - the ports come from the net's own
+    # endpoints. Either side left as plain casing means the ejection has nothing to push into.
+    problem, layout = _auto_multiblocks()
+    report = validate(problem, _without_hatches(layout, port))
+    assert ViolationCode.PORT_HATCH_MISSING in report.codes()
+    assert f"'{port}'" in str(report)
+
+
+def test_an_auto_output_naming_a_machine_the_problem_lacks_asks_for_no_hatch() -> None:
+    """A ghost endpoint is ``AUTO_OUTPUT_WRONG_ENDPOINTS``' to report. There is no structure to
+    read a port off, so the hatch check has nothing to require and must not invent one."""
+    problem, layout = _auto_multiblocks()
+    ghosted = layout.auto_connections[0].model_copy(update={"target_machine_id": "ghost"})
+    codes = _codes(problem, layout.model_copy(update={"auto_connections": [ghosted]}))
+    assert ViolationCode.AUTO_OUTPUT_WRONG_ENDPOINTS in codes
+    assert ViolationCode.PORT_HATCH_MISSING not in codes
+
+
+# ------------------------------------------------------- the upkeep hatches (maintenance/muffler)
+
+
+def test_a_multiblock_with_no_maintenance_hatch_is_rejected() -> None:
+    """``mMaintenanceHatches.size() == 1`` is asserted in a dozen-odd ``checkMachine``
+    implementations, so this structure never forms - the failure the gate exists to prevent, and
+    the one it used to check for the muffler only (#116)."""
+    problem, layout = _multiblock_line()
+    report = validate(problem, _without_hatches(layout, None))
+    assert not report.ok
+    assert ViolationCode.MAINTENANCE_MISSING in report.codes()
+    assert [v.machine_id for v in report.violations] == ["mb"]
+
+
+def test_a_structure_that_records_no_maintenance_cell_is_not_asked_for_one() -> None:
+    """The permissive half, and the one that matters most: a slot's kinds are a lower bound, and
+    35 of 208 dumped controllers record no ``Maintenance`` cell at all. Reading that silence as a
+    prohibition would manufacture a false infeasibility across a sixth of the dataset."""
+    problem, layout = _auto_multiblocks()  # records only OutputBus / InputBus cells
+    assert ViolationCode.MAINTENANCE_MISSING not in _codes(problem, layout)
+
+
+def test_a_machine_with_no_recorded_structure_is_asked_for_no_upkeep_hatch() -> None:
+    # A single block has no casing cells to spend, so neither upkeep hatch applies to it.
+    problem, layout = _base()
+    assert not _codes(problem, layout) & {
+        ViolationCode.MAINTENANCE_MISSING,
+        ViolationCode.MUFFLER_MISSING,
+    }

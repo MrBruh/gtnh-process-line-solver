@@ -20,6 +20,12 @@ What is checked now (needs only the IR):
   endpoints exactly once (no foreign or duplicate terminals), on a usable (non-front) face adjacent
   to its machine, with that terminal cell on the route (the geometric + structural halves of
   required-I/O-face reachability).
+  hatches - a multiblock does no I/O of its own, so every connection is a block: each recorded
+  hatch sits on a body cell of its own machine, faces out, shares its casing cell with nothing, and
+  agrees with its terminal; every connection the layout actually makes HAS such a hatch (a routed
+  port, or either side of a free auto-output); and a machine gets the upkeep hatches its own
+  structure records - a maintenance hatch, without which the multiblock never forms, and a muffler
+  with literal air in front of it.
   auto-output - every auto-connection joins its net's real OUTPUT->INPUT endpoint machines
   (resolved by port direction) on adjacent usable faces; power/ME commodities cannot
   auto-output, and a machine has at most one auto-output face.
@@ -98,7 +104,8 @@ def validate(problem: InputIR, layout: LayoutResult) -> ValidationReport:
     _check_hatch_cells(problem, out)
     _check_terminal_hatch_cells(problem, layout, out)
     _check_hatches(problem, layout, out)
-    _check_mufflers(problem, layout, out)
+    _check_port_hatches(problem, layout, out)
+    _check_upkeep_hatches(problem, layout, out)
     _check_route_capacity(problem, layout, out)
     _check_route_materials(problem, layout, out)
     _check_pinned(problem, layout, out)
@@ -653,20 +660,125 @@ def _check_hatches(problem: InputIR, layout: LayoutResult, out: list[Violation])
             )
 
 
-def _check_mufflers(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
-    """A polluting machine needs a muffler, and a muffler needs literal air to vent into.
+def _check_port_hatches(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
+    """Every connection the layout actually makes needs a hatch to make it through.
 
+    ``_check_hatches`` checks the hatches that are *there*; this checks for the one that is not. A
+    multiblock does no I/O of its own - a connection IS a block, one casing cell replaced by a bus
+    or a hatch (docs/DOMAIN.md) - so a pipe docked against plain casing describes a structure that
+    forms and then moves nothing. Nothing else in the gate looks for an absent hatch, so without
+    this the property held only because the producer happened to emit one every time.
+
+    Re-derived from the problem's own nets rather than from the producer's emission: a net the
+    layout physically realizes (a route, or a free auto-output) attaches at each of its endpoints,
+    and each attachment on a machine with a recorded structure is a hatch. Three cases genuinely
+    need none, and flagging them would turn a valid layout into a false infeasibility - the worse
+    of the two failures:
+
+    - **an ME-toggled commodity.** It is removed from physical routing entirely, so its ports
+      attach to nothing at all;
+    - **a net with neither a route nor an auto-connection**, and a port no net names. Nothing was
+      built there to need a block: an unrealized net is ``MISSING_CONNECTION``'s to report, and an
+      unwired port is closed by a boundary storage or is a feed the plan never drew;
+    - **a machine that records no hatch slots.** A single-block machine *is* its own I/O, and an
+      unrecorded structure reads as "unknown", never "none" (23 of 208 dumped controllers record
+      no slot at all - :class:`~gtnh_solver.ir.HatchSlot`). Both want the permissive reading, and
+      it is the same one ``_check_terminal_hatch_cells`` and ``_check_hatch_cells`` already take.
+
+    An auto-connection names two machines and no ports, so the port each attaches through is
+    resolved from the net's own endpoints (``_endpoint_port``); whether those two machines are the
+    net's at all is ``_check_auto_net``'s question, not this one's.
+    """
+    machines = {m.id: m for m in problem.machines}
+    placed = {(h.machine_id, h.port_id) for h in layout.hatches if h.port_id is not None}
+    for machine_id, port_id, net_id in _connected_ports(problem, layout):
+        machine = machines.get(machine_id)
+        if machine is None or not machine.hatch_slots or not port_id:
+            continue
+        if (machine_id, port_id) in placed:
+            continue
+        out.append(
+            Violation(
+                ViolationCode.PORT_HATCH_MISSING,
+                f"net {net_id!r} connects to port {port_id!r} on {machine_id!r} "
+                f"({machine.type}), but the layout places no hatch for it: on a multiblock the "
+                f"connection is a hatch block, so this one docks against plain casing",
+                machine_id=machine_id,
+            )
+        )
+
+
+def _connected_ports(problem: InputIR, layout: LayoutResult) -> list[tuple[str, str, str]]:
+    """``(machine, port, net)`` for every attachment the layout physically makes, deduped.
+
+    The routed half reads the *net's* endpoints rather than the route's terminals: what needs a
+    hatch is the connection the problem asks for, and a terminal that went missing is
+    ``MISSING_TERMINAL``'s to report, not a reason to stop looking for the hatch. An ME-toggled
+    commodity is not physically connected at all, so it contributes nothing.
+    """
+    nets = {n.id: n for n in problem.nets}
+    machines = {m.id: m for m in problem.machines}
+    seen: dict[tuple[str, str], str] = {}
+    for route in layout.routes:
+        net = nets.get(route.net_id)
+        if net is None or problem.me_toggles.toggled(net.commodity):
+            continue
+        for endpoint in net.endpoints:
+            seen.setdefault((endpoint.machine_id, endpoint.port_id), net.id)
+    for auto in layout.auto_connections:
+        net = nets.get(auto.net_id)
+        if net is None or problem.me_toggles.toggled(net.commodity):
+            continue
+        for machine_id in (auto.source_machine_id, auto.target_machine_id):
+            machine = machines.get(machine_id)
+            if machine is None:
+                continue
+            seen.setdefault((machine_id, _endpoint_port(net, machine_id, machine)), net.id)
+    return [(mid, port_id, net_id) for (mid, port_id), net_id in sorted(seen.items())]
+
+
+#: The upkeep hatches a machine needs for itself, to the violation a missing one is and why it
+#: matters. The machine's OWN recorded slots are the requirement - GT offers each element only to
+#: a controller that needs it - which is what keeps this independent of ``router.hatches``: a gate
+#: that read the producer's list of required kinds could not catch the producer shortening it
+#: (docs/ARCHITECTURE.md #4).
+_UPKEEP_MISSING: dict[str, tuple[ViolationCode, str]] = {
+    "Maintenance": (
+        ViolationCode.MAINTENANCE_MISSING,
+        "GT offers the maintenance element only to a controller that runs maintenance checks, and "
+        "a controller whose mMaintenanceHatches is empty does not form at all",
+    ),
+    "Muffler": (
+        ViolationCode.MUFFLER_MISSING,
+        "GT offers the muffler element only to a controller that pollutes, and one that cannot "
+        "vent stops with POLLUTION_FAIL",
+    ),
+}
+
+
+def _check_upkeep_hatches(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
+    """The hatches a machine needs for itself rather than for a net: maintenance, and a muffler.
+
+    Both are load-bearing and neither serves a port, so nothing else in the gate would look for
+    them. A multiblock with no maintenance hatch **does not form**: ``mMaintenanceHatches.size()
+    == 1`` is asserted in ``checkMachine`` across a dozen-odd controllers. A polluting one with no
+    muffler forms and then stops: the controller accumulates ``VENT_AMOUNT`` of pollution and
+    halts with ``POLLUTION_FAIL``.
+
+    The requirement is re-derived from the structure's own recorded slots
+    (:data:`_UPKEEP_MISSING`), which is what makes it independent of the producer, and it stays
+    permissive exactly where the dump is silent: a slot's kinds are a lower bound, and 35 of 208
+    dumped controllers record no ``Maintenance``-capable cell (:class:`~gtnh_solver.ir.HatchSlot`),
+    so "not recorded" has to read as "unknown", not "forbidden", or a third of the dataset
+    acquires a false infeasibility. It does over-report on the few controllers that accept a
+    muffler without asserting one (the Implosion Compressor); that is the safe direction, since an
+    unneeded muffler costs a casing cell and a missing one stops the machine.
+
+    The muffler has a spatial rule on top, and this is the only gate that states it:
     ``MTEHatchMuffler.polluteEnvironment`` calls ``getAirAtSide`` on its own front facing and
-    returns false for anything else - a cable, a pipe, a casing, a neighbouring machine. The
-    controller then hits ``VENT_AMOUNT`` of stored pollution and stops with ``POLLUTION_FAIL``. So
-    the cell in front of a muffler is a genuine keep-out, a constraint class routing has no other
-    instance of, and this is the only gate that says so.
-
-    A structure that records a ``Muffler``-capable cell is one GT offered the muffler element to,
-    which it only does for a controller that pollutes, so a missing muffler is reported too. That
-    over-reports on the few controllers that accept one without asserting it (the Implosion
-    Compressor), which is the safe direction: an unneeded muffler costs a casing cell, a missing
-    one stops the machine.
+    returns false for anything else - a cable, a pipe, a casing, a neighbouring machine. So the
+    cell in front of a muffler is a genuine keep-out, a constraint class routing has no other
+    instance of.
     """
     machines = {m.id: m for m in problem.machines}
     occupied = {c.as_tuple() for c in problem.reserved_cells}
@@ -677,7 +789,6 @@ def _check_mufflers(problem: InputIR, layout: LayoutResult, out: list[Violation]
     for route in layout.routes:
         occupied |= route.cells()
 
-    placed = {h.machine_id for h in layout.hatches if h.kind == "Muffler"}
     for hatch in layout.hatches:
         if hatch.kind != "Muffler":
             continue
@@ -689,21 +800,28 @@ def _check_mufflers(problem: InputIR, layout: LayoutResult, out: list[Violation]
                     ViolationCode.MUFFLER_BLOCKED,
                     f"the muffler on {hatch.machine_id!r} vents {hatch.facing.value} into "
                     f"{vent}, which is not empty air: the machine would stop with POLLUTION_FAIL",
+                    machine_id=hatch.machine_id,
                 )
             )
+
+    placed: dict[str, set[str]] = defaultdict(set)
+    for hatch in layout.hatches:
+        placed[hatch.machine_id].add(hatch.kind)
     for placement in layout.placements:
         machine = machines.get(placement.machine_id)
-        if machine is None or placement.machine_id in placed:
+        if machine is None:
             continue
-        if any("Muffler" in slot.kinds for slot in machine.hatch_slots):
-            out.append(
-                Violation(
-                    ViolationCode.MUFFLER_MISSING,
-                    f"machine {placement.machine_id!r} ({machine.type}) has casing cells that "
-                    f"accept a muffler, which GT only offers to a controller that pollutes, but "
-                    f"the layout places none",
+        recorded = {kind for slot in machine.hatch_slots for kind in slot.kinds}
+        for kind, (code, why) in _UPKEEP_MISSING.items():
+            if kind in recorded and kind not in placed[placement.machine_id]:
+                out.append(
+                    Violation(
+                        code,
+                        f"machine {placement.machine_id!r} ({machine.type}) has casing cells that "
+                        f"accept a {kind} hatch but the layout places none: {why}",
+                        machine_id=placement.machine_id,
+                    )
                 )
-            )
 
 
 def _check_terminals(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:

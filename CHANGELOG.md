@@ -221,6 +221,38 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unchanged.
 
 ### Fixed
+- **The validator now checks the hatches a layout *needs*, not only the ones it records
+  (`validator/`).** Two holes in one gate, both of them the safety net certifying the producer
+  instead of checking it (docs/ARCHITECTURE.md #4).
+
+  **A missing maintenance hatch was invisible (#116).** `router/hatches.py` treats maintenance and
+  muffler as equally required on the way in (either one unplaceable is an explicit infeasibility),
+  but only the muffler was re-checked on the way out. Stripping all 7 `Maintenance` hatches from a
+  solved nitrobenzene layout added no violation at all, while stripping its single muffler was
+  caught: the codebase checked the *optional* upkeep hatch and not the mandatory one.
+  `mMaintenanceHatches.size() == 1` is asserted in a dozen-odd `checkMachine` implementations, so
+  a structure without one does not form. `MAINTENANCE_MISSING` now mirrors `MUFFLER_MISSING`,
+  derived from the machine's own recorded slots, so a dump silent about that kind still reads as
+  "unknown" rather than "forbidden" (35 of 208 controllers record no `Maintenance`-capable cell).
+
+  **A port whose hatch went missing was invisible too (#119).** The gate validated the hatches
+  that were *present* (a body cell of its own machine, an outward facing, no two on one casing
+  cell, agreement with its terminal) and never asked whether a connection that needs a hatch has
+  one, so the property held only because the producer happened to be correct. On a multiblock the
+  connection IS a block, so a pipe docked against plain casing describes a structure that forms
+  and then moves nothing. `PORT_HATCH_MISSING` re-derives the requirement from the problem's own
+  nets: a net the layout physically realizes, by pipe or by free auto-output, needs a hatch at
+  each machine it attaches to. Three cases genuinely need none and are deliberately left alone,
+  because a false infeasibility is the worse failure of the two: an ME-toggled commodity is not
+  physically routed at all; a net with neither a route nor an auto-connection is
+  `MISSING_CONNECTION`'s to report, as is a port no net names (closed by a boundary storage, or a
+  feed the plan never drew); and a machine that records no hatch slots is its own I/O, or is
+  simply unknown, which 23 of 208 dumped controllers are.
+
+  Neither check calls into `router/hatches.py` or restates its logic. Both are computed from the
+  `LayoutResult` and the `InputIR`, which is what lets them catch the producer dropping a hatch
+  rather than agreeing with it. Both shipped examples still solve VALID and validate clean.
+
 - **A power source is now placed by the cable it actually costs (`solver/`).** A source's position
   exists purely to serve a trunk, and it was the one machine the annealer had no gradient on: an
   un-penalized power net never entered the placement cost, so a 1x1x1 source anywhere inside the
