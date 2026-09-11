@@ -113,7 +113,10 @@ doc as intent and reconcile.
 - **buildguide/**, **previewer/**, **cli.py** - outputs and entry point. The previewer skins each
   block with its extracted GT sprite; a face that resolves none renders Minecraft's magenta/black
   missing-texture checkerboard, **not** a neutral grey, because so many GT casings are plain grey
-  that a gap was indistinguishable from a correct render (`previewer/html.py`, `_MISSING`).
+  that a gap was indistinguishable from a correct render (`previewer/html.py`, `_MISSING`). The
+  emitted page treats **plan text as untrusted**: it never builds markup from it (the legend is DOM
+  text nodes), the inlined JSON is `</`-escaped, and the page ships a hash-based CSP - a shared plan
+  is the expected input, not a contrived one.
 
 ## Engineering decisions (from the review)
 
