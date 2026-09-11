@@ -30,21 +30,21 @@ from gtnh_solver.adapter import (
     to_input_ir,
 )
 from gtnh_solver.adapter.core import _bounding_region
-from gtnh_solver.dataset import DatasetMeta, MachinePhysical, PhysicalDataset
+from gtnh_solver.dataset import PhysicalDataset
 from gtnh_solver.ir import (
     CellBox,
     Commodity,
-    Facing,
     InputIR,
     IODirection,
     LayoutResult,
     LayoutStatus,
     Net,
+    Port,
 )
 from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 from gtnh_solver.placement import place
 from gtnh_solver.validator import validate
-from tests._helpers import PLACEMENT_CODES
+from tests._helpers import PLACEMENT_CODES, hatched_dataset
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 _SAND = _EXAMPLES / "gtnh-sand.json"
@@ -296,45 +296,24 @@ def test_machine_over_the_cap_alone_gets_its_own_source() -> None:
 # --------------------------------------------------- energy hatches (multi-connection power)
 
 
-def _hatched_dataset(hatch_cells: int = 20, key: str = "M") -> PhysicalDataset:
-    """A dataset whose one machine is a multiblock with ``hatch_cells`` interchangeable cells.
-
-    A GT casing cell accepts a hatch of any kind, so ``energy_hatch_cells`` matches; one
-    maintenance hatch is reserved. This is what tells the synthesis the machine HAS hatches - with
-    no record it keeps a single connection.
-    """
-    return PhysicalDataset(
-        meta=DatasetMeta.model_validate(
-            {
-                "schema": 2,
-                "pack_version": "test",
-                "generated_at": "2026-01-01T00:00:00Z",
-                "extractor_sha": "0" * 40,
-                "controller_count": 1,
-            }
-        ),
-        machines={
-            key: MachinePhysical(
-                key=key,
-                registry_name="test:block",
-                meta=0,
-                source_class="test.Controller",
-                footprint=CellBox(sx=3, sy=3, sz=3),
-                io_faces=frozenset({Facing.NORTH}),
-                hint_layers=frozenset({0}),
-                coil_layer_count=0,
-                variant_count=1,
-                hatch_cells=hatch_cells,
-                energy_hatch_cells=hatch_cells,
-                upkeep_hatch_count=1,
-            )
-        },
-    )
-
-
 def _hatches(ir: InputIR, machine_id: str) -> list[str]:
     machine = next(m for m in ir.machines if m.id == machine_id)
     return [p.id for p in machine.power_input_ports]
+
+
+def _power_in(ir: InputIR, machine_id: str = "n0") -> Port:
+    machine = next(m for m in ir.machines if m.id == machine_id)
+    return next(p for p in machine.faces.ports if p.id == "power:in")
+
+
+def _missing_machine_dataset(*, census: bool) -> PhysicalDataset:
+    """A dataset that does NOT contain machine type ``M``, declaring itself a census or a sample.
+
+    The same miss means opposite things in the two: in a dump that enumerates every multiblock
+    controller it is a positive fact (``M`` is not a multiblock, so it is a single block); in a
+    sample it is no evidence at all. The record is filed under another key so the lookup misses.
+    """
+    return hatched_dataset(key="Some Other Multiblock", census=census)
 
 
 def test_a_machine_with_no_structural_record_keeps_one_connection() -> None:
@@ -343,28 +322,62 @@ def test_a_machine_with_no_structural_record_keeps_one_connection() -> None:
     # keeps the plain port id every consumer has always seen, and no rate.
     ir = to_input_ir(_powered_plan(60.0))
     assert _hatches(ir, "n0") == ["power:in"]
-    port = next(p for p in ir.machines[0].faces.ports if p.id == "power:in")
-    assert port.rate is None
-    # The one connection still states a ceiling, and it is the machine's OWN energy input rather
-    # than a hatch's: 60 EU/t at LV is (60 * 2) / 32 + 1 = 4 A by GT's MTEBasicMachine formula.
-    # Leaving it unset made the validator's under-supply check inert for every such machine (#114).
-    assert port.max_amps == 4.0
+    assert _power_in(ir).rate is None
+
+
+def test_no_dataset_states_no_intake_ceiling_at_all() -> None:
+    # "No structural record" is NOT "single-block machine". GT bounds a multiblock's intake at 2 A
+    # per energy hatch and a basic machine's at its own maxAmperesIn, and with no dataset nothing
+    # says which class this is - so the connection states no ceiling and the validator reports the
+    # machine as unmeasured rather than measuring it against whichever formula happened to be
+    # coded (#114). Under the committed two-machine fixtures this is every machine in both shipped
+    # examples, the Large Chemical Reactor included.
+    assert _power_in(to_input_ir(_powered_plan(30.0))).max_amps is None
+
+
+def test_a_census_dataset_that_misses_the_machine_states_gts_own_ceiling() -> None:
+    # The one population the MTEBasicMachine formula may be applied to: a machine a dump that
+    # enumerates every multiblock controller positively failed to find, which makes it a single
+    # block. 30 EU/t at LV is (30 * 2) / 32 + 1 = 2 A on GT's integer division.
+    ir = to_input_ir(_powered_plan(30.0), physical=_missing_machine_dataset(census=True))
+    assert _hatches(ir, "n0") == ["power:in"]
+    assert _power_in(ir).max_amps == 2.0
+
+
+def test_a_sample_dataset_that_misses_the_machine_states_nothing() -> None:
+    # The same miss against a dump that is only a SAMPLE proves nothing: the machine could be a
+    # multiblock the sample does not carry. Same code path, opposite conclusion, and the flag in
+    # the dump's own _meta.json is what separates them.
+    sample = _missing_machine_dataset(census=False)
+    assert sample.get("M") is None
+    assert sample.identifies_single_blocks is False
+    assert _power_in(to_input_ir(_powered_plan(30.0), physical=sample)).max_amps is None
 
 
 def test_a_no_record_machine_on_an_off_ladder_tier_states_no_ceiling() -> None:
     # The ceiling comes from the tier voltage, so a tier off the ladder leaves it genuinely
     # unknown. Inventing one would be worse than saying nothing: the validator reads an absent
     # ceiling as unverifiable and skips the machine rather than passing or failing it on a guess.
-    ir = to_input_ir(_powered_plan(60.0, tier="OpV"))
-    port = next(p for p in ir.machines[0].faces.ports if p.id == "power:in")
-    assert port.max_amps is None
+    ir = to_input_ir(
+        _powered_plan(60.0, tier="OpV"), physical=_missing_machine_dataset(census=True)
+    )
+    assert _power_in(ir).max_amps is None
+
+
+def test_a_draw_past_gts_own_input_domain_states_no_ceiling() -> None:
+    # GT caps what both overclock paths compute at V[tier] * mAmperage, so no real basic machine
+    # runs a recipe past its own tier voltage and the formula is undefined there. An export
+    # claiming an LV machine draws 480 EU/t is the upstream recipe-model bug _supply_tier
+    # documents; extrapolating would answer "GT accepts 31 amps" about a number GT cannot hold.
+    ir = to_input_ir(_powered_plan(480.0), physical=_missing_machine_dataset(census=True))
+    assert _power_in(ir).max_amps is None
 
 
 def test_a_draw_past_one_hatch_is_split_across_several() -> None:
     # A GT energy hatch accepts 2 A, so 60 EU/t at LV (3.75 A at the designed run length) needs
     # two of them. Each carries its own share of the draw, and the shares must add back up to the
     # machine's eut or part of it would go unsized.
-    ir = to_input_ir(_powered_plan(60.0), physical=_hatched_dataset())
+    ir = to_input_ir(_powered_plan(60.0), physical=hatched_dataset())
     assert _hatches(ir, "n0") == ["power:in#1", "power:in#2"]
     machine = ir.machines[0]
     assert [p.rate for p in machine.power_input_ports] == [30.0, 30.0]
@@ -375,7 +388,7 @@ def test_hatches_of_one_machine_spread_across_several_cable_runs() -> None:
     # The partitioner works in hatches, not machines: six 96 EU/t LV machines draw 18 A together,
     # past the 16x cap, so the tier splits - and because the unit is a hatch, the split can cut
     # through a machine rather than having to keep it whole.
-    ir = to_input_ir(_powered_plan(*([96.0] * 6)), physical=_hatched_dataset())
+    ir = to_input_ir(_powered_plan(*([96.0] * 6)), physical=hatched_dataset())
     nets = _power_nets(ir)
     assert {n.id for n in nets} == {"power:LV#1", "power:LV#2"}
     # every hatch of every machine is wired exactly once, across the two runs
@@ -390,7 +403,7 @@ def test_a_draw_needing_too_many_hatches_is_supplied_at_a_higher_tier() -> None:
     # TEMPORARY workaround (adapter.power._supply_tier): 200 EU/t at LV would want seven hatches,
     # which is a symptom of an upstream tier error rather than a real build. The layout supplies
     # it at MV instead, where one hatch carries it - what a player would do.
-    ir = to_input_ir(_powered_plan(200.0), physical=_hatched_dataset())
+    ir = to_input_ir(_powered_plan(200.0), physical=hatched_dataset())
     machine = ir.machines[0]
     assert machine.voltage_tier == "MV"
     assert _hatches(ir, "n0") == ["power:in"]
@@ -401,7 +414,7 @@ def test_the_tier_upgrade_does_not_touch_the_recipes_draw() -> None:
     # It changes only the voltage the layout supplies. A real tier change also re-overclocks,
     # moving both eut and the parallel count, which only the exporter can do - so eut is left
     # exactly as the export stated it, and the workaround stays honest about what it did.
-    ir = to_input_ir(_powered_plan(200.0), physical=_hatched_dataset())
+    ir = to_input_ir(_powered_plan(200.0), physical=hatched_dataset())
     assert ir.machines[0].eut == 200.0
 
 
@@ -409,7 +422,7 @@ def test_a_machine_too_small_to_host_its_hatches_is_left_for_the_validator() -> 
     # Allocation is not capped by the free cells: giving it fewer hatches than its draw needs
     # would under-size the feed and certify a machine that cannot draw its own load. The excess is
     # reported against hatch_cells by the validator instead.
-    ir = to_input_ir(_powered_plan(60.0), physical=_hatched_dataset(hatch_cells=1))
+    ir = to_input_ir(_powered_plan(60.0), physical=hatched_dataset(hatch_cells=1))
     machine = ir.machines[0]
     assert len(machine.power_input_ports) == 2
     assert machine.hatch_cells == 1
@@ -431,7 +444,7 @@ def test_an_off_ladder_tier_keeps_one_connection_and_its_own_tier() -> None:
     # A tier that is not on the ladder has no voltage to size hatches or an upgrade against. The
     # synthesis neither splits nor re-tiers it: the unknown tier is a violation the validator
     # reports, and guessing here would turn a reported problem into a silently different layout.
-    ir = to_input_ir(_powered_plan(600.0, tier="ZZZ"), physical=_hatched_dataset())
+    ir = to_input_ir(_powered_plan(600.0, tier="ZZZ"), physical=hatched_dataset())
     machine = ir.machines[0]
     assert machine.voltage_tier == "ZZZ"
     assert _hatches(ir, "n0") == ["power:in"]
@@ -441,7 +454,7 @@ def test_a_draw_no_tier_can_carry_keeps_its_own_tier() -> None:
     # The upgrade walks the ladder and stops at the first tier needing few enough hatches. A draw
     # so large that even MAX does not qualify exhausts the ladder, and the machine keeps the tier
     # the export gave it rather than being silently promoted to MAX for no benefit.
-    ir = to_input_ir(_powered_plan(1e13, tier="UXV"), physical=_hatched_dataset())
+    ir = to_input_ir(_powered_plan(1e13, tier="UXV"), physical=hatched_dataset())
     assert ir.machines[0].voltage_tier == "UXV"
 
 

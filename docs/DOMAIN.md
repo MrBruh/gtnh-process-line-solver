@@ -121,6 +121,39 @@ where load **sums** along shared segments (Steiner-tree-like):
   the 16x cap needs. TecTech's 4A/16A/64A hatches exist from **EV up only**; below that the 2 A
   hatch is the only one there is. The ceiling is rarely felt in play because it is 2 amps *at the
   hatch's own tier* - one HV hatch already passes 1024 EU/t.
+- **A single-block machine's intake is a different rule, on a different class.** A GT **basic
+  machine** (`MTEBasicMachine` and its subclasses: the Macerator, Forge Hammer, Chemical Reactor
+  and the rest of the single-block processing machines) has no hatches at all. It takes power
+  through its own block, and `MTEBasicMachine.maxAmperesIn()` returns `(mEUt * 2) / V[tier] + 1`
+  on integer division, which `BaseMetaTileEntity.injectEnergyUnits` enforces against the same
+  per-tick accepted-amperes counter as a hatch. So its ceiling **scales with the recipe it is
+  running**, where a hatch's is fixed. Two things bound where the rule may be used:
+  - **Class.** `MTEMultiBlockBase extends MetaTileEntity`, so a multiblock neither is nor inherits
+    `MTEBasicMachine` and never uses `maxAmperesIn` for intake - the 2 A hatch bullet above is its
+    rule. The flat `1` of `MetaTileEntity.maxAmperesIn` is the bare-block default every basic
+    machine overrides, so it is not a fallback for either.
+  - **Domain: `mEUt <= V[tier] * mAmperage`.** Both overclock paths cap the consumption they
+    compute at that (`MTEBasicMachine.calculateOverclockedNess`,
+    `EUOverclockDescriber.createCalculator`), and `mAmperage` is 1 on a standard basic machine, so
+    a real one never carries a larger `mEUt` and GT never evaluates the formula above it.
+    Extrapolating past it turns an upstream EU/t figure the exporter got wrong into a confident
+    amp count no GT block can have.
+
+  Inside that domain the ceiling is *nearly* vacuous by construction: `floor(2e/V) + 1 > 2e/V`, so
+  a basic machine can always take in the recipe it runs at the source voltage, and the shortfall
+  check can only fire past `V/2` cable blocks - 17 at LV, 65 at MV, 257 at HV, or 22 / 86 / 342
+  for a machine drawing its whole tier - with `POWER_VOLTAGE_DROP_EXCESSIVE` taking over past `V`.
+  The rule is still worth stating, because the alternative models are both wrong in the expensive
+  direction, but it is not a load-bearing gate on a short run.
+- **The solver states an intake ceiling only where it knows which rule applies.** That needs the
+  machine's class, which means a physical dataset that is a **complete census** of the pack's
+  multiblock controllers: only then is absence from the dump evidence that a machine is a single
+  block. With no dataset - or with the committed two-machine fixtures, which are a sample and say
+  so (`_meta.json`'s `census: false`) - the class is unknown, `Port.max_amps` stays unset, and the
+  connection reads as genuinely unmeasurable. The validator then *reports* that it did not measure
+  the machine (`ValidationReport.unverified_power_intake`, surfaced by the CLI) instead of picking
+  whichever of the two rules happens to be coded: a plausible wrong ceiling is worse than an
+  honest gap, and a silent skip is worse than either.
 - **Enough power must arrive, not just fit the cable.** Loss shrinks every packet, and a hatch
   passes a bounded number of them, so a machine's real intake is
   `sum(hatch_amps x delivered_volts)` over its hatches. A machine whose intake falls short of its

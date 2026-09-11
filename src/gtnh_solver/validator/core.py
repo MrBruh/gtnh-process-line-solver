@@ -93,7 +93,9 @@ def validate(problem: InputIR, layout: LayoutResult) -> ValidationReport:
     _check_routes(problem, layout, out)
     _check_terminals(problem, layout, out)
     _check_auto_connections(problem, layout, out)
-    _check_power_amperage(problem, layout, out)
+    # The one check that can legitimately abstain, so it reports WHICH machines it could not
+    # measure alongside what it proved - silence is otherwise indistinguishable from a pass.
+    unverified_intake = _check_power_amperage(problem, layout, out)
     _check_power_feed(problem, layout, out)
     _check_hatch_cells(problem, out)
     _check_terminal_hatch_cells(problem, layout, out)
@@ -102,7 +104,7 @@ def validate(problem: InputIR, layout: LayoutResult) -> ValidationReport:
     _check_route_capacity(problem, layout, out)
     _check_route_materials(problem, layout, out)
     _check_pinned(problem, layout, out)
-    return ValidationReport(tuple(out))
+    return ValidationReport(tuple(out), unverified_power_intake=unverified_intake)
 
 
 def _check_route_materials(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
@@ -921,7 +923,9 @@ def _check_auto_net(
         )
 
 
-def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
+def _check_power_amperage(
+    problem: InputIR, layout: LayoutResult, out: list[Violation]
+) -> tuple[str, ...]:
     """Independently re-derive each power cable's load and check the thickness can carry it.
 
     The router sizes thickness to the summed load; this recomputes that load from geometry +
@@ -944,16 +948,21 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
     accumulated across routes and checked once at the end; a machine on any route this could not
     verify is skipped rather than reported on partial evidence.
 
-    **What that half actually covers**, since a skip is easy to mistake for a pass: a machine is
-    measured when every power connection on it declares a ``max_amps``, and marked unverifiable
-    otherwise - an undeclared ceiling, an off-ladder tier, or a run whose voltage has already
-    dropped to nothing. Undeclared is the case that used to disappear silently (#114): the adapter
-    left it unset on every machine with no structural record, which is every single-block machine
-    and every machine in a run without the physical dataset, so for those the check never ran at
-    all. It now states the ceiling GT gives such a machine's own energy input
-    (``dataset.machine_amps_in``), and they are measured like any other. That one violation also carries
-    its machine in ``Violation.machine_id``: the shortfall is driven by how far the cable ran, so
-    the solver re-places the machine and tries again, and it needs the id to know which one.
+    **Returns the machines it could not measure**, because a skip is otherwise indistinguishable
+    from a pass (#114). A powered machine is measured only when every power connection of its own
+    declares a ``max_amps`` ceiling AND its routes were all verifiable; anything else - an
+    undeclared ceiling, an off-ladder tier, a run whose voltage has already collapsed, a machine
+    that never appeared on a power route at all - leaves it unmeasured, and its id comes back for
+    ``ValidationReport.unverified_power_intake`` to carry to the CLI. An undeclared ceiling is the
+    common case, not a corner: the adapter states one only where it can name the GT rule that
+    applies (2 A per energy hatch for a machine with a structural record, ``maxAmperesIn`` for a
+    machine a census dataset proves is a single block), and abstains otherwise rather than
+    measuring against the wrong formula. It is *reported* rather than raised as a violation
+    because an abstention is not a defect - see ``ValidationReport.unverified_power_intake``.
+
+    That one violation also carries its machine in ``Violation.machine_id``: the shortfall is
+    driven by how far the cable ran, so the solver re-places the machine and tries again, and it
+    needs the id to know which one.
 
     Crucially the arithmetic is the validator's OWN (:func:`_required_amps` below, and the inline
     ``eut / (tier_voltage - loss * distance)`` per machine): it shares only the rule DATA with the
@@ -1054,10 +1063,11 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
             # different distances - this is the power that reaches it.
             port_cap = _port_max_amps(machine, t.port_id)
             if port_cap is None:
-                # A connection that declares no ceiling cannot be measured, and a machine judged
-                # on its OTHER connections alone would be reported starved on part of its intake.
-                # So the machine is marked unverifiable rather than quietly contributing nothing:
-                # that skip used to be silent and indistinguishable from "checked and fine" (#114).
+                # A connection whose ceiling is unknown cannot be measured, and a machine judged on
+                # its OTHER connections alone would be reported starved on part of its intake. So
+                # the machine is marked unverifiable rather than quietly contributing nothing: that
+                # skip used to be silent and indistinguishable from "checked and fine" (#114), and
+                # it now comes back in the return value for the report to carry.
                 unverified.add(t.machine_id)
             elif volts > 0:
                 supply[t.machine_id] = supply.get(t.machine_id, 0.0) + port_cap * volts
@@ -1107,6 +1117,19 @@ def _check_power_amperage(problem: InputIR, layout: LayoutResult, out: list[Viol
                     machine_id=machine_id,
                 )
             )
+
+    # Everything the gate did NOT cover. Taken as the complement of what it measured rather than
+    # accumulated case by case, so a machine that slipped past for any reason - no ceiling on some
+    # connection, an unverifiable route, or never reaching a power route at all - is reported
+    # unmeasured instead of silently reading as checked-and-fine (#114).
+    measured = set(supply) - unverified
+    return tuple(
+        sorted(
+            m.id
+            for m in problem.machines
+            if m.eut > 0 and m.power_input_ports and m.id not in measured
+        )
+    )
 
 
 def _port_max_amps(machine: Machine, port_id: str) -> float | None:

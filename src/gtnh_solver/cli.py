@@ -29,9 +29,10 @@ from gtnh_solver import __version__
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.buildguide import build_guide
 from gtnh_solver.dataset import PhysicalDataset, list_versions, load_physical_dataset
-from gtnh_solver.ir import LayoutStatus
+from gtnh_solver.ir import InputIR, LayoutResult, LayoutStatus
 from gtnh_solver.previewer import write_preview
 from gtnh_solver.solver import solve
+from gtnh_solver.validator import validate
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -111,6 +112,30 @@ def _load_physical_or_warn(version: str | None = None) -> PhysicalDataset | None
     return physical
 
 
+def _warn_unmeasured_power_intake(problem: InputIR, layout: LayoutResult) -> None:
+    """Say how many machines the under-supply gate could not measure, if any.
+
+    The validator abstains on a machine whose power connections state no amp ceiling, and it
+    abstains often: the ceiling comes from a GT rule that has to be *named* (2 A per energy hatch
+    for a machine with a structural record, ``maxAmperesIn`` for a machine a census dataset proves
+    is a single block), and with no local dump neither applies. That silence used to be
+    indistinguishable from "checked and fine", which is the complaint #114 was filed about - so a
+    run says plainly how much of its power intake went unchecked. On stderr, like the dataset
+    warnings, so piping the build guide is unaffected; it is a coverage note, not a defect, and it
+    does not touch the exit code.
+    """
+    unmeasured = validate(problem, layout).unverified_power_intake
+    if not unmeasured:
+        return
+    powered = sum(1 for m in problem.machines if m.eut > 0 and m.power_input_ports)
+    print(
+        f"note: power intake unmeasured for {len(unmeasured)} of {powered} powered machine(s) - "
+        f"no per-connection amp ceiling is known for them, so the under-supply check did not run "
+        f"on {'them' if len(unmeasured) > 1 else 'it'}",
+        file=sys.stderr,
+    )
+
+
 def _enable_previewer_logging() -> None:
     """Route ``gtnh_solver`` INFO logs to stderr (idempotently) so ``--preview`` shows the texture
     summary. Scoped to this logger and guarded against double-attaching a handler on re-entry."""
@@ -148,6 +173,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     layout = solve(problem, seed=args.seed, optimize=not args.fast, objective=args.objective)
+    _warn_unmeasured_power_intake(problem, layout)
     guide = build_guide(problem, layout)
 
     if args.output:

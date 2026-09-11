@@ -32,6 +32,7 @@ from gtnh_solver.adapter import (
 )
 from gtnh_solver.dataset import (
     DatasetError,
+    DatasetMeta,
     MultiblockDoc,
     PhysicalDataset,
     load_physical_dataset,
@@ -89,6 +90,34 @@ def test_load_physical_dataset_keys_by_display_name(dataset: PhysicalDataset) ->
     assert set(dataset.machines) == {"Electric Blast Furnace", "Vacuum Freezer"}
     assert dataset.get("Nonexistent Machine") is None
     assert dataset.meta.controller_count == 2
+
+
+def test_the_committed_fixtures_declare_themselves_a_sample_not_a_census(
+    dataset: PhysicalDataset,
+) -> None:
+    # Load-bearing, not trivia. Absence from a CENSUS is evidence a machine is not a multiblock,
+    # which is the only thing that lets the adapter state GT's single-block intake ceiling for it.
+    # These two files are a sample kept for the tests: nearly every machine in both shipped
+    # examples misses them, the Large Chemical Reactor included, so a miss here proves nothing and
+    # the adapter must abstain (#114).
+    assert dataset.meta.census is False
+    assert dataset.identifies_single_blocks is False
+
+
+def test_a_dump_with_no_census_field_is_taken_as_a_census(dataset: PhysicalDataset) -> None:
+    # The field is optional so an extractor run need not state it: the extractor walks every
+    # registered controller, so any real dump IS a census and defaults to one.
+    meta = DatasetMeta.model_validate(
+        {
+            "schema": 2,
+            "pack_version": "test",
+            "generated_at": "2026-01-01T00:00:00Z",
+            "extractor_sha": "0" * 40,
+            "controller_count": 200,
+        }
+    )
+    assert meta.census is True
+    assert PhysicalDataset(meta=meta, machines=dataset.machines).identifies_single_blocks
 
 
 def test_default_data_dir_resolves_to_the_committed_dump() -> None:

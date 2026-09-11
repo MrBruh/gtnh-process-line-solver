@@ -8,13 +8,14 @@ still reported invalid (``report.ok is False``) - the validator's verdict is ind
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from gtnh_solver.adapter import adapt_file
+from gtnh_solver.adapter import Node, Plan, Recipe, adapt_file, to_input_ir
 from gtnh_solver.dataset import load_physical_dataset, machine_amps_in
 from gtnh_solver.ir import (
     AutoConnection,
@@ -44,6 +45,7 @@ from gtnh_solver.ir import (
 from gtnh_solver.solver import solve
 from gtnh_solver.validator import ValidationReport, validate
 from gtnh_solver.validator.report import ViolationCode
+from tests._helpers import hatched_dataset
 
 Mutator = Callable[[InputIR, LayoutResult], tuple[InputIR, LayoutResult]]
 
@@ -1162,12 +1164,17 @@ def test_unknown_hatch_cells_imposes_no_ceiling() -> None:
     assert report.ok, str(report)
 
 
-def _rated_trunk(max_amps: float) -> tuple[InputIR, LayoutResult]:
-    """The valid 2x trunk, with m0's energy hatch declaring a per-tick amp ceiling."""
+def _rated_trunk(max_amps: float, eut: float | None = None) -> tuple[InputIR, LayoutResult]:
+    """The valid 2x trunk, with m0's energy hatch declaring a per-tick amp ceiling.
+
+    ``eut`` re-states m0's draw; the trunk stays correctly sized for anything up to 60 EU/t at the
+    2 cable-blocks m0 sits at (30 V after loss, so 2x carries it).
+    """
     problem, layout = _power_trunk()
     m0 = problem.machines[1]
     hatch = m0.faces.ports[0].model_copy(update={"max_amps": max_amps})
-    rated = m0.model_copy(update={"faces": FaceSpec(ports=[hatch])})
+    update = {"faces": FaceSpec(ports=[hatch])} | ({} if eut is None else {"eut": eut})
+    rated = m0.model_copy(update=update)
     return problem.model_copy(update={"machines": [problem.machines[0], rated]}), layout
 
 
@@ -1206,19 +1213,146 @@ def test_a_machine_with_one_unrated_hatch_is_not_judged_on_the_others() -> None:
     assert ViolationCode.POWER_SUPPLY_INSUFFICIENT not in codes, codes
 
 
-def test_gts_own_ceiling_feeds_a_machine_a_flat_one_amp_would_starve() -> None:
-    """The modelling choice, pinned. ``_rated_trunk`` is a 48 EU/t LV machine 2 cable-blocks out.
+def test_gts_own_ceiling_feeds_a_basic_machine_a_flat_one_amp_would_starve() -> None:
+    """Why the ``MTEBasicMachine`` formula and not ``MetaTileEntity``'s flat 1 A, pinned.
 
-    At a flat 1 A it takes in 30 EU/t and is reported starved. At the ceiling GT actually gives a
-    machine's own energy input - ``(mEUt * 2) / V + 1``, so 4 A here - it takes in 120 EU/t and
-    runs. Pricing a machine with no structural record at one amp would have manufactured that
-    shortfall for every single-block machine and every run without the dataset, which is why the
-    adapter states GT's number instead (``dataset.machine_amps_in``).
+    A 31 EU/t LV machine 2 cable-blocks out receives 30 V a packet. At one amp that is 30 EU/t
+    against a 31 EU/t draw and the machine is reported starved; at the ceiling GT actually gives a
+    basic machine's own energy input - ``(mEUt * 2) / V + 1``, so 2 A here - it takes in 60 EU/t
+    and runs. The flat 1 is ``MetaTileEntity``'s bare-block default, which every basic processing
+    machine overrides, so modelling these at one amp would manufacture that shortfall.
     """
-    assert ViolationCode.POWER_SUPPLY_INSUFFICIENT in validate(*_rated_trunk(1.0)).codes()
-    assert machine_amps_in(48.0, "LV") == 4
-    report = validate(*_rated_trunk(float(machine_amps_in(48.0, "LV"))))
+    assert ViolationCode.POWER_SUPPLY_INSUFFICIENT in validate(*_rated_trunk(1.0, 31.0)).codes()
+    gt_ceiling = machine_amps_in(31.0, "LV")
+    assert gt_ceiling == 2
+    report = validate(*_rated_trunk(float(gt_ceiling), 31.0))
     assert report.ok, str(report)
+    assert report.unverified_power_intake == ()  # measured, not merely un-flagged
+
+
+# ------------------------------- the adapter -> validator path, end to end (#114)
+
+
+def _adapted_single_block(eut: float, *, census: bool) -> InputIR:
+    """The adapter's REAL output for one machine of a type the dataset does not carry.
+
+    With ``census=True`` the dump enumerates every multiblock controller, so the miss proves the
+    machine is a single block and the adapter states GT's ``maxAmperesIn`` ceiling on its one
+    connection. With ``census=False`` the dump is only a sample (what the committed fixtures are),
+    the machine's class is unknown, and the adapter states nothing. No hand-set ``max_amps``
+    anywhere: this is the path a real run takes.
+    """
+    plan = Plan(
+        schema_version=1,
+        recipes=[Recipe(id="r0", machine_type="M", duration_ticks=10.0, eut=eut)],
+        nodes=[Node(id="n0", recipe_id="r0", overclock_tier="LV")],
+    )
+    dataset = hatched_dataset(key="Some Other Multiblock", census=census)
+    problem = to_input_ir(plan, physical=dataset)
+    return problem.model_copy(update={"bounding_region": CellBox(sx=32, sy=4, sz=4)})
+
+
+def _long_power_run(problem: InputIR, distance: int) -> LayoutResult:
+    """A valid straight cable from the synthesized source to ``n0``, ``distance`` blocks long."""
+    net = next(n for n in problem.nets if n.commodity is Commodity.POWER)
+    source_id = next(e.machine_id for e in net.endpoints if e.machine_id != "n0")
+    machine = next(m for m in problem.machines if m.id == "n0")
+    volts = 32 - distance  # LV, one EU of cable loss a block
+    amps = math.ceil(machine.eut / volts)  # what the trunk must carry, in whole amps
+    thickness = next(t for t in (1, 2, 4, 8, 12, 16) if t >= amps)  # the legal cable ladder
+    return LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id=source_id, cell=_coord(0, 0, 0), orientation=Facing.NORTH),
+            Placement(machine_id="n0", cell=_coord(distance, 0, 0), orientation=Facing.NORTH),
+        ],
+        routes=[
+            Route(
+                net_id=net.id,
+                commodity=Commodity.POWER,
+                terminals=[
+                    Terminal(
+                        machine_id=source_id,
+                        port_id="power:out",
+                        face=Facing.SOUTH,
+                        cell=_coord(0, 0, 1),
+                    ),
+                    Terminal(
+                        machine_id="n0",
+                        port_id="power:in",
+                        face=Facing.SOUTH,
+                        cell=_coord(distance, 0, 1),
+                    ),
+                ],
+                segments=[
+                    Segment(start=_coord(i, 0, 1), end=_coord(i + 1, 0, 1), channel=0)
+                    for i in range(distance)
+                ],
+                thickness_per_segment=[thickness] * distance,
+            )
+        ],
+    )
+
+
+def test_an_adapter_stated_ceiling_can_actually_fire_the_supply_check() -> None:
+    """The headline claim, driven end to end: no hand-set ``max_amps`` anywhere in this test.
+
+    A 32 EU/t LV machine that a census dump proves is a single block gets GT's own ceiling,
+    ``(32 * 2) / 32 + 1 = 3 A``. 22 cable-blocks out each packet is down to 10 V, so three of them
+    are 30 EU/t against a 32 EU/t draw and the machine cannot run its recipe - reported, and named,
+    so the solver can pull it back toward its source.
+    """
+    problem = _adapted_single_block(32.0, census=True)
+    assert next(p for p in problem.machines[0].faces.ports if p.id == "power:in").max_amps == 3.0
+    report = validate(problem, _long_power_run(problem, 22))
+    assert ViolationCode.POWER_SUPPLY_INSUFFICIENT in report.codes(), str(report)
+    assert [v.machine_id for v in report.violations] == ["n0"]
+    assert report.unverified_power_intake == ()
+
+
+def test_the_same_machine_on_a_short_run_is_measured_and_passes() -> None:
+    # The other half: measured-and-fine has to be distinguishable from unmeasured. 16 blocks out
+    # (the far side of the same run) 3 A x 16 V is 48 EU/t against 32, so the layout is clean AND
+    # the machine is reported as verified rather than skipped.
+    problem = _adapted_single_block(32.0, census=True)
+    report = validate(problem, _long_power_run(problem, 16))
+    assert ViolationCode.POWER_SUPPLY_INSUFFICIENT not in report.codes(), str(report)
+    assert report.unverified_power_intake == ()
+
+
+def test_without_a_census_the_same_layout_is_reported_unmeasured_not_clean() -> None:
+    """The abstention, and the reason it has to be visible.
+
+    Nothing about the machine changed - same draw, same 22-block run that starves it above. Only
+    the evidence did: a sample dump cannot say whether this is a basic machine (ceiling
+    ``maxAmperesIn``) or a multiblock (2 A per energy hatch), so the adapter states no ceiling and
+    the check cannot run. The verdict must therefore NOT read as a pass: ``ok`` stays true, and
+    the report says plainly which machine went unmeasured (#114).
+    """
+    problem = _adapted_single_block(32.0, census=False)
+    assert next(p for p in problem.machines[0].faces.ports if p.id == "power:in").max_amps is None
+    report = validate(problem, _long_power_run(problem, 22))
+    assert ViolationCode.POWER_SUPPLY_INSUFFICIENT not in report.codes(), str(report)
+    assert report.ok, str(report)
+    assert report.unverified_power_intake == ("n0",)
+    assert "1 machine(s) unmeasured for power intake" in str(report)
+
+
+def test_an_unrated_hatch_is_reported_unmeasured_rather_than_skipped() -> None:
+    # The hand-built form of the same thing, on the trunk fixture: a machine whose connection
+    # states no ceiling comes back named, not silently absent.
+    report = validate(*_power_trunk())
+    assert report.ok, str(report)
+    assert report.unverified_power_intake == ("m0",)
+
+
+def test_a_machine_on_no_power_route_at_all_is_reported_unmeasured() -> None:
+    # The other silent skip #114 names: a machine that never reaches a measured power route never
+    # entered the supply sum either, so dropping its route must not read as checked-and-fine.
+    problem, layout = _rated_trunk(2.0)
+    report = validate(problem, layout.model_copy(update={"routes": []}))
+    assert report.unverified_power_intake == ("m0",)
 
 
 def test_hatches_that_cannot_take_the_draw_in_after_loss_are_flagged() -> None:
