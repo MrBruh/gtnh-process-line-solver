@@ -54,8 +54,17 @@ which GT will catch for you.
   uses a heuristic worth mirroring: the first face not contained in the structure piece,
   preferring a horizontal one.
 
-Two more structural facts follow from a hatch *being* a casing cell:
+Three more structural facts follow from a hatch *being* a casing cell:
 
+- **A maintenance hatch is needed exactly once, and this one bites at formation time**, unlike the
+  muffler below, which is a runtime rule. GT reads the *count*: 57 of the 64 controllers that touch
+  `mMaintenanceHatches` assert `size() == 1` in `checkMachine` and the remaining 7 demand `<= 1`, so
+  none of them forms with two. Both directions are therefore errors, and they are separate codes
+  because they are separate fixes: `MAINTENANCE_MISSING` for none and `MAINTENANCE_DUPLICATE` for a
+  spare. Note what the spare is not: two maintenance hatches on two different casing cells break no
+  other rule at all (both sit on real body cells, both face outward, neither shares a block), so
+  nothing but the count catches it. As with the muffler, "the dump records a `Maintenance`-capable
+  cell" is the proxy for "this machine needs one", which over-asks on the 7 that accept zero.
 - **One cell is one block.** An input bus and an energy hatch cannot share a cell, not even by
   facing two different ways, so a machine's connections all compete for one pool of casing cells
   (`HATCH_CELLS_EXCEEDED`, and `terminal_hatch_contention` for the per-cell case).
@@ -74,7 +83,10 @@ Two more bind the machine at **runtime**, where a structure that formed perfectl
   muffler element only to a controller that pollutes, so "the dump records a `Muffler`-capable cell"
   is the usable proxy for "this machine needs one" (`MUFFLER_MISSING`) - it over-places on the few
   that accept one without asserting it, which is the safe direction: a spare muffler costs a casing
-  cell, a missing one stops the machine.
+  cell, a missing one stops the machine. Unlike the maintenance hatch, **several mufflers are
+  legal**: `MTEMultiBlockBase.polluteEnvironment` divides the vent batch across all of them, and
+  some controllers assert 2 (Nuclear Salt Processing Plant) or 4 (Nuclear Reactor, the larger
+  turbines), so there is no duplicate-muffler error to report.
 - **Which hatch a product lands in is the machine's choice, not ours.** `addOutput` takes the first
   hatch that can store the stack, so with two output hatches nothing guarantees the pipe we routed
   from one carries the product we routed it for. Pinning it is a player action (fluid-lock or
