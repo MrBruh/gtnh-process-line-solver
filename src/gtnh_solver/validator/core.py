@@ -24,8 +24,9 @@ What is checked now (needs only the IR):
   hatch sits on a body cell of its own machine, faces out, shares its casing cell with nothing, and
   agrees with its terminal; every connection the layout actually makes HAS such a hatch (a routed
   port, or either side of a free auto-output); and a machine gets the upkeep hatches its own
-  structure records - a maintenance hatch, without which the multiblock never forms, and a muffler
-  with literal air in front of it.
+  structure records - exactly one maintenance hatch, since either none or a spare stops the
+  multiblock forming, and a muffler (any number; GT splits venting across them) with literal air
+  in front of it.
   auto-output - every auto-connection joins its net's real OUTPUT->INPUT endpoint machines
   (resolved by port direction) on adjacent usable faces; power/ME commodities cannot
   auto-output, and a machine has at most one auto-output face.
@@ -54,7 +55,8 @@ What is deferred to the dataset lane (rule data not available yet) - TODO:
 from __future__ import annotations
 
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict
+from dataclasses import dataclass
 
 from gtnh_solver.dataset import (
     CABLE_LOSS_PER_BLOCK,
@@ -737,21 +739,50 @@ def _connected_ports(problem: InputIR, layout: LayoutResult) -> list[tuple[str, 
     return [(mid, port_id, net_id) for (mid, port_id), net_id in sorted(seen.items())]
 
 
-#: The upkeep hatches a machine needs for itself, to the violation a missing one is and why it
-#: matters. The machine's OWN recorded slots are the requirement - GT offers each element only to
-#: a controller that needs it - which is what keeps this independent of ``router.hatches``: a gate
-#: that read the producer's list of required kinds could not catch the producer shortening it
+@dataclass(frozen=True)
+class _UpkeepRule:
+    """How many of one upkeep kind a machine must carry, and what too few or too many are.
+
+    ``surplus`` is ``None`` for a kind GT tolerates several of, and that is the whole difference
+    between the two entries below: a second maintenance hatch un-forms the structure, while a
+    second muffler is ordinary and on some controllers mandatory.
+    """
+
+    missing: ViolationCode
+    why_missing: str
+    surplus: ViolationCode | None = None
+    why_surplus: str = ""
+
+
+#: The upkeep hatches a machine needs for itself, to the violations too few and too many are. The
+#: machine's OWN recorded slots are the requirement - GT offers each element only to a controller
+#: that needs it - which is what keeps this independent of ``router.hatches``: a gate that read the
+#: producer's list of required kinds could not catch the producer shortening it
 #: (docs/ARCHITECTURE.md #4).
-_UPKEEP_MISSING: dict[str, tuple[ViolationCode, str]] = {
-    "Maintenance": (
-        ViolationCode.MAINTENANCE_MISSING,
-        "GT offers the maintenance element only to a controller that runs maintenance checks, and "
-        "a controller whose mMaintenanceHatches is empty does not form at all",
+_UPKEEP_RULES: dict[str, _UpkeepRule] = {
+    "Maintenance": _UpkeepRule(
+        missing=ViolationCode.MAINTENANCE_MISSING,
+        why_missing=(
+            "GT offers the maintenance element only to a controller that runs maintenance checks, "
+            "and a controller whose mMaintenanceHatches is empty does not form at all"
+        ),
+        surplus=ViolationCode.MAINTENANCE_DUPLICATE,
+        why_surplus=(
+            "GT wants exactly one - 57 of the 64 controllers that read mMaintenanceHatches assert "
+            "size() == 1 and the other 7 demand <= 1, none of them accepts two - so a spare "
+            "un-forms the structure exactly as a missing one does"
+        ),
     ),
-    "Muffler": (
-        ViolationCode.MUFFLER_MISSING,
-        "GT offers the muffler element only to a controller that pollutes, and one that cannot "
-        "vent stops with POLLUTION_FAIL",
+    "Muffler": _UpkeepRule(
+        missing=ViolationCode.MUFFLER_MISSING,
+        why_missing=(
+            "GT offers the muffler element only to a controller that pollutes, and one that cannot "
+            "vent stops with POLLUTION_FAIL"
+        ),
+        # Deliberately no surplus code. MTEMultiBlockBase.polluteEnvironment splits the vent batch
+        # across however many mufflers it has, and controllers assert 2 (Nuclear Salt Processing
+        # Plant) or 4 (Nuclear Reactor, the larger turbines), so a second muffler is legal in a way
+        # a second maintenance hatch never is.
     ),
 }
 
@@ -765,8 +796,18 @@ def _check_upkeep_hatches(problem: InputIR, layout: LayoutResult, out: list[Viol
     muffler forms and then stops: the controller accumulates ``VENT_AMOUNT`` of pollution and
     halts with ``POLLUTION_FAIL``.
 
+    **The maintenance hatch is counted, not merely looked for**, which is what "exactly one" means
+    and what mere presence could not say: a machine carrying three of them on three casing cells
+    satisfies every other hatch check (each is on a real body cell, faces out, and collides with
+    nothing, so ``HATCH_CELL_COLLISION`` sees nothing wrong) and still does not form, because GT
+    reads the *count*. The router cannot emit a second one today - :func:`router.hatches` places
+    the upkeep kinds once per machine and no port's ``HATCH_KINDS`` entry names ``Maintenance`` -
+    so this is a safety net over that producer, exactly like the rest of the gate, rather than a
+    rule the producer has to be taught (docs/ARCHITECTURE.md #4). The muffler is deliberately left
+    on presence alone; see :data:`_UPKEEP_RULES`.
+
     The requirement is re-derived from the structure's own recorded slots
-    (:data:`_UPKEEP_MISSING`), which is what makes it independent of the producer, and it stays
+    (:data:`_UPKEEP_RULES`), which is what makes it independent of the producer, and it stays
     permissive exactly where the dump is silent: a slot's kinds are a lower bound, and 35 of 208
     dumped controllers record no ``Maintenance``-capable cell (:class:`~gtnh_solver.ir.HatchSlot`),
     so "not recorded" has to read as "unknown", not "forbidden", or a third of the dataset
@@ -804,21 +845,31 @@ def _check_upkeep_hatches(problem: InputIR, layout: LayoutResult, out: list[Viol
                 )
             )
 
-    placed: dict[str, set[str]] = defaultdict(set)
-    for hatch in layout.hatches:
-        placed[hatch.machine_id].add(hatch.kind)
+    placed = Counter((hatch.machine_id, hatch.kind) for hatch in layout.hatches)
     for placement in layout.placements:
         machine = machines.get(placement.machine_id)
         if machine is None:
             continue
         recorded = {kind for slot in machine.hatch_slots for kind in slot.kinds}
-        for kind, (code, why) in _UPKEEP_MISSING.items():
-            if kind in recorded and kind not in placed[placement.machine_id]:
+        for kind, rule in _UPKEEP_RULES.items():
+            if kind not in recorded:
+                continue  # this structure does not take one, so it is not asked for one
+            count = placed[(placement.machine_id, kind)]
+            if count == 0:
                 out.append(
                     Violation(
-                        code,
+                        rule.missing,
                         f"machine {placement.machine_id!r} ({machine.type}) has casing cells that "
-                        f"accept a {kind} hatch but the layout places none: {why}",
+                        f"accept a {kind} hatch but the layout places none: {rule.why_missing}",
+                        machine_id=placement.machine_id,
+                    )
+                )
+            elif count > 1 and rule.surplus is not None:
+                out.append(
+                    Violation(
+                        rule.surplus,
+                        f"machine {placement.machine_id!r} ({machine.type}) carries {count} "
+                        f"{kind} hatches: {rule.why_surplus}",
                         machine_id=placement.machine_id,
                     )
                 )

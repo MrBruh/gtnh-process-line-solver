@@ -95,6 +95,9 @@ class ViolationCode(str, Enum):
     MAINTENANCE_MISSING = (
         "maintenance_missing"  # a structure that accepts a maintenance hatch was given none
     )
+    # GT wants EXACTLY one, so the surplus un-forms the structure as surely as the shortfall; the
+    # muffler has no counterpart because several of those are legal (some controllers demand 4)
+    MAINTENANCE_DUPLICATE = "maintenance_duplicate"  # more than one on one machine
     # where a routed connection may attach: the casing cell behind its terminal must be able to
     # host that connection's hatch, and no two connections may want the same block
     TERMINAL_NOT_ON_HATCH_CELL = (

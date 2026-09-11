@@ -1782,6 +1782,118 @@ def test_an_me_toggled_port_needs_no_hatch() -> None:
     assert report.ok, str(report)
 
 
+def _mixed_commodity_line() -> tuple[InputIR, LayoutResult]:
+    """One multiblock taking ME-toggled items on one port and a piped fluid on another.
+
+    The shape above is degenerate: toggling items there also strips every route and every hatch,
+    so the machine keeps no physical connection of any kind and "no hatch is needed" holds for the
+    trivial reason that nothing is routed. This is the production shape instead - a line does not
+    go all-ME or all-pipe, it puts one commodity on the ME network and pipes the rest - and it is
+    what the per-net commodity filter in ``_connected_ports`` actually implements: the exemption
+    is per (machine, port), not per machine.
+    """
+    mb = _multiblock(
+        "mb",
+        [
+            Port(id="items", commodity=Commodity.ITEM, direction=IODirection.INPUT),
+            Port(id="fluid", commodity=Commodity.FLUID, direction=IODirection.INPUT),
+        ],
+        [_slot(0, 0, 0, "InputBus"), _slot(1, 0, 0, "InputHatch"), _slot(2, 0, 0, "Maintenance")],
+        width=3,
+    )
+    feeder = _item_machine("p-item")
+    tank = Machine(
+        id="p-fluid",
+        type="gt.tank",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH, Facing.SOUTH],
+        faces=FaceSpec(
+            ports=[Port(id="out", commodity=Commodity.FLUID, direction=IODirection.OUTPUT)]
+        ),
+    )
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[feeder, tank, mb],
+        nets=[
+            Net(
+                id=nid,
+                commodity=commodity,
+                fluid_or_item=resource,
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id=src, port_id="out"),
+                    MachineFaceRef(machine_id="mb", port_id=port),
+                ],
+            )
+            for nid, commodity, resource, src, port in (
+                ("n-item", Commodity.ITEM, "gt.dust.iron", "p-item", "items"),
+                ("n-fluid", Commodity.FLUID, "water", "p-fluid", "fluid"),
+            )
+        ],
+        me_toggles=METoggles(items=True),  # items ride the ME network; the fluid is piped
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            # the partners face south, so their usable north face looks back at mb
+            Placement(machine_id="p-item", cell=_coord(2, 0, 5), orientation=Facing.SOUTH),
+            Placement(machine_id="p-fluid", cell=_coord(3, 0, 5), orientation=Facing.SOUTH),
+            Placement(machine_id="mb", cell=_coord(2, 0, 2), orientation=Facing.NORTH),
+        ],
+        # only the fluid is physically routed; the ME-toggled item net is not, and must not be
+        routes=[
+            Route(
+                net_id="n-fluid",
+                commodity=Commodity.FLUID,
+                terminals=[
+                    Terminal(
+                        machine_id="p-fluid", port_id="out", face=Facing.NORTH, cell=_coord(3, 0, 4)
+                    ),
+                    Terminal(
+                        machine_id="mb", port_id="fluid", face=Facing.SOUTH, cell=_coord(3, 0, 3)
+                    ),
+                ],
+                segments=[Segment(start=_coord(3, 0, 4), end=_coord(3, 0, 3), channel=0)],
+            )
+        ],
+        hatches=[
+            PlacedHatch(
+                machine_id="mb",
+                kind="InputHatch",
+                cell=_coord(3, 0, 2),
+                facing=Facing.SOUTH,
+                port_id="fluid",
+            ),
+            PlacedHatch(
+                machine_id="mb", kind="Maintenance", cell=_coord(4, 0, 2), facing=Facing.SOUTH
+            ),
+        ],
+    )
+    return problem, layout
+
+
+def test_one_commodity_on_me_beside_another_routed_on_the_same_multiblock_is_clean() -> None:
+    """Neither port is reported: not the ME-toggled one (nothing is built for it) and not the
+    piped one (its hatch is there). Getting this wrong in either direction breaks the solver's
+    contract - a false infeasibility on the toggled port, or a silent pass on the piped one."""
+    problem, layout = _mixed_commodity_line()
+    report = validate(problem, layout)
+    assert report.ok, str(report)
+    assert ViolationCode.PORT_HATCH_MISSING not in report.codes()
+
+
+def test_the_routed_commodity_is_still_checked_when_its_neighbour_is_me_toggled() -> None:
+    """The teeth half of the same layout: the exemption covers the toggled commodity only, so the
+    piped port on that very machine is still required to have its hatch. Were the filter written
+    per machine rather than per port, this would pass silently."""
+    problem, layout = _mixed_commodity_line()
+    report = validate(problem, _without_hatches(layout, "fluid"))
+    assert report.codes() == (ViolationCode.PORT_HATCH_MISSING,)
+    assert "'fluid'" in str(report)
+    assert "'items'" not in str(report)
+
+
 def test_a_port_no_net_names_needs_no_hatch() -> None:
     """Having a port does not imply needing a hatch: an output no net consumes is closed by a
     boundary storage rather than a route, and a feed the plan never drew is wired by hand."""
@@ -1933,3 +2045,74 @@ def test_a_machine_with_no_recorded_structure_is_asked_for_no_upkeep_hatch() -> 
         ViolationCode.MAINTENANCE_MISSING,
         ViolationCode.MUFFLER_MISSING,
     }
+
+
+def _upkeep_only(*kinds: str, width: int = 4) -> tuple[InputIR, LayoutResult]:
+    """One multiblock and nothing else: every casing cell accepts ``kinds``, no net, no route.
+
+    An upkeep hatch serves no port, so a machine with no connections at all is where counting them
+    is cleanest - nothing else in the report can be mistaken for the count's own verdict.
+    """
+    mb = _multiblock("mb", [], [_slot(i, 0, 0, *kinds) for i in range(width)], width=width)
+    return (
+        InputIR(bounding_region=CellBox(sx=8, sy=4, sz=8), machines=[mb], nets=[]),
+        LayoutResult(
+            status=LayoutStatus.VALID,
+            seed=0,
+            placements=[Placement(machine_id="mb", cell=_coord(2, 0, 2), orientation=Facing.NORTH)],
+        ),
+    )
+
+
+def _with_upkeep(layout: LayoutResult, kind: str, count: int) -> LayoutResult:
+    """``count`` hatches of ``kind``, each on its own casing cell, each facing free air.
+
+    Distinct cells on purpose: that is what makes the count the *only* thing wrong. Stacked on one
+    cell they would be ``HATCH_CELL_COLLISION``, which is a different defect with a different fix.
+    """
+    return layout.model_copy(
+        update={
+            "hatches": [
+                PlacedHatch(
+                    machine_id="mb", kind=kind, cell=_coord(2 + i, 0, 2), facing=Facing.SOUTH
+                )
+                for i in range(count)
+            ]
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("count", "expected"),
+    [
+        (0, {ViolationCode.MAINTENANCE_MISSING}),
+        (1, set()),
+        (2, {ViolationCode.MAINTENANCE_DUPLICATE}),
+        (3, {ViolationCode.MAINTENANCE_DUPLICATE}),
+    ],
+)
+def test_a_structure_needs_exactly_one_maintenance_hatch(
+    count: int, expected: set[ViolationCode]
+) -> None:
+    """GT reads the count, not the presence: 57 of the 64 controllers that touch
+    ``mMaintenanceHatches`` assert ``size() == 1`` and the remaining 7 demand ``<= 1``, so none of
+    them forms with two. Every one of these layouts satisfies every other hatch check - real body
+    cells, outward facings, one hatch per cell - so the count is the only thing separating them."""
+    problem, layout = _upkeep_only("Maintenance")
+    assert _codes(problem, _with_upkeep(layout, "Maintenance", count)) == expected
+
+
+def test_the_duplicate_maintenance_report_names_how_many_there_are() -> None:
+    # "place one" and "remove two" are different fixes, so the report has to say which it is.
+    problem, layout = _upkeep_only("Maintenance")
+    report = validate(problem, _with_upkeep(layout, "Maintenance", 3))
+    assert "carries 3 Maintenance hatches" in str(report)
+
+
+def test_several_mufflers_are_not_a_violation() -> None:
+    """The muffler deliberately keeps the weaker rule. ``MTEMultiBlockBase.polluteEnvironment``
+    divides the vent batch across however many mufflers the controller has, and controllers assert
+    2 of them (Nuclear Salt Processing Plant) or 4 (Nuclear Reactor, the larger turbines), so
+    demanding exactly one here would reject structures GT requires."""
+    problem, layout = _upkeep_only("Muffler")
+    assert _codes(problem, _with_upkeep(layout, "Muffler", 3)) == set()

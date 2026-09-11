@@ -235,6 +235,18 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   derived from the machine's own recorded slots, so a dump silent about that kind still reads as
   "unknown" rather than "forbidden" (35 of 208 controllers record no `Maintenance`-capable cell).
 
+  **Exactly one, counted rather than looked for.** GT reads the *count*: 57 of the 64 controllers
+  that touch `mMaintenanceHatches` assert `size() == 1` and the remaining 7 demand `<= 1`, so none
+  of them forms with two. A machine carrying three of them on three distinct casing cells satisfies
+  every other hatch check there is (real body cells, outward facings, one hatch per cell, so
+  `HATCH_CELL_COLLISION` sees nothing wrong), which is why presence could not catch it. A surplus is
+  `MAINTENANCE_DUPLICATE`, its own code rather than a widened `MAINTENANCE_MISSING`, because "place
+  one" and "remove two" are different fixes and a code named `_missing` would be a lie about a count
+  of three. The muffler deliberately keeps the weaker presence-only rule:
+  `MTEMultiBlockBase.polluteEnvironment` divides the vent batch across however many mufflers a
+  controller has, and controllers assert 2 of them (Nuclear Salt Processing Plant) or 4 (Nuclear
+  Reactor, the larger turbines), so demanding exactly one there would reject structures GT requires.
+
   **A port whose hatch went missing was invisible too (#119).** The gate validated the hatches
   that were *present* (a body cell of its own machine, an outward facing, no two on one casing
   cell, agreement with its terminal) and never asked whether a connection that needs a hatch has
@@ -252,6 +264,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Neither check calls into `router/hatches.py` or restates its logic. Both are computed from the
   `LayoutResult` and the `InputIR`, which is what lets them catch the producer dropping a hatch
   rather than agreeing with it. Both shipped examples still solve VALID and validate clean.
+
+  **`PORT_HATCH_MISSING` fires on real producer output today, so some layouts change verdict.**
+  `router/hatches.py` can drop both hatches of a free auto-output connection when a power hatch has
+  already taken the casing cell the connection reserved, and the result is a line with a silently
+  dead connection: `main` calls such a layout VALID, this gate calls it `partial_invalid` and asks
+  the user to report a solver bug. That is the honest verdict, not a new defect, but it IS a change
+  for multiblock-dense inputs with power. Measured at 1 of 200 randomly generated multiblock
+  problems, which is 1 of the 8 among them that had a free auto-output connection at all, and at 0
+  of 28 solves of the two shipped examples. The producer bug is #131 and is fixed there, not here.
 
 - **A power source is now placed by the cable it actually costs (`solver/`).** A source's position
   exists purely to serve a trunk, and it was the one machine the annealer had no gradient on: an
