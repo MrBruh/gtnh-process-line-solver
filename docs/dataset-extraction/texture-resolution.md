@@ -229,6 +229,28 @@ which accept hatches in a glass ring. Those draw a block from their own structur
 matches the cells around them. The Component Assembly Line's 4 frame cells and the Large Chemical
 Reactor's coil cell are outvoted, which is the point of taking a mode.
 
+**Those 6 are a recorded gap, not a silent guess** (trap 5). The mode is an estimate that cannot in
+principle be confirmed, since GT's answer is the `casingIndex` integer and the dump does not carry
+it - so the previewer cannot verify a hit, only catch a miss, and the dump's own `source_class`
+provenance is what catches it: a casing resolves through a casing class (`BlockCasings4`,
+`GregtechMetaCasingBlocks2`, `BlockComplexTextureCasing`, ...), `BlockGlass1` and `BWBlocksGlass`
+do not. `TextureSummary` counts those hatch cubes apart from re-skinned ones, names the block each
+wears, and the run warns. The sprite still goes down, because it matches the cells around it; what
+the flag buys is that it stops being indistinguishable from a resolved one. Two alternatives were
+measured and rejected: a **modal-share bar** is exactly inverted (all 6 wrong modes are unanimous,
+while the lowest-share *correct* one is the Circuit Assembly Line at 0.50), and **returning
+nothing** would put the hatch back in the `MACHINE_<TIER>_SIDE` fallback, which is a wrong sprite GT never
+draws on a formed hatch, traded for one that at least matches its neighbours. The one hole in the
+class-name test, stated rather than papered over: GT keeps its coils in the casing classes, so a
+coil-dominated hatch ring would pass it. No controller in the dump has one.
+
+The mode's **tie-break** is worth knowing about because a real tie ships. The Circuit Assembly Line
+splits exactly 20/20: its `G` energy element chains `sBlockCasings3, 10` while its `b` and `I`
+elements chain `sBlockCasings2, 0`. The rule is lexicographic on the registry name, which has no
+relation to which casing GT names - arbitrary but stable. It happens to be right here
+(`CASING_INDEX = 16`, `BlockCasings2.getTextureIndex(0) = 0 + 16`), but only because `'2'` sorts
+before `'3'`, so the tie is pinned by a test rather than left to drift.
+
 ### Overlay rotation: there is no rotation to record
 
 `.extFacing()` on a `TextureFactory` layer does **not** mean "this sprite is drawn turned". It sets

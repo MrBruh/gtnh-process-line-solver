@@ -225,12 +225,20 @@ class TextureSummary:
     #: ``unskinned_blocks``: the flat bar is a *correct* render, so nothing else would say the
     #: manifest is short, and the fix is a re-dump rather than a code change.
     unresolved_route_blocks: tuple[str, ...] = ()
-    #: Hatch cubes drawn in their multiblock's own casing rather than the standalone skin the dump
-    #: recorded, and hatch cubes that kept that standalone skin because the casing was unknown (see
-    #: :func:`_hatch_layers`). Reported because the difference is invisible in a gap list: both
-    #: render a full, plausible hatch, and only the count says which of the two a page shows.
+    #: How the page's hatch cubes got their background (see :func:`_hatch_layers`), in three
+    #: disjoint buckets: re-skinned to a block the dump records as a **casing**; re-skinned to a
+    #: block it does not (:func:`_names_a_casing`); or left in the standalone skin the dump
+    #: recorded, because no casing resolved at all. Reported because the difference is invisible in
+    #: the render - all three draw a full, plausible hatch - so only these counts say which of them
+    #: a page shows.
     hatches_recased: int = 0
+    hatches_recased_uncertain: int = 0
     hatches_standalone: int = 0
+    #: ``"<block>|<meta>"`` for every block an *uncertain* re-skin landed on: the gap list behind
+    #: ``hatches_recased_uncertain``. The count says how many faces are unverified; this says which
+    #: sprite they are wearing, which is what makes the guess checkable against GT source. Reported
+    #: for the same reason as ``unskinned_blocks``: the page itself cannot show it.
+    uncertain_hatch_casings: tuple[str, ...] = ()
 
 
 class TextureManifest:
@@ -334,6 +342,16 @@ class TextureManifest:
         casing the manifest could never draw.
         """
         return f"{block}|{meta}" in self._blocks
+
+    def source_class(self, block: str, meta: int) -> str:
+        """The Java class the dump resolved ``(block, meta)`` through, or ``""`` if it has none.
+
+        Pure provenance, recorded on every entry the extractor writes (the hatch index above joins
+        on the MTE half of it). The block half answers the one question the manifest cannot answer
+        from its layers: whether a block is a **casing** - see :func:`_names_a_casing`.
+        """
+        entry = self._blocks.get(f"{block}|{meta}")
+        return str(entry.get("source_class", "")) if entry is not None else ""
 
     def hatch_block(self, kind: str, tier: str | None) -> tuple[str, int] | None:
         """The ``(block, meta)`` of the ``kind`` hatch at ``tier``, or ``None`` if unresolvable.
@@ -609,6 +627,43 @@ def _hatch_cell(hatch: Mapping[str, Any]) -> tuple[int, int, int]:
     return (int(hatch["cell"][0]), int(hatch["cell"][1]), int(hatch["cell"][2]))
 
 
+#: Substring that marks a dumped block's ``source_class`` as a **casing** family. Every casing
+#: family in the pack names itself (``BlockCasings4``, ``GregtechMetaCasingBlocks2``,
+#: ``BlockCasingGasSiphon``, ``BlockComplexTextureCasing``, ...), and nothing that is not a casing
+#: family does - see :func:`_names_a_casing` for the measurement and the one hole in that.
+_CASING_CLASS_MARK = "casing"
+
+
+def _names_a_casing(manifest: TextureManifest, block: str, meta: int) -> bool:
+    """Whether the dump's provenance for ``(block, meta)`` says it is a multiblock **casing**.
+
+    :func:`_hatch_casing` estimates a controller's casing from the blocks at its hatch cells, and
+    that estimate is unverifiable in principle: GT's own answer is the ``CASING_INDEX`` integer,
+    which the dump does not carry. So the previewer cannot confirm a hit - it can only notice a
+    miss, and this is the notice. A ``False`` here does not change what is drawn; it makes
+    :func:`texturize_scene` count and name the face as unverified, which is the whole point
+    (docs/dataset-extraction/texture-resolution.md: record a gap, never guess).
+
+    **Measured over the full local dump (pack 2.8.4, 208 controllers, 170 of which resolve a
+    casing at all): 164 land on a class naming a casing and 6 do not** - the T.F.F.T. on
+    ``gregtech:gt.blockglass1|0`` and the five Compact Fusion Computers on ``BW_GlasBlocks``, every
+    one of them a controller that accepts its hatches in a glass ring. Those 6 are exactly the
+    controllers whose hatch cells their ``casingIndex`` does not name, so the test separates the
+    population it is meant to.
+
+    An entry with no ``source_class`` at all counts as **not** a casing: unknown provenance is not
+    evidence, and the safe direction here is to over-report. A false positive costs one log line; a
+    false negative is the silent wrong sprite this exists to prevent.
+
+    The known hole, stated rather than papered over: GT keeps its **coils** in the casing classes
+    (a cupronickel coil is ``BlockCasings5``), so a controller whose hatch cells were dominated by
+    coil would pass this test while wearing the wrong sprite. No controller in the dump is - the
+    Large Chemical Reactor's single coil cell is outvoted 24 to 1 - so the hole is theoretical
+    today, and closing it would need the casing id itself, not a better name test.
+    """
+    return _CASING_CLASS_MARK in manifest.source_class(block, meta).lower()
+
+
 def _hatch_casing(
     variant: Variant,
     manifest: TextureManifest,
@@ -631,8 +686,22 @@ def _hatch_casing(
     The population is the variant's own ``hatch_slots`` where the dump recorded them (complete, and
     independent of which cells the router happened to pick), else the cells this machine's hatches
     occupy. Only blocks the manifest can skin are counted, so an unskinnable casing yields ``None``
-    and the hatches keep the standalone look rather than losing a face. Ties break on the lowest
-    ``(block, meta)`` for determinism.
+    and the hatches keep the standalone look rather than losing a face.
+
+    **Ties break on the lowest ``(block, meta)``, and that rule is arbitrary-but-stable, not
+    principled.** It is lexicographic on the registry name, which has no relation to which casing
+    GT's ``casingIndex`` actually names, and a tie is not hypothetical: the Circuit Assembly Line
+    ships an exact 20/20 split, its ``G`` energy element chaining ``sBlockCasings3, 10`` against
+    the ``sBlockCasings2, 0`` of its ``b`` and ``I`` elements. The rule picks ``gt.blockcasings2|0``
+    there and that happens to be right (``CASING_INDEX = 16``, and ``BlockCasings2`` indexes meta 0
+    at ``0 + 16``), but only because ``'2'`` sorts before ``'3'``. What the rule is FOR is
+    determinism: two runs of the same layout must bake the same sprite. A tie pinned by a test
+    (``tests/test_previewer_hatch_textures.py``) is what keeps it from drifting silently.
+
+    The mode is an estimate and is never verified - GT's answer is an integer the dump does not
+    carry. :func:`_names_a_casing` catches the case where it is visibly not a casing, and
+    :func:`texturize_scene` reports those faces as unverified rather than letting them pass for
+    resolved.
     """
     by_offset = {tuple(b.d): (b.block, b.meta) for b in variant.blocks}
     candidates = [by_offset.get(tuple(slot.d)) for slot in variant.hatch_slots]
@@ -835,7 +904,9 @@ def _hatch_layers(
     Two limits, both deliberate. A controller that chains its hatch elements to something other than
     the block its ``casingIndex`` names - the T.F.F.T., whose glass ring accepts hatches that wear
     the storage-field casing - draws the chained block instead; the render then still matches the
-    cells around it, which is the failure a builder can read. And a casing the manifest cannot skin
+    cells around it, which is the failure a builder can read, and :func:`_names_a_casing` marks
+    those faces unverified in the run's summary so the guess is not mistaken for a resolved sprite.
+    And a casing the manifest cannot skin
     leaves ``cube.casing`` unset, so the face falls back to the **target side's own** layer 0 rather
     than losing its texture - the target side's, and not a fixed one, because UP and DOWN carry
     ``MACHINE_<TIER>_TOP`` / ``_BOTTOM`` against the horizontals' ``_SIDE`` in every hatch entry in
@@ -987,20 +1058,30 @@ def texturize_scene(
     key_layers_active: dict[str, list[dict[str, Any]]] = {}
     # Constituent blocks that resolve no face at all (see TextureSummary).
     unskinned: set[str] = set()
-    recased = standalone = 0
+    # How each hatch cube got its background (see TextureSummary), plus the blocks the uncertain
+    # ones landed on.
+    recased = uncertain = standalone = 0
+    uncertain_casings: set[str] = set()
     for machine in scene["machines"]:
         machine_cubes = _machine_cubes(machine, docs, manifest, auto_out_face)
         if not machine_cubes:
             continue  # no doc and not a known single-block machine -> keep the placeholder box
         machine["expanded"] = True
         for cube in machine_cubes:
-            if cube.facing is not None:
-                recased, standalone = (
-                    (recased + 1, standalone) if cube.casing else (recased, standalone + 1)
-                )
             faces, stacks = _face_icons(cube, manifest)
             if all(face is None for face in faces):
                 unskinned.add(f"{cube.block}|{cube.meta}")
+            elif cube.facing is not None:
+                # Counted BELOW the face guard, and only for a hatch (facing is set on nothing
+                # else): a cube that resolved no face draws the checkerboard, and calling that
+                # "re-skinned" would have the log claim a change the page does not show.
+                if cube.casing is None:
+                    standalone += 1
+                elif _names_a_casing(manifest, cube.casing[0], cube.casing[1]):
+                    recased += 1
+                else:
+                    uncertain += 1
+                    uncertain_casings.add(f"{cube.casing[0]}|{cube.casing[1]}")
             for key, (idle, running) in stacks.items():
                 needed_icons.update(layer["icon"] for layer in idle)
                 if key in key_layers:
@@ -1097,7 +1178,9 @@ def texturize_scene(
         route_cells_flat=flat_cells,
         unresolved_route_blocks=tuple(sorted(unresolved_routes)),
         hatches_recased=recased,
+        hatches_recased_uncertain=uncertain,
         hatches_standalone=standalone,
+        uncertain_hatch_casings=tuple(sorted(uncertain_casings)),
     )
     _log.info(
         "textures: %d/%d machine types expanded to %d textured cubes (%s); placeholder: %s; "
@@ -1110,12 +1193,27 @@ def texturize_scene(
         summary.embedded_icons,
         summary.embedded_active_icons,
     )
-    if recased or standalone:
-        # Both looks are a complete hatch, so nothing else in the run says which one a page got.
+    if recased or uncertain or standalone:
+        # Every one of the three looks is a complete hatch, so nothing else in the run says which
+        # one a page got - nor how many of them are a guess.
         _log.info(
-            "textures: %d/%d hatch cube(s) re-skinned to their multiblock's casing",
-            recased,
-            recased + standalone,
+            "textures: %d/%d hatch cube(s) re-skinned to their multiblock's casing%s",
+            recased + uncertain,
+            recased + uncertain + standalone,
+            f", {uncertain} of them unverified" if uncertain else "",
+        )
+    if uncertain:
+        # The gap this run could not close. GT skins a formed hatch from the controller's own
+        # casingIndex, an integer the dump does not carry, so the casing is estimated from the
+        # blocks at the hatch cells - and here that estimate landed on something the dump does not
+        # record as a casing. The face is a plausible sprite, which is exactly why it needs saying
+        # out loud: nothing in the render distinguishes it from a resolved one.
+        _log.warning(
+            "textures: %d hatch cube(s) wear an UNVERIFIED background - the block dominating their "
+            "machine's hatch cells is not a casing (%s), so GT would draw the controller's own "
+            "casing there instead; check those machines against GT source before trusting them",
+            uncertain,
+            ", ".join(summary.uncertain_hatch_casings),
         )
     if textured_cells or flat_cells:
         _log.info(
