@@ -27,6 +27,7 @@ from gtnh_solver.dataset import (
     amp_load,
     delivered_voltage,
     energy_hatches_for,
+    machine_amps_in,
     tier_voltage,
     tiers_above,
     to_physical,
@@ -165,6 +166,72 @@ def test_energy_hatches_for_a_run_the_tier_cannot_survive_raises() -> None:
     # machine there, so sizing must fail loudly rather than return a hatch count that cannot work.
     with pytest.raises(UnpowerableError):
         energy_hatches_for(32, "LV", distance=40)
+
+
+def test_machine_amps_in_is_gts_own_formula_not_a_flat_one_amp() -> None:
+    # ``MTEBasicMachine.maxAmperesIn()`` is ``(mEUt * 2) / V + 1`` on integer division, so a basic
+    # machine's intake scales with the recipe it runs. The flat 1 A belongs to ``MetaTileEntity``,
+    # the default for a bare block, and every basic processing machine overrides it.
+    assert machine_amps_in(16, "LV") == 2  # a Forge Hammer: 32 / 32 = 1, plus one
+    assert machine_amps_in(30, "LV") == 2  # 60 / 32 floors to 1, plus one
+    assert machine_amps_in(32, "LV") == 3  # 64 / 32 = 2, plus one
+
+
+def test_machine_amps_in_past_gts_own_input_domain_is_unverifiable() -> None:
+    # GT caps the consumption both overclock paths compute at ``V[tier] * mAmperage``
+    # (``calculateOverclockedNess``, ``EUOverclockDescriber``), so with the standard amperage of 1
+    # no real basic machine carries a larger ``mEUt`` and GT never evaluates the formula there.
+    # Extrapolating would turn an upstream EU/t figure the exporter got wrong into a confident amp
+    # count no GT block can have - a Coke Oven exported at 2355 EU/t on MV would "accept" 37 A.
+    # An honest gap beats a plausible wrong value, so the domain is refused outright.
+    assert machine_amps_in(32, "LV") == 3  # exactly V[LV]: the last point in the domain
+    assert machine_amps_in(33, "LV") is None
+    assert machine_amps_in(2355.0159865343994, "MV") is None
+    assert machine_amps_in(480, "LV") is None  # the #114 repro's machine: never 31 A
+
+
+def test_machine_amps_in_always_covers_the_draw_at_source_voltage() -> None:
+    # The doubling and the +1 are what keep the ceiling non-binding at the source: a basic machine
+    # can always take in the recipe it is running. That is exactly why pricing one at a single amp
+    # would report it starved where GT feeds it perfectly well.
+    for tier in ("LV", "MV", "HV", "EV"):
+        volts = tier_voltage(tier)
+        for eut in (1, volts // 3, volts // 2, volts):
+            amps = machine_amps_in(eut, tier)
+            assert amps is not None, (tier, eut)
+            assert amps * volts >= eut, (tier, eut)
+
+
+def test_machine_amps_in_is_a_ceiling_with_teeth_only_on_a_long_run() -> None:
+    # The modelling limitation, pinned rather than buried. ``floor(2e/V) + 1 > 2e/V`` means the
+    # supply check cannot fire within HALF the tier voltage in cable blocks, whatever the draw:
+    # 16 blocks at LV is still fed. It first bites at V/2 + 1 for the worst in-domain draw (17 at
+    # LV), and at 22 for a machine drawing its whole tier; past V blocks the voltage-drop check
+    # takes over. So on a basic machine this gate is nearly, but not quite, vacuous.
+    for tier in ("LV", "MV", "HV"):
+        volts = tier_voltage(tier)
+        for half_eut in range(1, 2 * volts + 1):  # half-steps: euts are floats, not integers
+            eut = half_eut / 2
+            amps = machine_amps_in(eut, tier)
+            assert amps is not None, (tier, eut)
+            assert amps * delivered_voltage(tier, volts // 2) >= eut, (tier, eut)
+    worst, full_tier = machine_amps_in(15.5, "LV"), machine_amps_in(32, "LV")
+    assert worst is not None
+    assert full_tier is not None
+    assert worst * delivered_voltage("LV", 17) < 15.5  # the worst in-domain draw, one block past
+    assert full_tier * delivered_voltage("LV", 22) < 32  # a machine drawing its whole tier
+
+
+def test_machine_amps_in_idle_is_one_packet_a_tick() -> None:
+    # ``mEUt`` is 0 while a machine is idle, so GT's formula gives it exactly one - enough to fill
+    # its buffer and start the recipe that raises the ceiling.
+    assert machine_amps_in(0, "LV") == 1
+    assert machine_amps_in(-5, "MV") == 1
+
+
+def test_machine_amps_in_unknown_tier_raises() -> None:
+    with pytest.raises(UnknownTierError):
+        machine_amps_in(100, "OpV")
 
 
 def test_tiers_above_is_the_rest_of_the_ladder_lowest_first() -> None:

@@ -8,5 +8,6 @@
   "generated_at": "2026-07-02T00:00:00Z",
   "extractor_sha": "0000000000000000000000000000000000000000",
   "controller_count": 2,
-  "failures": []
+  "failures": [],
+  "census": false
 }

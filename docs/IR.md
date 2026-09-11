@@ -97,9 +97,13 @@ Port
                                     #  connection, and a machine's power input ports must sum to
                                     #  its eut (v3, BREAKING)
   max_amps: float | null            # most amps this one connection accepts (2 for a GT energy
-                                    #  hatch); null for no per-connection ceiling. Checked at the
-                                    #  DELIVERED voltage, where cable loss is known. Added in
-                                    #  InputIR v3 (additive)
+                                    #  hatch); null means the ceiling is UNKNOWN, not unlimited -
+                                    #  every GT connection has one, the producer just could not
+                                    #  name the rule. Checked at the DELIVERED voltage, where cable
+                                    #  loss is known; a null connection makes its machine's intake
+                                    #  unmeasurable, and the validator reports that rather than
+                                    #  certifying it (ValidationReport.unverified_power_intake).
+                                    #  Added in InputIR v3 (additive)
 
 Net
   id: str

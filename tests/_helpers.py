@@ -22,7 +22,9 @@ Reconciled drift (chose the form that keeps every caller green):
 
 from __future__ import annotations
 
+from gtnh_solver.dataset import DatasetMeta, MachinePhysical, PhysicalDataset
 from gtnh_solver.ir import (
+    CellBox,
     CellCoord,
     Commodity,
     FaceSpec,
@@ -115,4 +117,49 @@ def power_source(
         faces=FaceSpec(
             ports=[Port(id=port_id, commodity=Commodity.POWER, direction=IODirection.OUTPUT)]
         ),
+    )
+
+
+def hatched_dataset(
+    hatch_cells: int = 20, key: str = "M", *, census: bool = True
+) -> PhysicalDataset:
+    """A dataset whose one machine is a multiblock with ``hatch_cells`` interchangeable cells.
+
+    A GT casing cell accepts a hatch of any kind, so ``energy_hatch_cells`` matches; one
+    maintenance hatch is reserved. A record is what tells the power synthesis the machine HAS
+    hatches; with no record it keeps a single connection.
+
+    ``census`` says whether the dump enumerates every multiblock controller in the pack, which is
+    what decides the meaning of a MISS: in a census the machine is then known to be a single block
+    and GT's ``maxAmperesIn`` ceiling applies to it, while in a sample (the committed fixtures) a
+    miss is no evidence at all and the adapter must state no ceiling. Pass ``key`` to make the
+    lookup miss on purpose.
+    """
+    return PhysicalDataset(
+        meta=DatasetMeta.model_validate(
+            {
+                "schema": 2,
+                "pack_version": "test",
+                "generated_at": "2026-01-01T00:00:00Z",
+                "extractor_sha": "0" * 40,
+                "controller_count": 1,
+                "census": census,
+            }
+        ),
+        machines={
+            key: MachinePhysical(
+                key=key,
+                registry_name="test:block",
+                meta=0,
+                source_class="test.Controller",
+                footprint=CellBox(sx=3, sy=3, sz=3),
+                io_faces=frozenset({Facing.NORTH}),
+                hint_layers=frozenset({0}),
+                coil_layer_count=0,
+                variant_count=1,
+                hatch_cells=hatch_cells,
+                energy_hatch_cells=hatch_cells,
+                upkeep_hatch_count=1,
+            )
+        },
     )

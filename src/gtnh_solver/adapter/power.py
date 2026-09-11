@@ -22,6 +22,16 @@ runs as the 16x cap needs, where one connection could never carry the load. A ma
 structural record (a single-block machine, or a plan adapted without the dataset) keeps exactly
 one connection, the pre-v3 behaviour.
 
+**Intake has two cases, and stating the wrong one is worse than stating none.** GT bounds a
+multiblock's intake at 2 A per energy hatch and a *basic* machine's at its own
+``maxAmperesIn`` - ``(mEUt * 2) / V[tier] + 1``, which scales with the recipe
+(``dataset.machine_amps_in``). ``hatch_cells is None`` says only "no structural record", and that
+population is dominated by multiblocks whenever the dump does not cover them, so it cannot choose
+between the two. The single connection therefore states a ceiling only for a machine whose class
+is actually established - one a *census* dataset positively failed to find - and otherwise leaves
+``max_amps`` unset, which the validator reports as unmeasured intake rather than reading as a
+pass (#114).
+
 A machine that needs one hatch keeps the single-port id (``power:in``); one that needs several
 suffixes them (``power:in#1``, ``power:in#2``, ...). Likewise a tier that fits on one run keeps
 the single-source ids (``power-source:MV`` / ``power:MV``) and one that has to split suffixes them
@@ -44,6 +54,7 @@ from gtnh_solver.dataset import (
     UnpowerableError,
     amp_load,
     energy_hatches_for,
+    machine_amps_in,
     tiers_above,
     whole_amps,
 )
@@ -138,7 +149,7 @@ class _Feed:
     load: float  # nominal amps at the at-source voltage
 
 
-def _power_ports(machine: Machine) -> list[Port]:
+def _power_ports(machine: Machine, *, single_block: bool = False) -> list[Port]:
     """The power INPUT ports (energy hatches) ``machine`` needs, sharing its draw evenly.
 
     One port unless the machine has a structural record (``hatch_cells``) AND its draw exceeds
@@ -156,9 +167,26 @@ def _power_ports(machine: Machine) -> list[Port]:
     hatches than its casing can host is a real infeasibility, and the validator reports it against
     ``hatch_cells``. Silently allocating fewer would under-size the feed and certify a layout that
     cannot draw its own load.
+
+    **The single connection states a ceiling only when ``single_block`` is established.** GT gives
+    a basic machine its own ``maxAmperesIn`` (:func:`_own_input_amps`) and a multiblock 2 A per
+    energy hatch, and the two formulas are not interchangeable - so the ceiling may only be stated
+    for a machine whose class is actually known. ``hatch_cells is None`` does not establish it:
+    that only says "no structural record", a population dominated by multiblocks whenever the
+    dump does not cover them. :func:`synthesize_power` passes ``single_block`` for a machine a
+    *census* dataset positively failed to find (see ``adapter/core``); everything else leaves
+    ``max_amps`` unset, and the validator reports the connection as unmeasured rather than
+    measuring it against a number GT never gives that machine (#114).
     """
     if machine.hatch_cells is None:
-        return [Port(id=POWER_IN, commodity=Commodity.POWER, direction=IODirection.INPUT)]
+        return [
+            Port(
+                id=POWER_IN,
+                commodity=Commodity.POWER,
+                direction=IODirection.INPUT,
+                max_amps=_own_input_amps(machine) if single_block else None,
+            )
+        ]
     try:
         count = energy_hatches_for(machine.eut, machine.voltage_tier)
     except UnknownTierError:
@@ -174,6 +202,27 @@ def _power_ports(machine: Machine) -> list[Port]:
         )
         for i in range(count)
     ]
+
+
+def _own_input_amps(machine: Machine) -> float | None:
+    """The ceiling on the single connection of a machine **known to be a basic machine**.
+
+    Such a machine is one block feeding itself, so what bounds its intake is GT's own
+    ``maxAmperesIn`` for an ``MTEBasicMachine`` (``dataset.machine_amps_in``) and not the 2 A of an
+    energy hatch it does not have. The two differ in kind: a hatch's ceiling is fixed, while a
+    basic machine's scales with the recipe it runs.
+
+    ``None`` - the connection reads as unmeasurable, not as unlimited - whenever the number cannot
+    be stated honestly: a tier off the ladder, where the voltage it derives from is unknown, or an
+    ``eut`` past ``V[tier]``, outside the domain GT's own overclocking can produce
+    (``machine_amps_in``). Both are cases where inventing a ceiling would turn an upstream data
+    problem into an affirmative measurement.
+    """
+    try:
+        amps = machine_amps_in(machine.eut, machine.voltage_tier)
+    except UnknownTierError:
+        return None
+    return None if amps is None else float(amps)
 
 
 def _feeds_for(tier: str, machines_at_tier: list[tuple[Machine, list[Port]]]) -> list[_Feed]:
@@ -226,7 +275,12 @@ def _partition_by_amperage(feeds: list[_Feed]) -> list[list[_Feed]]:
     return [sorted(group, key=lambda f: order[(f.machine_id, f.port_id)]) for group in groups]
 
 
-def synthesize_power(machines: list[Machine], nets: list[Net]) -> tuple[list[Machine], list[Net]]:
+def synthesize_power(
+    machines: list[Machine],
+    nets: list[Net],
+    *,
+    single_block_ids: frozenset[str] = frozenset(),
+) -> tuple[list[Machine], list[Net]]:
     """Return ``(machines, nets)`` augmented with synthetic power sources + shared-amperage nets.
 
     Machines with ``eut > 0`` gain the power INPUT ports their draw needs (:func:`_power_ports`);
@@ -234,6 +288,12 @@ def synthesize_power(machines: list[Machine], nets: list[Net]) -> tuple[list[Mac
     (:func:`_partition_by_amperage`), and each group gains a source machine and a power net. Tiers
     are processed in sorted order so the output is deterministic. Raises
     :class:`~gtnh_solver.adapter.core.AdapterError` only via id collision.
+
+    ``single_block_ids`` names the machines *known* to be GT basic machines - the only ones whose
+    own ``maxAmperesIn`` ceiling may be stated on their connection (:func:`_power_ports`). It is
+    empty by default, which is the abstaining direction: a caller that cannot establish a
+    machine's class leaves its intake unmeasured rather than measuring it against the wrong
+    formula (#114).
     """
     # Re-tier first (a TEMPORARY workaround, see _supply_tier), because both the hatch count and
     # the net a machine lands on follow from the tier it is actually supplied at.
@@ -243,7 +303,9 @@ def synthesize_power(machines: list[Machine], nets: list[Net]) -> tuple[list[Mac
     if not powered:
         return machines, nets  # nothing draws power (e.g. only storages, or zero-eut recipes)
 
-    ports_by_machine = {mid: _power_ports(m) for mid, m in powered.items()}
+    ports_by_machine = {
+        mid: _power_ports(m, single_block=mid in single_block_ids) for mid, m in powered.items()
+    }
 
     by_tier: dict[str, list[tuple[Machine, list[Port]]]] = {}
     for m in machines:

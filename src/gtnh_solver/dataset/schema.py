@@ -161,6 +161,16 @@ class DatasetMeta(BaseModel):
     extractor_sha: str = Field(min_length=1)  # git SHA of the extractor tool that produced it
     controller_count: int = Field(ge=0)  # controllers successfully dumped
     failures: list[ControllerFailure] = Field(default_factory=list)  # controllers that did not
+    #: Whether this dump is a COMPLETE census of the pack's multiblock controllers. True for any
+    #: extractor run (it walks every registered controller), which is why it defaults to True and
+    #: a real dump need not state it. The committed ``data/multiblocks/`` fixtures set it False:
+    #: they are a two-machine sample kept for the tests, not a census.
+    #:
+    #: Load-bearing, not documentation. Absence from a census is evidence a machine is NOT a
+    #: multiblock - which is the only thing that lets the adapter state GT's single-block intake
+    #: ceiling for it (``dataset.machine_amps_in``, ``adapter.power``). Absence from a sample is
+    #: evidence of nothing at all, so the adapter must abstain there instead.
+    census: bool = True
 
 
 def load_multiblock_doc(path: str | Path) -> MultiblockDoc:
