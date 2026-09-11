@@ -5,7 +5,10 @@ be asserted (scene shape, colours, thickness, the inlined-and-self-contained HTM
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -371,6 +374,97 @@ def test_render_html_escapes_closing_script_in_inline_json() -> None:
     assert "</script>" not in payload  # the raw closing tag never reaches the page as data...
     assert "<\\/script>" in payload  # ...it is escaped to <\/script>
     assert json.loads(payload) == scene  # ...and json still round-trips (\/ is a valid escape)
+
+
+#: The classic XSS probe, the one the issue that asked for this reproduction used (GitHub #111).
+#: No quotes in it, so ``json.dumps`` embeds it verbatim and the "only as data" assertions below
+#: can match the exact string.
+_XSS = "<img src=x onerror=alert(1)>"
+
+#: Sinks that turn a string into live markup. None of them may appear in the emitted page.
+_HTML_SINKS = (
+    r"innerHTML\s*=",
+    r"outerHTML\s*=",
+    r"insertAdjacentHTML",
+    r"document\.write\(",
+    r"srcdoc",
+)
+
+
+def _xss_scene() -> dict:
+    """The sand scene with a script payload in every plan-derived string the panel prints."""
+    scene = _sand_scene()
+    scene["legend"][0]["label"] = _XSS  # machine type -> the legend rows
+    scene["io"]["inputs"][0]["resource"] = _XSS  # resource id -> the system-i/o rows
+    scene["io"]["outputs"][0]["resource"] = _XSS
+    return scene
+
+
+def _inline_blocks(html: str) -> dict[str, str]:
+    """The page's three inline blocks, exactly as the browser reads them (for the CSP hashes).
+
+    Non-greedy to the first closing tag is safe precisely because of the ``</`` escape (GitHub
+    #39): no plan string can put a literal ``</script>`` inside the payload.
+    """
+    return {
+        name: re.search(pattern, html, re.S).group(1)  # type: ignore[union-attr]
+        for name, pattern in (
+            ("style", r"<style>(.*?)</style>"),
+            ("importmap", r'<script type="importmap">(.*?)</script>'),
+            ("module", r'<script type="module">(.*?)</script>'),
+        )
+    }
+
+
+def _csp_of(html: str) -> str:
+    match = re.search(r'<meta http-equiv="Content-Security-Policy" content="([^"]*)">', html)
+    assert match is not None, "the page ships no Content-Security-Policy"
+    return match.group(1)
+
+
+def _sha256_source(text: str) -> str:
+    return f"'sha256-{base64.b64encode(hashlib.sha256(text.encode()).digest()).decode()}'"
+
+
+def test_render_html_builds_the_legend_without_an_html_sink() -> None:
+    # GitHub #111: the legend and system-i/o rows used to be a concatenated HTML string assigned to
+    # innerHTML, so a machine type of "<img src=x onerror=...>" ran on open. The panel is DOM nodes
+    # now - assert the page carries no markup sink at all, which is the property that keeps it so.
+    html = render_html(_xss_scene())
+    for sink in _HTML_SINKS:
+        assert re.search(sink, html) is None, f"plan text can reach {sink}"
+    assert "createDocumentFragment" in html  # the panel is assembled...
+    assert "n.textContent = text" in html  # ...out of text nodes...
+    assert "replaceChildren" in html  # ...and swapped in as nodes, not parsed as markup
+    assert "s.style.background = color" in html  # swatch colour via CSSOM, not a style attribute
+
+
+def test_render_html_keeps_a_plan_payload_out_of_the_pages_markup() -> None:
+    # The payload may appear in the page exactly once: as a JSON string inside the scene the viewer
+    # reads at runtime. Anywhere else it would be markup (or JS) the browser executes.
+    html = render_html(_xss_scene())
+    payload = _inlined_scene_json(html)
+    assert html.count(_XSS) == 3  # the three strings seeded above...
+    assert payload.count(_XSS) == 3  # ...all of them inside the inlined JSON, none outside it
+    assert json.loads(payload)["legend"][0]["label"] == _XSS  # and it survives as the data it is
+
+
+def test_render_html_csp_admits_its_own_blocks_and_the_three_js_origin() -> None:
+    # Defence in depth, and the one part of it that can silently break the previewer instead of
+    # hardening it: a policy whose hashes do not match the emitted blocks blocks the viewer, and one
+    # that omits the CDN origin blocks three.js. Recompute both from the page the browser gets.
+    html = render_html(_xss_scene())
+    csp, blocks = _csp_of(html), _inline_blocks(html)
+    script_src = next(d for d in csp.split("; ") if d.startswith("script-src "))
+    style_src = next(d for d in csp.split("; ") if d.startswith("style-src "))
+    assert _sha256_source(blocks["importmap"]) in script_src
+    assert _sha256_source(blocks["module"]) in script_src  # per-scene: the payload is inside it
+    assert _sha256_source(blocks["style"]) in style_src
+    assert "https://unpkg.com" in script_src  # ...or three.js never loads and the page is blank
+    assert "default-src 'none'" in csp
+    assert "img-src data:" in csp  # the baked GT textures
+    assert "'unsafe-inline'" not in csp  # would hand an injected handler back the run of the page
+    assert "'unsafe-eval'" not in csp
 
 
 def test_write_preview_writes_an_html_file(tmp_path: Path) -> None:

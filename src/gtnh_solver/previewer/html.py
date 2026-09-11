@@ -25,27 +25,64 @@ system's boundary inputs, outputs, and power (``scene.io``), with a per-tick / p
 toggle. The view frames the layout's *actual* extent (``scene.bounds``), not the solver's
 oversized search region.
 
-The scene JSON is *inlined*, not fetched, so there is no ``file://`` CORS problem. The template is
-assembled by replacing a single ``__SCENE_JSON__`` token (NOT an f-string / ``.format``) so the
-JS/CSS braces stay literal. Vendoring three.js to drop the CDN (offline) is a noted follow-up.
+The scene JSON is *inlined*, not fetched, so there is no ``file://`` CORS problem. The page is
+assembled by replacing tokens (NOT an f-string / ``.format``) so the JS/CSS braces stay literal:
+a shell with ``__CSP__``, ``__STYLE__``, ``__IMPORTMAP__`` and ``__VIEWER_JS__`` holes, and the
+three inline blocks as their own constants - which is what lets the policy hash exactly the text
+the browser will hash.
+
+**A plan is somebody else's file**, so nothing derived from one is ever allowed to become markup:
+the viewer builds its legend out of DOM text nodes (GitHub #111), ``render_html`` escapes ``</`` in
+the payload so a name cannot close the inline script (#39), and the emitted Content-Security-Policy
+admits only the page's own hashed blocks plus the three.js CDN. Vendoring three.js to drop the CDN
+(offline) would let the policy drop that origin too; it is a noted follow-up.
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 from typing import Any
 
 _THREE = "https://unpkg.com/three@0.160.0"
+#: The CDN origin the page's CSP must admit, derived from the module URL so the two cannot
+#: drift: a policy that omits it blocks three.js and the page renders nothing at all.
+_THREE_ORIGIN = "/".join(_THREE.split("/")[:3])
 _SCENE_TOKEN = "__SCENE_JSON__"  # a template placeholder the scene JSON replaces
 
-_TEMPLATE = (
-    """<!doctype html>
+_TEMPLATE = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="__CSP__">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>gtnh-solve preview</title>
-<style>
+<style>__STYLE__</style>
+</head>
+<body>
+<div id="hud">loading...<div id="hint">drag: rotate &middot; right-drag / arrows: pan &middot; scroll: zoom &middot; hover: name</div></div>
+<div id="legend"></div>
+<div id="controls">
+  <span>layer <b id="layerVal">all</b></span>
+  <input id="layer" type="range" min="-1" max="0" value="-1" step="1">
+  <button id="reset">reset camera</button>
+  <button id="rateUnit" title="toggle throughput units">rate: per tick</button>
+  <button id="stateToggle" title="toggle machine idle / running skins">state: idle</button>
+  <button id="arrowToggle" title="show / hide the auto-output arrows">arrows: on</button>
+</div>
+<div id="nametag"></div>
+
+<script type="importmap">__IMPORTMAP__</script>
+
+<script type="module">__VIEWER_JS__</script>
+</body>
+</html>
+"""
+
+#: The page's stylesheet, the exact text of the inline ``<style>`` block. Split out of the
+#: shell so ``render_html`` can hash precisely the bytes the browser hashes (see ``_csp``).
+_STYLE = """
   html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1d22;
                font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: #e8eaed; }
   #hud, #legend, #controls { position: fixed; z-index: 10; background: rgba(20,22,28,0.82);
@@ -65,29 +102,21 @@ _TEMPLATE = (
              transform: translate(-50%, -100%); background: rgba(20,22,28,0.92);
              border: 1px solid #3a4150; border-radius: 4px; padding: 2px 7px; white-space: nowrap;
              font-weight: 600; box-shadow: 0 2px 6px rgba(0,0,0,0.45); }
-</style>
-</head>
-<body>
-<div id="hud">loading...<div id="hint">drag: rotate &middot; right-drag / arrows: pan &middot; scroll: zoom &middot; hover: name</div></div>
-<div id="legend"></div>
-<div id="controls">
-  <span>layer <b id="layerVal">all</b></span>
-  <input id="layer" type="range" min="-1" max="0" value="-1" step="1">
-  <button id="reset">reset camera</button>
-  <button id="rateUnit" title="toggle throughput units">rate: per tick</button>
-  <button id="stateToggle" title="toggle machine idle / running skins">state: idle</button>
-  <button id="arrowToggle" title="show / hide the auto-output arrows">arrows: on</button>
-</div>
-<div id="nametag"></div>
+"""
 
-<script type="importmap">
+#: The inline ``<script type="importmap">`` body, verbatim, for the same reason. Bare
+#: specifiers are what OrbitControls itself imports ``three`` by, so the map cannot be
+#: dropped in favour of absolute URLs.
+_IMPORTMAP = """
 { "imports": {
     "three": "__THREE__/build/three.module.js",
     "three/addons/": "__THREE__/examples/jsm/"
 } }
-</script>
+""".replace("__THREE__", _THREE)
 
-<script type="module">
+#: The inline ``<script type="module">`` body, verbatim: the viewer itself. Carries the
+#: ``__SCENE_JSON__`` token, so its hash is per-scene and is computed at render time.
+_VIEWER_JS = """
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
@@ -541,12 +570,34 @@ function rateText(perTick) {
   const rounded = Math.abs(shown - v) > Math.abs(v) * 1e-9;
   return (rounded ? '~' : '') + shown;
 }
+// The legend is built as DOM NODES, never as an HTML string. Every value in it - machine type,
+// resource id, cable material - comes from the plan, which is somebody else's file (GitHub #111):
+// concatenate one into innerHTML and a machine named `<img src=x onerror=...>` runs on open.
+// `textContent` and `append`'s string overload make text nodes, so markup in a name stays text. The
+// swatch colour goes through the CSSOM (`style.background`), not an interpolated style attribute.
+// Two more layers back this one: the `</` escape render_html applies to the payload (#39, the
+// parse-time half) and the page's CSP, which refuses inline handlers outright.
+function el(tag, text) {
+  const n = document.createElement(tag);
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+function swatch(color) {
+  const s = el('span');
+  s.className = 'sw';
+  s.style.background = color;
+  return s;
+}
+function row(parent, ...parts) {
+  parent.append(...parts, el('br'));   // strings here become text nodes, never markup
+}
 function renderLegend() {
-  let html = '<b>machines</b><br>';
-  for (const e of SCENE.legend) html += '<span class="sw" style="background:' + e.color + '"></span>' + e.label + '<br>';
-  html += '<b>routes</b><br>';
-  for (const k of ['item', 'fluid', 'power']) html += '<span class="sw" style="background:' + COMMODITY[k] + '"></span>' + k + '<br>';
-  html += '<span class="sw" style="background:#00e5ff"></span>auto-output<br>';
+  const panel = document.createDocumentFragment();
+  row(panel, el('b', 'machines'));
+  for (const e of SCENE.legend) row(panel, swatch(e.color), e.label);
+  row(panel, el('b', 'routes'));
+  for (const k of ['item', 'fluid', 'power']) row(panel, swatch(COMMODITY[k]), k);
+  row(panel, swatch('#00e5ff'), 'auto-output');
   // Which cable/pipe material the routes above are DRAWN as, and - the point of the line - that the
   // choice is representative. GT ships several cables per voltage tier and the solver sizes by
   // gauge, never by material, so a preview that shows Tin without saying so reads as a spec
@@ -555,29 +606,33 @@ function renderLegend() {
   for (const r of SCENE.routes)
     if (r.material) mats.set(r.material.material + '|' + (r.material.tier || ''), r.material);
   if (mats.size) {
-    html += '<b>materials</b><br>';
+    row(panel, el('b', 'materials'));
     let anyStandIn = false;
     for (const m of mats.values()) {
       anyStandIn = anyStandIn || m.standIn;
-      html += m.material + (m.tier ? ' (' + m.tier + ')' : '') + (m.standIn ? ' *' : '') + '<br>';
+      row(panel, m.material + (m.tier ? ' (' + m.tier + ')' : '') + (m.standIn ? ' *' : ''));
     }
-    if (anyStandIn) html += '<span id="standin">* representative stand-in, not a spec</span><br>';
+    if (anyStandIn) {
+      const note = el('span', '* representative stand-in, not a spec');
+      note.id = 'standin';
+      row(panel, note);
+    }
   }
   if (SCENE.io) {
     const io = SCENE.io, sfx = perSecond ? '/s' : '/t';
-    html += '<b>system i/o</b><br>';
+    row(panel, el('b', 'system i/o'));
     for (const i of io.inputs)
-      html += 'in: ' + i.resource + (i.rate != null ? ' (' + rateText(i.rate) + ' ' + i.unit + sfx + ')' : '') + '<br>';
+      row(panel, 'in: ' + i.resource + (i.rate != null ? ' (' + rateText(i.rate) + ' ' + i.unit + sfx + ')' : ''));
     for (const o of io.outputs)
-      html += 'out: ' + o.resource + (o.rate != null ? ' (' + rateText(o.rate) + ' ' + o.unit + sfx + ')' : '') + '<br>';
+      row(panel, 'out: ' + o.resource + (o.rate != null ? ' (' + rateText(o.rate) + ' ' + o.unit + sfx + ')' : ''));
     // Power: total EU/t supplied plus the per-tier feed spec, the full tier voltage x amps to
     // supply (how a GT source is fed). The total is that feed (tier voltage x amps), so it matches
     // the breakdown, e.g. 'power: 96 EU/t (LV 32V x 3A)' where 96 = 32 x 3.
     const tiers = Object.keys(io.power.byTier);
     const feed = tiers.map((t) => t + ' ' + io.power.byTier[t].volts + 'V x ' + io.power.byTier[t].amps + 'A').join(', ');
-    html += 'power: ' + rateText(io.power.total) + ' EU' + sfx + (tiers.length ? ' (' + feed + ')' : '') + '<br>';
+    row(panel, 'power: ' + rateText(io.power.total) + ' EU' + sfx + (tiers.length ? ' (' + feed + ')' : ''));
   }
-  document.getElementById('legend').innerHTML = html;
+  document.getElementById('legend').replaceChildren(panel);
 }
 renderLegend();
 document.getElementById('rateUnit').addEventListener('click', () => {
@@ -629,17 +684,60 @@ function animate() {
 }
 applyLayer();
 animate();
-</script>
-</body>
-</html>
 """
-).replace("__THREE__", _THREE)
+
+
+def _sha256_source(text: str) -> str:
+    """The CSP ``'sha256-...'`` source expression for one inline block's exact text.
+
+    A browser hashes an inline ``<script>``/``<style>`` element's text content verbatim, so the
+    argument must be exactly what lands between the tags - which is why the three blocks are
+    module constants spliced in whole rather than fragments assembled inside the template.
+    """
+    return f"'sha256-{base64.b64encode(hashlib.sha256(text.encode()).digest()).decode()}'"
+
+
+def _csp(style: str, scripts: tuple[str, ...]) -> str:
+    """The page's Content-Security-Policy: deny everything, then admit only what it needs.
+
+    Third and last layer of the untrusted-plan defence (GitHub #111), behind the ``</`` escape in
+    ``render_html`` and the DOM-building legend in the viewer. It is what stops an injected inline
+    handler (``<img src=x onerror=...>``) running at all, and it denies an exfiltration channel to
+    any script that somehow does: no ``connect-src``, images from ``data:`` only, so nothing can
+    carry a layout off the machine.
+
+    Hashes, not ``'unsafe-inline'``: the point is to refuse script the page did not author, which
+    ``'unsafe-inline'`` would hand straight back. The three.js CDN origin has to be admitted or the
+    module never loads and the page renders nothing (``_THREE_ORIGIN``); vendoring three.js would
+    let even that go, and is the noted follow-up.
+    """
+    return "; ".join(
+        (
+            "default-src 'none'",
+            "script-src " + " ".join((*map(_sha256_source, scripts), _THREE_ORIGIN)),
+            # CSSOM writes (the legend swatch colours, three.js sizing its canvas) are not governed
+            # by style-src, so hashing the one stylesheet costs the page nothing.
+            "style-src " + _sha256_source(style),
+            "img-src data:",  # the baked GT block textures ride data: URIs
+            "base-uri 'none'",
+            "form-action 'none'",
+        )
+    )
 
 
 def render_html(scene: dict[str, Any]) -> str:
     """Return a self-contained viewer page with ``scene`` (from ``build_scene``) inlined."""
     # Plan JSON is external input: escape ``</`` so a machine type or resource id containing
     # ``</script>`` cannot close this inline <script> and break (or inject into) the page. The
-    # JS parser reads ``<\/script>`` back as the identical string.
+    # JS parser reads ``<\/script>`` back as the identical string. That is the *parse-time*
+    # half (GitHub #39); the *runtime* half is ``renderLegend``, which builds the panel out of DOM
+    # text nodes instead of an HTML string (GitHub #111), with the CSP above behind both.
     payload = json.dumps(scene).replace("</", "<\\/")
-    return _TEMPLATE.replace(_SCENE_TOKEN, payload)
+    viewer_js = _VIEWER_JS.replace(_SCENE_TOKEN, payload)
+    # Splice the scene-carrying block in LAST, so no later replacement can run over plan text.
+    return (
+        _TEMPLATE.replace("__CSP__", _csp(_STYLE, (_IMPORTMAP, viewer_js)))
+        .replace("__STYLE__", _STYLE)
+        .replace("__IMPORTMAP__", _IMPORTMAP)
+        .replace("__VIEWER_JS__", viewer_js)
+    )

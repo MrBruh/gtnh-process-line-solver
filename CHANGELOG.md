@@ -336,6 +336,27 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   report. `Violation` gained an optional `machine_id` so the machine it names travels structurally
   rather than only in the message prose. Refs #106.
 
+### Security
+- **A machine type or resource id from someone else's plan can no longer run script in the
+  preview page (`previewer/`).** The legend and the system-i/o rows were built by concatenating
+  those plan strings into HTML and assigning the result to `innerHTML`, so opening a `--preview`
+  page generated from a shared plan executed whatever its author put in a machine name, at a
+  `file://` origin, on a page with no policy of its own. Sharing exported plans is the normal
+  workflow here, so "a plan you did not write" is the expected case.
+
+  The panel is now assembled from DOM nodes: `createElement` plus `textContent`, with the swatch
+  colour set through the CSSOM (`style.background`) rather than interpolated into a `style`
+  attribute. Markup in a name renders as the text it is. That is the runtime half of the hole the
+  `</` payload escape closed at parse time; the escape stays, because it fixes a different one.
+
+  The page also ships a **Content-Security-Policy** as the layer behind both: `default-src 'none'`,
+  scripts only from the sha256 hashes of the page's own two inline blocks plus the three.js CDN
+  origin, styles only from the stylesheet's hash, images only from `data:` (the baked GT
+  textures). Hashes rather than `'unsafe-inline'`, so an injected inline handler does not run even
+  if a sink is ever reintroduced, and no `connect-src` at all, so nothing can carry a layout off
+  the machine. The policy is computed from the emitted blocks, and a test recomputes it from the
+  finished page, so it cannot drift into silently blocking three.js. Refs #111.
+
 ### Added
 - **A multiblock's hatch cells now say WHERE they are, and a layout says where each hatch went
   (`ir/` LayoutResult v1, `dataset/`, `adapter/`, `validator/`).** `Machine.hatch_slots` carries
