@@ -282,6 +282,109 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pre-existing face-reachability failure); on the committed fixtures both now report every powered
   machine as unmeasured for intake, which is the honest state of the gate there.
 
+- **A hatch on a formed multiblock now wears that machine's casing, not the standalone skin
+  (`previewer/`).** GT re-skins a hatch when it joins a *formed* multiblock:
+  `MTEHatch.getTexture` reads its background from `casingTexturePages[page][index]`, an id the
+  controller hands over through `updateTexture` in `add***ToMachineList`, and falls back to
+  `MACHINE_CASINGS[mTier]` only while the hatch stands alone. The extractor dumps hatches standing
+  alone, so the manifest holds that fallback - which drew an input bus on the Industrial Coke Oven
+  in HV machine casing rather than the oven's own Structural Coke Oven Casing, on every hatch of
+  every multiblock (GitHub #109 part 2).
+
+  **It is fixed in the splice, with no extractor change and no re-dump.** The casing id is not in
+  the dump, but the block it names is: a GT hatch element is written
+  `buildHatchAdder(..).casingIndex(CASING_INDEX).buildAndChain(ofBlock(CASING, META))`, and that
+  `casingIndex` is the `TextureFactory.of(CASING, META)` the same casing registered - so the blocks
+  at a machine's hatch-capable cells name the casing GT re-skins its hatches to. Checked against GT
+  source for the Distillation Tower (`CASING_INDEX = 49`, page 0 index 49, `gt.blockcasings4|1`),
+  the Large Chemical Reactor (`176`, page 1 index 48, `gt.blockcasings8|0`), the Industrial Coke
+  Oven (`TAE.GTPP_INDEX(1)`, `miscutils.blockcasings|1`) and the ExxonMobil Chemical Plant
+  (`getCasingTextureID()`, its own solid casing).
+
+  **One casing per machine, taken as the mode over its hatch cells, not the block under each
+  hatch.** GT declares a single `CASING_INDEX` per controller and hands it to every hatch, and
+  reading the cell instead is wrong on a shipped example: the Large Chemical Reactor's `x` element
+  chains `activeCoils(..)` ahead of its casing, so 1 of its 25 hatch-capable cells holds a
+  cupronickel coil and a hatch landing there came out coil-skinned. The population is the dump's
+  `hatch_slots` where it recorded them, else the cells the machine's own hatches occupy.
+  Nitrobenzene's 45 hatch cubes now resolve to exactly four casings, one per machine type, and a
+  run reports the count, because every one of these looks is a complete and plausible hatch and
+  nothing else would say which of them a page got.
+
+  **A mode that lands on a non-casing is drawn, but reported as a guess.** GT's real answer is the
+  controller's `casingIndex` integer, which the dump does not carry, so the mode is an estimate
+  that can never be confirmed - only caught out. A few controllers accept their hatches in a glass
+  ring rather than in the block their `casingIndex` names: measured over the 208 locally dumped
+  multiblocks, 6 land on a non-casing (the T.F.F.T. on `gt.blockglass1|0` and the five Compact
+  Fusion Computers on `BW_GlasBlocks`). The dump's own `source_class` provenance says which: a
+  casing resolves through a casing class, glass does not. Those faces are now counted apart
+  (`TextureSummary.hatches_recased_uncertain`), the blocks they wear are named
+  (`uncertain_hatch_casings`), and the run warns, so a plausible wrong sprite cannot pass for a
+  resolved one. The sprite still goes down, because it is what the cells around the hatch hold and
+  a builder can read that; what changed is that it is no longer indistinguishable from a fact.
+
+  Where the casing is undeterminable - no hatch cell resolves, or the casing is one the manifest
+  cannot skin - the face keeps the hatch's own background rather than losing its texture, taken per
+  side so an UP-facing hatch still gets `MACHINE_<TIER>_TOP`. The texture pool key gained the
+  casing: one bus kind serves several machines in a line and each wears its own, so without it the
+  dedupe would paint them all in whichever machine baked first.
+
+  The committed fixture manifest is load-bearing for hatch backgrounds now as well as for casing
+  cubes, which makes the `gt.blockcasings` metas 10-15 mis-skin (issue #130) reach one more surface.
+  That needs a `TextureDumper` bound change and a re-dump, so it is tracked separately.
+- **The validator now checks the hatches a layout *needs*, not only the ones it records
+  (`validator/`).** Two holes in one gate, both of them the safety net certifying the producer
+  instead of checking it (docs/ARCHITECTURE.md #4).
+
+  **A missing maintenance hatch was invisible (#116).** `router/hatches.py` treats maintenance and
+  muffler as equally required on the way in (either one unplaceable is an explicit infeasibility),
+  but only the muffler was re-checked on the way out. Stripping all 7 `Maintenance` hatches from a
+  solved nitrobenzene layout added no violation at all, while stripping its single muffler was
+  caught: the codebase checked the *optional* upkeep hatch and not the mandatory one.
+  `mMaintenanceHatches.size() == 1` is asserted in a dozen-odd `checkMachine` implementations, so
+  a structure without one does not form. `MAINTENANCE_MISSING` now mirrors `MUFFLER_MISSING`,
+  derived from the machine's own recorded slots, so a dump silent about that kind still reads as
+  "unknown" rather than "forbidden" (35 of 208 controllers record no `Maintenance`-capable cell).
+
+  **Exactly one, counted rather than looked for.** GT reads the *count*: 57 of the 64 controllers
+  that touch `mMaintenanceHatches` assert `size() == 1` and the remaining 7 demand `<= 1`, so none
+  of them forms with two. A machine carrying three of them on three distinct casing cells satisfies
+  every other hatch check there is (real body cells, outward facings, one hatch per cell, so
+  `HATCH_CELL_COLLISION` sees nothing wrong), which is why presence could not catch it. A surplus is
+  `MAINTENANCE_DUPLICATE`, its own code rather than a widened `MAINTENANCE_MISSING`, because "place
+  one" and "remove two" are different fixes and a code named `_missing` would be a lie about a count
+  of three. The muffler deliberately keeps the weaker presence-only rule:
+  `MTEMultiBlockBase.polluteEnvironment` divides the vent batch across however many mufflers a
+  controller has, and controllers assert 2 of them (Nuclear Salt Processing Plant) or 4 (Nuclear
+  Reactor, the larger turbines), so demanding exactly one there would reject structures GT requires.
+
+  **A port whose hatch went missing was invisible too (#119).** The gate validated the hatches
+  that were *present* (a body cell of its own machine, an outward facing, no two on one casing
+  cell, agreement with its terminal) and never asked whether a connection that needs a hatch has
+  one, so the property held only because the producer happened to be correct. On a multiblock the
+  connection IS a block, so a pipe docked against plain casing describes a structure that forms
+  and then moves nothing. `PORT_HATCH_MISSING` re-derives the requirement from the problem's own
+  nets: a net the layout physically realizes, by pipe or by free auto-output, needs a hatch at
+  each machine it attaches to. Three cases genuinely need none and are deliberately left alone,
+  because a false infeasibility is the worse failure of the two: an ME-toggled commodity is not
+  physically routed at all; a net with neither a route nor an auto-connection is
+  `MISSING_CONNECTION`'s to report, as is a port no net names (closed by a boundary storage, or a
+  feed the plan never drew); and a machine that records no hatch slots is its own I/O, or is
+  simply unknown, which 23 of 208 dumped controllers are.
+
+  Neither check calls into `router/hatches.py` or restates its logic. Both are computed from the
+  `LayoutResult` and the `InputIR`, which is what lets them catch the producer dropping a hatch
+  rather than agreeing with it. Both shipped examples still solve VALID and validate clean.
+
+  **`PORT_HATCH_MISSING` fires on real producer output today, so some layouts change verdict.**
+  `router/hatches.py` can drop both hatches of a free auto-output connection when a power hatch has
+  already taken the casing cell the connection reserved, and the result is a line with a silently
+  dead connection: `main` calls such a layout VALID, this gate calls it `partial_invalid` and asks
+  the user to report a solver bug. That is the honest verdict, not a new defect, but it IS a change
+  for multiblock-dense inputs with power. Measured at 1 of 200 randomly generated multiblock
+  problems, which is 1 of the 8 among them that had a free auto-output connection at all, and at 0
+  of 28 solves of the two shipped examples. The producer bug is #131 and is fixed there, not here.
+
 - **A power source is now placed by the cable it actually costs (`solver/`).** A source's position
   exists purely to serve a trunk, and it was the one machine the annealer had no gradient on: an
   un-penalized power net never entered the placement cost, so a 1x1x1 source anywhere inside the

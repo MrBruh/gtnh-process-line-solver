@@ -87,8 +87,17 @@ class ViolationCode(str, Enum):
     HATCH_CELL_COLLISION = "hatch_cell_collision"  # two hatches claim one casing cell
     HATCH_TERMINAL_MISMATCH = "hatch_terminal_mismatch"  # its port's terminal says somewhere else
     HATCH_UNKNOWN_PORT = "hatch_unknown_port"  # port_id names no port on that machine
+    PORT_HATCH_MISSING = (
+        "port_hatch_missing"  # a connection was made to a multiblock that has no hatch for it
+    )
     MUFFLER_BLOCKED = "muffler_blocked"  # no empty air in front of it: the machine shuts down
     MUFFLER_MISSING = "muffler_missing"  # a structure that accepts a muffler was given none
+    MAINTENANCE_MISSING = (
+        "maintenance_missing"  # a structure that accepts a maintenance hatch was given none
+    )
+    # GT wants EXACTLY one, so the surplus un-forms the structure as surely as the shortfall; the
+    # muffler has no counterpart because several of those are legal (some controllers demand 4)
+    MAINTENANCE_DUPLICATE = "maintenance_duplicate"  # more than one on one machine
     # where a routed connection may attach: the casing cell behind its terminal must be able to
     # host that connection's hatch, and no two connections may want the same block
     TERMINAL_NOT_ON_HATCH_CELL = (
