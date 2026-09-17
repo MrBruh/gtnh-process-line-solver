@@ -314,6 +314,7 @@ def synthesize_power(
             by_tier.setdefault(supplied.voltage_tier, []).append((supplied, ports_by_machine[m.id]))
 
     existing_ids = {m.id for m in machines}
+    existing_net_ids = {n.id for n in nets}
 
     # Append the power INPUT ports to every powered machine (its other ports are untouched).
     out_machines = [
@@ -330,10 +331,18 @@ def synthesize_power(
                 raise AdapterError(
                     f"synthetic power source id {source_id!r} collides with an export machine id"
                 )
+            net_id = _net_id(tier, index, len(groups))
+            # Checked for the same reason as the source id above: an export edge already called
+            # "power:LV" would otherwise surface as a bare duplicate-net ValueError from InputIR,
+            # naming neither the collision nor the fact that this synthesis caused it.
+            if net_id in existing_net_ids:
+                raise AdapterError(
+                    f"synthetic power net id {net_id!r} collides with an export edge id"
+                )
             out_machines.append(_power_source(source_id, tier))
             out_nets.append(
                 Net(
-                    id=_net_id(tier, index, len(groups)),
+                    id=net_id,
                     commodity=Commodity.POWER,
                     throughput=sum(f.eut for f in group),  # total EU/t on this group's trunk
                     endpoints=[

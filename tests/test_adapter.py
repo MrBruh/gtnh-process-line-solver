@@ -163,6 +163,57 @@ def test_unsupported_resource_kind_raises() -> None:
         to_input_ir(plan)
 
 
+def test_unsupported_storage_kind_raises() -> None:
+    # The sibling of the resource-kind check above, on the storage path: a kind with no Super
+    # Chest/Tank to stand for it has no boundary block to place, so it must fail loud rather than
+    # land as a KeyError from the lookup table.
+    plan = Plan(
+        schema_version=1,
+        recipes=[Recipe(id="r", machine_type="M", outputs=[_resource("item", "x")])],
+        nodes=[Node(id="n", recipe_id="r", overclock_tier="LV")],
+        storages=[Storage(id="s", kind="energy")],
+    )
+    with pytest.raises(AdapterError, match="unsupported storage kind"):
+        to_input_ir(plan)
+
+
+def test_a_machine_type_beginning_with_super_is_still_collected() -> None:
+    """Storages are identified by id, not by a ``"Super "`` type prefix (#38).
+
+    GT has real processing machines whose names begin that way (Super Jukebox, and the pack's
+    own naming is not ours to police). Under the old string sentinel such a machine's unconsumed
+    output was silently skipped by buffer synthesis: no buffer, no net, and a final product left
+    exiting into thin air with nothing reporting it.
+    """
+    plan = Plan(
+        schema_version=1,
+        recipes=[
+            Recipe(id="r", machine_type="Super Widget Maker", outputs=[_resource("item", "x")])
+        ],
+        nodes=[Node(id="n", recipe_id="r", overclock_tier="LV")],
+    )
+    ir = to_input_ir(plan)
+    assert [m.id for m in ir.machines if m.id.startswith("output-buffer:")] == ["output-buffer:n:x"]
+
+
+def test_a_storage_port_carries_the_rate_of_the_edge_touching_it() -> None:
+    # Port.rate exists to surface boundary I/O rates (system_io, the previewer), and a storage IS
+    # the boundary - so the one place the figure is most wanted was the one place it was None.
+    plan = Plan(
+        schema_version=1,
+        recipes=[
+            Recipe(
+                id="r", machine_type="M", duration_ticks=4.0, outputs=[_resource("item", "R", 2.0)]
+            )
+        ],
+        nodes=[Node(id="n", recipe_id="r", overclock_tier="LV")],
+        storages=[Storage(id="s", kind="item")],
+        edges=[Edge(id="e", source="n", target="s", resource_kind="item", resource_id="R")],
+    )
+    storage = next(m for m in to_input_ir(plan).machines if m.id == "s")
+    assert [p.rate for p in storage.faces.ports] == [0.5]  # 2 amount / 4 ticks, as the net carries
+
+
 def test_storage_sink_routes_with_throughput_from_producer() -> None:
     plan = Plan(
         schema_version=1,
@@ -437,6 +488,22 @@ def test_a_node_named_like_a_synthetic_source_is_rejected() -> None:
         nodes=[Node(id="power-source:LV", recipe_id="r", overclock_tier="LV")],
     )
     with pytest.raises(AdapterError, match="collides"):
+        to_input_ir(plan)
+
+
+def test_an_edge_named_like_a_synthetic_power_net_is_rejected() -> None:
+    # The same collision one level down, on the NET ids the synthesis invents (#38). The source id
+    # was checked and this was not, so an export edge already called "power:LV" surfaced as a bare
+    # duplicate-net ValueError out of InputIR - naming neither the collision nor the synthesis that
+    # caused it, for a plan the author could not see anything wrong with.
+    plan = Plan(
+        schema_version=1,
+        recipes=[Recipe(id="r", machine_type="M", eut=16.0, outputs=[_resource("item", "x")])],
+        nodes=[Node(id="n", recipe_id="r", overclock_tier="LV")],
+        storages=[Storage(id="s", kind="item")],
+        edges=[Edge(id="power:LV", source="n", target="s", resource_kind="item", resource_id="x")],
+    )
+    with pytest.raises(AdapterError, match="power net id 'power:LV' collides"):
         to_input_ir(plan)
 
 
