@@ -11,3 +11,10 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+
+  # The hook revs in .pre-commit-config.yaml were watched by nothing, which is how the ruff hook
+  # came to sit 14 patch releases behind the ruff the dev extra resolved.
+  - package-ecosystem: "pre-commit"
+    directory: "/"
+    schedule:
+      interval: "weekly"
