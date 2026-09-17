@@ -18,9 +18,9 @@ from __future__ import annotations
 
 import math
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
-from ._base import FrozenModel, StrictModel
+from ._base import FrozenModel, StrictModel, check_contract_version
 from .enums import HORIZONTAL_FACINGS, Commodity, Facing, IODirection
 from .geometry import CellBox, CellCoord
 
@@ -336,6 +336,11 @@ class InputIR(StrictModel):
     pinned: list[PinnedIO] = Field(default_factory=list)
     reserved_cells: list[CellCoord] = Field(default_factory=list)
     me_toggles: METoggles = Field(default_factory=METoggles)
+
+    @field_validator("version")
+    @classmethod
+    def _check_version(cls, value: int) -> int:
+        return check_contract_version(value, INPUT_IR_VERSION, "InputIR")
 
     @model_validator(mode="after")
     def _check_referential_integrity(self) -> InputIR:

@@ -206,4 +206,9 @@ result carries no infeasibility; `infeasible`/`partial_invalid` must carry one.
   `hatches`, which is additive in shape, and still bumped: a consumer that ignores it renders a
   build for a machine with no maintenance hatch and no muffler, which will not run. Nothing
   raises; the build is simply wrong.
+- **`version` is enforced on parse.** A payload whose version is not this build's is rejected,
+  in either direction: older, because a bump can change what an existing field *means* and not
+  just which fields exist (v2 -> v3 did exactly that to a power port's `rate`); newer, because
+  being unable to name what changed is a reason to refuse, not a reason to hope. `extra="forbid"`
+  catches only the other half, a payload carrying fields this build does not know.
 - Keep a short changelog of contract changes at the bottom of `src/gtnh_solver/ir/__init__.py`.

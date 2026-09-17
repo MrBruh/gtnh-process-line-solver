@@ -197,4 +197,18 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   the failure docs/dataset-extraction/texture-resolution.md calls unrecoverable - so the flag
 #   travels on the contract for the sake of the consumer that must refuse it: `.schematic` export
 #   (#4, #96) may not lower a stand-in into a real block.
+#
+# Both roots (enforcement, no version bump) - `version` is now CHECKED on parse: a payload whose
+#   version is not this build's is rejected with a pointed error instead of validating clean.
+#   Until now the field enforced nothing - `InputIR.model_validate({"version": 0, ...})` returned a
+#   model reporting v0 against a v3 contract - so the one field whose whole job is to catch a
+#   contract mismatch was the one field that could not. `extra="forbid"` covers the other half
+#   (fields this build does not know) but cannot see a bump that changed what an existing field
+#   MEANS, which is the v2 -> v3 power-rate change exactly: same shape, different meaning, silently
+#   read as if it agreed. A *newer* version is refused as firmly as an older one, since being
+#   unable to name what changed is the reason to refuse rather than a reason to hope.
+#
+#   No bump: this tightens what the contract ACCEPTS, it does not change what it says. A producer
+#   emitting the current version is unaffected, and the only payloads that now fail are ones that
+#   were already being misread. (GitHub #38.)
 # ---------------------------------------------------------------------------
