@@ -10,9 +10,9 @@ amperage of the shared-amperage net (docs/DOMAIN.md).
 
 from __future__ import annotations
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from ._base import StrictModel
+from ._base import StrictModel, check_contract_version
 from .enums import Commodity, Facing, LayoutStatus, PipeFamily
 from .geometry import Cell, CellCoord
 
@@ -228,6 +228,11 @@ class LayoutResult(StrictModel):
     hatches: list[PlacedHatch] = Field(default_factory=list)
     metrics: LayoutMetrics = Field(default_factory=LayoutMetrics)
     seed: int  # the RNG seed that produced this layout (for the seed-compare workflow)
+
+    @field_validator("version")
+    @classmethod
+    def _check_version(cls, value: int) -> int:
+        return check_contract_version(value, LAYOUT_RESULT_VERSION, "LayoutResult")
 
     @model_validator(mode="after")
     def _check(self) -> LayoutResult:

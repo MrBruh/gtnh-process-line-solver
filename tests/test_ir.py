@@ -348,6 +348,30 @@ def test_valid_input_ir_builds_and_defaults_version() -> None:
     assert ir.version == INPUT_IR_VERSION
 
 
+@pytest.mark.parametrize("version", [INPUT_IR_VERSION - 1, INPUT_IR_VERSION + 1])
+def test_input_ir_rejects_a_payload_from_another_contract_version(version: int) -> None:
+    """A mismatched ``version`` is refused rather than read as if it agreed (#38).
+
+    ``extra="forbid"`` catches a payload carrying fields this build does not know; it cannot catch
+    a bump that changed what an existing field MEANS. InputIR v3 is exactly that case - a power
+    port's ``rate`` became its own connection's share of the draw rather than nothing - so a v2
+    payload and a v3 consumer disagree by a multiple with every field present and well-typed. A
+    *newer* version is refused just as firmly: not knowing what changed is the reason to refuse,
+    not a reason to hope.
+    """
+    payload = _valid_input_ir().model_dump()
+    payload["version"] = version
+    with pytest.raises(ValidationError, match=f"contract version {version}"):
+        InputIR.model_validate(payload)
+
+
+def test_input_ir_round_trips_through_its_own_serialization() -> None:
+    # The guard must not reject this build's own output. The round trip is what every consumer
+    # actually does, so a version check that broke it would be worse than no check at all.
+    ir = _valid_input_ir()
+    assert InputIR.model_validate_json(ir.model_dump_json()) == ir
+
+
 def test_duplicate_machine_id_rejected() -> None:
     with pytest.raises(ValidationError):
         InputIR(bounding_region=CellBox(sx=2, sy=2, sz=2), machines=[_machine("m"), _machine("m")])
@@ -525,6 +549,23 @@ def test_valid_layout_has_no_infeasibility() -> None:
             seed=1,
             infeasibility=Infeasibility(constraint="c", detail="d"),
         )
+
+
+@pytest.mark.parametrize("version", [LAYOUT_RESULT_VERSION - 1, LAYOUT_RESULT_VERSION + 1])
+def test_layout_result_rejects_a_payload_from_another_contract_version(version: int) -> None:
+    # The output schema is a first-class contract with its own consumers (previewer, build guide,
+    # the planned .schematic export), so it gets the same guard as the input - and needs it for the
+    # same reason: LayoutResult v1 added `hatches`, a bump precisely because a consumer that
+    # ignores a field can describe a structure that will not form, with nothing raising.
+    payload = _valid_layout().model_dump()
+    payload["version"] = version
+    with pytest.raises(ValidationError, match=f"contract version {version}"):
+        LayoutResult.model_validate(payload)
+
+
+def test_layout_result_round_trips_through_its_own_serialization() -> None:
+    layout = _valid_layout()
+    assert LayoutResult.model_validate_json(layout.model_dump_json()) == layout
 
 
 def test_infeasible_layout_requires_infeasibility() -> None:
