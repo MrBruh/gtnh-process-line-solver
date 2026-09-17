@@ -10,6 +10,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -33,7 +34,7 @@ from tests._helpers import consumer, net, producer
 _SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
 
 
-def _sand_scene() -> dict:
+def _sand_scene() -> dict[str, Any]:
     # The fast (constructive) solve: deterministic layout coordinates that the exact-cell
     # assertions below can rely on; scene building does not care which placer produced them.
     ir = adapt_file(_SAND)
@@ -391,7 +392,7 @@ _HTML_SINKS = (
 )
 
 
-def _xss_scene() -> dict:
+def _xss_scene() -> dict[str, Any]:
     """The sand scene with a script payload in every plan-derived string the panel prints."""
     scene = _sand_scene()
     scene["legend"][0]["label"] = _XSS  # machine type -> the legend rows

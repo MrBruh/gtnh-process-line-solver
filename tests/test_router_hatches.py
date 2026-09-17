@@ -22,6 +22,7 @@ from gtnh_solver.ir import (
     HatchSlot,
     InputIR,
     IODirection,
+    LayoutStatus,
     Machine,
     MachineFaceRef,
     Net,
@@ -30,7 +31,6 @@ from gtnh_solver.ir import (
 from gtnh_solver.ir.geometry import Cell
 from gtnh_solver.ir.output import (
     LayoutResult,
-    LayoutStatus,
     Route,
     Segment,
     Terminal,
