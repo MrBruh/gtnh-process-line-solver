@@ -198,7 +198,7 @@ def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> Input
             )
         )
 
-    storage_ports = _storage_ports(plan, storage_ids)
+    storage_ports = _storage_ports(plan, storage_ids, nodes_by_id, recipes)
     for storage in plan.storages:
         machines.append(
             Machine(
@@ -212,9 +212,9 @@ def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> Input
         )
 
     nets = [_net_for_edge(edge, nodes_by_id, recipes) for edge in plan.edges]
-    machines, nets = _add_output_buffers(
-        machines, nets
-    )  # close the line: collect each output (#16)
+    # Close the line: collect each unconsumed output (#16). Storages are named by id rather than
+    # by their type string - a real GT machine called "Super ..." would have been skipped silently.
+    machines, nets = _add_output_buffers(machines, nets, storage_ids)
     # The export has no power source; invent it. ``single_block_ids`` is what lets the synthesis
     # state a basic machine's own intake ceiling without guessing at a multiblock's.
     machines, nets = synthesize_power(machines, nets, single_block_ids=frozenset(single_block_ids))
@@ -326,26 +326,34 @@ def _recipe_ports(recipe: Recipe, node: Node) -> list[Port]:
     return list(ports.values())
 
 
-def _storage_ports(plan: Plan, storage_ids: set[str]) -> dict[str, list[Port]]:
-    """Ports a storage needs, inferred from the edges touching it (source->out, target->in)."""
+def _storage_ports(
+    plan: Plan, storage_ids: set[str], nodes_by_id: dict[str, Node], recipes: dict[str, Recipe]
+) -> dict[str, list[Port]]:
+    """Ports a storage needs, inferred from the edges touching it (source->out, target->in).
+
+    Each port carries the touching edge's own rate. That is the stated purpose of ``Port.rate`` -
+    surfacing boundary I/O rates to ``system_io`` and the previewer - and a storage IS the boundary,
+    so leaving it None was the one place the figure was both wanted and already computable.
+    """
     by_storage: dict[str, dict[str, Port]] = {sid: {} for sid in storage_ids}
     for edge in plan.edges:
         commodity = _commodity(edge.resource_kind)
+        rate = _throughput(edge, nodes_by_id, recipes)
         if edge.source in storage_ids:
             pid = _port_id(IODirection.OUTPUT, edge.resource_id)
             by_storage[edge.source][pid] = Port(
-                id=pid, commodity=commodity, direction=IODirection.OUTPUT
+                id=pid, commodity=commodity, direction=IODirection.OUTPUT, rate=rate
             )
         if edge.target in storage_ids:
             pid = _port_id(IODirection.INPUT, edge.resource_id)
             by_storage[edge.target][pid] = Port(
-                id=pid, commodity=commodity, direction=IODirection.INPUT
+                id=pid, commodity=commodity, direction=IODirection.INPUT, rate=rate
             )
     return {sid: list(ports.values()) for sid, ports in by_storage.items()}
 
 
 def _add_output_buffers(
-    machines: list[Machine], nets: list[Net]
+    machines: list[Machine], nets: list[Net], storage_ids: set[str]
 ) -> tuple[list[Machine], list[Net]]:
     """Close the line: synthesize a boundary Super Chest/Tank + net to collect each unconsumed
     system output - a machine OUTPUT port (item/fluid) that no net already sources (GitHub #16), so
@@ -355,8 +363,8 @@ def _add_output_buffers(
     buffers: list[Machine] = []
     buffer_nets: list[Net] = []
     for machine in machines:
-        if machine.type.startswith("Super "):  # a storage's own output is a boundary, not collected
-            continue
+        if machine.id in storage_ids:
+            continue  # a storage's own output is already a boundary, not something to collect
         for port in machine.faces.ports:
             if port.direction is not IODirection.OUTPUT or port.commodity is Commodity.POWER:
                 continue
@@ -432,7 +440,10 @@ def _rate(recipe: Recipe, resource_id: str, node: Node, *, outputs: bool) -> flo
     amount = sum(res.amount for res in pool if res.id == resource_id)
     if recipe.duration_ticks <= 0:
         return 0.0
-    return amount * node.parallel * node.machine_count / recipe.duration_ticks
+    # `parallel` only, matching `_node_eut`: `machineCount` is forced to 1 upstream, so carrying
+    # it here scaled nothing while implying the two paths disagree about multi-instance nodes.
+    # When instance-aware routing lands (#76) both have to change together, deliberately.
+    return amount * node.parallel / recipe.duration_ticks
 
 
 #: Multiplier on the summed footprint floor area when sizing the region's side (leaves routing
