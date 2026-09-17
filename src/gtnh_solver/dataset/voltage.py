@@ -52,6 +52,7 @@ VOLTAGE_BY_TIER: dict[str, int] = {
 #: dump would have to select, so they are not modelled and every hatch here is the standard 2 A.
 ENERGY_HATCH_AMPS = 2
 
+
 #: EU lost per cable block a power packet travels. GT cables lose voltage over distance; the
 #: voltage a machine receives is the source voltage minus this loss times the block distance
 #: (docs/DOMAIN.md). Simplifying assumption for now (maintainer call): every tier has a 1-loss
@@ -87,6 +88,55 @@ def delivered_voltage(tier: str, distance: int = 0) -> int:
     unknown tier.
     """
     return tier_voltage(tier) - CABLE_LOSS_PER_BLOCK * distance
+
+
+def machine_amps_in(eut: float, tier: str) -> int | None:
+    """Amps a **basic machine**'s own energy input accepts per tick - GT's own formula.
+
+    ``MTEBasicMachine.maxAmperesIn()`` returns ``((long) mEUt * 2L) / V[mTier] + 1L`` (integer
+    division), where ``mEUt`` is the consumption of the recipe the machine is currently running,
+    and ``BaseMetaTileEntity.injectEnergyUnits`` caps each tick's accepted amperes at it. So a
+    basic machine's intake **scales with its draw**, unlike the fixed 2 A of an energy hatch
+    (:data:`ENERGY_HATCH_AMPS`). The flat ``1`` of ``MetaTileEntity.maxAmperesIn`` is the
+    bare-block default that every basic processing machine overrides, so pricing one of these at
+    a single amp would report a shortfall GT does not have.
+
+    **The class matters: this is ``MTEBasicMachine`` and its subclasses only** - GT's single-block
+    processing machines (Macerator, Forge Hammer, Chemical Reactor, ...). A **multiblock is out of
+    its class**: ``MTEMultiBlockBase extends MetaTileEntity``, so it neither is nor inherits
+    ``MTEBasicMachine`` and never calls ``maxAmperesIn`` for intake at all - it takes power through
+    energy hatches at 2 A each, summed by ``MTEMultiBlockBase.getMaxInputPower()``
+    (docs/DOMAIN.md). A caller that does not *know* it is holding a basic machine must not state
+    this ceiling; see ``adapter.power._power_ports`` for how that is established.
+
+    **Domain: ``0 <= eut <= tier_voltage(tier)``.** Both of GT's overclock paths cap the
+    consumption they compute at ``V[mTier] * mAmperage``
+    (``MTEBasicMachine.calculateOverclockedNess``, ``EUOverclockDescriber.createCalculator``), and
+    ``mAmperage`` is 1 for a standard basic machine, so a real one can never carry a larger
+    ``mEUt`` and GT never evaluates the formula there. Above that this returns ``None``
+    (unverifiable) rather than extrapolating: an export claiming an LV machine draws 480 EU/t is
+    the upstream recipe-model bug ``adapter.power._supply_tier`` documents, and turning it into
+    "GT would accept 31 amps" would be an affirmative measurement against a number no GT block
+    can hold. A plausible wrong value is worse than an honest gap
+    (docs/dataset-extraction/texture-resolution.md).
+
+    **Inside the domain the ceiling is nearly, but not quite, vacuous.** ``floor(2e/V) + 1 > 2e/V``,
+    so ``amps * (V - loss*d) >= eut`` holds for every distance ``d <= V/2``: the under-supply check
+    can never fire on a basic machine within half the tier voltage in cable blocks. The first
+    distance at which any in-domain draw falls short is ``V/2 + 1`` - 17 blocks at LV, 65 at MV,
+    257 at HV - and for a machine drawing its whole tier it is 22 / 86 / 342; past ``V`` blocks
+    ``POWER_VOLTAGE_DROP_EXCESSIVE`` takes over. So on a basic machine this gate has teeth only on
+    a long run, which is precisely why an abstention has to be reported rather than read as a pass
+    (``ValidationReport.unverified_power_intake``).
+
+    Raises :class:`UnknownTierError` for a tier off the ladder.
+    """
+    volts = tier_voltage(tier)
+    if eut <= 0:
+        return 1  # idle: mEUt is 0, and the block still takes a packet a tick to fill its buffer
+    if eut > volts:
+        return None  # outside GT's own input domain: no basic machine can be running this recipe
+    return math.floor(2.0 * eut / volts) + 1
 
 
 #: Slack for float dust when fractional amp loads are summed: a true integer total (e.g. two

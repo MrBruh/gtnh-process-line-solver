@@ -221,6 +221,67 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unchanged.
 
 ### Fixed
+- **The under-supply check now says when it did not run, and states a ceiling only where GT's own
+  rule is known to apply (`validator/`, `adapter/`, `dataset/`, `cli/`).**
+  `POWER_SUPPLY_INSUFFICIENT` only ever ran on a connection declaring a `Port.max_amps` ceiling,
+  and a machine whose connections declared none never entered the supply sum at all - so it was
+  skipped silently, indistinguishable from "checked and fine". That is the hole #114 was filed
+  about, and it also corrects a premise of #106, whose acceptance rested on the validator checking
+  intake independently: that held only where `max_amps` happened to be set.
+
+  **Abstaining is now reported, not silent.** `ValidationReport.unverified_power_intake` carries
+  every powered machine the check could not measure - an unknown ceiling on some connection, an
+  unverifiable route, or a machine that never reached a power route - and `gtnh-solve` prints the
+  count on stderr ("power intake unmeasured for 3 of 3 powered machine(s)"). It is deliberately
+  **not** a violation: `report.ok` is `not violations` and the solver downgrades any layout
+  carrying one, so shipping an abstention as a `Violation` would fail every layout whose machines
+  cannot be classified. A check that could not run proves nothing either way; it just must not
+  read as a pass.
+
+  **GT has two intake rules, and the solver states only the one it can prove applies.** A
+  multiblock takes power through energy hatches at a fixed 2 A each
+  (`MTEMultiBlockBase.getMaxInputPower()`); a **basic machine** - `MTEBasicMachine` and its
+  subclasses, the single-block processing machines - takes it through its own block, at
+  `maxAmperesIn() = (mEUt * 2) / V[tier] + 1`, which scales with the recipe it runs. The two are
+  not interchangeable, and `Machine.hatch_cells is None` does not pick between them: it says only
+  "no structural record", a population **dominated by multiblocks** whenever the dump does not
+  cover them. Under the committed two-machine fixtures it is every machine in both shipped
+  examples, the Large Chemical Reactor included. So `dataset.machine_amps_in` is applied only to a
+  machine a **census** dataset positively failed to find, which is what makes it a single block;
+  the committed fixtures declare themselves a sample (`_meta.json`'s new `census: false`), and
+  without a dataset nothing is known at all. Elsewhere the connection reads as genuinely
+  unmeasurable rather than being measured against a fabricated number.
+
+  **The formula is also bounded by GT's own input domain.** Both overclock paths cap the
+  consumption they compute at `V[tier] * mAmperage`
+  (`MTEBasicMachine.calculateOverclockedNess`, `EUOverclockDescriber.createCalculator`), so with
+  the standard amperage of 1 a real basic machine never carries `mEUt > V[tier]`.
+  `machine_amps_in` returns "unverifiable" above that instead of extrapolating: the #114 repro's
+  LV machine drawing 480 EU/t would otherwise be answered with "GT accepts 31 amps", a confident
+  number no GT block can hold, about an EU/t figure the PR itself identifies as an upstream export
+  bug. A plausible wrong value is worse than an honest gap.
+
+  **Where it does apply, it is a ceiling with teeth only on a long run** - stated plainly rather
+  than buried. `floor(2e/V) + 1 > 2e/V`, so a basic machine can always take in the recipe it runs
+  at the source voltage and the check cannot fire within half the tier voltage in cable blocks. It
+  first bites at `V/2 + 1` (17 blocks at LV, 65 at MV, 257 at HV), or at 22 / 86 / 342 for a
+  machine drawing its whole tier, with `POWER_VOLTAGE_DROP_EXCESSIVE` taking over past `V`.
+
+  **An unknown ceiling now marks its machine unverifiable** instead of quietly contributing
+  nothing, which closes a latent false positive: a machine with one rated and one unrated
+  connection was judged on the rated one alone, and could be reported starved on part of its
+  intake.
+
+  **`Port.max_amps = null` is settled as "unknown", never "unlimited"** (no version bump; both
+  readings produced the same verdict, so nothing was live). `docs/IR.md` said unlimited while the
+  validator had always implemented unknown, and a versioned contract should not carry two
+  readings. Every GT connection has a ceiling: the producer either names the rule or abstains, so
+  a consumer must treat null as unmeasurable, not satisfied. Recorded in `ir/__init__.py`.
+
+  Neither shipped example changes verdict (sand valid, nitrobenzene `partial_invalid` on the
+  pre-existing face-reachability failure); on the committed fixtures both now report every powered
+  machine as unmeasured for intake, which is the honest state of the gate there.
+
 - **A hatch on a formed multiblock now wears that machine's casing, not the standalone skin
   (`previewer/`).** GT re-skins a hatch when it joins a *formed* multiblock:
   `MTEHatch.getTexture` reads its background from `casingTexturePages[page][index]`, an id the

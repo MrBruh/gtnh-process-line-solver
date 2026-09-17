@@ -359,6 +359,29 @@ def test_cli_threads_the_dataset_into_the_adapter(
     assert dataset.get("Electric Blast Furnace") is not None
 
 
+def test_cli_says_how_many_machines_went_unmeasured_for_power_intake(
+    solve_calls: list[dict[str, object]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Without a census dump nothing says whether a machine is a basic machine or a multiblock, so
+    # the validator's under-supply check abstains and the run must SAY so. Silence there used to
+    # be indistinguishable from "checked and fine" (#114). Sand is three Forge Hammers; the
+    # committed fixtures are a two-machine sample, so all three go unmeasured.
+    assert main([_SAND]) == 0
+    err = capsys.readouterr().err
+    assert "power intake unmeasured for 3 of 3 powered machine(s)" in err
+
+
+def test_the_unmeasured_note_is_advisory_and_does_not_change_the_exit_code(
+    solve_calls: list[dict[str, object]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A check that could not run proves nothing either way, so it must not fail the layout: the
+    # note rides stderr next to the dataset warnings and the 0/1/2 contract is untouched.
+    assert main([_SAND]) == 0
+    out, err = capsys.readouterr()
+    assert "note:" in err
+    assert "note:" not in out  # the build guide on stdout stays pipeable
+
+
 def test_cli_falls_back_when_dataset_load_fails(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

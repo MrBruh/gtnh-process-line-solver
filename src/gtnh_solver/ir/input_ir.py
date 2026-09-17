@@ -51,11 +51,18 @@ class Port(StrictModel):
     #: through *this* connection: a multiblock spreads its draw over several energy hatches, so the
     #: router and validator size a cable from the port's rate, never the whole machine's.
     rate: float | None = Field(default=None, ge=0.0)
-    #: Most amps this single connection can accept, or ``None`` for no per-connection ceiling.
-    #: A GT energy hatch takes 2 A (``dataset.ENERGY_HATCH_AMPS``). It is what a connection can
-    #: take **in**, so with the delivered voltage it says how much power actually reaches the
-    #: machine; a cable offering more is not an error (the hatch just takes its 2), but hatches
-    #: that together take in less than the machine's ``eut`` mean it cannot run its recipe.
+    #: Most amps this single connection can accept. A GT energy hatch takes 2 A
+    #: (``dataset.ENERGY_HATCH_AMPS``). It is what a connection can take **in**, so with the
+    #: delivered voltage it says how much power actually reaches the machine; a cable offering
+    #: more is not an error (the hatch just takes its 2), but hatches that together take in less
+    #: than the machine's ``eut`` mean it cannot run its recipe.
+    #:
+    #: ``None`` means the ceiling is **unknown**, not unlimited: every GT connection has one, the
+    #: producer just could not name the rule that gives it (``adapter.power`` states a hatch's 2 A
+    #: or a basic machine's ``maxAmperesIn``, and abstains where the machine's class is not
+    #: established). A consumer must therefore not read ``None`` as "satisfied" - the validator
+    #: treats the machine's intake as unmeasurable and reports it
+    #: (``ValidationReport.unverified_power_intake``).
     max_amps: float | None = Field(default=None, gt=0.0)
 
 

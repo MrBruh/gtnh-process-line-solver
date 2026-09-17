@@ -259,6 +259,19 @@ class PhysicalDataset:
     machines: Mapping[str, MachinePhysical]
 
     @property
+    def identifies_single_blocks(self) -> bool:
+        """Whether a :meth:`get` miss is evidence that the machine is a **single block**.
+
+        True only for a *census* dump (``meta.census``), one that enumerates every multiblock
+        controller in the pack: there a miss is a positive fact - the machine is not a multiblock,
+        so it is a single block, and GT's ``MTEBasicMachine`` rules apply to it
+        (``dataset.machine_amps_in``). The committed ``data/multiblocks/`` fixtures are a
+        two-machine sample, so a miss there means only "not one of those two" and a caller must
+        abstain instead of inferring a class.
+        """
+        return self.meta.census
+
+    @property
     def by_block_key(self) -> Mapping[str, MachinePhysical]:
         """Every machine indexed by :attr:`MachinePhysical.block_key` (``"<registry>@<meta>"``).
 

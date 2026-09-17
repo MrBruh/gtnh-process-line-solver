@@ -206,6 +206,23 @@ doc as intent and reconcile.
     exporter can do), and it comes out once those upstream fixes land. See
     [`DOMAIN.md`](DOMAIN.md).
 
+11. **Intake has two cases, and the solver only states the one it can prove applies.** GT bounds a
+    *multiblock*'s intake at 2 A per energy hatch (decision 10) and a *basic machine*'s at its own
+    `MTEBasicMachine.maxAmperesIn()`, `(mEUt * 2) / V[tier] + 1`, which scales with the recipe and
+    is only defined for `mEUt <= V[tier] * mAmperage`. `Machine.hatch_cells is None` does not pick
+    between them: it says only "no structural record", a population dominated by multiblocks
+    whenever the dump does not cover them - under the committed two-machine fixtures it is *every*
+    machine in both shipped examples, the Large Chemical Reactor included. So the adapter states a
+    `Port.max_amps` ceiling only where the class is established - a structural record (hatches), or
+    a **census** dataset that positively failed to find the machine (a single block) - and leaves
+    it unset otherwise, which the validator reads as "cannot be measured" rather than "unlimited".
+    Abstaining is not silent: `_check_power_amperage` returns the powered machines it could not
+    measure and `ValidationReport.unverified_power_intake` carries them to the CLI, because a check
+    that does not run must not read the same as one that passed (#114). An abstention is not a
+    `Violation` - `report.ok` is `not violations` and the solver downgrades on any of them, so
+    "not measured" travelling as one would fail every fixtures-only layout. See
+    [`DOMAIN.md`](DOMAIN.md).
+
 ## Spatial model
 
 Placement runs on a **coarse cell grid** (cell = largest common single-block footprint +

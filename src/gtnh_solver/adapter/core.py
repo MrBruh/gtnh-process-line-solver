@@ -148,6 +148,12 @@ def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> Input
     )
 
     machines: list[Machine] = []
+    # Machines a CENSUS dataset positively failed to find, so absence proves they are not
+    # multiblocks: the only population whose intake ceiling GT's single-block rule may be stated
+    # for (adapter.power). Empty without a dataset, and empty under the committed fixtures - a
+    # two-machine sample, where a miss proves nothing (dataset.PhysicalDataset).
+    single_block_ids: set[str] = set()
+    identifies_single_blocks = physical is not None and physical.identifies_single_blocks
     for node in plan.nodes:
         recipe = recipes.get(node.recipe_id)
         if recipe is None:
@@ -164,6 +170,8 @@ def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> Input
         # cannot describe different built forms of the same machine.
         fluid_outputs = _fluid_output_count(recipe)
         footprint = _footprint_for(recipe.machine_type, physical, block_key, fluid_outputs)
+        if record is None and identifies_single_blocks:
+            single_block_ids.add(node.id)
         machines.append(
             Machine(
                 id=node.id,
@@ -207,7 +215,9 @@ def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> Input
     machines, nets = _add_output_buffers(
         machines, nets
     )  # close the line: collect each output (#16)
-    machines, nets = synthesize_power(machines, nets)  # the export has no power source; invent it
+    # The export has no power source; invent it. ``single_block_ids`` is what lets the synthesis
+    # state a basic machine's own intake ceiling without guessing at a multiblock's.
+    machines, nets = synthesize_power(machines, nets, single_block_ids=frozenset(single_block_ids))
     _check_resolved_power(plan, nets)
     region = _bounding_region([m.footprint for m in machines])
     return InputIR(bounding_region=region, machines=machines, nets=nets)

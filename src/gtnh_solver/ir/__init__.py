@@ -174,6 +174,15 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   structure can physically host. Both default to None ("no ceiling known"), so a problem built
 #   without the physical dataset behaves exactly as before.
 #
+# InputIR v3 (clarification, no version bump) - `Port.max_amps = null` is settled as "the ceiling
+#   is UNKNOWN", never "unlimited". docs/IR.md used to say the latter while the validator had
+#   always implemented the former; both verdicts happened to coincide, so nothing was live, but a
+#   versioned contract should not carry two readings. Every GT connection has a ceiling - the
+#   producer either names the rule (2 A for an energy hatch, `maxAmperesIn` for a machine known to
+#   be a single block) or abstains - so a consumer must treat null as unmeasurable rather than
+#   satisfied. No producer or consumer changed; only the wording, in the same PR as the validator
+#   change that made the distinction observable (#114).
+#
 # LayoutResult v1 (additive, no version bump) - added `Route.material: RouteMaterial | None`, the
 #   tier-representative cable or pipe a route is drawn and costed as. It exists so the build guide's
 #   bill of materials and the previewer cannot disagree about what a route is made of: both read it

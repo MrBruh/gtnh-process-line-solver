@@ -130,10 +130,27 @@ class ValidationReport:
     """The result of validating one layout against its problem."""
 
     violations: tuple[Violation, ...] = ()
+    #: Powered machines the under-supply check could **not** measure, sorted by id. A machine lands
+    #: here when some power connection of its own declares no ``Port.max_amps`` ceiling, when its
+    #: route could not be verified at all, or when it never appeared on a measured power route -
+    #: so the ``POWER_SUPPLY_INSUFFICIENT`` gate simply did not run on it.
+    #:
+    #: **Reported rather than raised as a violation on purpose.** An abstention is not a defect:
+    #: :attr:`ok` is ``not violations`` and the solver downgrades any layout carrying one to
+    #: ``partial_invalid``, so shipping "not measured" as a ``Violation`` would fail every layout
+    #: whose machines the dataset cannot classify - which, on the committed fixtures, is all of
+    #: them. It travels beside the verdict instead, so a consumer can say how much of the layout
+    #: the gate actually covered rather than reading silence as a pass (#114). The CLI prints a
+    #: count; :attr:`ok` is untouched.
+    unverified_power_intake: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
-        """True iff the layout is geometrically and structurally valid."""
+        """True iff the layout is geometrically and structurally valid.
+
+        Unaffected by :attr:`unverified_power_intake`: a check that could not run proves nothing
+        either way, and a layout is not invalid for being partly unmeasured.
+        """
         return not self.violations
 
     def codes(self) -> tuple[ViolationCode, ...]:
@@ -141,7 +158,12 @@ class ValidationReport:
         return tuple(v.code for v in self.violations)
 
     def __str__(self) -> str:
+        unmeasured = (
+            f" [{len(self.unverified_power_intake)} machine(s) unmeasured for power intake]"
+            if self.unverified_power_intake
+            else ""
+        )
         if self.ok:
-            return "ValidationReport(ok)"
+            return f"ValidationReport(ok){unmeasured}"
         lines = "\n".join(f"  - {v.code.value}: {v.message}" for v in self.violations)
-        return f"ValidationReport({len(self.violations)} violation(s)):\n{lines}"
+        return f"ValidationReport({len(self.violations)} violation(s)){unmeasured}:\n{lines}"
