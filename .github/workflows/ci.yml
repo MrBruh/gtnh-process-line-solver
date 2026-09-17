@@ -24,9 +24,13 @@ jobs:
         with:
           python-version: "3.12"
           cache: "pip"
-          cache-dependency-path: pyproject.toml
+          cache-dependency-path: |
+            pyproject.toml
+            constraints-dev.txt
       - name: Install
-        run: pip install -e ".[dev]"
+        # -c pins the dev toolchain (see constraints-dev.txt): the checks are only
+        # meaningful if every run makes them with the same tools.
+        run: pip install -e ".[dev]" -c constraints-dev.txt
       # Runs the same hooks as local pre-commit: ruff (lint + format), mypy --strict,
       # and file hygiene. Single source of truth for "what static checks mean here".
       - name: pre-commit
@@ -55,9 +59,13 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
-          cache-dependency-path: pyproject.toml
+          cache-dependency-path: |
+            pyproject.toml
+            constraints-dev.txt
       - name: Install
-        run: pip install -e ".[dev]"
+        # -c pins the dev toolchain (see constraints-dev.txt): the checks are only
+        # meaningful if every run makes them with the same tools.
+        run: pip install -e ".[dev]" -c constraints-dev.txt
       - name: Test
         if: ${{ !matrix.coverage }}
         run: pytest --no-cov

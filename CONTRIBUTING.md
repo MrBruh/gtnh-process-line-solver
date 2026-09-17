@@ -14,7 +14,7 @@ venv with an explicit 3.10+ interpreter - e.g. `py -3.12` on Windows.
 git clone <repo>
 cd gtnh-process-line-solver
 python -m venv .venv && . .venv/bin/activate   # Windows: py -3.12 -m venv .venv; .venv\Scripts\activate
-pip install -e ".[dev]"
+pip install -e ".[dev]" -c constraints-dev.txt
 pre-commit install   # wire the git hooks (lint, format, types, commit-msg)
 pytest               # run tests (with coverage)
 ruff check .         # lint
@@ -24,6 +24,17 @@ mypy                 # type-check
 
 `pre-commit install` is the one-time step that makes your local commits run the same
 checks CI does. To run them all on demand: `pre-commit run --all-files`.
+
+**Use the `-c constraints-dev.txt`.** It pins the tools whose version alone decides whether the
+checks pass - ruff, mypy, the pytest stack, pydantic - so your run, a teammate's and CI all judge
+the same code the same way. Without it pip floats to whatever is newest that day, which is how
+mypy crossed a major and pytest reached 9.x here with nothing recording it. CI installs with the
+same flag. The `[dev]` floors in `pyproject.toml` stay loose on purpose: they say what the project
+*works with*, while the constraints file is where an exact version is *chosen*.
+
+To move a pin, edit `constraints-dev.txt` - and if it is ruff, bump `.pre-commit-config.yaml` to
+the matching rev in the same commit, since pre-commit builds that hook in an isolated environment
+a constraints file cannot reach. `tests/test_toolchain_pins.py` fails if the two drift apart.
 
 ## Before you start
 
