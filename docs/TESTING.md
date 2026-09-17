@@ -21,7 +21,13 @@ correctness. The strategy works around this with three layers:
 2. **Property tests (hypothesis).** The safety net against the worst failure class. For any
    generated input graph, the solver must return **a valid layout OR an explicit
    infeasibility report - never a silently-invalid layout.** This is the one invariant that
-   must always hold.
+   must always hold. It lives in `tests/test_solver_properties.py`, over generated `InputIR`s
+   on both the annealed and the `--fast` path, alongside the fuzz that holds `validate` to its
+   never-raises contract (the downgrade that makes the invariant true calls it). **Read the
+   outcome mix, not just the exit code:** the tests `event()` their status, so
+   `--hypothesis-show-statistics` says whether the generated space still reaches valid,
+   partial-invalid *and* infeasible layouts. A change that quietly made everything infeasible
+   would leave the suite green and the promise unproven.
 
 3. **Golden corpus** (`tests/golden/`). A small set of **known-good** layouts the validator
    must accept and **known-bad** ones it must reject - the only real-world ground-truth proxy
