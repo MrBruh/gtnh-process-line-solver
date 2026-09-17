@@ -98,7 +98,11 @@ docstring-code-format = true  # keep ASCII diagrams / code in docstrings tidy
 
 [tool.mypy]
 python_version = "3.10"
-packages = ["gtnh_solver"]  # the shipped package; tools/ holds standalone scripts, not a package
+# Tests are checked at the same strictness, because CLAUDE.md and CONTRIBUTING both claim "typed
+# throughout" and the suite is the half of the codebase most likely to drift from the contracts it
+# asserts on - it calls every public signature in the project. It paid for itself immediately: the
+# stale `type: ignore`s below were each a comment claiming an error that no longer happens.
+files = ["src/gtnh_solver", "tests"]
 plugins = ["pydantic.mypy"]  # the IR is Pydantic v2; the plugin type-checks models
 strict = true
 

@@ -354,12 +354,14 @@ def test_cli_threads_the_dataset_into_the_adapter(
 ) -> None:
     # Prove the wiring: the CLI must hand the loaded physical dataset to adapt_file so multiblocks
     # resolve to real footprints (not the 1x1x1 default the no-arg adapt would give).
-    captured: dict[str, object] = {}
-    real = cli_module.adapt_file
+    captured: dict[str, PhysicalDataset | None] = {}
 
-    def spy(path: str, *, physical: object = None) -> object:
+    # Calls the real adapt_file through its own module rather than through `cli_module`, which
+    # only re-exports it: same function, and the spy now carries adapt_file's actual signature,
+    # so a change to it fails here instead of being absorbed by an `object` parameter.
+    def spy(path: str | Path, *, physical: PhysicalDataset | None = None) -> InputIR:
         captured["physical"] = physical
-        return real(path, physical=physical)  # type: ignore[arg-type]
+        return adapt_file(path, physical=physical)
 
     monkeypatch.setattr(cli_module, "adapt_file", spy)
     assert main([_SAND]) == 0

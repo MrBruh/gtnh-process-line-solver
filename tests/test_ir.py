@@ -132,7 +132,7 @@ def test_cellcoord_is_frozen_and_hashable() -> None:
     c = CellCoord(x=1, y=2, z=3)
     assert c in {CellCoord(x=1, y=2, z=3)}  # value equality + hashability
     with pytest.raises(ValidationError):
-        c.x = 9  # frozen
+        c.x = 9  # type: ignore[misc]  # frozen: mypy agrees statically, this pins it at runtime
 
 
 def test_unknown_field_is_rejected() -> None:
@@ -211,7 +211,7 @@ def test_machine_no_longer_accepts_count() -> None:
     # `count` was dropped in InputIR v1 (multi-instance machines are Phase 2); StrictModel
     # forbids unknown fields, so a stray `count=` is now a loud error, not silently ignored.
     with pytest.raises(ValidationError):
-        Machine(
+        Machine(  # type: ignore[call-arg]  # `count` is gone from the model, which is the point
             id="m",
             type="t",
             voltage_tier="LV",
@@ -477,7 +477,7 @@ def test_non_power_route_must_not_carry_thickness() -> None:
 def _cable(**over: object) -> RouteMaterial:
     kwargs: dict[str, object] = {"family": PipeFamily.CABLE, "material": "tin", "tier": "LV"}
     kwargs.update(over)
-    return RouteMaterial(**kwargs)  # type: ignore[arg-type]
+    return RouteMaterial(**kwargs)
 
 
 def _power(material: RouteMaterial | None) -> Route:
@@ -583,7 +583,7 @@ def test_infeasible_layout_requires_infeasibility() -> None:
 
 
 def test_metrics_allow_extra_fields() -> None:
-    m = LayoutMetrics(footprint=4, vertical_runs=2)  # type: ignore[call-arg]
+    m = LayoutMetrics(footprint=4, vertical_runs=2)
     assert m.model_dump()["vertical_runs"] == 2
 
 

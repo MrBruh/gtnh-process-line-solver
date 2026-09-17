@@ -32,7 +32,7 @@ from gtnh_solver.ir import (
     Route,
     Segment,
 )
-from gtnh_solver.placement import PlacementResult, optimize_placement, place
+from gtnh_solver.placement import Objective, PlacementResult, optimize_placement, place
 from gtnh_solver.router import RouteResult, assign_auto_outputs
 from gtnh_solver.solver import core as solver_core
 from gtnh_solver.solver import solve
@@ -393,12 +393,21 @@ def test_solve_gives_up_when_the_same_net_fails_every_attempt(
     monkeypatch.setattr(solver_core, "route", always_fails_the_same_net)
 
     attempts = 0
-    real_optimize = solver_core.optimize_placement
 
-    def counting_optimize(*args: object, **kwargs: object) -> object:
+    # Spelled out rather than forwarded through *args: this is the signature solve() actually
+    # calls, so a parameter it gains or renames fails here instead of sliding through untyped.
+    def counting_optimize(
+        problem: InputIR,
+        *,
+        seed: int = 0,
+        net_penalties: dict[str, float] | None = None,
+        objective: Objective = "footprint",
+    ) -> PlacementResult:
         nonlocal attempts
         attempts += 1
-        return real_optimize(*args, **kwargs)
+        return optimize_placement(
+            problem, seed=seed, net_penalties=net_penalties, objective=objective
+        )
 
     monkeypatch.setattr(solver_core, "optimize_placement", counting_optimize)
 
