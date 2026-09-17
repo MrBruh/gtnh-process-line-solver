@@ -92,11 +92,42 @@ and has no hatch, cable or pipe entries at all.
 - Whether a layout actually runs in GT:NH - covered by the in-game Assignment, not CI.
 - Previewer visual correctness - smoke-test the render path; eyeball the rest.
 
+## How much of your machine a run takes
+
+`addopts` runs the suite under `-n auto` (it is CPU-bound and every test is independent), but
+`auto` means *every* core, which pins the box for the whole run. `tests/conftest.py` bounds that
+with two dials, both disabled when `CI` is set so the GitHub runner still gets all of itself:
+
+| Env var | Default | Effect |
+|---|---|---|
+| `GTNH_TEST_CPU_FRACTION` | `0.8` | `-n auto` uses `floor(fraction * cores)` workers, floor 1 |
+| `GTNH_TEST_NICE` | on | every process drops to a below-normal scheduler priority |
+
+An explicit `-n 4` overrides the first (the hook only fires for `auto`/`logical`), as does xdist's
+own `PYTEST_XDIST_AUTO_NUM_WORKERS`.
+
+**The cap is not a speed tradeoff.** On a 4-core box at `--no-cov` the suite runs 56s on `-n 4`,
+54s on `-n 3` and 58s on `-n 2`: the last worker oversubscribes the cores the controller needs, so
+it buys nothing. Reach for `GTNH_TEST_CPU_FRACTION=1.0` only on a machine you are not using.
+
+**`solve()` is the suite.** A probe over a serial run puts 53.0s of 73.5s (72%) inside `solve()`
+across 592 calls, against 0.10s in `adapt_file` - parsing an export is free, annealing a layout is
+not. Two things dominate: the hypothesis property tests (300 generated solves) and the shipped
+example lines, which several modules each re-solve from scratch. Nitrobenzene alone costs ~5.5s a
+solve. `tests/test_cli.py` already caches its own with a `scope="session"` fixture; prefer that
+pattern to a fresh `solve()` when a test only needs *a* real layout to assert against.
+
+**Coverage is a 3x multiplier**, and `addopts` enables it: serial, the suite is 73s at `--no-cov`
+and 282s with `--cov`. Pass `--no-cov` while iterating; `COVERAGE_CORE=sysmon` does not help,
+because `sys.monitoring` cannot measure branches before Python 3.14 and coverage silently falls
+back to its tracer.
+
 ## Commands
 
 ```bash
-pytest            # all tests
+pytest                    # all tests
+pytest --no-cov           # ~3x faster; coverage is on by default via addopts
 pytest -q tests/golden    # the corpus
-ruff check .      # lint
-mypy              # types
+ruff check .              # lint
+mypy                      # types
 ```

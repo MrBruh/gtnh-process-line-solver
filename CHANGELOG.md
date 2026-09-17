@@ -123,6 +123,23 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   correct render, the gap is reported in the texture summary instead.
 
 ### Changed
+- **A local test run leaves the machine usable (`tests/conftest.py`).** `addopts` carries
+  `-n auto`, which means *every* core, so `pytest` pinned the box at 100% for its whole run and
+  nothing else stayed responsive. Two dials now bound it, both off when `CI` is set so GitHub
+  Actions still gets the whole runner:
+
+  - `pytest_xdist_auto_num_workers` trims `-n auto` to `floor(0.8 * cores)`, floor 1, tunable via
+    `GTNH_TEST_CPU_FRACTION`. An explicit `-n 4` still wins, and xdist's own
+    `PYTEST_XDIST_AUTO_NUM_WORKERS` escape hatch is left untouched.
+  - every process, controller and each xdist worker, drops to a below-normal scheduler priority
+    (`GTNH_TEST_NICE=0` opts out), so the cores it does hold yield to the foreground.
+
+  **The cap costs no wall clock.** Measured on a 4-core box at `--no-cov`: `-n 4` 56s, `-n 3` 54s,
+  `-n 2` 58s. The fourth worker oversubscribes the cores the controller also needs, so capping at
+  three is, if anything, faster; with coverage the full suite runs 171s against 175s uncapped. The
+  priority drop is done per-process rather than once in the controller because that does not
+  depend on Windows priority-class inheritance through `execnet`'s popen.
+
 - **Placement asks its geometry questions of the boxes, not of every cell (`ir/`, `placement/`).**
   Two predicates in the hot loop walked cell sets whose size is machine *volume*, so a solve got
   slower as the physical dataset gave machines their real footprints - exactly backwards, since
