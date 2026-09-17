@@ -21,13 +21,22 @@ import gtnh_solver.cli as cli_module
 from gtnh_solver import __version__
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.cli import _load_physical_or_warn, main
-from gtnh_solver.dataset import DatasetError, DatasetMeta, PhysicalDataset
+from gtnh_solver.dataset import (
+    DatasetError,
+    DatasetMeta,
+    PhysicalDataset,
+    load_physical_dataset,
+)
 from gtnh_solver.ir import InputIR, LayoutResult, LayoutStatus
 from gtnh_solver.solver import solve
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 _SAND = str(_EXAMPLES / "gtnh-sand.json")
 _NITROBENZENE = str(_EXAMPLES / "gtnh-nitrobenzene.json")
+#: The committed fixtures: a two-machine SAMPLE declaring ``census: false``. Named here so a test
+#: can pin that configuration rather than inherit whichever dump the machine happens to hold
+#: (docs/TESTING.md, "CI sees a smaller dataset than you do").
+_FIXTURE_DATASET = Path(__file__).resolve().parents[1] / "data" / "multiblocks"
 
 
 @pytest.fixture(scope="session")
@@ -359,12 +368,35 @@ def test_cli_threads_the_dataset_into_the_adapter(
     assert dataset.get("Electric Blast Furnace") is not None
 
 
+@pytest.fixture
+def sample_dataset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the CLI to the committed fixtures, whatever dump this checkout happens to hold.
+
+    The abstention tests below are *about* the note, and only a **sample** dump produces one: a
+    miss in a two-machine sample is no evidence, so the adapter states no ceiling and the
+    validator abstains. In a **census** dump a miss is positive evidence the machine is a basic
+    machine, `max_amps` is stated, the intake is measured, and there is correctly no note at all
+    (`dataset/schema.py`: `census` defaults to True, so any pre-#129 local dump reads as one).
+
+    Without this pin the tests assert the sample answer while silently inheriting whichever
+    configuration the machine has, which passes in CI and fails on any checkout with a real local
+    dump (#134). Branching on what resolved is the wrong tool here: the census side emits nothing
+    to assert, so the branch would collapse into a disjunction that holds in every configuration
+    and therefore pins nothing (docs/TESTING.md).
+    """
+    monkeypatch.setattr(
+        cli_module,
+        "load_physical_dataset",
+        lambda *_a, **_k: load_physical_dataset(_FIXTURE_DATASET),
+    )
+
+
 def test_cli_says_how_many_machines_went_unmeasured_for_power_intake(
-    solve_calls: list[dict[str, object]], capsys: pytest.CaptureFixture[str]
+    sample_dataset: None, solve_calls: list[dict[str, object]], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # Without a census dump nothing says whether a machine is a basic machine or a multiblock, so
+    # Against a SAMPLE dump nothing says whether a machine is a basic machine or a multiblock, so
     # the validator's under-supply check abstains and the run must SAY so. Silence there used to
-    # be indistinguishable from "checked and fine" (#114). Sand is three Forge Hammers; the
+    # be indistinguishable from "checked and fine" (#114). Sand is three Forge Hammers and the
     # committed fixtures are a two-machine sample, so all three go unmeasured.
     assert main([_SAND]) == 0
     err = capsys.readouterr().err
@@ -372,7 +404,7 @@ def test_cli_says_how_many_machines_went_unmeasured_for_power_intake(
 
 
 def test_the_unmeasured_note_is_advisory_and_does_not_change_the_exit_code(
-    solve_calls: list[dict[str, object]], capsys: pytest.CaptureFixture[str]
+    sample_dataset: None, solve_calls: list[dict[str, object]], capsys: pytest.CaptureFixture[str]
 ) -> None:
     # A check that could not run proves nothing either way, so it must not fail the layout: the
     # note rides stderr next to the dataset warnings and the 0/1/2 contract is untouched.
