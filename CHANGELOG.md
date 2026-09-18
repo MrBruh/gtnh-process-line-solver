@@ -6,6 +6,24 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **A display name is no longer assumed unique across the multiblock dump, because in GTNH 2.9 it is
+  not.** 2.9 shares 52 display names between two controllers each: GT migrated the GT++ machines into
+  `gregtech.*` and kept every original registered as `...Legacy`, so "Industrial Centrifuge" is both
+  `MTEIndustrialCentrifuge` (meta 15512, 5x5x5) and `MTEIndustrialCentrifugeLegacy` (meta 790,
+  3x3x3). `load_physical_dataset` raised on the first collision, which made the whole pack
+  unloadable.
+
+  A collision is now a fact about the pack rather than a corrupt dump. When exactly one of the
+  colliding records is not `...Legacy` it takes the name, since a plan naming that machine means the
+  one the name refers to now; that is read off `source_class`, a declared fact of the dump rather than
+  a hand-maintained list, and it settles **51 of the 52**. The one that genuinely cannot be decided
+  (2.9's "Drone Centre" is two controllers of the same class) has its name withheld and recorded in
+  `PhysicalDataset.ambiguous`, so a lookup abstains instead of returning the wrong one of two real
+  machines. Every record stays in the new `PhysicalDataset.records` and addressable by `block_key`.
+
+  Two files claiming the same **block_key** is still an error: that is one controller dumped twice.
+
 ### Added
 - **`gtnh-solve --dataset-coverage` reports what the local dataset cannot draw (`dataset/`, `cli`).**
   #98's scope asked for this and it existed only as prose: three questions, each failing
@@ -114,6 +132,20 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Power Source (LV)` is an adapter invention, so nothing in the pack is named after it and
   `derive_small_manifest`'s machine-name rule could never keep one; GT's Debug Power Generator now
   ships by a dedicated rule, the way cables and hatches already did. (#158)
+- **The extractor builds and dumps against GTNH 2.9.** Pins bumped to GT5-Unofficial `5.09.54.20` /
+  StructureLib `1.4.42` from the DreamAssemblerXXL 2.9.0-beta-2 manifest, and `TextureDumper` ported
+  to GT's refactor of `Textures.BlockIcons` from an `enum` into a `final class` of static
+  `IIconContainer` fields, which had broken compilation outright.
+
+  The port made the code **more** general, not less: the new `GTBlockIconContainer`s already carry
+  `mIconName` and self-register into `GregTechAPI.sGTBlockIconload`, which is exactly the population
+  `injectQueuedIconContainers` walks and `iconRef` reads, so on 2.9 the enum-era name injection simply
+  has nothing to do. Both shapes are detected reflectively (`getEnumConstants()` returns `null` for a
+  non-enum; a missing `mIcon` is a shape difference, not a breakage), so one code path serves either
+  pack version with no per-version branch.
+
+  Yields a 296-controller census dump against 2.8.4's 208. Local-only per the dataset policy, so the
+  dump itself is not committed; only the pins and the port are.
 - **Hatches render as real GT hatch blocks, at their own facing, vertical ones included
   (`previewer/`, `tools/`).** A hatch was previously invisible: the previewer drew the casing block
   it displaced. It now resolves to the actual `(block, meta)` GT would place - an `Input Bus (HV)`,

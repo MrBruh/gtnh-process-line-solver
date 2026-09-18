@@ -1520,23 +1520,52 @@ final class TextureDumper {
     // Shared reflection helpers (from v1)
     // ------------------------------------------------------------------------------------------
 
-    /** Inject a {@link NamedIcon} into every {@code BlockIcons} constant so block.getIcon names it. */
+    /**
+     * Inject a {@link NamedIcon} into every {@code BlockIcons} <b>enum constant</b> so block.getIcon
+     * names it, then let {@link #injectQueuedIconContainers} name everything else.
+     *
+     * <p>
+     * <b>{@code BlockIcons} has two shapes across pack versions, and this handles both without
+     * asking which.</b> Up to GTNH 2.8.4 it was an {@code enum} whose constants each carried their
+     * own {@code mIcon}, so naming them meant walking the constants and writing that field - what
+     * this method does. From GT5U 5.09.54.20 (pack 2.9) it is a {@code final class} of static
+     * {@code IIconContainer} fields built by {@code GTBlockIconContainer.create(name)}: there are no
+     * enum constants, {@code mIcon} lives on the container instead, and each container both
+     * self-registers into {@code GregTechAPI.sGTBlockIconload} and carries its own
+     * {@code mIconName}. That is precisely the population {@link #injectQueuedIconContainers} walks
+     * and the name {@link #iconRef} reads, so on the newer shape every icon is named by that pass
+     * and this one has nothing to do.
+     *
+     * <p>
+     * Both facts are read reflectively - {@code getEnumConstants()} returns {@code null} for a
+     * non-enum, and a missing {@code mIcon} is a shape difference rather than a breakage - so this
+     * compiles and runs against either version with no per-version branch anywhere else.
+     */
     private void populateIconNames() {
-        Field mIconField;
+        Object[] constants = Textures.BlockIcons.class.getEnumConstants();
+        Field mIconField = null;
         try {
             mIconField = Textures.BlockIcons.class.getDeclaredField("mIcon");
             mIconField.setAccessible(true);
         } catch (NoSuchFieldException e) {
-            throw new IllegalStateException("Textures.BlockIcons.mIcon is gone: " + e.getMessage(), e);
+            mIconField = null;
+        }
+        if (constants == null || mIconField == null) {
+            LOG.info(
+                "gtnh-extractor: Textures.BlockIcons is not an enum-with-mIcon (GT >= 5.09.54.20 "
+                    + "shape); its icons are named by the queued-container pass instead");
+            injectQueuedIconContainers();
+            return;
         }
         int ok = 0;
-        for (Textures.BlockIcons icon : Textures.BlockIcons.values()) {
+        for (Object icon : constants) {
+            String name = ((Enum<?>) icon).name();
             try {
-                String rel = "iconsets/" + icon.name();
+                String rel = "iconsets/" + name;
                 mIconField.set(icon, new NamedIcon(ICON_DOMAIN + ":" + rel, assetPath(ICON_DOMAIN, rel)));
                 ok++;
             } catch (Throwable t) {
-                LOG.debug("gtnh-extractor: cannot name BlockIcons.{}: {}", icon.name(), t.toString());
+                LOG.debug("gtnh-extractor: cannot name BlockIcons.{}: {}", name, t.toString());
             }
         }
         LOG.info("gtnh-extractor: named {} BlockIcons constants", ok);
@@ -2081,11 +2110,19 @@ final class TextureDumper {
                 }
                 value = java.lang.reflect.Array.get(value, meta);
             }
-            if (!(value instanceof Textures.BlockIcons)) {
+            // Named through iconRef rather than a cast to BlockIcons: on GT <= 2.8.4 these fields hold
+            // BlockIcons enum CONSTANTS, on GT >= 5.09.54.20 they hold IIconContainer instances built
+            // by GTBlockIconContainer.create(name). iconRef reads both - the enum's own name, or the
+            // container's mIconName - so this stays one code path across the refactor. Any other
+            // IIconContainer implementation a future GT introduces is covered for free.
+            if (!(value instanceof IIconContainer)) {
                 return null;
             }
-            String rel = "iconsets/" + ((Textures.BlockIcons) value).name();
-            return new NamedIcon(ICON_DOMAIN + ":" + rel, assetPath(ICON_DOMAIN, rel));
+            String[] ref = iconRef(value);
+            if (ref == null) {
+                return null;
+            }
+            return new NamedIcon(ref[0] + ":" + ref[1], assetPath(ref[0], ref[1]));
         } catch (Throwable t) {
             LOG.debug("gtnh-extractor: casing table lookup failed for {}|{}: {}", constant, meta, t.toString());
             return null;

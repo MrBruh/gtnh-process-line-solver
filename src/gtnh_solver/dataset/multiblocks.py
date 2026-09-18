@@ -27,7 +27,7 @@ a committed ``data/multiblocks/`` dump.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from gtnh_solver.ir import CellBox, CellCoord, Facing, HatchSlot
@@ -50,6 +50,12 @@ DEFAULT_DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "multiblocks"
 #: The substitutions channel that carries tiered heating coils (plan section 4.2 example). A coil
 #: layer is a y-level whose blocks include one of this channel's alternatives.
 _COIL_CHANNEL = "coil"
+
+#: GT's own marker for a controller kept registered only so existing worlds keep working, after the
+#: machine it implements was reimplemented elsewhere ("MTEIndustrialCentrifugeLegacy"). It is what
+#: lets a shared display name resolve to the machine that name means *now*
+#: (``load_physical_dataset``). A suffix on ``source_class``, so it is the dump's own declared fact.
+_LEGACY_SUFFIX = "Legacy"
 
 
 class DatasetError(ValueError):
@@ -253,10 +259,31 @@ class MachinePhysical:
 
 @dataclass(frozen=True)
 class PhysicalDataset:
-    """A loaded ``data/multiblocks/`` dump: the run summary plus every machine keyed by display name."""
+    """A loaded ``data/multiblocks/`` dump: the run summary plus every machine keyed by display name.
+
+    ``machines`` is keyed by display name, which **is not unique in every pack**. GTNH 2.9 registers
+    two different controllers both localized "Mega Chemical Reactor" (BartWorks'
+    ``MTEMegaChemicalReactorLegacy`` at meta 13366 and GT's own ``MTEMegaChemicalReactor`` at 15515),
+    so a name is a convenience index and ``block_key`` is the identity. Every record is always
+    reachable through :attr:`by_block_key`; an ambiguous *name* is deliberately absent from
+    ``machines`` and listed in :attr:`ambiguous_names` instead, so a name lookup cannot silently
+    return the wrong one of two real machines.
+    """
 
     meta: DatasetMeta
     machines: Mapping[str, MachinePhysical]
+    #: Display names no single controller can claim, withheld from ``machines`` for that reason. Every
+    #: record behind one is still in :attr:`records` and :attr:`by_block_key`; only the name is
+    #: unusable.
+    ambiguous: Mapping[str, tuple[MachinePhysical, ...]] = field(default_factory=dict)
+    #: Every controller loaded, whatever the name indexes did with it. The truth the indexes derive
+    #: from, so a record superseded for a *name* is never lost as a *record*.
+    records: tuple[MachinePhysical, ...] = ()
+
+    @property
+    def ambiguous_names(self) -> frozenset[str]:
+        """Display names that identify more than one controller, so a name lookup must abstain."""
+        return frozenset(self.ambiguous)
 
     @property
     def identifies_single_blocks(self) -> bool:
@@ -275,10 +302,12 @@ class PhysicalDataset:
     def by_block_key(self) -> Mapping[str, MachinePhysical]:
         """Every machine indexed by :attr:`MachinePhysical.block_key` (``"<registry>@<meta>"``).
 
-        Derived rather than stored so it cannot drift from ``machines``; the dump is ~200 entries,
-        so rebuilding it per lookup is not worth caching.
+        Derived from :attr:`records` rather than stored so it cannot drift; the dump is a few hundred
+        entries, so rebuilding it per lookup is not worth caching. Covers every controller, including
+        ones a display name could not or did not claim, which is the whole point: a name collision
+        costs the *name*, never the record.
         """
-        return {m.block_key: m for m in self.machines.values()}
+        return {m.block_key: m for m in self.records}
 
     def get(self, key: str, block_key: str | None = None) -> MachinePhysical | None:
         """The physical record for a machine, or ``None`` if the dump lacks it.
@@ -467,8 +496,27 @@ def load_physical_dataset(
     With no explicit ``data_dir`` the location is resolved (:func:`resolve_dataset_path`): the newest
     local ``data/<version>/multiblocks/`` that exists, else the committed fixtures, with ``version``
     to pin one. Reads ``_meta.json`` for the run summary, then every other ``*.json`` file as a
-    controller, keying the resulting records by display name. Raises :class:`DatasetError` on a
-    duplicate key so two files can never silently shadow one machine.
+    controller, keying the resulting records by display name.
+
+    **A display name is not a unique key in every pack.** GTNH 2.9 shares 52 display names between
+    two controllers each, so a collision is a fact about the pack, not a corrupt dump, and refusing
+    to load would make that pack unusable.
+
+    **Nearly every collision decides itself.** GT 2.9 migrated the GT++ machines into ``gregtech.*``
+    and kept each original registered as ``...Legacy``: "Industrial Centrifuge" is
+    ``MTEIndustrialCentrifuge`` (meta 15512, 5x5x5) *and*
+    ``MTEIndustrialCentrifugeLegacy`` (meta 790, 3x3x3). A plan naming that machine means the one the
+    name refers to now, so when exactly one of the colliding records is **not** ``...Legacy`` it takes
+    the name. That is read off ``source_class``, a declared fact of the dump rather than a
+    hand-maintained list, and it settles 51 of 2.9's 52 collisions.
+
+    What is left genuinely cannot be decided (2.9's "Drone Centre" is two controllers of the *same*
+    class): the name is withheld from ``machines`` and recorded in ``PhysicalDataset.ambiguous``, so a
+    lookup abstains instead of silently returning the wrong one of two real machines. Either way every
+    record stays in ``records`` and addressable by ``block_key``.
+
+    Two files claiming the same **block_key** is a different thing - the same controller dumped twice -
+    and still raises :class:`DatasetError`.
     """
     directory = (
         Path(data_dir)
@@ -476,14 +524,31 @@ def load_physical_dataset(
         else resolve_dataset_path("multiblocks", version=version)
     )
     meta = load_meta(directory / "_meta.json")
-    machines: dict[str, MachinePhysical] = {}
+    by_name: dict[str, list[MachinePhysical]] = {}
+    seen_blocks: dict[str, str] = {}
     for path in sorted(directory.glob("*.json")):
         if path.name == "_meta.json":
             continue
         physical = to_physical(load_multiblock_doc(path))
-        if physical.key in machines:
+        previous = seen_blocks.get(physical.block_key)
+        if previous is not None:
             raise DatasetError(
-                f"two files claim machine {physical.key!r} ({path.name} and an earlier file)"
+                f"two files claim controller block {physical.block_key!r} "
+                f"({path.name} and {previous})"
             )
-        machines[physical.key] = physical
-    return PhysicalDataset(meta=meta, machines=machines)
+        seen_blocks[physical.block_key] = path.name
+        by_name.setdefault(physical.key, []).append(physical)
+
+    machines: dict[str, MachinePhysical] = {}
+    ambiguous: dict[str, tuple[MachinePhysical, ...]] = {}
+    for name, found in by_name.items():
+        if len(found) == 1:
+            machines[name] = found[0]
+            continue
+        current = [record for record in found if not record.source_class.endswith(_LEGACY_SUFFIX)]
+        if len(current) == 1:
+            machines[name] = current[0]  # the superseded one keeps its block_key, loses the name
+        else:
+            ambiguous[name] = tuple(found)
+    records = tuple(record for found in by_name.values() for record in found)
+    return PhysicalDataset(meta=meta, machines=machines, ambiguous=ambiguous, records=records)

@@ -31,7 +31,7 @@
  */
 dependencies {
     // GT5-Unofficial - the single source of truth for GTNH multiblocks (LGPL, GTNewHorizons).
-    // Pinned from DreamAssemblerXXL manifest 2.8.4. Pulls its hard deps transitively (see above).
+    // Pinned from DreamAssemblerXXL manifest 2.9.0-beta-2. Pulls its hard deps transitively (see above).
     //
     // GT5U's POM lists ThaumicTinkerer (a Thaumcraft integration addon) as a compile
     // dependency without excluding its transitives, and that subtree resolves to
@@ -40,13 +40,13 @@ dependencies {
     // :compileJava. Thaumcraft integration is not needed to enumerate or construct
     // multiblocks, so drop that one broken optional subtree; every other GT5U hard
     // dependency still resolves and loads on the dev server.
-    implementation("com.github.GTNewHorizons:GT5-Unofficial:5.09.51.482:dev") {
+    implementation("com.github.GTNewHorizons:GT5-Unofficial:5.09.54.20:dev") {
         exclude group: "com.github.GTNewHorizons", module: "ThaumicTinkerer"
     }
 
     // StructureLib - the multiblock structure framework (LGPL, GTNewHorizons).
-    // Pinned from DreamAssemblerXXL manifest 2.8.4; matches GT5U's transitive requirement.
-    implementation("com.github.GTNewHorizons:StructureLib:1.4.23:dev")
+    // Pinned from DreamAssemblerXXL manifest 2.9.0-beta-2; matches GT5U's transitive requirement.
+    implementation("com.github.GTNewHorizons:StructureLib:1.4.42:dev")
 
     // JUnit 4, for the ASM icon-name matcher only (#98). Deliberately a SEPARATE suite from the
     // project's pytest gate: run it with `./gradlew test` from this directory. It is not wired
