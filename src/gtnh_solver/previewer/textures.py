@@ -411,6 +411,21 @@ class TextureManifest:
         """
         return self._pipes_by_name.get(display_name)
 
+    def kind(self, block: str, meta: int) -> str | None:
+        """What the extractor called this entry: ``"mte"``, ``"pipe"``, ``"block"``, or ``None``.
+
+        The distinction the ``.schematic`` exporter turns on (#96): an ``mte`` or ``pipe`` is a
+        ``gt.blockmachines`` cell whose identity lives in a tile entity, while a ``block`` is an
+        ordinary casing whose meta is real block metadata and needs no tile entity at all.
+        ``None`` means the manifest has never heard of the block, which is not the same as knowing
+        it is plain - the exporter refuses the former and emits the latter.
+        """
+        entry = self._blocks.get(f"{block}|{meta}")
+        if entry is None:
+            return None
+        value = entry.get("kind")
+        return str(value) if value is not None else None
+
     def te_base_type(self, block: str, meta: int) -> int | None:
         """The block metadata GT places this MTE at, or ``None`` if the manifest does not say.
 
@@ -486,7 +501,7 @@ def load_multiblock_docs(data_dir: str | Path) -> dict[str, MultiblockDoc]:
     Each doc is indexed under BOTH its controller display name and its controller block key
     (``"<registry_name>@<meta>"``), because a plan can name a machine either way: an export from
     before gtnh-factory-flow #25 only has the localized recipe-map name, while a newer one carries
-    the exact block id (see :func:`_machine_cubes`, which prefers the block key). The two key spaces
+    the exact block id (see :func:`machine_cubes`, which prefers the block key). The two key spaces
     cannot collide - a block key always ends in ``@<int>`` after a registry path, which no GT
     display name is - so one flat dict serves both without an ambiguity guard.
 
@@ -813,7 +828,7 @@ def _glyph_steps(machine: Mapping[str, Any], auto_out_face: Mapping[str, str] | 
     return _FRONT_CW_STEPS.get(str(machine.get("front", "north")), 0)
 
 
-def _machine_cubes(
+def machine_cubes(
     machine: Mapping[str, Any],
     docs: Mapping[str, MultiblockDoc],
     manifest: TextureManifest,
@@ -1085,11 +1100,12 @@ def texturize_scene(
     recased = uncertain = standalone = 0
     uncertain_casings: set[str] = set()
     for machine in scene["machines"]:
-        machine_cubes = _machine_cubes(machine, docs, manifest, auto_out_face)
-        if not machine_cubes:
+        # NOT `cubes`: that name is the output accumulator this loop appends scene blocks to.
+        expanded = machine_cubes(machine, docs, manifest, auto_out_face)
+        if not expanded:
             continue  # no doc and not a known single-block machine -> keep the placeholder box
         machine["expanded"] = True
-        for cube in machine_cubes:
+        for cube in expanded:
             faces, stacks = _face_icons(cube, manifest)
             if all(face is None for face in faces):
                 unskinned.add(f"{cube.block}|{cube.meta}")
