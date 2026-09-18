@@ -7,6 +7,9 @@ Real-world ground truth for the validator, since there is no headless GT simulat
   working GT:NH builds to start; grown from the v1.1 round-trip importer later).
 - **`bad/`** - known-bad layouts the validator MUST reject, each with a one-line note on
   *why* it's invalid (overlap, over-capacity pipe, burnt cable, blocked required face, ...).
+- **`schematic/`** - a different kind of artifact, and not part of the validator corpus below:
+  real `.schematic` files saved from the instance, so the exporter (#96) targets the true NBT
+  layout rather than a guessed one. See its own README.
 
 Each case is a **pair** - an `InputIR` (the problem) and a `LayoutResult` (the candidate
 solution), since the validator checks a solution *against* its problem (`validate(problem,

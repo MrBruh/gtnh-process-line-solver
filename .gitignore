@@ -26,6 +26,9 @@ node_modules/
 out/
 *.litematic
 *.schematic
+# ...but the hand-saved Schematica files under tests/golden/schematic/ are inputs, not outputs:
+# they are the format reference the exporter (#96) is written against. See that dir's README.
+!tests/golden/schematic/*.schematic
 
 # Generated datasets are local-only and version-namespaced (data/<version>/{multiblocks,textures}/):
 # regenerated on demand, never committed, so a user can hold several pack versions side by side.
