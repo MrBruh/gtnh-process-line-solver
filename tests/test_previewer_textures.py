@@ -1256,6 +1256,32 @@ def test_committed_basic_machine_front_carries_overlay() -> None:
     )
 
 
+def test_committed_heat_proof_casing_is_not_a_tier_casing() -> None:
+    """Golden guard (issue #130): the Heat Proof Machine Casing in the SHIPPED manifest wears its
+    own sprite, not a tiered machine casing.
+
+    ``BlockCasings1.getIcon`` answers metas 10-15 from its own switch and only falls through to the
+    tiered ``MACHINECASINGS_*`` arrays below that, but the extractor's casing table claimed 0-14 and
+    runs first, so meta 11 shipped as ``MACHINE_UIV_SIDE``. That is the failure mode nothing
+    downstream can detect - a confident, plausible, wrong sprite - and it reached every clean clone,
+    because the Electric Blast Furnace is one of the two committed multiblock fixtures and this is
+    the casing it is built from.
+    """
+    manifest = json.loads(_COMMITTED_MANIFEST.read_text(encoding="utf-8"))
+    m = TextureManifest(manifest)
+    icons = [layer["icon"] for layer in m.layers("gregtech:gt.blockcasings", 11, "NORTH")]
+
+    assert icons, "the Heat Proof casing must be present in the committed manifest"
+    assert icons[0] == "gregtech:iconsets/MACHINE_HEATPROOFCASING"
+    assert not any("MACHINECASINGS" in icon or "_SIDE" in icon for icon in icons), (
+        f"meta 11 is not a tiered machine casing, got {icons}"
+    )
+    assert (
+        manifest["icons"]["gregtech:iconsets/MACHINE_HEATPROOFCASING"]
+        == "assets/gregtech/textures/blocks/iconsets/MACHINE_HEATPROOFCASING.png"
+    )
+
+
 # --------------------------------------------------------------------------------------------------
 # Routes: a cable is a block too (#4)
 # --------------------------------------------------------------------------------------------------
