@@ -113,7 +113,10 @@ def place_hatches(
             hatches.append(placed)
 
     for auto in autos:
-        hatches.extend(_auto_hatches(auto, port_of_auto, machines, by_machine, claimed))
+        auto_hatches, dropped = _auto_hatches(auto, port_of_auto, machines, by_machine, claimed)
+        if dropped is not None:
+            return HatchPlan(hatches=tuple(hatches), infeasibility=dropped)
+        hatches.extend(auto_hatches)
 
     blocked = set(occupied) | {h.cell.as_tuple() for h in hatches}
     for machine_id in sorted({p.machine_id for p in placements}):
@@ -182,7 +185,7 @@ def _auto_hatches(
     machines: Mapping[str, Machine],
     by_machine: Mapping[str, Placement],
     claimed: dict[str, set[Cell]],
-) -> list[PlacedHatch]:
+) -> tuple[list[PlacedHatch], Infeasibility | None]:
     """The two hatches a free auto-output connection needs, where either side is a multiblock.
 
     GT's output bus pushes into whatever inventory sits on **its own front face**, every 8 ticks,
@@ -190,14 +193,21 @@ def _auto_hatches(
     target's input hatch facing back. ``auto.assign_auto_outputs`` has already proved such a pair
     exists on these faces (that is what it now requires before covering a net), so this re-derives
     the same cells rather than searching.
+
+    **Finding no pair left is reported, not shrugged off.** It used to return no hatches, which
+    described a certified connection with no output bus and no input bus: two multiblocks that
+    form and move nothing, and before the ``PORT_HATCH_MISSING`` check nothing downstream noticed
+    (#131). Its cause - the power router docking an energy hatch onto a reserved cell - is fixed
+    at the source in ``solver._assemble``, so this should now be unreachable; it stays as a loud
+    floor rather than a silent one, because the failure it guards is invisible in the artifact.
     """
     ports = port_of_auto.get(auto.net_id)
     if ports is None:
-        return []
+        return [], None
     out: list[PlacedHatch] = []
     pair = _auto_pair(auto, ports, machines, by_machine, claimed)
     if pair is None:
-        return []
+        return [], _no_auto_pair(auto)
     source_cell, target_cell = pair
     for machine_id, port_id, cell, face in (
         (auto.source_machine_id, ports[0], source_cell, auto.source_face),
@@ -216,7 +226,7 @@ def _auto_hatches(
                 port_id=port_id,
             )
         )
-    return out
+    return out, None
 
 
 def _auto_pair(
@@ -230,7 +240,7 @@ def _auto_pair(
 
     ``None`` on a side means that machine places no hatch there (it is a single block, whose own
     face does the work). ``None`` for the whole pair means no unclaimed pair is left, which the
-    caller treats as "emit nothing" - the connection itself was already certified by
+    caller now REPORTS rather than passing over - the connection itself was already certified by
     ``assign_auto_outputs``.
     """
     source_m, source_p = (
@@ -366,6 +376,22 @@ def _kinds_by_cell(placement: Placement, machine: Machine) -> dict[Cell, frozens
         dx, dy, dz = rotated_slot(slot.offset.as_tuple(), machine.footprint, placement.orientation)
         turned[(origin.x + dx, origin.y + dy, origin.z + dz)] = frozenset(slot.kinds)
     return turned
+
+
+def _no_auto_pair(auto: AutoConnection) -> Infeasibility:
+    """A free connection whose reserved casing pair was taken by something else (#131)."""
+    return Infeasibility(
+        constraint="hatch_budget",
+        detail=(
+            f"net {auto.net_id!r} was covered by a free auto-output from "
+            f"{auto.source_machine_id!r} to {auto.target_machine_id!r}, but no unclaimed pair of "
+            f"touching casing cells is left to host its two hatches: another hatch took the pair "
+            f"the connection had reserved"
+        ),
+        suggested_relaxation=(
+            "reduce the machines' connections, or leave routing gaps so another face can be used"
+        ),
+    )
 
 
 def _no_room(machine: Machine, kind: str) -> Infeasibility:
