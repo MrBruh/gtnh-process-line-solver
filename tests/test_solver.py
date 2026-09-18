@@ -114,9 +114,10 @@ def test_solve_sand_balanced_objective_is_valid_and_low_wire() -> None:
     assert cables <= 3
 
 
-def test_solve_is_deterministic() -> None:
-    ir = adapt_file(_SAND)
-    assert solve(ir) == solve(ir)
+# The optimized path's determinism is proven over generated problems by
+# test_solver_properties.py::test_solve_is_deterministic_for_a_given_problem_and_seed, which
+# subsumes the sand-only example that used to sit here and costs 16s less (GitHub #94). The fast
+# path keeps its own example below: it is a different placer, and near-instant.
 
 
 def test_fast_mode_uses_constructive_placement() -> None:
