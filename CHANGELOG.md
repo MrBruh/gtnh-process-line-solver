@@ -146,6 +146,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   old list was one tuple; it only appears against a real structure dump, which is the trap
   docs/TESTING.md names.
 
+- **The previewer's arrow toggle is labelled `auto-output arrows` (`previewer/`).** It read just
+  `arrows: on`, in a HUD whose own hint line uses "arrows" for the arrow *keys* that pan the camera,
+  so the button did not say which arrows it hid. The label is unchanged in meaning and the title
+  attribute already said it; only the button text is longer.
+
 - **Insertion ranking stops scoring candidates that cannot win (`placement/`).**
   `_marginal_insertion_cost` now takes the incumbent's cost as a `bound` and returns `inf` above
   it, skipping the whole auto term for candidates already out of the running: the `Placement` it
@@ -324,6 +329,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unchanged.
 
 ### Fixed
+- **Auto-output arrows are drawn for single-block sources only (`previewer/`).** The decal is
+  positioned off the source machine's bounding box, which is where the ejection happens only when
+  the machine is one cell, because then it is its own hatch. A multiblock controller has no
+  auto-output at all in GT (`doesAutoOutput` lives on `MTEBasicMachine`, and `MTEMultiBlockBase`
+  never mentions it); its output hatch or bus pushes to that *hatch's* own front face. So an arrow
+  on the controller's box marked a casing face that moves nothing: on the nitrobenzene example, 10
+  of 16 auto-connections have a multiblock source, and the 7x7x7 Chemical Plant carried four arrows
+  about 3.5 blocks off the nearest real hatch. The connection itself is unchanged in the scene, the
+  build guide and the validator; only the misplaced decal is gone. Drawing it at the hatch cell that
+  `LayoutResult.hatches` already records is the follow-up (#153).
+
 - **The under-supply check now says when it did not run, and states a ceiling only where GT's own
   rule is known to apply (`validator/`, `adapter/`, `dataset/`, `cli/`).**
   `POWER_SUPPLY_INSUFFICIENT` only ever ran on a connection declaring a `Port.max_amps` ceiling,

@@ -28,7 +28,7 @@ that into a physical, buildable layout.
 
 ![The three.js previewer: a solved nitrobenzene line in 3D, machines drawn with their real GT block textures, item, fluid and power runs routed between them, and a legend of machines, route types and system I/O.](docs/images/previewer.png)
 
-*The `--preview` viewer on `examples/gtnh-nitrobenzene.json`: 23 machines in a 17x10x8 build,
+*The `--preview` viewer on `examples/gtnh-nitrobenzene.json`: 23 machines in a 15x10x7 build,
 with the shared-amperage power net and the per-tick system I/O the line consumes and produces.*
 
 ## How it works (data flow)
