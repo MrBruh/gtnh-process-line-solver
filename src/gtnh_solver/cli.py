@@ -6,6 +6,7 @@ human-readable build guide out::
     gtnh-solve examples/gtnh-sand.json            # print the build guide to stdout
     gtnh-solve plan.json -o guide.txt             # ...or write it to a file
     gtnh-solve plan.json --preview view.html      # write a double-clickable 3D preview
+    gtnh-solve plan.json --schematic line.schematic  # write a Schematica build ghost
     gtnh-solve plan.json --seed 3                 # pick the solver seed
     gtnh-solve plan.json --fast                   # skip optimization (instant, constructive)
     gtnh-solve plan.json --objective volume       # what "compact" means: footprint|volume|balanced
@@ -31,6 +32,7 @@ from gtnh_solver.buildguide import build_guide
 from gtnh_solver.dataset import PhysicalDataset, list_versions, load_physical_dataset
 from gtnh_solver.ir import InputIR, LayoutResult, LayoutStatus
 from gtnh_solver.previewer import write_preview
+from gtnh_solver.schematic import SchematicError, write_schematic
 from gtnh_solver.solver import solve
 from gtnh_solver.validator import validate
 
@@ -68,6 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--preview",
         metavar="FILE",
         help="write a self-contained 3D preview (a double-clickable .html) to FILE",
+    )
+    parser.add_argument(
+        "--schematic",
+        metavar="FILE",
+        help="write a Schematica .schematic build ghost to FILE (1.7.10; not Litematica)",
     )
     parser.add_argument(
         "--dataset-version",
@@ -183,8 +190,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: could not write {args.output}: {exc}", file=sys.stderr)
             return 2
         print(f"wrote build guide to {args.output}", file=sys.stderr)
-    elif not args.preview:
-        print(guide, end="")  # default to stdout, unless the user asked only for the visual preview
+    elif not (args.preview or args.schematic):
+        print(guide, end="")  # default to stdout, unless the user asked only for an artifact
 
     if args.preview:
         # Surface the previewer's texture-resolution summary (which machines got a real GT texture
@@ -197,6 +204,19 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: could not write {args.preview}: {exc}", file=sys.stderr)
             return 2
         print(f"wrote preview to {args.preview}", file=sys.stderr)
+
+    if args.schematic:
+        try:
+            write_schematic(problem, layout, args.schematic, version=args.dataset_version)
+        except SchematicError as exc:
+            # A block the dataset cannot type is refused rather than guessed: a .schematic that
+            # rebuilds a cable as a machine looks buildable and is not (GitHub #96).
+            print(f"error: cannot export {args.schematic}: {exc}", file=sys.stderr)
+            return 2
+        except OSError as exc:
+            print(f"error: could not write {args.schematic}: {exc}", file=sys.stderr)
+            return 2
+        print(f"wrote schematic to {args.schematic}", file=sys.stderr)
 
     if layout.status is LayoutStatus.VALID:
         return 0

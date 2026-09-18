@@ -7,7 +7,7 @@
       "GT5-Unofficial": "5.09.51.482",
       "StructureLib": "1.4.23"
     },
-    "generated_at": "2026-09-08T11:11:57.606Z",
+    "generated_at": "2026-09-18T18:00:57.520Z",
     "extractor_sha": "unknown",
     "note": "SMALL committed manifest: only the blocks the shipped example lines and the two multiblock fixtures need - plus every hatch kind at the tiers those lines use, the cables and pipes those tiers route, and the block that stands in for a synthesized power source, none of which matches a machine name - so `gtnh-solve --preview examples/*.json` skins out of the box. The full dump is local and version-namespaced (data/<version>/textures/manifest.json), never committed. Regenerate with tools/derive_small_manifest.py.",
     "coverage": {
@@ -1102,6 +1102,7 @@
     "gregtech:gt.blockmachines|10910": {
       "kind": "mte",
       "display_name": "Elite Forge Hammer",
+      "te_base_type": 2,
       "source_class": "gregtech.api.metatileentity.implementations.MTEBasicMachineWithRecipe",
       "sides": {
         "DOWN": {
@@ -1505,6 +1506,7 @@
     "gregtech:gt.blockmachines|10911": {
       "kind": "mte",
       "display_name": "Elite Forge Hammer II",
+      "te_base_type": 2,
       "source_class": "gregtech.api.metatileentity.implementations.MTEBasicMachineWithRecipe",
       "sides": {
         "DOWN": {
@@ -1908,6 +1910,7 @@
     "gregtech:gt.blockmachines|112": {
       "kind": "mte",
       "display_name": "Steam Forge Hammer",
+      "te_base_type": 1,
       "source_class": "gregtech.common.tileentities.machines.steam.MTESteamForgeHammerBronze",
       "sides": {
         "DOWN": {
@@ -2311,6 +2314,7 @@
     "gregtech:gt.blockmachines|1126": {
       "kind": "mte",
       "display_name": "Distillation Tower",
+      "te_base_type": 2,
       "source_class": "gregtech.common.tileentities.machines.multi.MTEDistillationTower",
       "sides": {
         "DOWN": {
@@ -2514,6 +2518,7 @@
     "gregtech:gt.blockmachines|113": {
       "kind": "mte",
       "display_name": "High Pressure Steam Forge Hammer",
+      "te_base_type": 1,
       "source_class": "gregtech.common.tileentities.machines.steam.MTESteamForgeHammerSteel",
       "sides": {
         "DOWN": {
@@ -2917,6 +2922,7 @@
     "gregtech:gt.blockmachines|1169": {
       "kind": "mte",
       "display_name": "Large Chemical Reactor",
+      "te_base_type": 2,
       "source_class": "gregtech.common.tileentities.machines.multi.MTELargeChemicalReactor",
       "sides": {
         "NORTH": {
@@ -2970,6 +2976,7 @@
     "gregtech:gt.blockmachines|1246": {
       "kind": "pipe",
       "display_name": "cable.tin.01",
+      "te_base_type": 9,
       "source_class": "gregtech.api.metatileentity.implementations.MTECable",
       "sides": {
         "all": {
@@ -3021,6 +3028,7 @@
     "gregtech:gt.blockmachines|1247": {
       "kind": "pipe",
       "display_name": "cable.tin.02",
+      "te_base_type": 9,
       "source_class": "gregtech.api.metatileentity.implementations.MTECable",
       "sides": {
         "all": {
@@ -3072,6 +3080,7 @@
     "gregtech:gt.blockmachines|1248": {
       "kind": "pipe",
       "display_name": "cable.tin.04",
+      "te_base_type": 9,
       "source_class": "gregtech.api.metatileentity.implementations.MTECable",
       "sides": {
         "all": {
@@ -3123,6 +3132,7 @@
     "gregtech:gt.blockmachines|1249": {
       "kind": "pipe",
       "display_name": "cable.tin.08",
+      "te_base_type": 9,
       "source_class": "gregtech.api.metatileentity.implementations.MTECable",
       "sides": {
         "all": {
@@ -3174,6 +3184,7 @@
     "gregtech:gt.blockmachines|1250": {
       "kind": "pipe",
       "display_name": "cable.tin.12",
+      "te_base_type": 9,
       "source_class": "gregtech.api.metatileentity.implementations.MTECable",
       "sides": {
         "all": {
@@ -3225,6 +3236,7 @@
     "gregtech:gt.blockmachines|1251": {
       "kind": "pipe",
       "display_name": "cable.tin.16",
+      "te_base_type": 9,
       "source_class": "gregtech.api.metatileentity.implementations.MTECable",
       "sides": {
         "all": {
@@ -3276,6 +3288,7 @@
     "gregtech:gt.blockmachines|12738": {
       "kind": "mte",
       "display_name": "Mega Distillation Tower",
+      "te_base_type": 2,
       "source_class": "bartworks.common.tileentities.multis.mega.MTEMegaDistillTower",
       "sides": {
         "DOWN": {
@@ -3479,6 +3492,7 @@
     "gregtech:gt.blockmachines|130": {
       "kind": "mte",
       "display_name": "Super Tank I",
+      "te_base_type": 1,
       "source_class": "gregtech.common.tileentities.storage.MTESuperTank",
       "sides": {
         "DOWN": {
@@ -3702,6 +3716,7 @@
     "gregtech:gt.blockmachines|131": {
       "kind": "mte",
       "display_name": "Super Tank II",
+      "te_base_type": 1,
       "source_class": "gregtech.common.tileentities.storage.MTESuperTank",
       "sides": {
         "DOWN": {
@@ -3925,6 +3940,7 @@
     "gregtech:gt.blockmachines|132": {
       "kind": "mte",
       "display_name": "Super Tank III",
+      "te_base_type": 1,
       "source_class": "gregtech.common.tileentities.storage.MTESuperTank",
       "sides": {
         "DOWN": {
@@ -4148,6 +4164,7 @@
     "gregtech:gt.blockmachines|133": {
       "kind": "mte",
       "display_name": "Super Tank IV",
+      "te_base_type": 1,
       "source_class": "gregtech.common.tileentities.storage.MTESuperTank",
       "sides": {
         "DOWN": {
@@ -4371,6 +4388,7 @@
     "gregtech:gt.blockmachines|134": {
       "kind": "mte",
       "display_name": "Super Tank V",
+      "te_base_type": 2,
       "source_class": "gregtech.common.tileentities.storage.MTESuperTank",
       "sides": {
         "DOWN": {
@@ -4594,6 +4612,7 @@
     "gregtech:gt.blockmachines|135": {
       "kind": "mte",
       "display_name": "Super Chest I",
+      "te_base_type": 1,
       "source_class": "gregtech.common.tileentities.storage.MTESuperChest",
       "sides": {
         "DOWN": {
@@ -4797,6 +4816,7 @@
     "gregtech:gt.blockmachines|136": {
       "kind": "mte",
       "display_name": "Super Chest II",
+      "te_base_type": 1,
       "source_class": "gregtech.common.tileentities.storage.MTESuperChest",
       "sides": {
         "DOWN": {
@@ -5000,6 +5020,7 @@
     "gregtech:gt.blockmachines|1366": {
       "kind": "pipe",
       "display_name": "cable.copper.01",
+      "te_base_type": 9,
       "source_class": "gregtech.api.metatileentity.implementations.MTECable",
       "sides": {
         "all": {
@@ -5051,6 +5072,7 @@
     "gregtech:gt.blockmachines|1367": {
       "kind": "pipe",
       "display_name": "cable.copper.02",
+      "te_base_type": 9,
       "source_class": "gregtech.api.metatileentity.implementations.MTECable",
       "sides": {
         "all": {
@@ -5102,6 +5124,7 @@
     "gregtech:gt.blockmachines|1368": {
       "kind": "pipe",
       "display_name": "cable.copper.04",
+      "te_base_type": 9,
       "source_class": "gregtech.api.metatileentity.implementations.MTECable",
       "sides": {
         "all": {
@@ -5153,6 +5176,7 @@
     "gregtech:gt.blockmachines|1369": {
       "kind": "pipe",
       "display_name": "cable.copper.08",
+      "te_base_type": 9,
       "source_class": "gregtech.api.metatileentity.implementations.MTECable",
       "sides": {
         "all": {
@@ -5204,6 +5228,7 @@
     "gregtech:gt.blockmachines|137": {
       "kind": "mte",
       "display_name": "Super Chest III",
+      "te_base_type": 1,
       "source_class": "gregtech.common.tileentities.storage.MTESuperChest",
       "sides": {
         "DOWN": {
@@ -5407,6 +5432,7 @@
     "gregtech:gt.blockmachines|1370": {
       "kind": "pipe",
       "display_name": "cable.copper.12",
+      "te_base_type": 9,
       "source_class": "gregtech.api.metatileentity.implementations.MTECable",
       "sides": {
         "all": {
@@ -5458,6 +5484,7 @@
     "gregtech:gt.blockmachines|1371": {
       "kind": "pipe",
       "display_name": "cable.copper.16",
+      "te_base_type": 9,
       "source_class": "gregtech.api.metatileentity.implementations.MTECable",
       "sides": {
         "all": {
@@ -5509,6 +5536,7 @@
     "gregtech:gt.blockmachines|138": {
       "kind": "mte",
       "display_name": "Super Chest IV",
+      "te_base_type": 1,
       "source_class": "gregtech.common.tileentities.storage.MTESuperChest",
       "sides": {
         "DOWN": {
@@ -5712,6 +5740,7 @@
     "gregtech:gt.blockmachines|139": {
       "kind": "mte",
       "display_name": "Super Chest V",
+      "te_base_type": 2,
       "source_class": "gregtech.common.tileentities.storage.MTESuperChest",
       "sides": {
         "DOWN": {
@@ -5915,6 +5944,7 @@
     "gregtech:gt.blockmachines|1426": {
       "kind": "pipe",
       "display_name": "cable.gold.01",
+      "te_base_type": 9,
       "source_class": "gregtech.api.metatileentity.implementations.MTECable",
       "sides": {
         "all": {
@@ -5966,6 +5996,7 @@
     "gregtech:gt.blockmachines|1427": {
       "kind": "pipe",
       "display_name": "cable.gold.02",
+      "te_base_type": 9,
       "source_class": "gregtech.api.metatileentity.implementations.MTECable",
       "sides": {
         "all": {
@@ -6017,6 +6048,7 @@
     "gregtech:gt.blockmachines|1428": {
       "kind": "pipe",
       "display_name": "cable.gold.04",
+      "te_base_type": 9,
       "source_class": "gregtech.api.metatileentity.implementations.MTECable",
       "sides": {
         "all": {
@@ -6068,6 +6100,7 @@
     "gregtech:gt.blockmachines|1429": {
       "kind": "pipe",
       "display_name": "cable.gold.08",
+      "te_base_type": 9,
       "source_class": "gregtech.api.metatileentity.implementations.MTECable",
       "sides": {
         "all": {
@@ -6119,6 +6152,7 @@
     "gregtech:gt.blockmachines|1430": {
       "kind": "pipe",
       "display_name": "cable.gold.12",
+      "te_base_type": 9,
       "source_class": "gregtech.api.metatileentity.implementations.MTECable",
       "sides": {
         "all": {
@@ -6170,6 +6204,7 @@
     "gregtech:gt.blockmachines|1431": {
       "kind": "pipe",
       "display_name": "cable.gold.16",
+      "te_base_type": 9,
       "source_class": "gregtech.api.metatileentity.implementations.MTECable",
       "sides": {
         "all": {
@@ -6221,6 +6256,7 @@
     "gregtech:gt.blockmachines|15498": {
       "kind": "mte",
       "display_name": "Debug Power Generator",
+      "te_base_type": 3,
       "source_class": "tectech.thing.metaTileEntity.single.MTEDebugPowerGenerator",
       "sides": {
         "DOWN": {
@@ -6484,6 +6520,7 @@
     "gregtech:gt.blockmachines|31": {
       "kind": "mte",
       "display_name": "LV Dynamo Hatch",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchDynamo",
       "sides": {
         "DOWN": {
@@ -6667,6 +6704,7 @@
     "gregtech:gt.blockmachines|32": {
       "kind": "mte",
       "display_name": "MV Dynamo Hatch",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchDynamo",
       "sides": {
         "DOWN": {
@@ -6850,6 +6888,7 @@
     "gregtech:gt.blockmachines|33": {
       "kind": "mte",
       "display_name": "HV Dynamo Hatch",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchDynamo",
       "sides": {
         "DOWN": {
@@ -7033,6 +7072,7 @@
     "gregtech:gt.blockmachines|41": {
       "kind": "mte",
       "display_name": "LV Energy Hatch",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchEnergy",
       "sides": {
         "DOWN": {
@@ -7216,6 +7256,7 @@
     "gregtech:gt.blockmachines|42": {
       "kind": "mte",
       "display_name": "MV Energy Hatch",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchEnergy",
       "sides": {
         "DOWN": {
@@ -7399,6 +7440,7 @@
     "gregtech:gt.blockmachines|43": {
       "kind": "mte",
       "display_name": "HV Energy Hatch",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchEnergy",
       "sides": {
         "DOWN": {
@@ -7582,6 +7624,7 @@
     "gregtech:gt.blockmachines|51": {
       "kind": "mte",
       "display_name": "Input Hatch (LV)",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchInput",
       "sides": {
         "DOWN": {
@@ -7805,6 +7848,7 @@
     "gregtech:gt.blockmachines|5122": {
       "kind": "pipe",
       "display_name": "gt_pipe_bronze",
+      "te_base_type": 6,
       "source_class": "gregtech.api.metatileentity.implementations.MTEFluidPipe",
       "sides": {
         "all": {
@@ -7843,6 +7887,7 @@
     "gregtech:gt.blockmachines|52": {
       "kind": "mte",
       "display_name": "Input Hatch (MV)",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchInput",
       "sides": {
         "DOWN": {
@@ -8066,6 +8111,7 @@
     "gregtech:gt.blockmachines|53": {
       "kind": "mte",
       "display_name": "Input Hatch (HV)",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchInput",
       "sides": {
         "DOWN": {
@@ -8289,6 +8335,7 @@
     "gregtech:gt.blockmachines|5591": {
       "kind": "pipe",
       "display_name": "gt_pipe_tin",
+      "te_base_type": 7,
       "source_class": "gregtech.api.metatileentity.implementations.MTEItemPipe",
       "sides": {
         "all": {
@@ -8327,6 +8374,7 @@
     "gregtech:gt.blockmachines|61": {
       "kind": "mte",
       "display_name": "Output Hatch (LV)",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchOutput",
       "sides": {
         "DOWN": {
@@ -8530,6 +8578,7 @@
     "gregtech:gt.blockmachines|611": {
       "kind": "mte",
       "display_name": "Basic Forge Hammer",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEBasicMachineWithRecipe",
       "sides": {
         "DOWN": {
@@ -8933,6 +8982,7 @@
     "gregtech:gt.blockmachines|612": {
       "kind": "mte",
       "display_name": "Advanced Forge Hammer",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEBasicMachineWithRecipe",
       "sides": {
         "DOWN": {
@@ -9336,6 +9386,7 @@
     "gregtech:gt.blockmachines|613": {
       "kind": "mte",
       "display_name": "Advanced Forge Hammer II",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEBasicMachineWithRecipe",
       "sides": {
         "DOWN": {
@@ -9739,6 +9790,7 @@
     "gregtech:gt.blockmachines|614": {
       "kind": "mte",
       "display_name": "Advanced Forge Hammer III",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEBasicMachineWithRecipe",
       "sides": {
         "DOWN": {
@@ -10142,6 +10194,7 @@
     "gregtech:gt.blockmachines|615": {
       "kind": "mte",
       "display_name": "Advanced Forge Hammer IV",
+      "te_base_type": 2,
       "source_class": "gregtech.api.metatileentity.implementations.MTEBasicMachineWithRecipe",
       "sides": {
         "DOWN": {
@@ -10545,6 +10598,7 @@
     "gregtech:gt.blockmachines|62": {
       "kind": "mte",
       "display_name": "Output Hatch (MV)",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchOutput",
       "sides": {
         "DOWN": {
@@ -10748,6 +10802,7 @@
     "gregtech:gt.blockmachines|63": {
       "kind": "mte",
       "display_name": "Output Hatch (HV)",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchOutput",
       "sides": {
         "DOWN": {
@@ -10951,6 +11006,7 @@
     "gregtech:gt.blockmachines|71": {
       "kind": "mte",
       "display_name": "Input Bus (LV)",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchInputBus",
       "sides": {
         "DOWN": {
@@ -11174,6 +11230,7 @@
     "gregtech:gt.blockmachines|72": {
       "kind": "mte",
       "display_name": "Input Bus (MV)",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchInputBus",
       "sides": {
         "DOWN": {
@@ -11397,6 +11454,7 @@
     "gregtech:gt.blockmachines|73": {
       "kind": "mte",
       "display_name": "Input Bus (HV)",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchInputBus",
       "sides": {
         "DOWN": {
@@ -11620,6 +11678,7 @@
     "gregtech:gt.blockmachines|791": {
       "kind": "mte",
       "display_name": "Industrial Coke Oven",
+      "te_base_type": 2,
       "source_class": "gtPlusPlus.xmod.gregtech.common.tileentities.machines.multi.processing.MTEIndustrialCokeOven",
       "sides": {
         "DOWN": {
@@ -11823,6 +11882,7 @@
     "gregtech:gt.blockmachines|81": {
       "kind": "mte",
       "display_name": "Output Bus (LV)",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchOutputBus",
       "sides": {
         "DOWN": {
@@ -12026,6 +12086,7 @@
     "gregtech:gt.blockmachines|82": {
       "kind": "mte",
       "display_name": "Output Bus (MV)",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchOutputBus",
       "sides": {
         "DOWN": {
@@ -12229,6 +12290,7 @@
     "gregtech:gt.blockmachines|83": {
       "kind": "mte",
       "display_name": "Output Bus (HV)",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchOutputBus",
       "sides": {
         "DOWN": {
@@ -12432,6 +12494,7 @@
     "gregtech:gt.blockmachines|90": {
       "kind": "mte",
       "display_name": "Maintenance Hatch",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchMaintenance",
       "sides": {
         "DOWN": {
@@ -12625,6 +12688,7 @@
     "gregtech:gt.blockmachines|91": {
       "kind": "mte",
       "display_name": "Muffler Hatch (LV)",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchMuffler",
       "sides": {
         "DOWN": {
@@ -12808,6 +12872,7 @@
     "gregtech:gt.blockmachines|92": {
       "kind": "mte",
       "display_name": "Muffler Hatch (MV)",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchMuffler",
       "sides": {
         "DOWN": {
@@ -12991,6 +13056,7 @@
     "gregtech:gt.blockmachines|93": {
       "kind": "mte",
       "display_name": "Muffler Hatch (HV)",
+      "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchMuffler",
       "sides": {
         "DOWN": {
@@ -13174,6 +13240,7 @@
     "gregtech:gt.blockmachines|998": {
       "kind": "mte",
       "display_name": "ExxonMobil Chemical Plant",
+      "te_base_type": 2,
       "source_class": "gtPlusPlus.xmod.gregtech.common.tileentities.machines.multi.production.chemplant.MTEChemicalPlant",
       "sides": {
         "DOWN": {
