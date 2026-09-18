@@ -1426,3 +1426,67 @@ def test_the_shipped_lines_texture_every_route_cell_they_draw(
         assert found is not None, f"{name} is missing from the committed manifest"
         for role in ("open", "closed"):
             assert manifest.pipe_layers(*found, role), f"{name} has no {role} face"
+
+
+# --------------------------------------------------------------------------------------------------
+# te_base_type: the block metadata GT places an MTE at (#158, for the .schematic exporter #96)
+# --------------------------------------------------------------------------------------------------
+
+
+def _base_type_manifest() -> dict[str, Any]:
+    """A manifest carrying the field for a machine and a cable, and omitting it for a casing."""
+    return {
+        "blocks": {
+            "gregtech:gt.blockmachines|611": {
+                "kind": "mte",
+                "display_name": "Basic Forge Hammer",
+                "te_base_type": 1,  # WrenchLevel1: a tier-1 MTETieredMachineBlock
+                "sides": {},
+            },
+            "gregtech:gt.blockmachines|1246": {
+                "kind": "pipe",
+                "display_name": "cable.tin.01",
+                "te_base_type": 9,  # CutterLevel1: an insulated MTECable
+                "sides": {},
+            },
+            "gregtech:gt.blockcasings|11": {"kind": "block", "sides": {}},  # plain block: no MTE
+        },
+        "icons": {},
+    }
+
+
+def test_te_base_type_is_read_for_a_machine_and_a_cable() -> None:
+    # The value is NOT the key's meta: 611 is the mID GT stores in the tile entity, while 1 is what
+    # goes in the block's metadata nibble. Asserting both apart is the point - a .schematic that
+    # confuses them rebuilds a cable as a machine (GitHub #158).
+    m = TextureManifest(_base_type_manifest())
+    assert m.te_base_type("gregtech:gt.blockmachines", 611) == 1
+    assert m.te_base_type("gregtech:gt.blockmachines", 1246) == 9
+    assert m.mte_block("Basic Forge Hammer") == ("gregtech:gt.blockmachines", 611)  # meta != type
+
+
+def test_te_base_type_is_none_when_the_manifest_cannot_say() -> None:
+    m = TextureManifest(_base_type_manifest())
+    assert m.te_base_type("gregtech:gt.blockcasings", 11) is None  # a plain block has no MTE...
+    assert m.te_base_type("gregtech:gt.blockmachines", 9999) is None  # ...nor does an absent key
+
+
+def test_a_manifest_predating_the_field_still_loads() -> None:
+    # Schema 2 dumps carry no te_base_type. They must keep working (the previewer never asks for
+    # it); only the exporter is held back, and it can see the difference as None rather than a
+    # plausible-looking 0.
+    raw = _base_type_manifest()
+    for entry in raw["blocks"].values():
+        entry.pop("te_base_type", None)
+    m = TextureManifest(raw)
+    assert m.te_base_type("gregtech:gt.blockmachines", 611) is None
+    assert m.mte_block("Basic Forge Hammer") == ("gregtech:gt.blockmachines", 611)  # still loads
+
+
+def test_the_committed_manifest_ships_the_power_source_stand_in() -> None:
+    """The hole this closed: ``Power Source (LV)`` is an adapter invention, so no block is named
+    after it and ``derive_small_manifest``'s machine-name rule could never keep one. Without the
+    dedicated rule the only cell carrying the feed is a placeholder in the preview and would be a
+    gap in a ``.schematic`` export (GitHub #158)."""
+    manifest = TextureManifest.load(_COMMITTED_MANIFEST)
+    assert manifest.mte_block("Debug Power Generator") is not None

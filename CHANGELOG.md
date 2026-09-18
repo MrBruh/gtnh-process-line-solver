@@ -7,6 +7,20 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **The dataset records the block metadata GT places each MTE at (`dataset/`, `previewer/`,
+  `tools/`), texture-manifest schema 2 -> 3.** A `.schematic` (#96) gives each cell a block id and
+  a 4-bit `Data` nibble, and for a GT block that nibble is *not* the machine: it selects the tile
+  entity class, so writing the wrong one rebuilds a cable as a machine. GT derives it per MTE via
+  `getTileEntityBaseType()` in four different ways (insulation for cables, the material's tool
+  quality for pipes, the voltage tier for tiered machines, a constant for multiblocks), and only
+  the first was reconstructible from what the manifest stored, so the extractor now asks the MTE
+  directly and emits `te_base_type`. `TextureManifest.te_base_type()` reads it, answering `None`
+  for a plain block and for any manifest written before the bump - a schema 2 dump still loads and
+  simply cannot be exported. The previewer does not use the field. (#158)
+- **The committed manifest ships the block that stands in for a synthesized power source.**
+  `Power Source (LV)` is an adapter invention, so nothing in the pack is named after it and
+  `derive_small_manifest`'s machine-name rule could never keep one; GT's Debug Power Generator now
+  ships by a dedicated rule, the way cables and hatches already did. (#158)
 - **Hatches render as real GT hatch blocks, at their own facing, vertical ones included
   (`previewer/`, `tools/`).** A hatch was previously invisible: the previewer drew the casing block
   it displaced. It now resolves to the actual `(block, meta)` GT would place - an `Input Bus (HV)`,

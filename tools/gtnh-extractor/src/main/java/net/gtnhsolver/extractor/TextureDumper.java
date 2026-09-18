@@ -86,7 +86,7 @@ final class TextureDumper {
     private static final Logger LOG = LogManager.getLogger(DumperMod.MODID);
 
     /** Layered-manifest schema version. Bump when the on-disk shape changes. */
-    static final int SCHEMA_VERSION = 2;
+    static final int SCHEMA_VERSION = 3;  // 3: per-entry te_base_type (#158)
 
     private static final String[] GET_ICON_NAMES = { "getIcon", "func_149691_a" };
     private static final String ICON_DOMAIN = "gregtech";
@@ -194,6 +194,12 @@ final class TextureDumper {
         // side name -> state ("inactive"/"active") -> ordered layer list
         final Map<String, Map<String, List<Layer>>> sides = new TreeMap<>();
         PipeInfo pipe;  // cables and pipes only; null for every other block
+        // The block metadata GT itself places this MTE at: HarvestTool.toTileEntityBaseType(), so
+        // 0-3 wrench (machines), 4-7 wrench-pipe, 8-11 cutter (cables), 12-15 pickaxe. It selects
+        // the TILE ENTITY CLASS, not the machine - GTMod registers BaseMetaTileEntity for 0-3 and
+        // 12-15 and BaseMetaPipeEntity for 4-11 - so a .schematic (#96) that writes the wrong
+        // nibble reconstructs a cable as a machine. Null for a block with no MTE behind it.
+        Byte teBaseType;
 
         Entry(String kind, String displayName, String sourceClass) {
             this.kind = kind;
@@ -432,6 +438,7 @@ final class TextureDumper {
         // which docs/dataset-extraction/texture-resolution.md names as the unrecoverable failure.
         if (imte instanceof MetaPipeEntity) {
             Entry pipe = new Entry("pipe", safeName(imte), imte.getClass().getName());
+            pipe.teBaseType = teBaseType(imte);
             int pipeStacks = pipeEntry((MetaPipeEntity) imte, pipe, nameObj.toString(), id);
             if (pipeStacks > 0) {
                 blocks.put(key, pipe);
@@ -440,6 +447,7 @@ final class TextureDumper {
         }
 
         Entry entry = new Entry("mte", safeName(imte), imte.getClass().getName());
+        entry.teBaseType = teBaseType(imte);
         boolean basic = imte instanceof MTEBasicMachine;
         // Non-basic MTEs (hulls/hatches) read their layers off a live getTexture, so place ONCE and
         // reuse the base TE for all 12 side/state queries instead of re-placing per query.
@@ -1223,6 +1231,27 @@ final class TextureDumper {
             }
         } catch (Throwable ignored) {
             // best-effort cleanup between MTEs
+        }
+    }
+
+    /**
+     * The block metadata GT places this MTE at, or null if it cannot be read.
+     *
+     * <p>This is the value {@code ItemMachines.placeBlockAt} writes, straight off the MTE rather
+     * than inferred: GT derives it four different ways ({@code MTECable} on insulation,
+     * {@code MTEFluidPipe}/{@code MTEItemPipe} on the material's tool quality,
+     * {@code MTETieredMachineBlock} on the voltage tier, {@code MTEMultiBlockBase} a constant), and
+     * only the first of those is reconstructible from what the manifest already stores. Asking the
+     * MTE settles all four at once.
+     *
+     * <p>Best-effort like {@link #safeName}: a missing value costs the exporter one block, while a
+     * throw here would cost the whole dump.
+     */
+    private static Byte teBaseType(IMetaTileEntity imte) {
+        try {
+            return imte.getTileEntityBaseType();
+        } catch (Throwable ignored) {
+            return null;
         }
     }
 
@@ -2049,6 +2078,9 @@ final class TextureDumper {
             bj.addProperty("kind", entry.kind);
             if (entry.displayName != null) {
                 bj.addProperty("display_name", entry.displayName);
+            }
+            if (entry.teBaseType != null) {
+                bj.addProperty("te_base_type", entry.teBaseType);
             }
             if (entry.sourceClass != null) {
                 bj.addProperty("source_class", entry.sourceClass);

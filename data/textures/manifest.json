@@ -7,13 +7,13 @@
       "GT5-Unofficial": "5.09.51.482",
       "StructureLib": "1.4.23"
     },
-    "generated_at": "2026-09-03T19:14:53.752Z",
+    "generated_at": "2026-09-08T11:11:57.606Z",
     "extractor_sha": "unknown",
-    "note": "SMALL committed manifest: only the blocks the shipped example lines and the two multiblock fixtures need - plus every hatch kind at the tiers those lines use, since a hatch matches no machine name - so `gtnh-solve --preview examples/*.json` skins out of the box. The full dump is local and version-namespaced (data/<version>/textures/manifest.json), never committed. Regenerate with tools/derive_small_manifest.py.",
+    "note": "SMALL committed manifest: only the blocks the shipped example lines and the two multiblock fixtures need - plus every hatch kind at the tiers those lines use, the cables and pipes those tiers route, and the block that stands in for a synthesized power source, none of which matches a machine name - so `gtnh-solve --preview examples/*.json` skins out of the box. The full dump is local and version-namespaced (data/<version>/textures/manifest.json), never committed. Regenerate with tools/derive_small_manifest.py.",
     "coverage": {
-      "blocks": 72,
-      "mte": 46,
-      "icons": 126,
+      "blocks": 73,
+      "mte": 47,
+      "icons": 131,
       "gaps": 0
     },
     "extractor_checks": {
@@ -6216,6 +6216,269 @@
         "voltage": 512,
         "amps": 48,
         "loss": 2
+      }
+    },
+    "gregtech:gt.blockmachines|15498": {
+      "kind": "mte",
+      "display_name": "Debug Power Generator",
+      "source_class": "tectech.thing.metaTileEntity.single.MTEDebugPowerGenerator",
+      "sides": {
+        "DOWN": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_MAX_BOTTOM",
+              "rgba": [
+                210,
+                220,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ENERGY_OUT_MULTI_64A_MAX",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_MAX_BOTTOM",
+              "rgba": [
+                210,
+                220,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ENERGY_IN_MULTI_64A_MAX",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "EAST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_MAX_SIDE",
+              "rgba": [
+                210,
+                220,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ENERGY_OUT_MULTI_64A_MAX",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_MAX_SIDE",
+              "rgba": [
+                210,
+                220,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ENERGY_IN_MULTI_64A_MAX",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "NORTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_MAX_SIDE",
+              "rgba": [
+                210,
+                220,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_MAX_SIDE",
+              "rgba": [
+                210,
+                220,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "SOUTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_MAX_SIDE",
+              "rgba": [
+                210,
+                220,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ENERGY_OUT_MULTI_64A_MAX",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_MAX_SIDE",
+              "rgba": [
+                210,
+                220,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ENERGY_IN_MULTI_64A_MAX",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "UP": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_MAX_TOP",
+              "rgba": [
+                210,
+                220,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ENERGY_OUT_MULTI_64A_MAX",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_MAX_TOP",
+              "rgba": [
+                210,
+                220,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ENERGY_IN_MULTI_64A_MAX",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "WEST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_MAX_SIDE",
+              "rgba": [
+                210,
+                220,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ENERGY_OUT_MULTI_64A_MAX",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_MAX_SIDE",
+              "rgba": [
+                210,
+                220,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ENERGY_IN_MULTI_64A_MAX",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
       }
     },
     "gregtech:gt.blockmachines|31": {
@@ -13168,6 +13431,9 @@
     "gregtech:iconsets/MACHINE_LuV_BOTTOM": "assets/gregtech/textures/blocks/iconsets/MACHINE_LuV_BOTTOM.png",
     "gregtech:iconsets/MACHINE_LuV_SIDE": "assets/gregtech/textures/blocks/iconsets/MACHINE_LuV_SIDE.png",
     "gregtech:iconsets/MACHINE_LuV_TOP": "assets/gregtech/textures/blocks/iconsets/MACHINE_LuV_TOP.png",
+    "gregtech:iconsets/MACHINE_MAX_BOTTOM": "assets/gregtech/textures/blocks/iconsets/MACHINE_MAX_BOTTOM.png",
+    "gregtech:iconsets/MACHINE_MAX_SIDE": "assets/gregtech/textures/blocks/iconsets/MACHINE_MAX_SIDE.png",
+    "gregtech:iconsets/MACHINE_MAX_TOP": "assets/gregtech/textures/blocks/iconsets/MACHINE_MAX_TOP.png",
     "gregtech:iconsets/MACHINE_MV_BOTTOM": "assets/gregtech/textures/blocks/iconsets/MACHINE_MV_BOTTOM.png",
     "gregtech:iconsets/MACHINE_MV_SIDE": "assets/gregtech/textures/blocks/iconsets/MACHINE_MV_SIDE.png",
     "gregtech:iconsets/MACHINE_MV_TOP": "assets/gregtech/textures/blocks/iconsets/MACHINE_MV_TOP.png",
@@ -13191,9 +13457,11 @@
     "gregtech:iconsets/OVERLAY_ENERGY_IN_MULTI_2A_HV": "assets/gregtech/textures/blocks/iconsets/OVERLAY_ENERGY_IN_MULTI_2A_HV.png",
     "gregtech:iconsets/OVERLAY_ENERGY_IN_MULTI_2A_LV": "assets/gregtech/textures/blocks/iconsets/OVERLAY_ENERGY_IN_MULTI_2A_LV.png",
     "gregtech:iconsets/OVERLAY_ENERGY_IN_MULTI_2A_MV": "assets/gregtech/textures/blocks/iconsets/OVERLAY_ENERGY_IN_MULTI_2A_MV.png",
+    "gregtech:iconsets/OVERLAY_ENERGY_IN_MULTI_64A_MAX": "assets/gregtech/textures/blocks/iconsets/OVERLAY_ENERGY_IN_MULTI_64A_MAX.png",
     "gregtech:iconsets/OVERLAY_ENERGY_OUT_MULTI_2A_HV": "assets/gregtech/textures/blocks/iconsets/OVERLAY_ENERGY_OUT_MULTI_2A_HV.png",
     "gregtech:iconsets/OVERLAY_ENERGY_OUT_MULTI_2A_LV": "assets/gregtech/textures/blocks/iconsets/OVERLAY_ENERGY_OUT_MULTI_2A_LV.png",
     "gregtech:iconsets/OVERLAY_ENERGY_OUT_MULTI_2A_MV": "assets/gregtech/textures/blocks/iconsets/OVERLAY_ENERGY_OUT_MULTI_2A_MV.png",
+    "gregtech:iconsets/OVERLAY_ENERGY_OUT_MULTI_64A_MAX": "assets/gregtech/textures/blocks/iconsets/OVERLAY_ENERGY_OUT_MULTI_64A_MAX.png",
     "gregtech:iconsets/OVERLAY_FRONT_DISTILLATION_TOWER": "assets/gregtech/textures/blocks/iconsets/OVERLAY_FRONT_DISTILLATION_TOWER.png",
     "gregtech:iconsets/OVERLAY_FRONT_DISTILLATION_TOWER_ACTIVE": "assets/gregtech/textures/blocks/iconsets/OVERLAY_FRONT_DISTILLATION_TOWER_ACTIVE.png",
     "gregtech:iconsets/OVERLAY_FRONT_DISTILLATION_TOWER_ACTIVE_GLOW": "assets/gregtech/textures/blocks/iconsets/OVERLAY_FRONT_DISTILLATION_TOWER_ACTIVE_GLOW.png",
