@@ -27,7 +27,7 @@
 # propose both halves; the test is what stops one landing without the other.
 
 hypothesis==6.168.0
-mypy==2.1.0
+mypy==2.3.1
 pre-commit==4.6.2
 pydantic==2.13.5
 pytest==9.1.1
