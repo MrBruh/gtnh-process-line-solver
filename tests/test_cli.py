@@ -140,8 +140,12 @@ def test_cli_preview_writes_self_contained_html(
     code = main([_SAND, "--preview", str(target)])
     assert code == 0
     html = target.read_text(encoding="utf-8")
-    assert "<!doctype html>" in html
-    assert "OrbitControls" in html  # the camera controls are in the page
+    # The CLI's own contract is that it delegates to the previewer and writes the bytes out, so
+    # assert that, not a three.js identifier the page happens to mention (GitHub #94): the file is
+    # the page, scene payload and all. What the page then does with the scene is the previewer's
+    # own tests.
+    assert html.startswith("<!doctype html>")
+    assert "const SCENE = " in html
     captured = capsys.readouterr()
     assert captured.out == ""  # --preview alone suppresses the stdout guide dump
     assert "wrote preview" in captured.err
@@ -317,8 +321,8 @@ def test_cli_version_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
 
 def test_package_exposes_a_nonempty_version_string() -> None:
     # The package exports a version; the CLI's --version reports it. (Folded in from the retired
-    # tests/test_smoke.py scaffolding.)
-    assert isinstance(__version__, str)
+    # tests/test_smoke.py scaffolding.) That it is a `str` is mypy's job, not a test's (#94); that
+    # it is not empty is this one's.
     assert __version__
 
 

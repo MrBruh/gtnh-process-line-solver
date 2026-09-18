@@ -241,73 +241,32 @@ def test_scene_is_deterministic() -> None:
     assert _sand_scene() == _sand_scene()
 
 
-def test_render_html_is_self_contained_with_camera_and_layer_controls() -> None:
+def test_render_html_ships_the_page_shell_and_its_stable_controls() -> None:
+    # The page's addressable surface: the doctype, and the element ids anything driving the viewer
+    # (a future headless test, a user script) has to target. Renaming one is a real break, which is
+    # why these are asserted and the JS behind them is not - that part is eye-validated, and grepping
+    # its identifiers only pins the current spelling of code no test executes (GitHub #94).
     html = render_html(_sand_scene())
     assert html.startswith("<!doctype html>")
-    assert "three.module.js" in html  # three.js pulled from the CDN
-    assert "OrbitControls" in html  # move the camera around
     assert 'id="layer"' in html  # the layer-by-layer slider...
     assert 'type="range"' in html  # ...is a range input
-    assert "Forge Hammer" in html  # the scene is inlined, not fetched
-
-
-def test_render_html_wires_the_requested_viewer_features() -> None:
-    html = render_html(_sand_scene())
-    assert "screenSpacePanning" in html  # camera can translate, not just orbit (#1)
-    assert "listenToKeyEvents" in html  # ...incl. arrow-key panning
-    assert "BoxGeometry" in html  # cables/pipes are rectangular bars, not cylinders (#2)
-    assert "PlaneGeometry" in html  # machine names live on the front face (#3)
-    assert "faceArrow" in html  # per-face auto-output direction arrows (#4)
-    assert "r.cells" in html  # routes drawn from the blocks route_blocks resolved (#4)...
-    assert "e.boxes" in html  # ...as the boxes it resolved, at GT's real cross-section
-    assert "b.open" in html  # ...each box's open ends coming from the scene, not decided here
-    assert "gtBlockUVs" in html  # sprites sampled at the box's position in the block, MC-style
-    assert "Raycaster" in html  # hover a block -> its machine name tag
-    assert 'id="nametag"' in html  # ...shown in the floating name-tag element
-
-
-def test_render_html_auto_output_arrow_draws_on_top_of_the_machine() -> None:
-    # GitHub #30: the front-face auto-output arrow (#20) was buried - a placeholder machine's opaque
-    # name plate drew over it, and a machine that bakes textures renders as full-size (1.0) block cubes
-    # that swallowed an arrow tucked against the 0.92-scaled box. The arrow is now lifted just outside
-    # the machine's actual rendered surface (expansion-aware), so it draws on top of both the casing
-    # texture and the label, which keeps its opaque high-contrast backing. The WebGL result is eye-
-    # validated, so assert the two mechanisms on their own code: the arrow offset is expansion-aware,
-    # and the name decal still fills an opaque backing.
-    html = render_html(_sand_scene())
-    arrows = html[
-        html.index("for (const ac of SCENE.autoConnections)") : html.index("const layer =")
-    ]
-    assert "expandedById" in arrows  # arrow clears full-size textured cubes, not just the flat box
-    front = html[html.index("function frontFace(") : html.index("const TEXTURES")]
-    assert "fillRect(0, 0, W, H)" in front  # ...and the name keeps its opaque, readable backing
-
-
-def test_render_html_draws_auto_output_arrows_for_single_block_sources_only() -> None:
-    # GitHub #153: the decal is positioned off the source machine's BOUNDING BOX, which is where the
-    # ejection actually happens only when the machine is one cell - then it IS its own hatch. GT
-    # gives a multiblock controller no auto-output at all (doesAutoOutput lives on MTEBasicMachine,
-    # and MTEMultiBlockBase never mentions it); its output hatch/bus pushes to that HATCH's own front
-    # face. So an arrow on the controller's box marks a casing face that moves nothing - four of them
-    # 3.5 blocks off the nearest hatch on nitrobenzene's 7x7x7 Chemical Plant. The WebGL result is
-    # eye-validated, so assert the mechanism on its own code, as #30's test above does.
-    html = render_html(_sand_scene())
-    arrows = html[
-        html.index("for (const ac of SCENE.autoConnections)") : html.index("const layer =")
-    ]
-    guard = "size[0] * size[1] * size[2] > 1"
-    assert guard in arrows  # a multi-cell source is skipped...
-    assert arrows.index(guard) < arrows.index("faceArrow(")  # ...before any decal is built for it
+    assert 'id="nametag"' in html  # the floating name tag a hovered block writes into
 
 
 def test_render_html_labels_the_auto_output_toggle_identically_before_and_after_a_click() -> None:
     # The label is written twice, the same way the sibling rate/state toggles do it: once in the
     # markup for the initial render, once in the click handler that rewrites it. Change one and the
     # button silently renames itself the first time it is pressed, which no other test would catch.
+    # The invariant is that the two AGREE, so assert them against each other rather than against a
+    # pinned literal - renaming the button then stays a one-line change (GitHub #94).
     html = render_html(_sand_scene())
-    label = "auto-output arrows: "
-    assert f">{label}on</button>" in html  # what the page loads with...
-    assert f"arrowToggle.textContent = '{label}'" in html  # ...and what a click restates
+    markup = re.search(r'<button id="arrowToggle"[^>]*>(.*?)</button>', html)
+    handler = re.search(r"arrowToggle\.textContent = '(.*?)'", html)
+    assert markup is not None, "the page ships no #arrowToggle button"
+    assert handler is not None, "no click handler restates the #arrowToggle label"
+    # The handler appends the state word; the markup carries the label with the on-load state baked
+    # in, so the page must load saying exactly what a click would restate for that same state.
+    assert markup.group(1) == f"{handler.group(1)}on"
 
 
 def test_scene_still_carries_a_multiblock_auto_connection_it_draws_no_arrow_for() -> None:
@@ -340,21 +299,6 @@ def test_scene_still_carries_a_multiblock_auto_connection_it_draws_no_arrow_for(
     assert (auto["source"], auto["sourceFace"]) == ("mb", "east")
     size = next(m["size"] for m in scene["machines"] if m["id"] == "mb")
     assert size[0] * size[1] * size[2] > 1  # ...and it is the multi-cell source the viewer skips
-
-
-def test_render_html_marks_an_unresolved_block_face_as_missing_not_grey() -> None:
-    # GitHub #98 asks for texture gaps to be loud, not silent. A face with no baked texture used to
-    # fall back to a neutral casing grey, which was actively misleading: plenty of GT casings ARE
-    # plain grey, so an unresolved sprite looked exactly like a correctly rendered one and the gap
-    # stayed invisible in the very view meant to reveal it. It now draws Minecraft's own
-    # missing-texture checkerboard. The WebGL result is eye-validated, so assert the mechanism: the
-    # fallback material is built from a magenta/black canvas and is what an unbaked face resolves to.
-    html = render_html(_sand_scene())
-    missing = html[html.index("const _MISSING = ") : html.index("function blockMaterials(")]
-    assert "#f800f8" in missing  # MC's missing-texture magenta...
-    assert "#000000" in missing  # ...checkered against black
-    assert "NearestFilter" in missing  # crisp pixel art, consistent with every other sprite
-    assert "return _MISSING;" in html  # ...and an unbaked face actually falls back to it
 
 
 def test_scene_route_segments_and_terminals_drive_node_and_arm_drawing() -> None:
@@ -403,13 +347,6 @@ def test_render_html_wires_the_active_idle_state_toggle() -> None:
     # texture where the two differ. Assert the stable control id is wired into the page (one coarse
     # marker), not the JS that swaps the materials - the running faces ride scene.texturesActive.
     assert 'id="stateToggle"' in render_html(_sand_scene())
-
-
-def test_render_html_draws_a_floor_grid() -> None:
-    # The floor grid frames the build (GitHub #19). Its snap-to-cell-boundary math is bounds-derived,
-    # JS-only, and eye-validated, so assert only that the grid is wired into the page (one coarse
-    # marker) instead of grepping the exact alignment expression a refactor is free to move.
-    assert "GridHelper" in render_html(_sand_scene())
 
 
 def test_render_html_inlines_the_exact_scene() -> None:
@@ -494,10 +431,6 @@ def test_render_html_builds_the_legend_without_an_html_sink() -> None:
     html = render_html(_xss_scene())
     for sink in _HTML_SINKS:
         assert re.search(sink, html) is None, f"plan text can reach {sink}"
-    assert "createDocumentFragment" in html  # the panel is assembled...
-    assert "n.textContent = text" in html  # ...out of text nodes...
-    assert "replaceChildren" in html  # ...and swapped in as nodes, not parsed as markup
-    assert "s.style.background = color" in html  # swatch colour via CSSOM, not a style attribute
 
 
 def test_render_html_keeps_a_plan_payload_out_of_the_pages_markup() -> None:

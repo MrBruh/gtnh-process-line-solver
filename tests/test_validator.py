@@ -44,7 +44,7 @@ from gtnh_solver.ir import (
     Terminal,
 )
 from gtnh_solver.solver import solve
-from gtnh_solver.validator import ValidationReport, validate
+from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
 from tests._helpers import hatched_dataset
 
@@ -1678,8 +1678,9 @@ def test_net_with_both_route_and_auto_connection_is_flagged() -> None:
 def test_validate_never_raises_on_a_mismatched_layout() -> None:
     problem, _ = _base()
     empty = LayoutResult(status=LayoutStatus.VALID, seed=0)
+    # `validate` is typed `-> ValidationReport`, so mypy already proves the return type (#94); what
+    # this test adds is that the call returns at all instead of raising, and says why it failed.
     report = validate(problem, empty)
-    assert isinstance(report, ValidationReport)
     assert not report.ok  # machines unplaced, net unrouted - reported, not raised
 
 

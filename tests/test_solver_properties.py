@@ -88,7 +88,7 @@ from gtnh_solver.ir import (
 from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 from gtnh_solver.ir.output import CABLE_THICKNESSES
 from gtnh_solver.solver import solve
-from gtnh_solver.validator import ValidationReport, ViolationCode, validate
+from gtnh_solver.validator import validate
 from tests._helpers import property_examples
 
 # ------------------------------------------------------------------------------------- problems
@@ -439,8 +439,8 @@ def test_validate_reports_but_never_raises(pair: tuple[InputIR, LayoutResult]) -
 
     report = validate(problem, layout)
 
-    assert isinstance(report, ValidationReport)
+    # The return type and `code: ViolationCode` are mypy's and pydantic's to prove, not this
+    # test's (#94); what it adds is that the call returns, agrees with itself, and can be shown.
     assert report.ok is (not report.violations)
-    assert all(isinstance(v.code, ViolationCode) for v in report.violations)
     assert str(report)  # the CLI renders this; a report that cannot be shown is not an answer
     event(f"violations={'none' if report.ok else 'some'}")
