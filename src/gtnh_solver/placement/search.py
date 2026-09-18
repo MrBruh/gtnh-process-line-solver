@@ -54,7 +54,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from gtnh_solver.ir import (
     CellBox,
@@ -68,7 +68,6 @@ from gtnh_solver.ir import (
 from gtnh_solver.ir.geometry import (
     FACE_OFFSETS,
     Cell,
-    auto_output_faces,
     box_in_region,
     front_on_boundary,
     in_region,
@@ -76,6 +75,7 @@ from gtnh_solver.ir.geometry import (
     rotated_footprint,
 )
 from gtnh_solver.ir.nets import net_sources_sinks, port_direction_map
+from gtnh_solver.router.auto import auto_output_possible
 
 from .constructive import PlacementResult, _fit, place
 
@@ -158,7 +158,7 @@ class _SearchContext:
     adjacency: dict[str, set[str]]
     machine_nets: dict[str, list[_WeightedNet]]
     machine_power: dict[str, list[_WeightedNet]]
-    machine_auto: dict[str, list[tuple[str, str]]]
+    machine_auto: dict[str, list[_AutoPair]]
 
 
 def optimize_placement(
@@ -303,33 +303,53 @@ def _machine_nets(problem: InputIR, nets: list[_WeightedNet]) -> dict[str, list[
     return by_machine
 
 
-def _machine_auto(
-    problem: InputIR, auto_pairs: list[tuple[str, str]]
-) -> dict[str, list[tuple[str, str]]]:
-    """Machine -> the auto-output candidate pairs it is an endpoint of (either side), so LNS can
+def _machine_auto(problem: InputIR, auto_pairs: list[_AutoPair]) -> dict[str, list[_AutoPair]]:
+    """Machine -> the auto-output candidates it is an endpoint of (either side), so LNS can
     check just the machine's own pairs for the orientation-dependent auto-output reward."""
-    by_machine: dict[str, list[tuple[str, str]]] = {m.id: [] for m in problem.machines}
+    by_machine: dict[str, list[_AutoPair]] = {m.id: [] for m in problem.machines}
     for pair in auto_pairs:
-        for mid in pair:
+        for mid in (pair.source_id, pair.sink_id):
             if mid in by_machine:
                 by_machine[mid].append(pair)
     return by_machine
 
 
-def _auto_candidate_pairs(problem: InputIR) -> list[tuple[str, str]]:
-    """Directed (source, sink) machine pairs for the simple 1->1 item/fluid nets that can
-    auto-output - the same nets the router's auto-output assignment covers (power/ME never
-    auto-feed). This is the *cheap proxy* of that decision the placement cost keeps so
-    orientation still has a gradient; the router is the authority on the final layout.
+class _AutoPair(NamedTuple):
+    """One directed auto-output candidate: which port on which machine, on each side.
+
+    The ports are the part that used to be dropped. They decide which casing cells could host the
+    two hatches, and therefore whether the connection is possible at all on a multiblock, so a
+    (machine, machine) pair cannot answer the question the router actually asks (#107).
+    """
+
+    source_id: str
+    source_port: str
+    sink_id: str
+    sink_port: str
+
+
+def _auto_candidate_pairs(problem: InputIR) -> list[_AutoPair]:
+    """Directed auto-output candidates for the simple 1->1 item/fluid nets - the same nets the
+    router's auto-output assignment covers (power/ME never auto-feed).
+
+    Which of them is *possible* is then asked of the router itself
+    (``router.auto.auto_output_possible``), so the reward and the decision share one rule.
     """
     port_dir = port_direction_map(problem)
-    pairs: list[tuple[str, str]] = []
+    pairs: list[_AutoPair] = []
     for net in problem.nets:
         if net.commodity is Commodity.POWER or problem.me_toggles.toggled(net.commodity):
             continue
         sources, sinks = net_sources_sinks(net, port_dir)
         if len(sources) == 1 and len(sinks) == 1:
-            pairs.append((sources[0].machine_id, sinks[0].machine_id))
+            pairs.append(
+                _AutoPair(
+                    sources[0].machine_id,
+                    sources[0].port_id,
+                    sinks[0].machine_id,
+                    sinks[0].port_id,
+                )
+            )
     return pairs
 
 
@@ -338,7 +358,7 @@ def _cost(
     machines: dict[str, Machine],
     wire_nets: list[_WeightedNet],
     power_nets: list[_WeightedNet],
-    auto_pairs: list[tuple[str, str]],
+    auto_pairs: list[_AutoPair],
     weights: tuple[float, float],
 ) -> float:
     """Routing-aware cost: weighted item/fluid HPWL + compactness per the objective, minus an
@@ -387,20 +407,17 @@ def _cost(
     volume = footprint * (max_y - min_y + 1)
 
     auto = 0
-    for source_id, sink_id in auto_pairs:
-        sp, tp = pos.get(source_id), pos.get(sink_id)
+    for pair in auto_pairs:
+        sp, tp = pos.get(pair.source_id), pos.get(pair.sink_id)
         if sp is None or tp is None:
             continue
-        if (
-            auto_output_faces(
-                sp.cell,
-                machines[source_id].footprint,
-                sp.orientation,
-                tp.cell,
-                machines[sink_id].footprint,
-                tp.orientation,
-            )
-            is not None
+        if auto_output_possible(
+            sp,
+            machines[pair.source_id],
+            pair.source_port,
+            tp,
+            machines[pair.sink_id],
+            pair.sink_port,
         ):
             auto += 1
     w_footprint, w_volume = weights
@@ -791,21 +808,19 @@ def _marginal_insertion_cost(
         )
         cable += weight * attach
     auto = 0
-    for src, sink in ctx.machine_auto[machine_id]:
-        other = sink if src == machine_id else src
+    here = Placement(machine_id=machine_id, cell=origin, orientation=orientation)
+    for pair in ctx.machine_auto[machine_id]:
+        is_source = pair.source_id == machine_id
+        other = pair.sink_id if is_source else pair.source_id
         op = placed_pos.get(other)
         if op is None:
             continue
         om = ctx.machines[other]
-        if src == machine_id:
-            faces = auto_output_faces(
-                origin, m.footprint, orientation, op.cell, om.footprint, op.orientation
-            )
+        if is_source:
+            possible = auto_output_possible(here, m, pair.source_port, op, om, pair.sink_port)
         else:
-            faces = auto_output_faces(
-                op.cell, om.footprint, op.orientation, origin, m.footprint, orientation
-            )
-        if faces is not None:
+            possible = auto_output_possible(op, om, pair.source_port, here, m, pair.sink_port)
+        if possible:
             auto += 1
     return _W_WIRE * wire + cable - _W_AUTO * auto
 
