@@ -700,6 +700,10 @@ def _ruin_and_recreate(
     occupied: set[Cell] = set()
     for p in kept:
         occupied.update(occupied_cells(p.cell, ctx.machines[p.machine_id].footprint, p.orientation))
+    # One grid for the whole recreate, updated in step with `occupied` as each machine lands,
+    # rather than rebuilt per insertion: `_best_insertion` only reads it.
+    grid = _occupancy_grid(ctx.region, occupied, ctx.reserved)
+    row, plane = ctx.region.sx, ctx.region.sx * ctx.region.sy
 
     placed = list(kept)
     placed_ids = {p.machine_id for p in placed}
@@ -711,13 +715,15 @@ def _ruin_and_recreate(
     )
     for p in to_insert:
         m = ctx.machines[p.machine_id]
-        spot = _best_insertion(p, placed, occupied, ctx, rng)
+        spot = _best_insertion(p, placed, occupied, grid, ctx, rng)
         if spot is None:
             return None  # could not re-place this machine; abandon the move, the loop skips it
         origin, orientation = spot
         placed.append(p.model_copy(update={"cell": origin, "orientation": orientation}))
         placed_ids.add(p.machine_id)
-        occupied.update(occupied_cells(origin, m.footprint, orientation))
+        for cell in occupied_cells(origin, m.footprint, orientation):
+            occupied.add(cell)
+            grid[cell[0] + cell[1] * row + cell[2] * plane] = 1
 
     by_id = {p.machine_id: p for p in placed}
     return [by_id[p.machine_id] for p in placements]  # preserve the original ordering
@@ -793,10 +799,46 @@ def _placed_invariants(
     return net_boxes, power
 
 
+def _occupancy_grid(region: CellBox, occupied: set[Cell], reserved: set[Cell]) -> bytearray:
+    """``occupied | reserved`` as a flat byte per region cell, indexed ``x + y*sx + z*sx*sy``.
+
+    The fit test in :func:`_best_insertion` asked ``isdisjoint`` of a freshly materialised cell
+    list, which meant building one tuple per cell of the body per candidate. That is cheap when a
+    machine is 1x1x1 and ruinous when the real dataset gives it a 7x7x7 body: it was 90% of all
+    ``occupied_cells`` yields in a solve and the single hottest line in the solver. A byte grid
+    answers the same question by indexing, with no allocation and no hashing per candidate.
+
+    Unpadded on purpose. ``box_in_region`` already gates every test with six comparisons on the
+    rotated box's corners, so an index built from a passing origin is always in range; a padded
+    border would buy a bounds check that has already been paid for.
+    """
+    sx, sy, sz = region.sx, region.sy, region.sz
+    plane = sx * sy
+    grid = bytearray(plane * sz)
+    for x, y, z in occupied:
+        grid[x + y * sx + z * plane] = 1  # every placed body cleared box_in_region to get here
+    for x, y, z in reserved:  # caller-supplied, so this one is guarded
+        if 0 <= x < sx and 0 <= y < sy and 0 <= z < sz:
+            grid[x + y * sx + z * plane] = 1
+    return grid
+
+
+def _box_offsets(box: CellBox, region: CellBox) -> tuple[int, ...]:
+    """Flat offsets from an origin to every cell a rotated ``box`` covers, in this region."""
+    sx, plane = region.sx, region.sx * region.sy
+    return tuple(
+        dx + dy * sx + dz * plane
+        for dz in range(box.sz)
+        for dy in range(box.sy)
+        for dx in range(box.sx)
+    )
+
+
 def _best_insertion(
     p: Placement,
     placed: list[Placement],
     occupied: set[Cell],
+    grid: bytearray,
     ctx: _SearchContext,
     rng: random.Random,
 ) -> tuple[CellCoord, Facing] | None:
@@ -812,6 +854,9 @@ def _best_insertion(
     is_source = m.is_power_source  # fixed for this machine; see _feed_ok_for
     placed_pos = {q.machine_id: q for q in placed}
     net_boxes, power_attach = _placed_invariants(p.machine_id, placed_pos, ctx)
+    region = ctx.region
+    offsets_by_box: dict[tuple[int, int, int], tuple[int, ...]] = {}
+    row, plane = region.sx, region.sx * region.sy
     best: tuple[CellCoord, Facing] | None = None
     best_cost = math.inf
     for origin in _candidate_origins(p, m, placed, ctx, rng):
@@ -832,8 +877,14 @@ def _best_insertion(
                 # and only a candidate that clears it is worth expanding into cells.
                 ok = box_in_region(origin, m.footprint, orientation, ctx.region)
                 if ok:
-                    cells = list(occupied_cells(origin, m.footprint, orientation))
-                    ok = ctx.reserved.isdisjoint(cells) and occupied.isdisjoint(cells)
+                    offsets = offsets_by_box.get(key)
+                    if offsets is None:
+                        offsets = offsets_by_box[key] = _box_offsets(box, region)
+                    base = origin.x + origin.y * row + origin.z * plane
+                    for off in offsets:
+                        if grid[base + off]:
+                            ok = False
+                            break
                 fits[key] = ok
             if not ok:
                 continue
