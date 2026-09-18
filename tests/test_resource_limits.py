@@ -48,6 +48,7 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         ("-0.5", _DEFAULT_CPU_FRACTION),
         ("2", _DEFAULT_CPU_FRACTION),
         ("nan", _DEFAULT_CPU_FRACTION),
+        ("0.75", 0.75),
     ],
 )
 def test_cpu_fraction_parses_or_falls_back(
@@ -61,8 +62,19 @@ def test_cpu_fraction_unset_is_the_default(clean_env: None) -> None:
     assert _cpu_fraction() == pytest.approx(_DEFAULT_CPU_FRACTION)
 
 
-def test_auto_workers_leaves_headroom(monkeypatch: pytest.MonkeyPatch, clean_env: None) -> None:
+def test_auto_workers_takes_every_core_by_default(
+    monkeypatch: pytest.MonkeyPatch, clean_env: None
+) -> None:
+    """The default is the whole machine, matching plain ``-n auto``."""
     monkeypatch.setattr(os, "cpu_count", lambda: 4)
+    assert pytest_xdist_auto_num_workers(None) == 4  # type: ignore[arg-type]
+
+
+def test_auto_workers_hands_cores_back_on_request(
+    monkeypatch: pytest.MonkeyPatch, clean_env: None
+) -> None:
+    monkeypatch.setattr(os, "cpu_count", lambda: 4)
+    monkeypatch.setenv("GTNH_TEST_CPU_FRACTION", "0.75")
     assert pytest_xdist_auto_num_workers(None) == 3  # type: ignore[arg-type]
     monkeypatch.setenv("GTNH_TEST_CPU_FRACTION", "0.5")
     assert pytest_xdist_auto_num_workers(None) == 2  # type: ignore[arg-type]
@@ -72,7 +84,7 @@ def test_auto_workers_never_returns_zero(monkeypatch: pytest.MonkeyPatch, clean_
     """A single-core box, or a tiny fraction, must still get one worker - 0 would run nothing."""
     monkeypatch.setattr(os, "cpu_count", lambda: 1)
     assert pytest_xdist_auto_num_workers(None) == 1  # type: ignore[arg-type]
-    monkeypatch.setenv("GTNH_TEST_CPU_FRACTION", "0.01")
+    monkeypatch.setenv("GTNH_TEST_CPU_FRACTION", "0.01")  # 8 cores -> 0 without the floor
     monkeypatch.setattr(os, "cpu_count", lambda: 8)
     assert pytest_xdist_auto_num_workers(None) == 1  # type: ignore[arg-type]
 

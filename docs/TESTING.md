@@ -100,16 +100,21 @@ with two dials, both disabled when `CI` is set so the GitHub runner still gets a
 
 | Env var | Default | Effect |
 |---|---|---|
-| `GTNH_TEST_CPU_FRACTION` | `0.8` | `-n auto` uses `floor(fraction * cores)` workers, floor 1 |
+| `GTNH_TEST_CPU_FRACTION` | `1.0` | `-n auto` uses `floor(fraction * cores)` workers, floor 1 |
 | `GTNH_TEST_NICE` | on | every process drops to a below-normal scheduler priority |
 | `GTNH_TEST_HYPOTHESIS_FRACTION` | `0.25` | share of each property test's `max_examples` a local run takes |
 
 An explicit `-n 4` overrides the first (the hook only fires for `auto`/`logical`), as does xdist's
 own `PYTEST_XDIST_AUTO_NUM_WORKERS`.
 
-**The cap is not a speed tradeoff.** On a 4-core box at `--no-cov` the suite runs 56s on `-n 4`,
-54s on `-n 3` and 58s on `-n 2`: the last worker oversubscribes the cores the controller needs, so
-it buys nothing. Reach for `GTNH_TEST_CPU_FRACTION=1.0` only on a machine you are not using.
+A run takes every core by default, as `-n auto` always did; the fraction is there to hand cores
+back when you want the machine while it runs. **It is close to free when you do.** On a 4-core box
+at `--no-cov` the suite runs 56s on `-n 4`, 54s on `-n 3` and 58s on `-n 2`: the last worker
+oversubscribes the cores the controller needs, so `GTNH_TEST_CPU_FRACTION=0.75` there costs
+nothing at all.
+
+The priority drop is the dial doing most of the work, which is why it is the one left on by
+default: it costs no wall clock on an idle machine and still lets the foreground preempt the run.
 
 **`solve()` is the suite.** A probe over a serial run puts 53.0s of 73.5s (72%) inside `solve()`
 across 592 calls, against 0.10s in `adapt_file` - parsing an export is free, annealing a layout is

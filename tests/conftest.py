@@ -5,18 +5,23 @@ independent (see the ``addopts`` comment). ``auto`` means *every* core, so a loc
 pins the box at 100% for the whole run and nothing else on the machine stays responsive. This
 file changes nothing about *what* is tested - only how much of the machine the run holds.
 
-Two dials, because worker count alone is not enough: three busy workers out of four cores still
-leave the desktop fighting the run for the fourth::
+Two dials::
 
-    GTNH_TEST_CPU_FRACTION=0.8   ->  -n auto yields floor(0.8 * cores), floor 1
+    GTNH_TEST_CPU_FRACTION=0.75  ->  -n auto yields floor(0.75 * cores), floor 1
     GTNH_TEST_NICE=0             ->  keep normal scheduler priority (default: drop below it)
 
-Measured on the 4-core reference box, suite at ``--no-cov``: ``-n 4`` 56s, ``-n 3`` 54s, ``-n 2``
-58s. The fourth worker buys nothing - it oversubscribes the cores the controller also needs - so
-the cap costs no wall clock and hands back a core.
+**The core fraction defaults to 1.0**: a run takes the whole machine, as ``-n auto`` always did.
+The dial exists to hand cores back on demand, not to withhold them by default. Measured on the
+4-core reference box at ``--no-cov``: ``-n 4`` 56s, ``-n 3`` 54s, ``-n 2`` 58s - the last worker
+oversubscribes the cores the controller also needs, so dropping to ``0.75`` there costs nothing
+and leaves a core for the desktop.
 
-An explicit ``-n 4`` still wins: the hook below only runs for ``auto``/``logical``. CI wants the
-whole runner, so both dials are off when ``CI`` is set (GitHub Actions sets it).
+Priority *is* lowered by default, and it is the dial that does the real work: it costs no wall
+clock at all on an otherwise-idle machine and still lets the foreground preempt the run.
+
+An explicit ``-n 4`` wins over the fraction: the hook below only runs for ``auto``/``logical``. CI
+wants the whole runner and the full property-test budget, so both dials are off when ``CI`` is set
+(GitHub Actions sets it).
 """
 
 from __future__ import annotations
@@ -31,8 +36,9 @@ from gtnh_solver.adapter import adapt_file
 from gtnh_solver.ir import InputIR, LayoutResult
 from gtnh_solver.solver import solve
 
-_DEFAULT_CPU_FRACTION = 0.8
-"""Leave a core's worth of headroom. See the module docstring for the measurements behind it."""
+_DEFAULT_CPU_FRACTION = 1.0
+"""Take every core, which is what ``-n auto`` means. Lower it with ``GTNH_TEST_CPU_FRACTION`` when
+you want the machine back; the priority drop below already keeps the foreground responsive."""
 
 _BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
 """Windows ``SetPriorityClass`` value. Below ``NORMAL`` (0x20), above ``IDLE`` - the run keeps
@@ -55,8 +61,8 @@ def _in_ci() -> bool:
 def _cpu_fraction() -> float:
     """The share of cores ``-n auto`` may use, clamped to ``(0, 1]``.
 
-    An unparseable or out-of-range value is a typo, not an instruction to take the whole box, so
-    it falls back to the default rather than to 1.0.
+    An unparseable or out-of-range value is a typo, so it falls back to the default rather than
+    being read as some other share.
     """
     raw = os.environ.get("GTNH_TEST_CPU_FRACTION")
     if raw is None:
