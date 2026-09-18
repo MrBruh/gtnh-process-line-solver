@@ -597,14 +597,9 @@ def test_enums_serialize_to_doc_strings() -> None:
     assert _valid_input_ir().model_dump(mode="json")["me_toggles"]["fluids"] is True
 
 
-def test_input_ir_json_round_trip() -> None:
-    ir = _valid_input_ir()
-    assert InputIR.model_validate_json(ir.model_dump_json()) == ir
-
-
-def test_layout_result_json_round_trip() -> None:
-    layout = _valid_layout()
-    assert LayoutResult.model_validate_json(layout.model_dump_json()) == layout
+# Both models' JSON round trips are asserted where they earn their keep, next to the contract
+# version guard that could break them: test_input_ir_round_trips_through_its_own_serialization and
+# test_layout_result_round_trips_through_its_own_serialization (GitHub #94).
 
 
 # --------------------------------------------------------------------------- property tests

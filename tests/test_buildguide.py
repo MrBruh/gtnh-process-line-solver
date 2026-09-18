@@ -111,14 +111,10 @@ def test_build_guide_placement_table_has_coords_and_front() -> None:
     assert re.search(r"front (north|south|east|west)", guide)
 
 
-def test_build_guide_power_note_states_feed_spec_as_tier_amps_eut() -> None:
-    # the source must be fed as a wiring spec, not a bare cable thickness (GitHub #15 B2). On the
-    # fast (constructive) row the trunk runs source dock (5,0,1) -> (1,0,1): the hammers tap or
-    # dock at depths 2/3/4, fractional loads 16/30 + 16/29 + 16/28 = 1.66 A, rounded up once to
-    # 2 A - the system_io number the previewer also shows (machines buffer packets, so rounding
-    # per machine would overstate the feed). LV is 32 V, so the note reads 2 A -> up to 64 EU/t.
-    guide = _sand_guide()
-    assert "feed LV (32 V), >=2 A -> up to 64 EU/t" in guide
+# The feed note as a wiring spec rather than a bare cable thickness (GitHub #15 B2) is asserted by
+# the regression test below, on a harder layout: it pins the identical string and additionally
+# rejects the per-machine rounding that once inflated it. The plain-solve example that used to sit
+# here asserted a strict subset of that on an easier one (GitHub #94).
 
 
 def test_build_guide_power_note_counts_a_sink_tapping_the_source_dock() -> None:
