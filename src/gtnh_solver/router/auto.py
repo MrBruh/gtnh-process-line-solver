@@ -14,10 +14,20 @@ non-adjacent endpoints, fan-out, or a machine with no free face for one.
 **Two faces touching is not enough for a multiblock.** A multiblock ejects through an output
 hatch's own front face, and receives through an input bus's, so a free connection needs a
 *touching pair of casing cells* that can host those two hatches - not merely two bodies in
-contact. That tightening is why this searches faces itself instead of calling
-``ir.geometry.auto_output_faces``, which models the loose "any touching body cell" rule and is
-still right for the placement cost that rewards adjacency (a soft preference that may be
-optimistic) and for a single-block machine, whose one cell is its own hatch.
+contact. That tightening is why this searches faces itself instead of relying on
+``ir.geometry.auto_output_faces``, which models the loose "any touching body cell" rule. For a
+single-block machine the two rules agree - its one cell is its own hatch - so the loose rule is
+exactly right there, and it survives here as a cheap *necessary condition*: bodies that do not
+touch cannot have touching casing cells either, so it rejects most candidates for six integer
+comparisons before any cell set is built (:func:`_auto_faces`).
+
+**The placement cost asks this module, not the loose rule** (:func:`auto_output_possible`). It
+used to ask the loose one and call the difference a soft preference, but an optimistic reward is
+not a harmless one: the annealer kept arrangements *because* of a discount for connections the
+router then refused, so its budget went on connections it would not get and its top-ranked
+layouts were ranked on a promise that was not kept (issue #107). What the cost still cannot see
+is routing-time contention - which casing cell some other hatch will take - so it asks with an
+empty ``claimed`` and remains an upper bound, now on structure the machine actually has.
 
 The one-auto-output-per-machine rule follows the same split. It is a real GT limit on a
 **single-block** machine - one auto-output face, items XOR fluids - and simply wrong for a
@@ -36,13 +46,19 @@ from types import MappingProxyType
 
 from gtnh_solver.ir import (
     AutoConnection,
+    CellCoord,
     Commodity,
     Facing,
     InputIR,
     Machine,
     Placement,
 )
-from gtnh_solver.ir.geometry import FACE_DELTAS, OPPOSITE_FACE, Cell
+from gtnh_solver.ir.geometry import (
+    FACE_DELTAS,
+    OPPOSITE_FACE,
+    Cell,
+    rotated_footprint,
+)
 from gtnh_solver.ir.nets import net_sources_sinks, placement_index, port_direction_map
 
 from . import hatches
@@ -123,6 +139,84 @@ def assign_auto_outputs(problem: InputIR, placements: Sequence[Placement]) -> Au
     )
 
 
+#: No casing cell is spoken for yet - the placement cost cannot know routing-time contention.
+_NOTHING_CLAIMED: Mapping[str, Collection[Cell]] = MappingProxyType({})
+
+
+def auto_output_possible(
+    source_p: Placement | None,
+    source_m: Machine,
+    source_port: str,
+    target_p: Placement | None,
+    target_m: Machine,
+    target_port: str,
+) -> bool:
+    """Whether a free auto-output connection between these two placed ports is structurally possible.
+
+    The placement cost's question, answered by the same :func:`_auto_faces` that decides the real
+    layout, so the reward and the router cannot drift apart again (#107). It is deliberately the
+    router's rule minus one term: ``claimed`` is routing-time state - which casing cell some other
+    hatch ends up taking - that does not exist while machines are still being placed. So this stays
+    an upper bound on what the router will grant, but an upper bound over the casing cells the
+    machine *has*, rather than over any two bodies in contact.
+
+    A single-block machine is unaffected either way: its one cell is its own hatch, so this and the
+    loose body rule agree on it exactly.
+    """
+    return (
+        _auto_faces(
+            source_p, source_m, source_port, target_p, target_m, target_port, _NOTHING_CLAIMED
+        )
+        is not None
+    )
+
+
+#: ``(id(machine), port, orientation)`` -> that machine and its host cells as offsets from the
+#: placement origin. The machine is kept beside the offsets so its ``id`` cannot be recycled onto a
+#: different object while the entry lives, and so a hit can verify identity rather than trust the
+#: key. Bounded by machines x ports x 4 orientations.
+_HOST_OFFSETS: dict[tuple[int, str, Facing], tuple[Machine, tuple[Cell, ...]]] = {}
+
+
+def _host_offsets(machine: Machine, port_id: str, orientation: Facing) -> tuple[Cell, ...]:
+    """``port_cells`` relative to the placement origin, computed once per orientation.
+
+    Which casing cells can host a port does not depend on *where* the machine stands, only on how
+    it is turned - so the rotation is the whole computation, and the position is an addition. The
+    placement cost re-asks this question for the same machine in thousands of positions per solve,
+    and the uncached form rebuilt both sets every time: 16M ``rotated_slot`` calls and 26M
+    ``occupied_cells`` yields on one nitrobenzene solve, two thirds of its runtime (#107). That is
+    the same shape as the enumeration #110 took off this path, one level down.
+    """
+    key = (id(machine), port_id, orientation)
+    hit = _HOST_OFFSETS.get(key)
+    if hit is not None and hit[0] is machine:
+        return hit[1]
+    origin = CellCoord(x=0, y=0, z=0)
+    cells = hatches.port_cells(
+        Placement(machine_id=machine.id, cell=origin, orientation=orientation), machine, port_id
+    )
+    offsets = tuple(cells)
+    _HOST_OFFSETS[key] = (machine, offsets)
+    return offsets
+
+
+#: The same offsets as a set, for the target side, which is asked "does it contain" rather than
+#: iterated. Kept apart from the tuple so neither side pays for the other's shape.
+_HOST_OFFSET_SETS: dict[tuple[int, str, Facing], tuple[Machine, frozenset[Cell]]] = {}
+
+
+def _host_offset_set(machine: Machine, port_id: str, orientation: Facing) -> frozenset[Cell]:
+    """:func:`_host_offsets` as a frozenset - the membership form the target side needs."""
+    key = (id(machine), port_id, orientation)
+    hit = _HOST_OFFSET_SETS.get(key)
+    if hit is not None and hit[0] is machine:
+        return hit[1]
+    offsets = frozenset(_host_offsets(machine, port_id, orientation))
+    _HOST_OFFSET_SETS[key] = (machine, offsets)
+    return offsets
+
+
 def _auto_faces(
     source_p: Placement | None,
     source_m: Machine,
@@ -142,8 +236,25 @@ def _auto_faces(
     """
     if source_p is None or target_p is None:
         return None
-    source_hosts = hatches.port_cells(source_p, source_m, source_port)
-    target_hosts = set(hatches.port_cells(target_p, target_m, target_port))
+    # Per face, cheapest test first. The BOX overlap is six integer comparisons and rejects most
+    # candidates outright; only a face whose bodies actually touch is worth scanning casing cells
+    # for, and bodies that do not touch cannot have touching cells inside them. Fused into one
+    # loop rather than run as a separate pre-pass, so a face that fails the box test costs nothing
+    # further - the placement cost asks this ~1.5M times a solve (#107), and the box form of the
+    # test is itself what took this path off a 70%-of-a-solve profile (#110).
+    #
+    # The scan itself runs in OFFSET space: which cells can host a hatch depends on how a machine
+    # is turned, not where it stands (:func:`_host_offsets`), so position enters only as the vector
+    # between the two origins. World cells are built solely when a pair matches.
+    source_box = rotated_footprint(source_m.footprint, source_p.orientation)
+    target_box = rotated_footprint(target_m.footprint, target_p.orientation)
+    source_offsets = _host_offsets(source_m, source_port, source_p.orientation)
+    target_offsets = _host_offset_set(target_m, target_port, target_p.orientation)
+    ox, oy, oz = source_p.cell.x, source_p.cell.y, source_p.cell.z
+    tx, ty, tz = target_p.cell.x, target_p.cell.y, target_p.cell.z
+    tx_max, ty_max, tz_max = tx + target_box.sx, ty + target_box.sy, tz + target_box.sz
+    # source origin - target origin: added to a source offset it lands in the target's frame.
+    bx, by, bz = ox - tx, oy - ty, oz - tz
     taken_source = claimed.get(source_p.machine_id, ())
     taken_target = claimed.get(target_p.machine_id, ())
     for face, (dx, dy, dz) in FACE_DELTAS.items():
@@ -152,10 +263,23 @@ def _auto_faces(
         opposite = OPPOSITE_FACE[face]
         if opposite is target_p.orientation:  # the target's input face would be its front
             continue
-        for cell in source_hosts:
-            neighbour = (cell[0] + dx, cell[1] + dy, cell[2] + dz)
-            if neighbour not in target_hosts:
+        # The stepped source box against the target box, half-open on both sides.
+        sx0, sy0, sz0 = ox + dx, oy + dy, oz + dz
+        if not (
+            sx0 < tx_max
+            and tx < sx0 + source_box.sx
+            and sy0 < ty_max
+            and ty < sy0 + source_box.sy
+            and sz0 < tz_max
+            and tz < sz0 + source_box.sz
+        ):
+            continue
+        ax, ay, az = bx + dx, by + dy, bz + dz
+        for sx, sy, sz in source_offsets:
+            if (sx + ax, sy + ay, sz + az) not in target_offsets:
                 continue
+            cell = (sx + ox, sy + oy, sz + oz)
+            neighbour = (cell[0] + dx, cell[1] + dy, cell[2] + dz)
             if cell in taken_source or neighbour in taken_target:
                 continue  # that casing block already holds another hatch
             return face, opposite, cell, neighbour
