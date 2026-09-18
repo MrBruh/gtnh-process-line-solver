@@ -56,7 +56,7 @@ from gtnh_solver.ir import (
 from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 
 from ._errors import AdapterError, AdapterWarning
-from .plan import Edge, MachineHandler, Node, Plan, Recipe, ResolvedMachine
+from .plan import Edge, MachineHandler, Node, Plan, Recipe, ResolvedMachine, Resource
 from .power import synthesize_power
 from .producer import PlanProducer, plan_pack_version, resolve_producer
 
@@ -184,6 +184,7 @@ def to_input_ir(
                 f"are not supported yet (instance-aware routing is Phase 2 - see docs/ROADMAP.md). "
                 f"Split it into single-machine nodes in the export."
             )
+        _check_input_overrides(recipe, node)
         block_key = _block_key_for(recipe, resolved_machines.get(node.id))
         record = physical.get(recipe.machine_type, block_key=block_key) if physical else None
         # One fluid-output count drives both the reserved shape and its hatch ceiling, so the two
@@ -413,13 +414,88 @@ def _port_resource(port_id: str) -> str:
     return port_id.split(":", 1)[1]
 
 
+#: Forge's ``OreDictionary.WILDCARD_VALUE``. A recipe input spelled ``<registry>@32767`` accepts any
+#: metadata of that block/item ("any log"), and the node's override is the exporter recording which
+#: one the player actually feeds it ("oak log"). That narrowing is the only override this adapter
+#: applies; see :func:`_refines`.
+_WILDCARD_META = "32767"
+
+
+def _refines(source: Resource, override: Resource) -> bool:
+    """Whether ``override`` narrows ``source`` rather than replacing it.
+
+    True only for an override that names the same resource more precisely: the same ``kind``, the
+    same registry name, and a ``source`` whose metadata is the wildcard. An identical id is trivially
+    true and costs nothing to apply.
+
+    **Everything else is a substitution and must not be applied.** Real plans contain overrides that
+    name an entirely different resource at that index (``oxygen -> water``,
+    ``ammonia -> hydrochloricacid_gt5u``), always one the recipe already lists at the *next* index.
+    Applying those would drop a required input and duplicate another, silently shrinking the port
+    set; the adapter cannot tell a stale plan from a deliberate swap, so it keeps the recipe's own
+    input and says so (:func:`_check_input_overrides`).
+    """
+    if source.kind != override.kind:
+        return False
+    if source.id == override.id:
+        return True
+    source_name, _, source_meta = source.id.partition("@")
+    override_name, _, _ = override.id.partition("@")
+    return source_name == override_name and source_meta == _WILDCARD_META
+
+
+def _effective_inputs(recipe: Recipe, node: Node) -> list[Resource]:
+    """``recipe.inputs`` with this node's refining overrides applied. Never mutates the recipe.
+
+    One recipe is shared by every node that runs it, so resolving overrides in place would leak one
+    node's ingredient choice into its siblings. The result is what both the ports and the throughput
+    rates are built from, which is what keeps a concretised id from resolving to a rate of zero:
+    ``_rate`` matches amounts by resource id, and the recipe's own list still says ``@32767``.
+    """
+    if not node.recipe_input_overrides:
+        return recipe.inputs
+    effective = list(recipe.inputs)
+    for index, override in node.recipe_input_overrides.items():
+        if 0 <= index < len(effective) and _refines(effective[index], override):
+            effective[index] = override
+    return effective
+
+
+def _check_input_overrides(recipe: Recipe, node: Node) -> None:
+    """Warn once per node for each override :func:`_effective_inputs` declined to apply.
+
+    Separate from the resolution itself so the message lands once per node rather than once per
+    port and per rate lookup, and so the resolution stays a pure function.
+    """
+    for index, override in sorted(node.recipe_input_overrides.items()):
+        if not 0 <= index < len(recipe.inputs):
+            warnings.warn(
+                f"node {node.id!r} overrides input {index} of recipe {recipe.id!r}, which has "
+                f"only {len(recipe.inputs)} input(s); ignoring the override",
+                AdapterWarning,
+                stacklevel=3,
+            )
+            continue
+        source = recipe.inputs[index]
+        if _refines(source, override):
+            continue
+        warnings.warn(
+            f"node {node.id!r} overrides input {index} of recipe {recipe.id!r} from "
+            f"{source.kind}:{source.id} to {override.kind}:{override.id}, which substitutes a "
+            f"different resource rather than narrowing a wildcard; keeping the recipe's own input "
+            f"(applying it would drop {source.id} from the machine's ports)",
+            AdapterWarning,
+            stacklevel=3,
+        )
+
+
 def _recipe_ports(recipe: Recipe, node: Node) -> list[Port]:
     """One input/output port per distinct recipe resource (deduped by id), each carrying the
     throughput it moves (items/t or mB/t) so boundary rates - notably a dangling output's product,
     which no net records - are reportable downstream."""
     ports: dict[str, Port] = {}
     for direction, pool, outputs in (
-        (IODirection.INPUT, recipe.inputs, False),
+        (IODirection.INPUT, _effective_inputs(recipe, node), False),
         (IODirection.OUTPUT, recipe.outputs, True),
     ):
         for res in pool:
@@ -543,7 +619,10 @@ def _throughput(edge: Edge, nodes_by_id: dict[str, Node], recipes: dict[str, Rec
 
 
 def _rate(recipe: Recipe, resource_id: str, node: Node, *, outputs: bool) -> float:
-    pool = recipe.outputs if outputs else recipe.inputs
+    # Inputs come from the node's effective list, not the recipe's own: an edge names the
+    # concretised id ("minecraft:log@1") while the recipe still says "@32767", so matching against
+    # the recipe here would sum nothing and rate the net at zero.
+    pool = recipe.outputs if outputs else _effective_inputs(recipe, node)
     amount = sum(res.amount for res in pool if res.id == resource_id)
     if recipe.duration_ticks <= 0:
         return 0.0

@@ -23,6 +23,25 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   machines. Every record stays in the new `PhysicalDataset.records` and addressable by `block_key`.
 
   Two files claiming the same **block_key** is still an error: that is one controller dumped twice.
+### Fixed
+- **`nodes[].recipeInputOverrides` is applied, so a wildcard recipe input no longer fails the
+  load.** A GT recipe can accept any metadata of an item (`minecraft:log@32767`, Forge's
+  `OreDictionary.WILDCARD_VALUE`), and the exporter records which one the player actually feeds it.
+  The adapter built ports from `recipe.inputs[].id` only, so the edge named `minecraft:log@1`, the
+  machine had no such port, and the load died on `references unknown port`. Both shipped MrBruh
+  fixtures carry overrides and only escaped this because theirs resolve to the id the recipe already
+  names.
+
+  **Only a narrowing is applied.** Real plans also carry overrides that name an entirely different
+  resource at that index (`oxygen` to `water`, `ammonia` to `hydrochloricacid_gt5u`), always one the
+  recipe already lists at the *next* index. Applying those drops a required input and duplicates
+  another, silently shrinking the port set, and nothing in the export distinguishes a stale plan
+  from a deliberate swap. Such an override is refused, the recipe's own input kept, and an
+  `AdapterWarning` names both resources.
+
+  Overrides resolve **per node and never onto the recipe**, which one node's siblings share, and the
+  throughput lookup reads the same resolved list: matching rates against the recipe's own `@32767`
+  entry would find nothing and rate the net at zero.
 
 ### Added
 - **The texture dump can run in a client JVM, where nothing is `@SideOnly`-stripped

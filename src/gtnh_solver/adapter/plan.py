@@ -124,6 +124,12 @@ class Node(BaseModel):
     #: Which of the recipe's :class:`MachineHandler` entries this node runs in. Empty means the
     #: default, the first entry; empty also on every MrBruh-fork plan, which emits no handlers.
     machine_handler_id: str = ""
+    #: Per-node replacements for ``recipe.inputs``, keyed by index into that list. A recipe is
+    #: shared between nodes while an override belongs to one node, so these are resolved per node
+    #: and never written back onto the recipe (``core._effective_inputs``). Keys arrive as JSON
+    #: strings and coerce to ``int``; a non-numeric key is malformed and fails validation here
+    #: rather than silently dropping an input the edges then reference.
+    recipe_input_overrides: dict[int, Resource] = Field(default_factory=dict)
 
 
 class Storage(BaseModel):
