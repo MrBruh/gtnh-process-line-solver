@@ -11,6 +11,8 @@ import json
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from gtnh_solver.previewer.jar import (
     JAR_NAME,
     default_cache_dir,
@@ -34,7 +36,7 @@ _ASSETS = {
 }
 
 
-def test_default_cache_dir_env_override(tmp_path: Path, monkeypatch) -> None:
+def test_default_cache_dir_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GTNH_SOLVER_CACHE_DIR", str(tmp_path / "cache"))
     assert default_cache_dir() == tmp_path / "cache"
     monkeypatch.delenv("GTNH_SOLVER_CACHE_DIR", raising=False)

@@ -61,7 +61,12 @@ def _decode(data_uri: str) -> bytes:
 
 
 def _pixel(png: bytes, xy: tuple[int, int] = (0, 0)) -> tuple[int, int, int, int]:
-    return Image.open(io.BytesIO(png)).convert("RGBA").getpixel(xy)
+    pixel = Image.open(io.BytesIO(png)).convert("RGBA").getpixel(xy)
+    # getpixel is typed for every mode (a float for "F", None off-image); the convert above is
+    # what makes it RGBA, which the stubs cannot see. Assert, then say so.
+    assert isinstance(pixel, tuple)
+    assert len(pixel) == 4
+    return pixel
 
 
 #: Icon names used across the synthetic manifest.
@@ -912,7 +917,7 @@ def test_storage_glyph_faces_auto_output_direction(dataset: tuple[Path, Path]) -
     """A boundary-storage block auto-outputs from its front, so its output glyph rotates to face the
     auto-output direction (EAST here), not the placer's default 'north' - the Super Tank/Chest fix."""
     mb, manifest = dataset
-    scene = {
+    scene: dict[str, Any] = {
         "version": 1,
         "machines": [{**_machine("s1", "Test Macerator", [0, 0, 0], [1, 1, 1]), "role": "storage"}],
         "autoConnections": [
@@ -937,7 +942,7 @@ def test_non_storage_glyph_keeps_placed_front(dataset: tuple[Path, Path]) -> Non
     """A non-storage machine ignores the auto-output face: its front glyph stays on its placed front,
     so only Super Tank/Chest-style storage blocks are reoriented."""
     mb, manifest = dataset
-    scene = {
+    scene: dict[str, Any] = {
         "version": 1,
         "machines": [_machine("m1", "Test Macerator", [0, 0, 0], [1, 1, 1])],  # role 'machine'
         "autoConnections": [
@@ -963,7 +968,7 @@ def test_non_storage_glyph_keeps_placed_front(dataset: tuple[Path, Path]) -> Non
 
 def _tower_doc() -> MultiblockDoc:
     """A two-form parametric tower: 3x3x3 and 3x5x3, so a size choice is observable."""
-    variants = []
+    variants: list[dict[str, Any]] = []
     for h in (3, 5):
         variants.append(
             {
