@@ -44,9 +44,10 @@ _SAND = _EXAMPLES / "gtnh-sand.json"
 _NITROBENZENE = _EXAMPLES / "gtnh-nitrobenzene.json"
 
 
-def test_solve_sand_items_auto_feed_and_power_is_cabled() -> None:
-    ir = adapt_file(_SAND)
-    layout = solve(ir)
+def test_solve_sand_items_auto_feed_and_power_is_cabled(
+    solved_sand: tuple[InputIR, LayoutResult],
+) -> None:
+    ir, layout = solved_sand
     assert layout.status is LayoutStatus.VALID
     assert validate(ir, layout).ok
     item_nets = [n for n in ir.nets if n.commodity is Commodity.ITEM]
@@ -74,14 +75,15 @@ def _structure_metrics(layout: LayoutResult) -> tuple[int, int, int]:
     return footprint, volume, len(power_cells)
 
 
-def test_solve_sand_optimized_matches_or_beats_the_hand_built_target() -> None:
+def test_solve_sand_optimized_matches_or_beats_the_hand_built_target(
+    solved_sand: tuple[InputIR, LayoutResult],
+) -> None:
     # The acceptance target (docs/ROADMAP.md lane C): the maintainer hand-builds the sand line in
     # a 3x2x2 volume with 3 power cables, so the optimizer must find that or better - VALID, the
     # whole built structure (machines + routes) on a floor area <= 3x2 = 6 cells, and <= 3 power
     # cable cells. The quality-driven feedback loop is what finds it: it routes every attempt and
     # keeps the best by (footprint, cable cells, volume) instead of returning the first valid.
-    ir = adapt_file(_SAND)
-    layout = solve(ir)
+    _, layout = solved_sand
     assert layout.status is LayoutStatus.VALID
     footprint, _, cables = _structure_metrics(layout)
     assert footprint <= 6, f"structure footprint {footprint} exceeds the hand-built 3x2"
@@ -159,9 +161,10 @@ def test_optimize_recovers_a_congested_line_fast_mode_leaves_partial() -> None:
     assert solve(problem, optimize=False).status is not LayoutStatus.VALID
 
 
-def test_solve_returns_valid_or_explicit_infeasibility() -> None:
-    ir = adapt_file(_NITROBENZENE)
-    layout = solve(ir)
+def test_solve_returns_valid_or_explicit_infeasibility(
+    solved_nitrobenzene: tuple[InputIR, LayoutResult],
+) -> None:
+    ir, layout = solved_nitrobenzene
     if layout.status is LayoutStatus.VALID:
         assert validate(ir, layout).ok
     else:
@@ -178,11 +181,12 @@ def test_solve_infeasible_when_machines_do_not_fit() -> None:
     assert layout.metrics.footprint is None  # nothing placed -> no measurable build to report
 
 
-def test_solve_populates_footprint_and_layer_metrics() -> None:
+def test_solve_populates_footprint_and_layer_metrics(
+    solved_sand: tuple[InputIR, LayoutResult],
+) -> None:
     # LayoutMetrics is produced, not just declared (GitHub #13): the previewer reads footprint and
     # layers off the returned layout, and the seed-compare workflow ranks on them.
-    ir = adapt_file(_SAND)
-    layout = solve(ir)
+    ir, layout = solved_sand
     assert layout.status is LayoutStatus.VALID
     assert layout.metrics.footprint is not None
     assert layout.metrics.footprint > 0

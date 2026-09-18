@@ -468,8 +468,10 @@ def test_render_html_csp_admits_its_own_blocks_and_the_three_js_origin() -> None
     assert "'unsafe-eval'" not in csp
 
 
-def test_write_preview_writes_an_html_file(tmp_path: Path) -> None:
-    ir = adapt_file(_SAND)
-    out = write_preview(ir, solve(ir), tmp_path / "view.html")
+def test_write_preview_writes_an_html_file(
+    tmp_path: Path, solved_sand: tuple[InputIR, LayoutResult]
+) -> None:
+    ir, layout = solved_sand
+    out = write_preview(ir, layout, tmp_path / "view.html")
     assert out.exists()
     assert "gtnh-solve preview" in out.read_text(encoding="utf-8")

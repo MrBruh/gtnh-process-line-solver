@@ -13,8 +13,13 @@ import sys
 
 import pytest
 
+from gtnh_solver.adapter import adapt_file
+from gtnh_solver.ir import CellCoord, InputIR, LayoutResult, LayoutStatus
+
+from ._helpers import property_examples
 from .conftest import (
     _DEFAULT_CPU_FRACTION,
+    _SAND,
     _cpu_fraction,
     _env_flag,
     _lower_priority,
@@ -140,3 +145,91 @@ def test_lower_priority_actually_lowers_it() -> None:
         assert kernel32.GetPriorityClass(kernel32.GetCurrentProcess()) == 0x00004000
     else:
         assert os.nice(0) > 0
+
+
+# ------------------------------------------------------------- the hypothesis example budget
+
+
+@pytest.mark.parametrize("full", [200, 50, 300])
+def test_property_examples_is_full_in_ci(monkeypatch: pytest.MonkeyPatch, full: int) -> None:
+    """CI is the run that has to prove the invariant, so it never gets the reduced budget."""
+    monkeypatch.setenv("CI", "true")
+    assert property_examples(full) == full
+
+
+def test_property_examples_is_reduced_locally(
+    monkeypatch: pytest.MonkeyPatch, clean_env: None
+) -> None:
+    assert property_examples(200) == 50
+    assert property_examples(300) == 75
+
+
+def test_property_examples_keeps_the_ratio_between_budgets(clean_env: None) -> None:
+    """The three budgets are not interchangeable, so scaling must not flatten them."""
+    assert property_examples(300) > property_examples(200) > property_examples(50)
+
+
+def test_property_examples_never_returns_a_token_few(clean_env: None) -> None:
+    """A floor, because 2 examples would pass instantly and prove nothing."""
+    assert property_examples(1) == 10
+    assert property_examples(0) == 10
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("1.0", 200), ("0.5", 100), ("bogus", 50), ("0", 50), ("-1", 50), ("3", 50)],
+)
+def test_property_examples_honors_the_override_or_falls_back(
+    monkeypatch: pytest.MonkeyPatch, clean_env: None, raw: str, expected: int
+) -> None:
+    monkeypatch.setenv("GTNH_TEST_HYPOTHESIS_FRACTION", raw)
+    assert property_examples(200) == expected
+
+
+# ------------------------------------------------------- the shared shipped-line fixtures
+
+
+def test_solved_sand_is_a_real_valid_layout(solved_sand: tuple[InputIR, LayoutResult]) -> None:
+    """A cached stand-in for a solve must itself be a genuine solve, or it proves nothing."""
+    ir, layout = solved_sand
+    assert layout.status is LayoutStatus.VALID
+    assert layout.placements
+    assert len(layout.placements) == len(ir.machines)
+
+
+def test_solved_sand_hands_out_independent_copies(
+    solved_sand: tuple[InputIR, LayoutResult], request: pytest.FixtureRequest
+) -> None:
+    """The isolation that makes session caching safe: edit your copy, the session's is untouched.
+
+    Without this the fixture is a foot-gun - ``LayoutResult`` is mutable, so one test reordering a
+    layout in place would surface as a failure in whichever test happened to run next.
+
+    Reaching for the session-scoped original through ``getfixturevalue`` is deliberate: it is
+    private precisely so tests take the copy, and this is the one test that must see both.
+    """
+    ir, layout = solved_sand
+    session_ir, session_layout = request.getfixturevalue("_sand_session")
+    assert layout is not session_layout
+    assert ir is not session_ir
+    assert layout.placements[0] is not session_layout.placements[0]
+
+    before = session_layout.placements[0].cell
+    layout.placements[0].cell = CellCoord(x=99, y=99, z=99)
+    ir.machines[0].type = "mutated"
+    assert session_layout.placements[0].cell == before
+    assert session_ir.machines[0].type != "mutated"
+
+
+def test_solved_nitrobenzene_carries_the_pipes_that_make_it_worth_caching(
+    solved_nitrobenzene: tuple[InputIR, LayoutResult],
+) -> None:
+    """Nitrobenzene is the expensive fixture (~5.6s) because it is the line that lays real pipes.
+
+    Its status is deliberately not asserted: against the committed fixtures it solves
+    PARTIAL_INVALID, and pinning that here would fail for reasons unrelated to caching
+    (docs/TESTING.md, "CI sees a smaller dataset than you do").
+    """
+    ir, layout = solved_nitrobenzene
+    assert len(ir.machines) > len(adapt_file(_SAND).machines)
+    assert layout.routes

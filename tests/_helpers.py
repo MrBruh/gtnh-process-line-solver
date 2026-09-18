@@ -22,6 +22,8 @@ Reconciled drift (chose the form that keeps every caller green):
 
 from __future__ import annotations
 
+import os
+
 from gtnh_solver.dataset import DatasetMeta, MachinePhysical, PhysicalDataset
 from gtnh_solver.ir import (
     CellBox,
@@ -163,3 +165,40 @@ def hatched_dataset(
             )
         },
     )
+
+
+_PROPERTY_FRACTION = 0.25
+"""Share of a property test's example budget a *local* run takes. See :func:`property_examples`."""
+
+_PROPERTY_FLOOR = 10
+"""No local budget drops below this: a handful of examples proves nothing at all."""
+
+
+def property_examples(full: int) -> int:
+    """The ``max_examples`` a hypothesis property test should run here.
+
+    ``full`` in CI, a fraction of it locally. The budgets in ``test_solver_properties`` are ~18s of
+    a 75s suite, which is a long wait for the fast feedback a local run is for, but shrinking them
+    everywhere would permanently narrow the space the never-silently-invalid invariant is proven
+    over - and docs/TESTING.md is explicit that a collapsed space leaves the suite green while
+    proving less. Splitting it keeps every PR held to the full budget and makes iteration cheap.
+
+    Scaled rather than set per test, so the ratio between the three budgets (200/50/300 - they are
+    not interchangeable, the biggest one fuzzes ``validate``) survives the reduction.
+
+    ``GTNH_TEST_HYPOTHESIS_FRACTION`` overrides the share; ``1.0`` runs the full budget locally,
+    which is worth doing before pushing a change to the solver or the validator. An unparseable or
+    out-of-range value falls back to the default rather than silently running a token few.
+    """
+    if os.environ.get("CI"):
+        return full
+    raw = os.environ.get("GTNH_TEST_HYPOTHESIS_FRACTION")
+    fraction = _PROPERTY_FRACTION
+    if raw is not None:
+        try:
+            parsed = float(raw)
+        except ValueError:
+            parsed = -1.0
+        if 0.0 < parsed <= 1.0:
+            fraction = parsed
+    return max(_PROPERTY_FLOOR, round(full * fraction))

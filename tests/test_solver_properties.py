@@ -89,6 +89,7 @@ from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 from gtnh_solver.ir.output import CABLE_THICKNESSES
 from gtnh_solver.solver import solve
 from gtnh_solver.validator import ValidationReport, ViolationCode, validate
+from tests._helpers import property_examples
 
 # ------------------------------------------------------------------------------------- problems
 
@@ -238,7 +239,11 @@ def _problems(draw: st.DrawFn) -> InputIR:
 
 
 @pytest.mark.parametrize("optimize", [True, False])
-@settings(max_examples=200, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@settings(
+    max_examples=property_examples(200),
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow],
+)
 @given(problem=_problems(), seed=st.integers(min_value=0, max_value=3))
 def test_solve_is_valid_or_explicitly_infeasible(
     problem: InputIR, seed: int, optimize: bool
@@ -261,7 +266,11 @@ def test_solve_is_valid_or_explicitly_infeasible(
         assert layout.infeasibility is not None
 
 
-@settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@settings(
+    max_examples=property_examples(50),
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow],
+)
 @given(problem=_problems(), seed=st.integers(min_value=0, max_value=3))
 def test_solve_is_deterministic_for_a_given_problem_and_seed(problem: InputIR, seed: int) -> None:
     """The same problem + seed always yields the same layout (``solver.core``: no wall-clock).
@@ -416,7 +425,7 @@ def _layouts(draw: st.DrawFn, problem: InputIR) -> LayoutResult:
     )
 
 
-@settings(max_examples=300, deadline=None)
+@settings(max_examples=property_examples(300), deadline=None)
 @given(pair=_problems().flatmap(lambda p: st.tuples(st.just(p), _layouts(p))))
 def test_validate_reports_but_never_raises(pair: tuple[InputIR, LayoutResult]) -> None:
     """``validate`` answers for every schema-valid layout, however unrelated to the problem.

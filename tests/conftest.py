@@ -23,8 +23,13 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 import pytest
+
+from gtnh_solver.adapter import adapt_file
+from gtnh_solver.ir import InputIR, LayoutResult
+from gtnh_solver.solver import solve
 
 _DEFAULT_CPU_FRACTION = 0.8
 """Leave a core's worth of headroom. See the module docstring for the measurements behind it."""
@@ -125,3 +130,68 @@ def pytest_configure(config: pytest.Config) -> None:
             ),
             stacklevel=2,
         )
+
+
+# --------------------------------------------------------------- the shipped example lines
+
+_EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+_SAND = _EXAMPLES / "gtnh-sand.json"
+_NITROBENZENE = _EXAMPLES / "gtnh-nitrobenzene.json"
+
+
+def _solved(path: Path) -> tuple[InputIR, LayoutResult]:
+    """One genuine solve of a shipped line: ``adapt_file(path)`` with no physical dataset.
+
+    **The absent dataset is part of the key.** ``adapt_file(path)`` and
+    ``adapt_file(path, physical=_load_physical_or_warn())`` are different problems - the second
+    gives a known machine its real footprint and hatch slots - so a test that passes one cannot
+    be served the other. These fixtures cover the no-dataset form only, because that is what the
+    tests they replace were calling; anything wanting the resolved dataset keeps its own solve,
+    and docs/TESTING.md explains why the two configurations must stay distinguishable.
+    """
+    ir = adapt_file(path)
+    return ir, solve(ir)
+
+
+@pytest.fixture(scope="session")
+def _sand_session() -> tuple[InputIR, LayoutResult]:
+    return _solved(_SAND)
+
+
+@pytest.fixture(scope="session")
+def _nitrobenzene_session() -> tuple[InputIR, LayoutResult]:
+    return _solved(_NITROBENZENE)
+
+
+@pytest.fixture
+def solved_sand(_sand_session: tuple[InputIR, LayoutResult]) -> tuple[InputIR, LayoutResult]:
+    """The sand line adapted and annealed once per session, handed out as a private deep copy.
+
+    For a test that needs *a* real, valid layout to render, measure or validate. It is still a
+    genuine ``solve`` - the fixture runs the real thing - so a consumer asserting on the layout
+    is asserting on real solver output. What a consumer may *not* do is assert on the act of
+    solving: a determinism test needs two independent solves to compare and must call ``solve``
+    itself. ``test_cli`` has cached its own sand solve since the guide tests landed, with the
+    note that re-solving a real line per test made it the slowest file in the suite; this is
+    that fixture lifted to the whole suite.
+
+    The copy is not paranoia about a specific test: ``InputIR`` and ``LayoutResult`` are
+    ``StrictModel``, so they are mutable, and a session-scoped object that one test edits is a
+    failure the *next* test reports. A deep copy costs ~0.4ms against a ~570ms solve (~1:1350),
+    so the safe thing is also the free thing.
+    """
+    ir, layout = _sand_session
+    return ir.model_copy(deep=True), layout.model_copy(deep=True)
+
+
+@pytest.fixture
+def solved_nitrobenzene(
+    _nitrobenzene_session: tuple[InputIR, LayoutResult],
+) -> tuple[InputIR, LayoutResult]:
+    """The nitrobenzene line, same contract as :func:`solved_sand` - and the one that pays.
+
+    A nitrobenzene solve is ~5.6s against sand's ~0.6s, and it was being run from scratch by
+    every module that wanted a realistic layout with actual pipes in it.
+    """
+    ir, layout = _nitrobenzene_session
+    return ir.model_copy(deep=True), layout.model_copy(deep=True)

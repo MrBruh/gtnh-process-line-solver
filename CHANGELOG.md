@@ -123,6 +123,28 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   correct render, the gap is reported in the texture summary instead.
 
 ### Changed
+- **The shipped example lines are solved once per session, not once per test (`tests/`).** A probe
+  over a serial run put 53.0s of 75s inside `solve()`, and the same two lines were being re-solved
+  from scratch by several modules that only needed *a* real layout to render or validate. A
+  nitrobenzene solve is ~5.6s.
+
+  `solved_sand` and `solved_nitrobenzene` in `tests/conftest.py` do the real `adapt_file` + `solve`
+  once and hand each test a private deep copy. The copy is load-bearing rather than defensive:
+  `InputIR` and `LayoutResult` are `StrictModel`, so a session-scoped object one test edits is a
+  failure the *next* test reports, and a deep copy is ~0.4ms against a ~570ms solve. Tests whose
+  subject is the act of solving keep their own call - determinism needs two independent solves to
+  compare, and a different `physical` dataset, `objective`, `seed` or `optimize` is a different
+  problem that cannot be served the cached one.
+
+  Property-test budgets now come from `property_examples()` (`tests/_helpers.py`): the full
+  200/50/300 whenever `CI` is set, a quarter of it locally, tunable with
+  `GTNH_TEST_HYPOTHESIS_FRACTION`. Every PR is still held to the full generated space; only local
+  iteration is cheaper. Scaled rather than re-set per test, so the ratio between the three budgets
+  survives - the largest one fuzzes `validate`, not `solve`.
+
+  Local `pytest` goes 175s to 93s; a CI-equivalent run (full budget, all cores) goes 175s to 141s,
+  with coverage unchanged at 98%.
+
 - **A local test run leaves the machine usable (`tests/conftest.py`).** `addopts` carries
   `-n auto`, which means *every* core, so `pytest` pinned the box at 100% for its whole run and
   nothing else stayed responsive. Two dials now bound it, both off when `CI` is set so GitHub
