@@ -123,6 +123,28 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   correct render, the gap is reported in the texture summary instead.
 
 ### Changed
+- **Insertion ranking stops re-deriving what every candidate shares (`placement/`).** A
+  nitrobenzene solve spent 63% of itself in `_best_insertion`, which evaluates ~50
+  (origin, orientation) candidates per insertion and rebuilt the same already-placed quantities
+  for each one. Output is byte-identical - both shipped lines hash the same before and after -
+  because nothing about the cost changed, only how many times its invariant parts are computed.
+
+  - A net's half-perimeter is the bounding box of its members' centroids. Every member but the
+    candidate is fixed during an insertion, so `_placed_invariants` precomputes that box once per
+    net (`_NetBox`) and each candidate only widens it. Same two operands subtracted, so the span
+    is identical; what goes away is ~1.9M `max()`, ~2.1M `min()` and ~1.9M list appends per solve.
+    The penalized-power term cannot collapse to a box (it is a nearest-member distance, not a
+    span) but its centroids are hoisted the same way (`_PowerAttach`).
+  - `Machine.is_power_source` is a Pydantic property that rescans `faces.ports` on every read and
+    depends on the machine alone, yet `_feed_ok` was asking it once per candidate - ~647k times a
+    solve, ~4% of it. `_feed_ok_for` takes the answer as an argument so the loop hoists it, and
+    `_feed_ok` delegates, keeping the feed rule in one place.
+
+  Nitrobenzene solves in 6.32s against 7.95s, a 20% cut (medians of 5 runs, measured back to back
+  against `main` in one session; absolute times drift with machine state, the ratio does not).
+  `_cost` is deliberately untouched: it is a global recompute over all placements where any of
+  them may have moved, so it has no equivalent cross-call invariant to hoist.
+
 - **The shipped example lines are solved once per session, not once per test (`tests/`).** A probe
   over a serial run put 53.0s of 75s inside `solve()`, and the same two lines were being re-solved
   from scratch by several modules that only needed *a* real layout to render or validate. A

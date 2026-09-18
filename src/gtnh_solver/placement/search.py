@@ -139,6 +139,36 @@ _P_SWAP = 0.67
 #: weigh ``1.0`` plus any feedback penalty; a power net appears here only once a feedback penalty
 #: puts it in play, carrying that penalty (module docstring).
 _WeightedNet = tuple[list[str], float]
+_Centroid = tuple[float, float, float]
+
+
+class _NetBox(NamedTuple):
+    """One wire net's HPWL bounding box over the members already placed, and the net's weight.
+
+    The half-perimeter of a net is the bounding box of *all* its members' centroids. During an
+    insertion every member but the candidate is fixed, so their box is the same for every
+    candidate origin and orientation: precompute it once and each candidate only has to widen it.
+    """
+
+    weight: float
+    x0: float
+    x1: float
+    y0: float
+    y1: float
+    z0: float
+    z1: float
+
+
+class _PowerAttach(NamedTuple):
+    """One penalized power net's weight and the centroids of its already-placed members.
+
+    Unlike :class:`_NetBox` this cannot collapse to a box - the term is the distance to the
+    *nearest* member (the increment Prim would pay), not a span - but the centroids themselves are
+    still invariant across candidates, so they are computed once rather than per candidate.
+    """
+
+    weight: float
+    centroids: list[_Centroid]
 
 
 @dataclass(frozen=True)
@@ -466,9 +496,21 @@ def _feed_ok(machine: Machine, origin: CellCoord, orientation: Facing, region: C
     """Whether placing ``machine`` here honors the power-source feed rule (trivially true for
     non-sources): a source's front face is its reserved external-feed face and must lie flush on
     the region boundary (docs/DOMAIN.md; validator-enforced)."""
-    return not machine.is_power_source or front_on_boundary(
-        origin, machine.footprint, orientation, region
-    )
+    return _feed_ok_for(machine.is_power_source, machine, origin, orientation, region)
+
+
+def _feed_ok_for(
+    is_source: bool, machine: Machine, origin: CellCoord, orientation: Facing, region: CellBox
+) -> bool:
+    """:func:`_feed_ok` with the source test already answered, for callers that ask in a loop.
+
+    ``Machine.is_power_source`` is a Pydantic property that rescans ``faces.ports`` on every read,
+    and it depends on the machine alone - never on where the machine is put. ``_best_insertion``
+    asks it once per (origin, orientation) pair, which measured at ~4% of a nitrobenzene solve for
+    an answer that cannot change inside the loop. Splitting the flag out keeps the rule itself in
+    one place rather than inlining ``front_on_boundary`` at the hot call site.
+    """
+    return not is_source or front_on_boundary(origin, machine.footprint, orientation, region)
 
 
 def _feed_orientation(
@@ -714,6 +756,43 @@ def _placed_neighbor_count(
     return sum(1 for nb in adjacency.get(machine_id, set()) if nb in placed_ids)
 
 
+def _placed_invariants(
+    machine_id: str, placed_pos: dict[str, Placement], ctx: _SearchContext
+) -> tuple[list[_NetBox], list[_PowerAttach]]:
+    """Everything :func:`_marginal_insertion_cost` needs that does NOT depend on the candidate.
+
+    An insertion evaluates ~50 (origin, orientation) pairs, and the wire and cable terms were
+    re-deriving the same already-placed centroids for every one of them. Both terms reduce to a
+    fixed summary of the placed members - a bounding box for HPWL, the centroid list for the MST
+    pull - so this computes each once per insertion and the candidate loop just reads them.
+    """
+    centroids = {mid: _center(q, ctx.machines[mid]) for mid, q in placed_pos.items()}
+
+    def placed_centroids(ids: list[str]) -> list[_Centroid]:
+        return [centroids[mid] for mid in ids if mid != machine_id and mid in placed_pos]
+
+    net_boxes = []
+    for ids, weight in ctx.machine_nets[machine_id]:
+        pts = placed_centroids(ids)
+        if not pts:
+            continue  # nothing placed to span yet: the net costs nothing until one of them is
+        net_boxes.append(
+            _NetBox(
+                weight,
+                min(c[0] for c in pts),
+                max(c[0] for c in pts),
+                min(c[1] for c in pts),
+                max(c[1] for c in pts),
+                min(c[2] for c in pts),
+                max(c[2] for c in pts),
+            )
+        )
+    power = [
+        _PowerAttach(weight, placed_centroids(ids)) for ids, weight in ctx.machine_power[machine_id]
+    ]
+    return net_boxes, power
+
+
 def _best_insertion(
     p: Placement,
     placed: list[Placement],
@@ -730,7 +809,9 @@ def _best_insertion(
     acceptance globally.
     """
     m = ctx.machines[p.machine_id]
+    is_source = m.is_power_source  # fixed for this machine; see _feed_ok_for
     placed_pos = {q.machine_id: q for q in placed}
+    net_boxes, power_attach = _placed_invariants(p.machine_id, placed_pos, ctx)
     best: tuple[CellCoord, Facing] | None = None
     best_cost = math.inf
     for origin in _candidate_origins(p, m, placed, ctx, rng):
@@ -740,7 +821,7 @@ def _best_insertion(
         # square-base machine (every machine in both shipped examples) instead of four.
         fits: dict[tuple[int, int, int], bool] = {}
         for orientation in m.orientation_options:
-            if not _feed_ok(m, origin, orientation, ctx.region):
+            if not _feed_ok_for(is_source, m, origin, orientation, ctx.region):
                 continue  # a source's feed face must stay on the boundary
             box = rotated_footprint(m.footprint, orientation)
             key = (box.sx, box.sy, box.sz)
@@ -756,7 +837,9 @@ def _best_insertion(
                 fits[key] = ok
             if not ok:
                 continue
-            cost = _marginal_insertion_cost(p.machine_id, origin, orientation, m, placed_pos, ctx)
+            cost = _marginal_insertion_cost(
+                p.machine_id, origin, orientation, m, placed_pos, net_boxes, power_attach, ctx
+            )
             if cost < best_cost:
                 best_cost, best = cost, (origin, orientation)
     if best is not None:
@@ -772,6 +855,8 @@ def _marginal_insertion_cost(
     orientation: Facing,
     m: Machine,
     placed_pos: dict[str, Placement],
+    net_boxes: list[_NetBox],
+    power_attach: list[_PowerAttach],
     ctx: _SearchContext,
 ) -> float:
     """The cost terms that change with where ``machine_id`` goes: the weighted HPWL of its own
@@ -780,32 +865,33 @@ def _marginal_insertion_cost(
     increment Prim would pay to attach this machine to the trunk MST), minus the auto-output
     reward for the pairs the candidate makes face-adjacent. A cheap marginal proxy of ``_cost``
     for ranking candidate insertions; the annealing loop's full ``_cost`` still gates acceptance
-    (the footprint/volume terms, which this per-machine view cannot see, included)."""
+    (the footprint/volume terms, which this per-machine view cannot see, included).
+
+    ``net_boxes`` and ``power_attach`` come from :func:`_placed_invariants` and summarise the
+    members that are already placed - the part of both terms that is the same for every candidate.
+    Only the auto reward is irreducibly per-candidate: face adjacency depends on this origin and
+    orientation, which is what the term is there to measure."""
     box = rotated_footprint(m.footprint, orientation)  # same centroid rule as _center
     cx = origin.x + box.sx / 2
     cy = origin.y + box.sy / 2
     cz = origin.z + box.sz / 2
+    # Widening the precomputed box with this candidate's centroid *is* the HPWL, so the span is
+    # identical to taking min/max over the members plus the candidate - the same two operands,
+    # just not rebuilt per candidate. Inlined conditionals rather than min()/max(): this runs
+    # ~236k times a solve and the call overhead was measurable.
     wire = 0.0
-    for ids, weight in ctx.machine_nets[machine_id]:
-        xs, ys, zs = [cx], [cy], [cz]
-        for mid in ids:
-            if mid != machine_id and mid in placed_pos:
-                ox, oy, oz = _center(placed_pos[mid], ctx.machines[mid])
-                xs.append(ox)
-                ys.append(oy)
-                zs.append(oz)
-        if len(xs) > 1:
-            wire += weight * (max(xs) - min(xs) + max(ys) - min(ys) + max(zs) - min(zs))
-    cable = 0.0
-    for ids, weight in ctx.machine_power[machine_id]:
-        attach = min(
-            (
-                _manhattan((cx, cy, cz), _center(placed_pos[mid], ctx.machines[mid]))
-                for mid in ids
-                if mid != machine_id and mid in placed_pos
-            ),
-            default=0.0,
+    for weight, x0, x1, y0, y1, z0, z1 in net_boxes:
+        wire += weight * (
+            (cx if cx > x1 else x1)
+            - (cx if cx < x0 else x0)
+            + (cy if cy > y1 else y1)
+            - (cy if cy < y0 else y0)
+            + (cz if cz > z1 else z1)
+            - (cz if cz < z0 else z0)
         )
+    cable = 0.0
+    for weight, centroids in power_attach:
+        attach = min((_manhattan((cx, cy, cz), c) for c in centroids), default=0.0)
         cable += weight * attach
     auto = 0
     here = Placement(machine_id=machine_id, cell=origin, orientation=orientation)
