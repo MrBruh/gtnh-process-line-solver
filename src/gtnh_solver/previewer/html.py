@@ -70,7 +70,7 @@ _TEMPLATE = """<!doctype html>
   <button id="reset">reset camera</button>
   <button id="rateUnit" title="toggle throughput units">rate: per tick</button>
   <button id="stateToggle" title="toggle machine idle / running skins">state: idle</button>
-  <button id="arrowToggle" title="show / hide the auto-output arrows">arrows: on</button>
+  <button id="arrowToggle" title="show / hide the auto-output arrows">auto-output arrows: on</button>
 </div>
 <div id="nametag"></div>
 
@@ -558,7 +558,7 @@ if (arrows.length === 0) {
 } else {
   arrowToggle.addEventListener('click', () => {
     arrowsOn = !arrowsOn;
-    arrowToggle.textContent = 'arrows: ' + (arrowsOn ? 'on' : 'off');
+    arrowToggle.textContent = 'auto-output arrows: ' + (arrowsOn ? 'on' : 'off');
     applyLayer();
   });
 }

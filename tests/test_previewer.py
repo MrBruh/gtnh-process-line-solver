@@ -300,6 +300,16 @@ def test_render_html_draws_auto_output_arrows_for_single_block_sources_only() ->
     assert arrows.index(guard) < arrows.index("faceArrow(")  # ...before any decal is built for it
 
 
+def test_render_html_labels_the_auto_output_toggle_identically_before_and_after_a_click() -> None:
+    # The label is written twice, the same way the sibling rate/state toggles do it: once in the
+    # markup for the initial render, once in the click handler that rewrites it. Change one and the
+    # button silently renames itself the first time it is pressed, which no other test would catch.
+    html = render_html(_sand_scene())
+    label = "auto-output arrows: "
+    assert f">{label}on</button>" in html  # what the page loads with...
+    assert f"arrowToggle.textContent = '{label}'" in html  # ...and what a click restates
+
+
 def test_scene_still_carries_a_multiblock_auto_connection_it_draws_no_arrow_for() -> None:
     # The other half of #153: the arrow goes, the CONNECTION stays. It is a real connection - the
     # build guide lists it and the validator re-checks it - so the fix belongs in the renderer, not

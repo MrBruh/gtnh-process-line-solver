@@ -146,6 +146,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   old list was one tuple; it only appears against a real structure dump, which is the trap
   docs/TESTING.md names.
 
+- **The previewer's arrow toggle is labelled `auto-output arrows` (`previewer/`).** It read just
+  `arrows: on`, in a HUD whose own hint line uses "arrows" for the arrow *keys* that pan the camera,
+  so the button did not say which arrows it hid. The label is unchanged in meaning and the title
+  attribute already said it; only the button text is longer.
+
 - **Insertion ranking stops scoring candidates that cannot win (`placement/`).**
   `_marginal_insertion_cost` now takes the incumbent's cost as a `bound` and returns `inf` above
   it, skipping the whole auto term for candidates already out of the running: the `Placement` it
