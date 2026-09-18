@@ -10,9 +10,12 @@ for a multiblock and a face for a single block (``_grid.claim_key``).
 from __future__ import annotations
 
 from itertools import pairwise
+from pathlib import Path
 
 import pytest
 
+from gtnh_solver.adapter.power import synthesize_power
+from gtnh_solver.dataset import load_physical_dataset
 from gtnh_solver.ir import (
     CellBox,
     CellCoord,
@@ -22,24 +25,31 @@ from gtnh_solver.ir import (
     HatchSlot,
     InputIR,
     IODirection,
+    LayoutStatus,
     Machine,
     MachineFaceRef,
     Net,
+    Placement,
     Port,
 )
+from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 from gtnh_solver.ir.geometry import Cell
 from gtnh_solver.ir.output import (
     LayoutResult,
-    LayoutStatus,
     Route,
     Segment,
     Terminal,
 )
 from gtnh_solver.router import claims_by_machine, route, route_power
 from gtnh_solver.router._grid import claim_key, dock_candidates
+from gtnh_solver.solver.core import _assemble
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
 from tests._helpers import at, power_source
+
+#: The committed two-machine fixture dump, named so a test can pin it instead of inheriting
+#: whichever dataset this checkout happens to resolve.
+_FIXTURE_DATASET = Path(__file__).resolve().parents[1] / "data" / "multiblocks"
 
 _REGION = CellBox(sx=12, sy=6, sz=12)
 
@@ -453,3 +463,119 @@ def test_validator_rejects_two_connections_wanting_the_same_casing_cell() -> Non
     down = _terminal("b", Facing.DOWN, (2, 0, 3))  # behind it: (2, 1, 3) - the same block
     problem, layout = _layout(m, [west, down], (2, 1, 2))
     assert ViolationCode.TERMINAL_HATCH_CONTENTION in _codes(problem, layout)
+
+
+# ------------------------------------------------------- #131: a free connection keeps its cells
+
+
+def _fixture_multiblock(mid: str, key: str, ports: list[Port]) -> Machine:
+    """A machine built from a committed fixture controller's real structure.
+
+    The fixture directory is passed explicitly rather than resolved: this test turns on which
+    casing cells exist, so a local ``data/<version>/`` dump would quietly change what it means
+    (docs/TESTING.md, "CI sees a smaller dataset than you do").
+    """
+    record = load_physical_dataset(_FIXTURE_DATASET).machines[key]
+    variant = record.variant_for(0)
+    return Machine(
+        id=mid,
+        type=record.key,
+        footprint=record.footprint,
+        hatch_cells=variant.hatch_cells or None,
+        hatch_slots=variant.slots,
+        faces=FaceSpec(ports=ports),
+        voltage_tier="LV",
+        eut=120.0,
+        orientation_options=list(HORIZONTAL_FACINGS_ORDERED),
+    )
+
+
+def _auto_output_line() -> tuple[InputIR, list[Placement]]:
+    """Two fixture multiblocks posed so the router covers their net with a free auto-output.
+
+    The poses are the ones from #131: on this face the two structures offer exactly ONE touching
+    pair of casing cells, which is what makes the collision reachable at all.
+    """
+    machines = [
+        _fixture_multiblock(
+            "m0",
+            "Vacuum Freezer",
+            [Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)],
+        ),
+        _fixture_multiblock(
+            "m1",
+            "Electric Blast Furnace",
+            [Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT)],
+        ),
+    ]
+    nets = [
+        Net(
+            id="n0",
+            commodity=Commodity.ITEM,
+            fluid_or_item="gt.dust.iron",
+            throughput=1.0,
+            endpoints=[
+                MachineFaceRef(machine_id="m0", port_id="out"),
+                MachineFaceRef(machine_id="m1", port_id="in"),
+            ],
+        )
+    ]
+    machines, nets = synthesize_power(machines, nets)
+    problem = InputIR(bounding_region=CellBox(sx=9, sy=6, sz=9), machines=machines, nets=nets)
+    placements = [
+        at("m0", 3, 0, 4),
+        at("m1", 0, 1, 6, orientation=Facing.SOUTH),
+        at("power-source:MV", 3, 3, 0),
+    ]
+    return problem, placements
+
+
+def test_an_energy_hatch_cannot_take_the_cell_a_free_connection_reserved() -> None:
+    """The half of #131 that is ``route_power``'s own contract: given the claims, it honours them.
+
+    Deliberately *not* the regression guard - it composes the claim map itself, so it passes with
+    or without the solver fix. What it pins is that handing those cells over is sufficient, which
+    is what makes the one-line merge in ``solver._assemble`` the right fix rather than a patch over
+    a deeper problem in the power router. ``test_a_free_connection_gets_both_its_hatches`` is the
+    test that fails when the merge is removed.
+    """
+    problem, placements = _auto_output_line()
+    routing = route(problem, placements)
+    assert routing.claimed, "the line under test must actually have a free connection"
+
+    claims = claims_by_machine(routing.routes, {m.id: m for m in problem.machines})
+    for machine_id, cells in routing.claimed.items():
+        claims.setdefault(machine_id, set()).update(cells)
+    power = route_power(problem, placements, extra_obstacles=set(), claimed_cells=claims)
+
+    docked = {
+        t.machine_id: claim_key(t, {m.id: m for m in problem.machines}[t.machine_id])
+        for r in power.routes
+        for t in r.terminals
+    }
+    for machine_id, reserved in routing.claimed.items():
+        assert docked.get(machine_id) not in reserved
+
+
+def test_a_free_connection_gets_both_its_hatches() -> None:
+    """The whole of #131, through the function that composes the two passes.
+
+    ``solver._assemble`` is the seam, not ``solve``: the poses are the point of this case, and
+    ``solve`` does its own placing. Before the fix this returned a VALID-looking layout whose net
+    was covered by a free auto-output and carried neither an output bus nor an input bus - two
+    multiblocks that form correctly and move nothing - and, once ``PORT_HATCH_MISSING`` existed to
+    see it, a ``partial_invalid`` blaming the user's input for a solver bug.
+
+    ``repair=False`` for determinism: the repair pass relocates power sources, and this asserts on
+    specific casing cells.
+    """
+    problem, placements = _auto_output_line()
+    layout, failed = _assemble(problem, tuple(placements), seed=0, repair=False)
+
+    assert layout.status is LayoutStatus.VALID, layout.infeasibility
+    assert not failed
+    assert "n0" in {a.net_id for a in layout.auto_connections}
+    kinds = {(h.machine_id, h.kind) for h in layout.hatches}
+    assert ("m0", "OutputBus") in kinds  # the source ejects through its own bus
+    assert ("m1", "InputBus") in kinds  # and the target receives through its own
+    assert validate(problem, layout).ok
