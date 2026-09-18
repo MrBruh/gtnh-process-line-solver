@@ -105,6 +105,21 @@ def _gt_tile(
     which is the paste-fidelity half of #96 and deliberately absent: a build ghost wants the right
     block in the right orientation, and inventing a half-configured machine would be a worse lie
     than an unconfigured one.
+
+    **``eRotation`` / ``eFlip`` are deliberately not written.** A multiblock controller
+    (``MTEEnhancedMultiBlockBase``) stores its StructureLib alignment in them, but they default to
+    exactly what we would write: ``Rotation.byIndex(0)`` is ``NORMAL`` and ``Flip.byIndex(0)`` is
+    ``NONE`` (both enums declare those first, ``getIndex()`` is ``ordinal()``), and ``getByte`` on
+    an absent tag returns 0. Every controller in ``tests/golden/schematic/`` carries 0/0 whatever
+    way it faces, so there is nothing else to copy.
+
+    **Known Schematica quirk, not a defect here (measured 2026-09-18):** a NORTH-facing controller
+    draws upside down in Schematica's *ghost overlay*. It is the renderer, not the file: the
+    golden - which Schematica itself wrote from a working in-world build, and which records the
+    same ``mFacing=2, eRotation=0, eFlip=0`` we emit - renders the same way, while placing the
+    block for real at that spot is correct, and sweeping ``eRotation`` through all four values
+    changes nothing. EAST, WEST and SOUTH are unaffected. Do not "fix" it by perturbing the
+    facing: that would corrupt a file that is already right.
     """
     tile = nbt.Compound(
         {
