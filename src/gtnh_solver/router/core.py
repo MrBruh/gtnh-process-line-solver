@@ -66,6 +66,7 @@ from gtnh_solver.ir import (
     Infeasibility,
     InputIR,
     Machine,
+    MachineFaceRef,
     Net,
     Placement,
     Route,
@@ -130,7 +131,12 @@ class RouteResult:
         return self.infeasibility is None
 
 
-def route(problem: InputIR, placements: Sequence[Placement]) -> RouteResult:
+def route(
+    problem: InputIR,
+    placements: Sequence[Placement],
+    *,
+    reserved: Collection[Cell] = (),
+) -> RouteResult:
     """Connect each non-ME net of ``problem`` over the given placements: auto-output, then pipes.
 
     The router first decides, from the final placements + orientations, which nets a free
@@ -142,6 +148,11 @@ def route(problem: InputIR, placements: Sequence[Placement]) -> RouteResult:
     a hard-walled path, or genuine congestion the round budget could not price apart (then a
     maximal collision-free subset is kept and the rest reported). Crude: one channel per cell;
     the per-edge multi-channel cap (``Segment.channel``) is later lane-D work.
+
+    ``reserved`` are cells another router has been promised and this one may not spend -
+    in practice the power docks held back by :func:`router.power.reserve_power_docks`,
+    because power routes after the pipes and cannot outbid a frozen dock (#76). They are
+    hard here in both senses: no pipe crosses one and no terminal docks on one.
     """
     assignment = assign_auto_outputs(problem, placements)
     auto_connections = assignment.connections
@@ -157,7 +168,7 @@ def route(problem: InputIR, placements: Sequence[Placement]) -> RouteResult:
 
     # A free connection still costs its two machines a casing cell each (an output hatch ejects
     # through its own front face), so a pipe must not dock onto one of those blocks.
-    routes, failures = _negotiate(problem, placements, nets, assignment.claimed)
+    routes, failures = _negotiate(problem, placements, nets, assignment.claimed, reserved)
     if not failures:
         return RouteResult(
             routes=tuple(routes),
@@ -182,6 +193,7 @@ def _negotiate(
     placements: Sequence[Placement],
     nets: Sequence[Net],
     spent: Mapping[str, Collection[Cell]] = MappingProxyType({}),
+    reserved: Collection[Cell] = (),
 ) -> tuple[list[Route], dict[str, Infeasibility]]:
     """Route ``nets`` by negotiated congestion; return ``(routes, {net_id: why it failed})``.
 
@@ -208,7 +220,10 @@ def _negotiate(
     machines = {m.id: m for m in problem.machines}
     placement_by_machine = placement_index(placements)
     region = problem.bounding_region
-    hard = obstacle_cells(problem, placements, machines)
+    # ``reserved`` joins the machine bodies rather than the prices: a promise another router
+    # is owed is not tradeable, and folding it in here covers docking and pathing at once,
+    # since _dock_net takes this same set as its obstacles.
+    hard = obstacle_cells(problem, placements, machines) | set(reserved)
 
     # Dock every net first, against a shared claim set so no two nets dock the same cell. A net
     # that cannot dock fails now and leaves no trace (its partial docks are not folded in).
@@ -222,8 +237,35 @@ def _negotiate(
     # (``docked``) does not catch. Power docks against this same pool, seeded from the terminals
     # below, so every commodity competes for one budget rather than three.
     claimed: dict[str, set[Cell]] = {k: set(v) for k, v in spent.items()}
+    state = _DockState(
+        docked=docked,
+        claimed=claimed,
+        owner={},
+        terminals_by_net=terminals_by_net,
+        term_cells_by_net=term_cells_by_net,
+        nets_by_id={n.id: n for n in nets},
+    )
     for net in nets:
         picked = _dock_net(net, placement_by_machine, machines, hard, docked, region, claimed)
+        if isinstance(picked, Infeasibility):
+            # Greedy order, not geometry, may be what stranded it: ask the holders of the cells
+            # it wanted to shuffle along, then dock it again (:func:`_make_room`).
+            starved = _starved_endpoint(
+                net, placement_by_machine, machines, hard, docked, region, claimed
+            )
+            if starved is not None and _make_room(
+                starved.machine_id,
+                starved.port_id,
+                placement_by_machine,
+                machines,
+                hard,
+                region,
+                state,
+                _MAX_RESEAT_DEPTH,
+            ):
+                picked = _dock_net(
+                    net, placement_by_machine, machines, hard, docked, region, claimed
+                )
         if isinstance(picked, Infeasibility):
             failures[net.id] = picked
             continue
@@ -231,10 +273,11 @@ def _negotiate(
         terminals_by_net[net.id] = picked
         term_cells_by_net[net.id] = chosen
         docked |= chosen
-        for terminal in picked:
+        for index, terminal in enumerate(picked):
             claimed.setdefault(terminal.machine_id, set()).add(
                 claim_key(terminal, machines[terminal.machine_id])
             )
+            state.owner[terminal.cell.as_tuple()] = (net.id, index)
 
     active = [net for net in nets if net.id not in failures]
     all_terms: set[Cell] = set().union(*term_cells_by_net.values()) if term_cells_by_net else set()
@@ -332,6 +375,170 @@ def _negotiate(
         if net.id in routed_ids
     ]
     return routes, failures
+
+
+#: How many docks deep the re-seat search will look to free a contested cell. Depth 1 already
+#: covers "a neighbour is sitting on the only cell I can use but has three of its own"; the extra
+#: levels cover a chain of those. Bounded because this runs per stranded net, and an unbounded
+#: search would pay a lot to rescue a layout the placer should not have produced.
+_MAX_RESEAT_DEPTH = 3
+
+
+@dataclass
+class _DockState:
+    """The mutable docking bookkeeping shared by the greedy pass and the re-seat rescue.
+
+    ``owner`` is the inverse of the assignment - which net's which endpoint holds a given cell -
+    which is what lets a stranded net find out who to ask to move.
+    """
+
+    docked: set[Cell]
+    claimed: dict[str, set[Cell]]
+    owner: dict[Cell, tuple[str, int]]
+    terminals_by_net: dict[str, list[Terminal]]
+    term_cells_by_net: dict[str, set[Cell]]
+    nets_by_id: dict[str, Net]
+
+
+def _starved_endpoint(
+    net: Net,
+    placement_by_machine: dict[str, Placement],
+    machines: dict[str, Machine],
+    hard: set[Cell],
+    docked: set[Cell],
+    region: CellBox,
+    claimed: Mapping[str, Collection[Cell]],
+) -> MachineFaceRef | None:
+    """The first endpoint of ``net`` with no free cell left to dock on, if any."""
+    for endpoint in net.endpoints:
+        placement = placement_by_machine.get(endpoint.machine_id)
+        machine = machines.get(endpoint.machine_id)
+        if placement is None or machine is None:
+            continue
+        if not dock_candidates(
+            endpoint.port_id,
+            placement,
+            machine,
+            hard,
+            docked,
+            region,
+            claimed.get(endpoint.machine_id, ()),
+        ):
+            return endpoint
+    return None
+
+
+def _make_room(
+    machine_id: str,
+    port_id: str,
+    placement_by_machine: dict[str, Placement],
+    machines: dict[str, Machine],
+    hard: set[Cell],
+    region: CellBox,
+    state: _DockState,
+    depth: int,
+) -> bool:
+    """Free one cell this port could dock on, by re-seating whoever holds it. True if it worked.
+
+    Docking is greedy and net-by-net, so an early net can take the one cell a later net needed
+    while having somewhere else to go itself - the assignment exists, the order just missed it,
+    and the later net is reported as ``face_reachability`` on a machine that is not actually
+    short of room (#76). This is the augmenting path that repairs exactly that: ask each holder
+    of a wanted cell to move aside, recursively, and take the first one that can.
+
+    Runs **only after a net has already failed** to dock, so a layout whose greedy pass succeeds
+    docks precisely as it did before - this cannot change a working line, only rescue a stuck one.
+    """
+    placement = placement_by_machine.get(machine_id)
+    machine = machines.get(machine_id)
+    if placement is None or machine is None:
+        return False
+    # The cells this port could use if they were not already spoken for, in _grid's deterministic
+    # order. ``docked`` is passed empty precisely so the held cells are the ones we see.
+    for terminal in dock_candidates(
+        port_id, placement, machine, hard, set(), region, state.claimed.get(machine_id, ())
+    ):
+        cell = terminal.cell.as_tuple()
+        held = state.owner.get(cell)
+        if held is None:
+            continue  # free already, or held by nothing this pass placed
+        if _reseat(held, cell, placement_by_machine, machines, hard, region, state, depth):
+            return True
+    return False
+
+
+def _reseat(
+    held: tuple[str, int],
+    cell: Cell,
+    placement_by_machine: dict[str, Placement],
+    machines: dict[str, Machine],
+    hard: set[Cell],
+    region: CellBox,
+    state: _DockState,
+    depth: int,
+) -> bool:
+    """Move the terminal holding ``cell`` somewhere else, so the caller can have it.
+
+    Lifts the terminal first - its own cell and casing claim would otherwise hide its
+    alternatives from :func:`dock_candidates` - and puts it straight back if nothing is found, so
+    a failed attempt leaves the assignment exactly as it was.
+    """
+    net_id, index = held
+    terminal = state.terminals_by_net[net_id][index]
+    endpoint = state.nets_by_id[net_id].endpoints[index]
+    placement = placement_by_machine.get(endpoint.machine_id)
+    machine = machines.get(endpoint.machine_id)
+    if placement is None or machine is None:
+        return False
+    key = claim_key(terminal, machine)
+    state.docked.discard(cell)
+    state.claimed.get(endpoint.machine_id, set()).discard(key)
+
+    def elsewhere() -> Terminal | None:
+        for option in dock_candidates(
+            endpoint.port_id,
+            placement,
+            machine,
+            hard,
+            state.docked,
+            region,
+            state.claimed.get(endpoint.machine_id, ()),
+        ):
+            if option.cell.as_tuple() != cell:
+                return option
+        return None
+
+    moved = elsewhere()
+    # Nowhere for it either - so ask ITS neighbours to shuffle, one level further out.
+    if (
+        moved is None
+        and depth > 0
+        and _make_room(
+            endpoint.machine_id,
+            endpoint.port_id,
+            placement_by_machine,
+            machines,
+            hard,
+            region,
+            state,
+            depth - 1,
+        )
+    ):
+        moved = elsewhere()
+    if moved is None:
+        state.docked.add(cell)  # untouched: put the terminal back exactly where it was
+        state.claimed.setdefault(endpoint.machine_id, set()).add(key)
+        return False
+
+    new_cell = moved.cell.as_tuple()
+    state.terminals_by_net[net_id][index] = moved
+    state.term_cells_by_net[net_id].discard(cell)
+    state.term_cells_by_net[net_id].add(new_cell)
+    state.docked.add(new_cell)
+    state.claimed.setdefault(moved.machine_id, set()).add(claim_key(moved, machine))
+    del state.owner[cell]
+    state.owner[new_cell] = (net_id, index)
+    return True
 
 
 def _dock_net(

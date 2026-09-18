@@ -168,10 +168,8 @@ def test_an_unconsumed_output_collects_into_one_buffer_for_the_whole_group() -> 
 def test_the_committed_parallel_fixture_expands_and_wires() -> None:
     """``gtnh-parallel-sand.json`` is the acceptance case #76 was filed for: 3 nodes at count 3.
 
-    It asserts the adapter's half only. The layout does **not** reach VALID yet, for a reason outside
-    the adapter: the item router freezes its dock cells up front and ``solver/core`` routes power last
-    against every item route cell as a hard obstacle, so power cannot dock even though every machine
-    has enough free faces. Cross-router cell contention, tracked as the rest of #76.
+    It asserts the adapter's half only; that the line now lays out is
+    ``test_solver.test_solve_the_parallel_line_reaches_a_valid_layout``.
     """
     plan = load_plan(_PARALLEL_SAND)
     assert {node.machine_count for node in plan.nodes} == {3}

@@ -110,6 +110,67 @@ class PowerRouteResult:
         return self.infeasibility is None
 
 
+def reserve_power_docks(
+    problem: InputIR,
+    placements: Sequence[Placement],
+    *,
+    claimed_cells: Mapping[str, Collection[Cell]] = MappingProxyType({}),
+) -> set[Cell]:
+    """One free dock cell held back per power endpoint, before any pipe is laid.
+
+    Power routes **last** (``solver.core``), with every item/fluid route cell already a hard
+    obstacle, and the item router freezes its own docks up front - negotiated congestion prices
+    *routes*, never docks. So a machine whose last usable faces are taken by pipe cells has no
+    face left to put an energy hatch on, and the net fails ``face_reachability`` even though the
+    placement is fine: ``route_power`` on the identical placement, run alone, succeeds. That is a
+    routing-**order** defect, not a packing one (#76).
+
+    The cure is to take one cell per power endpoint out of the item router's reach before it
+    starts. The reservation is a *guarantee of availability*, never a prescription: these cells
+    are hard for pipes but ordinary free cells for :func:`route_power`, which still picks
+    whichever face yields the shortest cable. Held back per endpoint rather than per machine
+    because a sink is a **connection** - a draw spread over several energy hatches puts the same
+    machine on the net once per hatch, and two hatches are two casing cells.
+
+    Accumulates, so no two endpoints hold the same cell (the ``docked`` argument) and no two
+    hatches of one machine hold the same casing cell (:func:`_grid.claim_key`, which for a
+    slot-less single block IS the dock cell). An endpoint with nothing free to hold back is
+    skipped rather than raised on: this pass is an optimization, and ``route_power`` is the one
+    place entitled to report a real dock infeasibility.
+    """
+    if problem.me_toggles.toggled(Commodity.POWER):
+        return set()  # power rides the ME network; there is no cable, so no dock to protect
+    machines = {m.id: m for m in problem.machines}
+    placement_by_machine = placement_index(placements)
+    obstacles = obstacle_cells(problem, placements, machines)
+    region = problem.bounding_region
+    reserved: set[Cell] = set()
+    claimed: dict[str, set[Cell]] = {k: set(v) for k, v in claimed_cells.items()}
+    for net in problem.nets:
+        if net.commodity is not Commodity.POWER:
+            continue
+        for endpoint in net.endpoints:
+            placement = placement_by_machine.get(endpoint.machine_id)
+            machine = machines.get(endpoint.machine_id)
+            if placement is None or machine is None:
+                continue  # an unplaced machine is the placer's problem to report, not ours
+            candidates = dock_candidates(
+                endpoint.port_id,
+                placement,
+                machine,
+                obstacles,
+                reserved,
+                region,
+                claimed.get(endpoint.machine_id, ()),
+            )
+            if not candidates:
+                continue
+            terminal = candidates[0]  # deterministic: _grid orders by FACE_ORDER then host cell
+            reserved.add(terminal.cell.as_tuple())
+            claimed.setdefault(endpoint.machine_id, set()).add(claim_key(terminal, machine))
+    return reserved
+
+
 def route_power(
     problem: InputIR,
     placements: Sequence[Placement],

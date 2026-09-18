@@ -13,6 +13,13 @@ on unrouted nets lives in ``solver.core``.
 from __future__ import annotations
 
 from .constructive import PlacementResult, place
+from .feasibility import crowded_machines
 from .search import Objective, optimize_placement
 
-__all__ = ["Objective", "PlacementResult", "optimize_placement", "place"]
+__all__ = [
+    "Objective",
+    "PlacementResult",
+    "crowded_machines",
+    "optimize_placement",
+    "place",
+]

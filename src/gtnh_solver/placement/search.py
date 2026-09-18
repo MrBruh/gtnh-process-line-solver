@@ -66,6 +66,7 @@ from gtnh_solver.ir import (
     Placement,
 )
 from gtnh_solver.ir.geometry import (
+    FACE_DELTAS,
     FACE_OFFSETS,
     Cell,
     box_in_region,
@@ -90,6 +91,16 @@ _FACE_DELTAS = FACE_OFFSETS
 # through the volume term.
 _W_WIRE = 1.0
 _W_AUTO = 4.0
+#: Weight on the face-shortfall term. The term is only an approximation of the real question
+#: (:func:`_face_shortfall` shares contested cells out rather than deciding the matching); the
+#: exact answer is enforced downstream, by the solver's crowding gate and the router's re-seat
+#: rescue. This weight only has to nudge the search off a pathological pack, such as the solid
+#: row of #76 where nine machines each had two free cells for three connections.
+#:
+#: Tuned, not derived, and the landscape is rugged: lowering it to 1.0 produced a *better* sand
+#: line on a single seed (enclosing box 8 against this weight's 18) and a worse one across the
+#: solver's full seed grid. Re-measure over the grid, never one seed, before changing it.
+_W_FACES = 8.0
 
 #: The selectable compactness objective. "Compact" is ambiguous and the two metrics pull opposite
 #: ways - stacking a layer shrinks the floor but can grow the enclosing box - so the builder
@@ -197,6 +208,7 @@ def optimize_placement(
     seed: int = 0,
     net_penalties: dict[str, float] | None = None,
     objective: Objective = "footprint",
+    face_pressure: float = 1.0,
 ) -> PlacementResult:
     """Anneal the constructive placement toward a lower routing-aware cost (seeded, validated).
 
@@ -206,6 +218,12 @@ def optimize_placement(
     ``objective`` selects what "compact" means (:data:`Objective`): minimum floor area
     (``footprint``, the default - stack tall), minimum enclosing box (``volume`` - stay flat), or
     ``balanced`` (both weighted).
+
+    ``face_pressure`` scales the face-shortfall term (:data:`_W_FACES`). The solver raises it when
+    its exact crowding gate (``placement.feasibility``) keeps rejecting what this search hands
+    back: the cheap term is an approximation and can be talked out of spreading by a big enough
+    wirelength gain, so when the gate says otherwise the answer is to make crowding cost more,
+    not to re-run the identical search and get the identical layout.
     """
     base = place(problem)
     if not base.ok or len(base.placements) < 2:
@@ -259,7 +277,17 @@ def optimize_placement(
         for p in current
         for c in occupied_cells(p.cell, machines[p.machine_id].footprint, p.orientation)
     }
-    current_cost = _cost(current, machines, wire_nets, power_nets, auto_pairs, weights)
+    current_cost = _cost(
+        current,
+        machines,
+        wire_nets,
+        power_nets,
+        auto_pairs,
+        weights,
+        region,
+        reserved,
+        face_pressure,
+    )
     best, best_cost = current, current_cost
     iters = min(_MAX_ITERS, max(_MIN_ITERS, _PER_MACHINE * len(current)))
     temp = _T0
@@ -269,7 +297,17 @@ def optimize_placement(
         else:
             cand = _move(current, ctx, occupied, rng)
         if cand is not None:
-            cand_cost = _cost(cand, machines, wire_nets, power_nets, auto_pairs, weights)
+            cand_cost = _cost(
+                cand,
+                machines,
+                wire_nets,
+                power_nets,
+                auto_pairs,
+                weights,
+                region,
+                reserved,
+                face_pressure,
+            )
             delta = cand_cost - current_cost
             if delta < 0 or rng.random() < math.exp(-delta / temp):
                 _apply_occupied_delta(occupied, current, cand, machines)
@@ -390,10 +428,18 @@ def _cost(
     power_nets: list[_WeightedNet],
     auto_pairs: list[_AutoPair],
     weights: tuple[float, float],
+    region: CellBox,
+    reserved: set[Cell],
+    face_pressure: float,
 ) -> float:
     """Routing-aware cost: weighted item/fluid HPWL + compactness per the objective, minus an
     auto-output reward (the only orientation-dependent term, so reorient moves are not free),
-    plus an MST pull for each feedback-penalized power net.
+    plus an MST pull for each feedback-penalized power net, plus a face-shortfall penalty.
+
+    The shortfall term (:func:`_face_shortfall`) is what keeps the search from packing machines
+    into a wall where they have no room left for their own connections - the failure #76 hit,
+    where nine machines each needed three connections and a solid row left them two free cells.
+    No routing order can rescue that, so it has to be priced here, where the geometry is chosen.
 
     Compactness is two independently weighted terms - ``weights`` is the objective's
     ``(footprint weight, volume weight)`` pair (:data:`_OBJECTIVE_WEIGHTS`): the floor area
@@ -450,8 +496,107 @@ def _cost(
             pair.sink_port,
         ):
             auto += 1
+    faces = _face_shortfall(placements, machines, region, reserved)
     w_footprint, w_volume = weights
-    return _W_WIRE * wire + cable + w_footprint * footprint + w_volume * volume - _W_AUTO * auto
+    return (
+        _W_WIRE * wire
+        + cable
+        + w_footprint * footprint
+        + w_volume * volume
+        - _W_AUTO * auto
+        + _W_FACES * face_pressure * faces
+    )
+
+
+def _dockable_cells(
+    placement: Placement,
+    machine: Machine,
+    occupied: set[Cell],
+    region: CellBox,
+    reserved: set[Cell],
+) -> set[Cell]:
+    """The free cells this machine could put a connection on, front face excluded.
+
+    The *cells*, not the faces: two faces of one body cell reach two different cells, and two body
+    cells can reach the same cell from different sides, so a cell set is the honest account of
+    what a hatch could dock onto. Returned as the set rather than its size because neighbouring
+    machines share candidates, and :func:`_face_shortfall` has to see the overlap to price it. Deliberately **generous**, the same way the validator's
+    hatch-cell ceiling is (``validator.core._check_hatch_cells``): it ignores which slots accept
+    which hatch kind, so it only ever over-counts. An over-count means the penalty fires strictly
+    less often than it could - it never invents a shortfall that is not real.
+    """
+    # Materialized, not the bare generator: it is rescanned once per face, and a generator
+    # would be exhausted by the first of them and read as no body cells for the other five.
+    body = tuple(occupied_cells(placement.cell, machine.footprint, placement.orientation))
+    cells: set[Cell] = set()
+    for face, (dx, dy, dz) in FACE_DELTAS.items():
+        if face is placement.orientation:  # front face carries no I/O
+            continue
+        for bx, by, bz in body:
+            cand = (bx + dx, by + dy, bz + dz)
+            # ``occupied`` holds this machine's own body too, so an interior slot - one walled
+            # inside the structure, which could reach nothing - is excluded by the same test.
+            if cand in occupied or cand in reserved:
+                continue
+            if in_region(cand, region):
+                cells.add(cand)
+    return cells
+
+
+def _face_shortfall(
+    placements: list[Placement],
+    machines: dict[str, Machine],
+    region: CellBox,
+    reserved: set[Cell],
+) -> float:
+    """Connections with nowhere to sit, summed over every machine: the unbuildability measure.
+
+    A machine needs one free adjacent cell per connection (item in, item out, power in, ...) and
+    its front face carries none of them. Pack it so that neighbours and region walls leave it
+    fewer free cells than it has ports and the layout cannot be built - the routers then report
+    whichever net happens to lose the race for the last face, which names the wrong machine and
+    reads like a routing bug. Priced here instead, where the packing decision is actually made.
+
+    Counting each machine's candidates in isolation is not enough, and #76 is exactly where that
+    shows: every machine can clear its own bar while two neighbours are counting **the same** free
+    cell, which can host only one of them. So a contested cell is shared out rather than credited
+    to each in full.
+
+    Only machines with **no slack** contend for it. Dividing a cell among every machine that could
+    reach it is far too pessimistic - a neighbour with five candidates for three ports is never
+    going to fight over this one, and counting it as a rival manufactured a shortfall on layouts
+    that were perfectly buildable, which cost the sand line a third of its compactness. A machine
+    that already has more candidates than ports is therefore not a contender; one that is exactly
+    at its limit is, because every cell it can reach is a cell it needs.
+
+    That makes this a heuristic, not a decision procedure: the real question is whether a system
+    of distinct representatives exists (each connection needing its own cell), and settling that
+    means a matching, which is far too slow per annealing step. It is tuned to stay silent on
+    layouts that build - a false shortfall costs compactness on every line - and to speak up on
+    the crowding that #76 hit.
+    """
+    occupied = {
+        c
+        for p in placements
+        for c in occupied_cells(p.cell, machines[p.machine_id].footprint, p.orientation)
+    }
+    demand: list[tuple[int, set[Cell]]] = []
+    for p in placements:
+        machine = machines[p.machine_id]
+        needed = len(machine.faces.ports)
+        if needed:
+            demand.append((needed, _dockable_cells(p, machine, occupied, region, reserved)))
+    contenders: dict[Cell, int] = {}
+    for needed, cells in demand:
+        if len(cells) > needed:
+            continue  # has room to spare, so it will not be fighting anyone for a particular cell
+        for cell in cells:
+            contenders[cell] = contenders.get(cell, 0) + 1
+    short = 0.0
+    for needed, cells in demand:
+        share = sum(1.0 / max(1, contenders.get(cell, 0)) for cell in cells)
+        short += max(0.0, needed - share)
+    return short
 
 
 def _mst_length(centers: list[tuple[float, float, float]]) -> float:

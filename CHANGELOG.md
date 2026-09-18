@@ -42,16 +42,46 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   of N machines would have been handed the whole group's draw. An unconsumed output collects into
   **one** buffer per node rather than one per machine.
 
-  **A parallel plan does not reach a VALID layout yet**, and the cause is **cross-router cell
-  contention**, not packing. Audited against free adjacent non-front cells, every machine in the
-  nine-machine fixture has *enough* faces; what consumes them is item route **paths**. The item
-  router docks its terminals up front and freezes them (negotiated congestion prices routes, never
-  docks), then `solver/core` routes power **last** with every item route cell as a hard obstacle - so
-  power can find no free face to dock on, while `route_power` on the same placement in isolation
-  succeeds. The fix belongs in the routing order (reserve a power dock per machine before item
-  routing), not in the placement cost, and is the remaining half of #76.
+  `examples/gtnh-parallel-sand.json` now solves to a **VALID** layout, which is the rest of #76
+  and is described under Fixed below.
 
 ### Fixed
+- **A parallel line lays out: nine machines at three instances each reach a VALID layout (#76).**
+  `examples/gtnh-parallel-sand.json` used to stop at `partial_invalid`, reporting
+  `face_reachability` on whichever net lost the race for a machine's last free face. The line was
+  short of room in **two** independent ways, and fixing either alone still left it partial, which
+  is why three earlier diagnoses each looked right and were not.
+
+  **The placement could not host its own connections.** The placer packed the nine machines into a
+  solid row, so every interior machine had its east and west faces against a neighbour and its
+  north and down faces against the region wall: **two free cells for three connections** (item in,
+  item out, power in). No routing order can rescue that. It is priced now by a face-shortfall term
+  in the placement cost, and decided exactly - before any routing - by a new
+  `placement.feasibility` gate that answers whether every connection can be given a cell of its
+  own. That is a bipartite matching, too slow per annealing step and cheap once per candidate
+  layout, so the cheap term steers the anneal and the gate rules on the result, raising the term's
+  weight when it keeps rejecting. The gate is **advisory by construction**: if it turns down every
+  attempt the solver routes anyway, so it can never turn a line the routers would have solved into
+  a hard failure.
+
+  **And the router stranded nets it had room for.** Docking is greedy and net by net, so an early
+  net could take the one cell a later net needed while having somewhere else to go itself. The
+  assignment existed; the order missed it. A net that fails to dock now asks the holders of the
+  cells it wanted to move aside, recursively (an augmenting path), and fails only if none can.
+  This runs **only after a net has already failed**, so a line that docks cleanly today docks
+  exactly as it did before.
+
+  Power also no longer loses a face by accident: one dock cell per power endpoint is held back
+  before the pipes are laid, because power routes last against every pipe cell as an obstacle.
+
+  Two rules the gate has to respect, both learned by getting them wrong first: a net covered by a
+  free **auto-output** needs no dock cell at all (charging the sand line's zero-pipe chain for six
+  of them declared its hand-built 3x2x2 crowded and drove the search to a box half again as
+  large), and a **power terminal may share** its cell with another machine's, because GT feeds
+  every wired face next to a cable block and `route_power` taps rather than laying a new leg.
+
+  The shipped lines are unaffected: `gtnh-sand.json` and `gtnh-nitrobenzene.json` still solve to
+  VALID layouts within the same hand-built compactness and cable targets.
 - **Multiblocks resolve to their real footprint instead of silently becoming one block.** The
   exporter names a machine by its localized **recipe map** ("Blast Furnace", "Macerator"); the
   structure dump is keyed by the **controller's** own display name ("Electric Blast Furnace",
