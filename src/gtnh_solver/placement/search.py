@@ -838,7 +838,15 @@ def _best_insertion(
             if not ok:
                 continue
             cost = _marginal_insertion_cost(
-                p.machine_id, origin, orientation, m, placed_pos, net_boxes, power_attach, ctx
+                p.machine_id,
+                origin,
+                orientation,
+                m,
+                placed_pos,
+                net_boxes,
+                power_attach,
+                ctx,
+                bound=best_cost,
             )
             if cost < best_cost:
                 best_cost, best = cost, (origin, orientation)
@@ -858,6 +866,7 @@ def _marginal_insertion_cost(
     net_boxes: list[_NetBox],
     power_attach: list[_PowerAttach],
     ctx: _SearchContext,
+    bound: float = math.inf,
 ) -> float:
     """The cost terms that change with where ``machine_id`` goes: the weighted HPWL of its own
     item/fluid nets over their already-placed members (this candidate included), plus for each of
@@ -870,7 +879,20 @@ def _marginal_insertion_cost(
     ``net_boxes`` and ``power_attach`` come from :func:`_placed_invariants` and summarise the
     members that are already placed - the part of both terms that is the same for every candidate.
     Only the auto reward is irreducibly per-candidate: face adjacency depends on this origin and
-    orientation, which is what the term is there to measure."""
+    orientation, which is what the term is there to measure.
+
+    ``bound`` is the incumbent's cost, and returning ``inf`` above it is a pure early-out: the
+    caller only keeps a strictly cheaper candidate, so a candidate that provably cannot get there
+    need not be scored exactly. **The bound has to account for the auto reward being subtracted.**
+    The running ``wire + cable`` total is an *upper* bound on the result, not a lower one, so
+    comparing it against ``bound`` directly would discard candidates the reward would have made
+    best. Subtracting the largest reward still available - every remaining pair scoring - makes the
+    test admissible, and the layouts it produces are identical to scoring every candidate in full.
+    What it skips is the auto term entirely: the ``Placement`` this function would have to build
+    to ask with, and a ``router.auto.auto_output_possible`` call per pair. That rule got
+    substantially dearer when it started asking the question the router actually answers (#107),
+    which is what makes the early-out worth having - it takes a nitrobenzene solve from 6.32s to
+    4.36s."""
     box = rotated_footprint(m.footprint, orientation)  # same centroid rule as _center
     cx = origin.x + box.sx / 2
     cy = origin.y + box.sy / 2
@@ -893,9 +915,12 @@ def _marginal_insertion_cost(
     for weight, centroids in power_attach:
         attach = min((_manhattan((cx, cy, cz), c) for c in centroids), default=0.0)
         cable += weight * attach
+    pairs = ctx.machine_auto[machine_id]
+    if _W_WIRE * wire + cable - _W_AUTO * len(pairs) >= bound:
+        return math.inf  # even every pair scoring cannot beat the incumbent
     auto = 0
     here = Placement(machine_id=machine_id, cell=origin, orientation=orientation)
-    for pair in ctx.machine_auto[machine_id]:
+    for pair in pairs:
         is_source = pair.source_id == machine_id
         other = pair.sink_id if is_source else pair.source_id
         op = placed_pos.get(other)

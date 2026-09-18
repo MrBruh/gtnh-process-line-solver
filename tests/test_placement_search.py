@@ -7,6 +7,7 @@ where first-fit strings the spokes out in a row but the optimizer clusters them 
 
 from __future__ import annotations
 
+import math
 import random
 
 from gtnh_solver.ir import (
@@ -29,6 +30,9 @@ from gtnh_solver.ir.geometry import Cell, front_on_boundary, occupied_cells
 from gtnh_solver.placement import optimize_placement, place
 from gtnh_solver.placement.search import (
     _apply_occupied_delta,
+    _AutoPair,
+    _marginal_insertion_cost,
+    _placed_invariants,
     _relocate,
     _SearchContext,
     _turn_fits,
@@ -463,3 +467,115 @@ def test_relocate_rejects_an_origin_whose_feed_turn_leaves_the_region() -> None:
     occupied = {(0, 0, 5), (0, 0, 6), (0, 0, 7)}
     assert _relocate(placed, ctx, occupied, random.Random(0)) is None
     assert occupied == {(0, 0, 5), (0, 0, 6), (0, 0, 7)}, "the move must restore what it borrowed"
+
+
+# ------------------------------------------------------- the marginal-cost pruning bound
+
+
+def _cost_ctx(machines: list[Machine], region: CellBox) -> _SearchContext:
+    """A context whose nets make every term of the marginal cost non-trivial.
+
+    The bound below is only interesting when wire, cable and auto all contribute: a machine wired
+    to two others, power-penalized against them, and auto-output-paired with both.
+    """
+    ids = [m.id for m in machines]
+    return _SearchContext(
+        machines={m.id: m for m in machines},
+        region=region,
+        reserved=set(),
+        adjacency={ids[0]: set(ids[1:])},
+        machine_nets={ids[0]: [(ids, 1.0)], ids[1]: [(ids, 1.0)], ids[2]: [(ids, 1.0)]},
+        machine_power={ids[0]: [(ids, 2.0)], ids[1]: [], ids[2]: []},
+        machine_auto={
+            # Both directions, so the cost exercises the is_source branch either way. The ports
+            # are what decide whether the connection is possible at all (#107), so they are the
+            # real ones off _hub rather than placeholders.
+            ids[0]: [
+                _AutoPair(ids[0], "out", ids[1], "out"),
+                _AutoPair(ids[2], "out", ids[0], "out"),
+            ],
+            ids[1]: [],
+            ids[2]: [],
+        },
+    )
+
+
+def test_the_pruning_bound_never_changes_which_cost_is_reported() -> None:
+    """``bound`` is an early-out, not an approximation: below it the exact cost still comes back.
+
+    The auto reward is *subtracted*, so the running ``wire + cable`` total is an upper bound on the
+    result. Comparing that against ``bound`` directly would discard candidates the reward would
+    have pulled under it - the bug this test exists to catch. Every origin is scored unbounded,
+    then re-scored at a bound on either side of its own cost; the answer must be the exact cost
+    whenever it can still win, and never a *wrong* finite number when it cannot.
+    """
+    machines = [_hub("a"), _hub("b"), _hub("c")]
+    region = CellBox(sx=6, sy=2, sz=6)
+    ctx = _cost_ctx(machines, region)
+    placed_pos = {"b": at("b", 4, 0, 0), "c": at("c", 0, 0, 4)}
+    net_boxes, power_attach = _placed_invariants("a", placed_pos, ctx)
+
+    checked = 0
+    for x in range(region.sx):
+        for z in range(region.sz):
+            origin = CellCoord(x=x, y=0, z=z)
+            args = (origin, Facing.NORTH, machines[0], placed_pos, net_boxes, power_attach, ctx)
+            exact = _marginal_insertion_cost("a", *args)
+            assert math.isfinite(exact)
+            # A bound above the true cost must not perturb it...
+            assert _marginal_insertion_cost("a", *args, bound=exact + 1e-9) == exact
+            # ...and one at or below it may only ever abstain, never report a different number.
+            pruned = _marginal_insertion_cost("a", *args, bound=exact)
+            assert pruned == exact or pruned == math.inf
+            checked += 1
+    assert checked == region.sx * region.sz
+
+
+def test_the_pruning_bound_matches_an_unbounded_scan() -> None:
+    """End to end on the loop's own contract: pruning picks the same winner as scoring everything.
+
+    ``_best_insertion`` keeps a candidate only on a strict ``<``, so an admissible bound cannot
+    change the argmin - this pins that the bound really is admissible rather than merely plausible.
+    """
+    machines = [_hub("a"), _hub("b"), _hub("c")]
+    region = CellBox(sx=6, sy=2, sz=6)
+    ctx = _cost_ctx(machines, region)
+    placed_pos = {"b": at("b", 4, 0, 0), "c": at("c", 0, 0, 4)}
+    net_boxes, power_attach = _placed_invariants("a", placed_pos, ctx)
+
+    def scan(use_bound: bool) -> tuple[float, tuple[int, int, int] | None]:
+        best_cost, best = math.inf, None
+        for x in range(region.sx):
+            for z in range(region.sz):
+                origin = CellCoord(x=x, y=0, z=z)
+                cost = _marginal_insertion_cost(
+                    "a",
+                    origin,
+                    Facing.NORTH,
+                    machines[0],
+                    placed_pos,
+                    net_boxes,
+                    power_attach,
+                    ctx,
+                    bound=best_cost if use_bound else math.inf,
+                )
+                if cost < best_cost:
+                    best_cost, best = cost, (x, 0, z)
+        return best_cost, best
+
+    assert scan(use_bound=True) == scan(use_bound=False)
+
+
+def test_placed_invariants_summarise_only_the_placed_members() -> None:
+    """A net with nothing else placed yet contributes no box, so it costs nothing until one is.
+
+    Dropping it is what makes the precomputed form equal the old per-candidate ``len(xs) > 1``
+    guard rather than adding a spurious zero-width span.
+    """
+    machines = [_hub("a"), _hub("b"), _hub("c")]
+    ctx = _cost_ctx(machines, CellBox(sx=6, sy=2, sz=6))
+    assert _placed_invariants("a", {}, ctx)[0] == []
+    boxes, power = _placed_invariants("a", {"b": at("b", 4, 0, 0)}, ctx)
+    assert len(boxes) == 1
+    assert boxes[0].x0 == boxes[0].x1, "one placed member is a degenerate box, not an empty one"
+    assert [len(pa.centroids) for pa in power] == [1]

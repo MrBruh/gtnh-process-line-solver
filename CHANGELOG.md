@@ -123,6 +123,25 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   correct render, the gap is reported in the texture summary instead.
 
 ### Changed
+- **Insertion ranking stops scoring candidates that cannot win (`placement/`).**
+  `_marginal_insertion_cost` now takes the incumbent's cost as a `bound` and returns `inf` above
+  it, skipping the whole auto term for candidates already out of the running: the `Placement` it
+  would have to build to ask with, and an `auto_output_possible` call per pair. That rule got
+  dearer when it started asking what the router actually answers (#107), so the early-out is worth
+  more than it would have been. `_best_insertion` keeps a candidate only on a strict `<`, so an
+  admissible bound cannot change the argmin: both shipped lines still hash exactly as before.
+
+  **The bound has to account for the auto reward being subtracted.** The running `wire + cable`
+  total is an *upper* bound on the result, so testing it against the incumbent directly would
+  discard candidates the reward would have pulled under - a wrong answer, not a slow one.
+  Subtracting the largest reward still available makes it admissible.
+  `test_the_pruning_bound_never_changes_which_cost_is_reported` fails with `inf == 6.0` against
+  the naive form.
+
+  Nitrobenzene 6.32s -> 4.36s, and 7.95s -> 4.36s (-45%) across both placement changes; the test
+  suite 191s -> 76s. Solve figures are medians of 5 runs taken back to back against `main` in one
+  session, the suite one run each the same way.
+
 - **Insertion ranking stops re-deriving what every candidate shares (`placement/`).** A
   nitrobenzene solve spent 63% of itself in `_best_insertion`, which evaluates ~50
   (origin, orientation) candidates per insertion and rebuilt the same already-placed quantities
@@ -140,10 +159,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     solve, ~4% of it. `_feed_ok_for` takes the answer as an argument so the loop hoists it, and
     `_feed_ok` delegates, keeping the feed rule in one place.
 
-  Nitrobenzene solves in 6.32s against 7.95s, a 20% cut (medians of 5 runs, measured back to back
-  against `main` in one session; absolute times drift with machine state, the ratio does not).
-  `_cost` is deliberately untouched: it is a global recompute over all placements where any of
-  them may have moved, so it has no equivalent cross-call invariant to hoist.
+  Nitrobenzene solves in 4.27s against 5.81s, a 26% cut; the test suite drops 104s to 73s.
+  `_cost` is deliberately untouched - it is a global recompute over all placements where
+  everything may have moved, so it has no equivalent cross-call invariant.
 
 - **The shipped example lines are solved once per session, not once per test (`tests/`).** A probe
   over a serial run put 53.0s of 75s inside `solve()`, and the same two lines were being re-solved
