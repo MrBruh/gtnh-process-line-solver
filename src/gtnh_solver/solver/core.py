@@ -223,6 +223,13 @@ def _assemble(
     # machine's hatch cells are one shared pool an input bus and an energy hatch compete for, and
     # a single casing cell has up to five free faces, so the pipe cells cannot stand in for it.
     claims = claims_by_machine(routing.routes, {m.id: m for m in problem.machines})
+    # The free connections spent casing cells too, and they own no Route to read that off. Without
+    # this the power router is the one pass that never hears about them: an energy hatch lands on
+    # the cell an auto-output reserved, `place_hatches` then finds no unclaimed touching pair, and
+    # the certified connection ends up with no output bus and no input bus - two multiblocks that
+    # form correctly and move nothing (#131).
+    for machine_id, cells in routing.claimed.items():
+        claims.setdefault(machine_id, set()).update(cells)
     if repair:
         # The power router runs inside the repair pass, which relocates each source to the cell
         # its really-routed cable likes best (solver.repair, #123) and hands back that routing.
