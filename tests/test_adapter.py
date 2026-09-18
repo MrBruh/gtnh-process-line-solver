@@ -141,15 +141,26 @@ def test_unknown_recipe_raises() -> None:
         to_input_ir(plan)
 
 
-def test_multi_instance_node_is_rejected() -> None:
-    # machineCount > 1 cannot be mapped yet: a net endpoint can't address one instance of a
-    # group, so the adapter fails loud rather than emit a placed-but-unwired layout.
+def test_a_multi_instance_node_expands_into_one_machine_each() -> None:
+    # machineCount > 1 used to be rejected outright (#76). It now expands: a net endpoint list is
+    # unbounded, so N machines share one net and no IR concept was needed. See
+    # tests/test_adapter_instances.py for the group's rates, power and buffers.
     plan = Plan(
         schema_version=1,
         recipes=[Recipe(id="r", machine_type="M", outputs=[_resource("item", "x")])],
         nodes=[Node(id="n", recipe_id="r", overclock_tier="LV", machine_count=2)],
     )
-    with pytest.raises(AdapterError):
+    ir = to_input_ir(plan)
+    assert [m.id for m in ir.machines if m.type == "M"] == ["n#1", "n#2"]
+
+
+def test_a_node_standing_for_no_machine_is_rejected() -> None:
+    plan = Plan(
+        schema_version=1,
+        recipes=[Recipe(id="r", machine_type="M", outputs=[_resource("item", "x")])],
+        nodes=[Node(id="n", recipe_id="r", overclock_tier="LV", machine_count=0)],
+    )
+    with pytest.raises(AdapterError, match="at least one machine"):
         to_input_ir(plan)
 
 

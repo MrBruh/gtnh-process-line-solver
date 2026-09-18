@@ -23,6 +23,31 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   machines. Every record stays in the new `PhysicalDataset.records` and addressable by `block_key`.
 
   Two files claiming the same **block_key** is still an error: that is one controller dumped twice.
+### Added
+- **A node standing for several parallel machines is mapped instead of rejected (#76, adapter half).**
+  `machineCount > 1` used to fail the load outright, which excluded most throughput-scaled
+  factories. It now expands into one `Machine` per physical machine, with `#1`-suffixed ids; a
+  single-machine node keeps its **bare** id, so every existing layout, golden file and preview is
+  unchanged.
+
+  **No IR change was needed**, contrary to what the issue anticipated: `Net.endpoints` is already an
+  unbounded list, so N producers and M consumers share one net, the router chains them and the
+  validator already permits several producers. The shared bus is also what a real GT line is.
+
+  What the adapter had to get right is which figures are per machine and which are per group, a
+  distinction that was invisible while `machineCount` was forced to 1. `Port.rate` and `Machine.eut`
+  stay **per machine** (a port belongs to one block; the power synthesis gives each machine its own
+  hatches and sums them). `Net.throughput` is **per group**, so a pipe is sized for what all N
+  machines move. A `resolved.totalEut`, being a group total, is divided back down before use, or each
+  of N machines would have been handed the whole group's draw. An unconsumed output collects into
+  **one** buffer per node rather than one per machine.
+
+  **A parallel plan does not reach a VALID layout yet.** The placer packs machines tightly enough
+  that interior ones are left one free face for three ports and the power net cannot dock. The
+  place-route feedback penalty makes this worse rather than better, because it pulls a failed net's
+  machines *tighter*, which is the wrong direction for a face-starvation failure. That is a
+  placement-cost problem and the remaining half of #76.
+
 ### Fixed
 - **Multiblocks resolve to their real footprint instead of silently becoming one block.** The
   exporter names a machine by its localized **recipe map** ("Blast Furnace", "Macerator"); the

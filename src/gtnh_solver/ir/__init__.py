@@ -211,4 +211,17 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   No bump: this tightens what the contract ACCEPTS, it does not change what it says. A producer
 #   emitting the current version is unaffected, and the only payloads that now fail are ones that
 #   were already being misread. (GitHub #38.)
+#
+# InputIR v3 (no change to the contract) - multi-instance nodes are supported, and `Machine.count`
+#   is NOT coming back. The v1 entry above expected it to "return once routing is instance-aware";
+#   it turned out nothing had to return. `Net.endpoints` is already an unbounded list, so a node
+#   standing for N machines maps to N `Machine`s sharing one net: the router chains the endpoints
+#   and the validator already permits several producers, which is also what a real GT line is (one
+#   shared bus, not per-instance pipes). The v1 failure was never the missing field - it was that
+#   the placer expanded `count` into placements sharing ONE machine id, so a `MachineFaceRef` could
+#   not name an instance. Distinct ids fix that without a contract concept.
+#
+#   Nothing here changed, so nothing is bumped; the note exists because the v1 entry above states a
+#   plan this supersedes. Consumers should know only that `Machine.id` may now carry a `#N` suffix,
+#   and that a node with one machine still uses its bare id. (GitHub #76.)
 # ---------------------------------------------------------------------------
