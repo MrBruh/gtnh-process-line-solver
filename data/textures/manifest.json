@@ -1,5 +1,5 @@
 {
-  "schema": 3,
+  "schema": 2,
   "method": "server-itexture-reflection",
   "provenance": {
     "pack_version": "2.8.4",
@@ -7,7 +7,7 @@
       "GT5-Unofficial": "5.09.51.482",
       "StructureLib": "1.4.23"
     },
-    "generated_at": "2026-09-18T16:36:06.758Z",
+    "generated_at": "2026-09-18T18:00:57.520Z",
     "extractor_sha": "unknown",
     "note": "SMALL committed manifest: only the blocks the shipped example lines and the two multiblock fixtures need - plus every hatch kind at the tiers those lines use, the cables and pipes those tiers route, and the block that stands in for a synthesized power source, none of which matches a machine name - so `gtnh-solve --preview examples/*.json` skins out of the box. The full dump is local and version-namespaced (data/<version>/textures/manifest.json), never committed. Regenerate with tools/derive_small_manifest.py.",
     "coverage": {

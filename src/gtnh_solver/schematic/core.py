@@ -141,7 +141,7 @@ def _cube_cell(
         raise SchematicError(
             f"{cube.block}|{cube.meta} ({kind}) has no te_base_type, so its Data nibble is "
             "unknown and it would rebuild as the wrong kind of tile entity; re-run the extractor "
-            "to refresh the manifest to schema 3 (GitHub #158)"
+            "to refresh the manifest (GitHub #158)"
         )
     # A hatch points where the router put it; anything else rides the machine's placed front.
     side = Facing(cube.facing.lower()) if cube.facing is not None else front

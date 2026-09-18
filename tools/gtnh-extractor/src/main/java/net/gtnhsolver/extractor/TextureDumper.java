@@ -85,8 +85,19 @@ final class TextureDumper {
 
     private static final Logger LOG = LogManager.getLogger(DumperMod.MODID);
 
-    /** Layered-manifest schema version. Bump when the on-disk shape changes. */
-    static final int SCHEMA_VERSION = 3;  // 3: per-entry te_base_type (#158)
+    /**
+     * Layered-manifest schema version. Bump when the on-disk shape changes in a way a reader has
+     * to know about.
+     *
+     * <p>An OPTIONAL field added to existing entries is not that, and does not bump: every reader
+     * is written to treat a missing one as "not stated" ({@code te_base_type} in #158 is the
+     * worked example), so an older manifest keeps loading and an older reader ignores what it does
+     * not know. Bumping for an additive change would say "incompatible" about something that is
+     * not, and the version is the wrong tool for "does this dump carry field X" - ask the entry.
+     * Reserve it for a change that would make an existing reader wrong: a renamed or retyped
+     * field, a restructured entry, a changed key space.
+     */
+    static final int SCHEMA_VERSION = 2;
 
     private static final String[] GET_ICON_NAMES = { "getIcon", "func_149691_a" };
     private static final String ICON_DOMAIN = "gregtech";

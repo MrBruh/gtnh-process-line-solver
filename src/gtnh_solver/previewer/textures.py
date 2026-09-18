@@ -242,15 +242,17 @@ class TextureSummary:
 
 
 class TextureManifest:
-    """A loaded layered ``data/textures/manifest.json`` (lane 6 v2, schema 3).
+    """A loaded layered ``data/textures/manifest.json`` (lane 6 v2, schema 2).
 
     Answers the two questions the previewer asks: the ordered ``ITexture`` layer stack for a
     ``(block, meta, side, state)``, and the jar path of an icon so its PNG can be fetched. Never
     touches the network or the filesystem beyond the one JSON it is built from.
 
-    Schema 3 adds ``te_base_type`` per entry (#158), which the previewer does not use: it is for
-    the ``.schematic`` exporter (#96). Every field is read defensively, so a schema 2 manifest
-    still loads and merely answers ``None`` there.
+    Newer dumps carry ``te_base_type`` per entry (#158), which the previewer does not use: it is
+    for the ``.schematic`` exporter (#96). It did NOT bump the schema, because it is optional and
+    additive - every accessor here treats a missing field as "not stated", so a dump from either
+    side of the change loads the same way and the version stays reserved for a shape change that
+    would make an existing reader wrong.
     """
 
     def __init__(self, raw: Mapping[str, Any]) -> None:
@@ -436,7 +438,7 @@ class TextureManifest:
         (#96) that writes the wrong one reconstructs a cable as a machine.
 
         ``None`` for a plain block (no MTE behind it) and for any manifest written before the
-        field existed, so a dump predating schema 3 still loads and simply cannot be exported.
+        field existed, so an older dump still loads and simply cannot be exported.
         """
         entry = self._blocks.get(f"{block}|{meta}")
         if entry is None:
