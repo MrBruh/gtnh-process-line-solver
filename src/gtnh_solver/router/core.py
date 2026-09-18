@@ -109,12 +109,20 @@ class RouteResult:
     a pipe (the router owns that decision); ``routes`` are the pipes for the rest.
     ``failed_nets`` lists the nets left unrouted (empty when ``ok``), in problem order, so the
     solver's place<->route feedback loop can penalize exactly those nets and re-place.
+
+    ``claimed`` is the casing cells those free connections reserved, per machine. It has to travel
+    with the result because a free connection spends a hatch cell on each side while owning no
+    ``Route`` to read it back off: pipes are seeded with it here, but the POWER router is a
+    separate pass that only ever saw the item routes' terminals, so an energy hatch could land on
+    a cell an auto-output had already taken and the connection ended up with no hatch at all
+    (#131).
     """
 
     routes: tuple[Route, ...] = ()
     infeasibility: Infeasibility | None = None
     failed_nets: tuple[str, ...] = ()
     auto_connections: tuple[AutoConnection, ...] = ()
+    claimed: Mapping[str, frozenset[Cell]] = MappingProxyType({})
 
     @property
     def ok(self) -> bool:
@@ -145,13 +153,17 @@ def route(problem: InputIR, placements: Sequence[Placement]) -> RouteResult:
         and net.commodity is not Commodity.POWER  # power is the power router's job (router.power)
     ]
     if not nets:
-        return RouteResult(auto_connections=auto_connections)
+        return RouteResult(auto_connections=auto_connections, claimed=assignment.claimed)
 
     # A free connection still costs its two machines a casing cell each (an output hatch ejects
     # through its own front face), so a pipe must not dock onto one of those blocks.
     routes, failures = _negotiate(problem, placements, nets, assignment.claimed)
     if not failures:
-        return RouteResult(routes=tuple(routes), auto_connections=auto_connections)
+        return RouteResult(
+            routes=tuple(routes),
+            auto_connections=auto_connections,
+            claimed=assignment.claimed,
+        )
 
     # Exhausted: report the first net still failing (in original order), with its specific reason,
     # plus every still-failing net so the solver's feedback loop can penalize them all.
@@ -161,6 +173,7 @@ def route(problem: InputIR, placements: Sequence[Placement]) -> RouteResult:
         infeasibility=failures[still_failing[0]],
         failed_nets=still_failing,
         auto_connections=auto_connections,
+        claimed=assignment.claimed,
     )
 
 
