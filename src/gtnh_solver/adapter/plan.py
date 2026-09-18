@@ -50,11 +50,17 @@ class MachineBlock(BaseModel):
 
 
 class RecipeSource(BaseModel):
-    """Provenance for a recipe. Only ``machine_block`` is consumed; the rest is ignored."""
+    """Provenance for a recipe: which controller block, and which recipe dataset it came from."""
 
     model_config = _CFG
 
     machine_block: MachineBlock | None = None
+    #: The exporter's recipe-dataset id, channel-prefixed: ``"stable-2.8.4"``,
+    #: ``"local-2.9.0-beta-2"``. Both forks emit it, which makes it the one place a plan states the
+    #: GTNH pack it was balanced against, so the physical dataset can be matched to it rather than
+    #: guessed (:func:`producer.plan_pack_version`). A top-level ``datasetVersionId`` exists only on
+    #: the MrBruh fork, so the per-recipe field is the portable one.
+    dataset_version_id: str = ""
 
 
 class MachineHandler(BaseModel):

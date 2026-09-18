@@ -23,17 +23,24 @@ from gtnh_solver.adapter import (
     Plan,
     PlanProducer,
     Recipe,
+    RecipeSource,
     ResolvedBlock,
     Resource,
     describe_markers,
     detect_producer,
     load_plan,
+    plan_pack_version,
     resolve_producer,
+    strip_dataset_channel,
     to_input_ir,
 )
-from gtnh_solver.adapter.core import _check_power_provenance, _effective_handler
-from gtnh_solver.cli import main
-from gtnh_solver.dataset import PhysicalDataset
+from gtnh_solver.adapter.core import (
+    _check_dataset_version,
+    _check_power_provenance,
+    _effective_handler,
+)
+from gtnh_solver.cli import _dataset_version_for, main
+from gtnh_solver.dataset import DatasetMeta, PhysicalDataset, load_physical_dataset
 from gtnh_solver.ir import InputIR, LayoutResult
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
@@ -49,6 +56,7 @@ def _plan(
     schema_version: int = 1,
     handler_id: str = "",
     eut: float = 30.0,
+    dataset_version: str = "",
 ) -> Plan:
     """A one-node plan whose recipe lists ``handlers``, for the detection/provenance branches."""
     return Plan(
@@ -62,11 +70,27 @@ def _plan(
                 duration_ticks=10.0,
                 outputs=[Resource(kind="item", id="x", amount=1.0)],
                 machine_handlers=list(handlers),
+                source=RecipeSource(dataset_version_id=dataset_version),
             )
         ],
         nodes=[
             Node(id="n", recipe_id="r", overclock_tier="LV", machine_handler_id=handler_id),
         ],
+    )
+
+
+def _dataset(pack_version: str, *, census: bool = True) -> PhysicalDataset:
+    """An empty dataset that only claims a pack version, which is all the version check reads."""
+    return PhysicalDataset(
+        meta=DatasetMeta(
+            schema=2,
+            pack_version=pack_version,
+            generated_at="2026-09-18T00:00:00Z",
+            extractor_sha="0" * 40,
+            controller_count=0,
+            census=census,
+        ),
+        machines={},
     )
 
 
@@ -313,3 +337,165 @@ def test_cli_rejects_an_unknown_plan_schema() -> None:
     with pytest.raises(SystemExit) as exc:
         main([str(_SAND), "--plan-schema", "samiracle64-v0"])
     assert exc.value.code == 2
+
+
+# ------------------------------------------------------------------ pack version, extraction
+
+
+@pytest.mark.parametrize(
+    ("dataset_version_id", "expected"),
+    [
+        ("stable-2.8.4", "2.8.4"),
+        ("local-2.9.0-beta-2", "2.9.0-beta-2"),
+        ("nightly-3.0.0", "3.0.0"),
+        # Already bare: "beta-2" does not start with a digit, so there is nothing to strip.
+        ("2.9.0-beta-2", "2.9.0-beta-2"),
+        ("2.8.4", "2.8.4"),
+        ("", ""),
+    ],
+)
+def test_strip_dataset_channel(dataset_version_id: str, expected: str) -> None:
+    assert strip_dataset_channel(dataset_version_id) == expected
+
+
+def test_plan_pack_version_reads_the_recipe_source() -> None:
+    assert plan_pack_version(_plan(dataset_version="local-2.9.0-beta-2")) == "2.9.0-beta-2"
+
+
+def test_plan_pack_version_is_none_when_unstated() -> None:
+    assert plan_pack_version(_plan()) is None
+
+
+def test_plan_pack_version_is_none_when_recipes_disagree() -> None:
+    # A plan spanning two datasets has no single answer, and picking a winner would silently size
+    # the layout against one of them.
+    plan = _plan(dataset_version="stable-2.8.4")
+    plan.recipes.append(
+        Recipe(
+            id="r2",
+            machine_type="Other",
+            source=RecipeSource(dataset_version_id="local-2.9.0-beta-2"),
+        )
+    )
+    assert plan_pack_version(plan) is None
+
+
+def test_plan_pack_version_ignores_recipes_that_state_nothing() -> None:
+    # Real plans carry non-GregTech recipe kinds with no dataset id; they must not read as conflict.
+    plan = _plan(dataset_version="stable-2.8.4")
+    plan.recipes.append(Recipe(id="r2", machine_type="Crop Farm"))
+    assert plan_pack_version(plan) == "2.8.4"
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [(_SAND, "2.8.4"), (_NITROBENZENE, "2.8.4"), (_PARALLEL_SAND, "2.9.0-beta-2")],
+)
+def test_plan_pack_version_on_the_committed_fixtures(path: Path, expected: str) -> None:
+    assert plan_pack_version(load_plan(path)) == expected
+
+
+# ------------------------------------------------------------------ pack version, mismatch warning
+
+
+def test_warns_when_the_plan_and_the_dataset_are_different_packs() -> None:
+    plan = _plan(dataset_version="local-2.9.0-beta-2")
+    with pytest.warns(AdapterWarning, match="balanced against GTNH 2.9.0-beta-2"):
+        _check_dataset_version(plan, _dataset("2.8.4"))
+
+
+def test_the_mismatch_warning_names_both_packs_and_the_remedy() -> None:
+    plan = _plan(dataset_version="local-2.9.0-beta-2")
+    with pytest.warns(AdapterWarning) as caught:
+        _check_dataset_version(plan, _dataset("2.8.4"))
+    message = str(caught[0].message)
+    assert "2.9.0-beta-2" in message
+    assert "2.8.4" in message
+    assert "--dataset-version 2.9.0-beta-2" in message
+
+
+def test_quiet_when_the_packs_agree() -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _check_dataset_version(_plan(dataset_version="stable-2.8.4"), _dataset("2.8.4"))
+
+
+def test_quiet_when_no_dataset_is_loaded() -> None:
+    # Every machine is 1x1x1 anyway, so there is no join to get wrong.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _check_dataset_version(_plan(dataset_version="local-2.9.0-beta-2"), None)
+
+
+def test_quiet_when_the_plan_states_no_pack() -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _check_dataset_version(_plan(), _dataset("2.8.4"))
+
+
+def test_quiet_against_a_non_census_sample_whatever_pack_it_claims() -> None:
+    # The committed fixtures are a two-machine sample declaring pack_version 2.9.0-beta-1, and they
+    # are what a fresh clone resolves to. Trusting that nominal version would greet every new
+    # contributor with a mismatch against the shipped 2.8.4 examples.
+    plan = _plan(dataset_version="stable-2.8.4")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _check_dataset_version(plan, _dataset("2.9.0-beta-1", census=False))
+
+
+def test_the_committed_fixture_dump_does_not_warn_against_the_shipped_examples() -> None:
+    # The fresh-clone path, asserted on the real files rather than a stand-in.
+    fixtures = load_physical_dataset(Path(__file__).resolve().parents[1] / "data" / "multiblocks")
+    assert not fixtures.meta.census
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _check_dataset_version(load_plan(_SAND), fixtures)
+
+
+def test_the_committed_arodoid_fixture_warns_against_the_2_8_4_dump() -> None:
+    # The real case this check exists for: a 2.9 plan resolving footprints against a 2.8.4 dump.
+    plan = load_plan(_PARALLEL_SAND)
+    with pytest.warns(AdapterWarning, match="2.9.0-beta-2"):
+        _check_dataset_version(plan, _dataset("2.8.4"))
+
+
+# ------------------------------------------------------------------ dataset version selection
+
+
+def test_an_explicit_pin_is_never_second_guessed(tmp_path: Path) -> None:
+    # Asking for a version with no dump should fail visibly, not be silently swapped.
+    assert _dataset_version_for(_plan(dataset_version="stable-2.8.4"), "9.9.9") == "9.9.9"
+
+
+def test_the_plan_pack_is_used_when_a_dump_provides_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / "2.9.0-beta-2" / "multiblocks").mkdir(parents=True)
+    monkeypatch.setattr(cli_module, "list_versions", lambda: [tmp_path / "2.9.0-beta-2"])
+    plan = _plan(dataset_version="local-2.9.0-beta-2")
+    assert _dataset_version_for(plan, None) == "2.9.0-beta-2"
+
+
+def test_an_unavailable_plan_pack_falls_back_rather_than_pinning_a_missing_folder(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Pinning it would lose every real footprint to the 1x1x1 default; falling back keeps
+    # best-effort footprints, and the adapter's mismatch warning still says the packs differ.
+    (tmp_path / "2.8.4" / "multiblocks").mkdir(parents=True)
+    monkeypatch.setattr(cli_module, "list_versions", lambda: [tmp_path / "2.8.4"])
+    plan = _plan(dataset_version="local-2.9.0-beta-2")
+    assert _dataset_version_for(plan, None) is None
+
+
+def test_a_version_folder_without_multiblocks_does_not_count(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A textures-only local run leaves the folder there with no multiblocks in it.
+    (tmp_path / "2.9.0-beta-2" / "textures").mkdir(parents=True)
+    monkeypatch.setattr(cli_module, "list_versions", lambda: [tmp_path / "2.9.0-beta-2"])
+    plan = _plan(dataset_version="local-2.9.0-beta-2")
+    assert _dataset_version_for(plan, None) is None
+
+
+def test_no_stated_pack_means_the_default_resolution() -> None:
+    assert _dataset_version_for(_plan(), None) is None

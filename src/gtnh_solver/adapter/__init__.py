@@ -33,7 +33,14 @@ from .plan import (
     Resource,
     Storage,
 )
-from .producer import PlanProducer, describe_markers, detect_producer, resolve_producer
+from .producer import (
+    PlanProducer,
+    describe_markers,
+    detect_producer,
+    plan_pack_version,
+    resolve_producer,
+    strip_dataset_channel,
+)
 
 __all__ = [
     "AdapterError",
@@ -59,6 +66,8 @@ __all__ = [
     "describe_markers",
     "detect_producer",
     "load_plan",
+    "plan_pack_version",
     "resolve_producer",
+    "strip_dataset_channel",
     "to_input_ir",
 ]

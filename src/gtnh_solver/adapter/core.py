@@ -58,7 +58,7 @@ from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 from ._errors import AdapterError, AdapterWarning
 from .plan import Edge, MachineHandler, Node, Plan, Recipe, ResolvedMachine
 from .power import synthesize_power
-from .producer import PlanProducer, resolve_producer
+from .producer import PlanProducer, plan_pack_version, resolve_producer
 
 # Crude single-block physical defaults until the dataset lane provides real footprints/faces.
 _DEFAULT_FOOTPRINT = CellBox()  # 1x1x1
@@ -159,6 +159,7 @@ def to_input_ir(
     """
     resolved_producer = resolve_producer(plan, producer)
     _check_power_provenance(plan, resolved_producer)
+    _check_dataset_version(plan, physical)
     recipes = {r.id: r for r in plan.recipes}
     nodes_by_id = {n.id: n for n in plan.nodes}
     storage_ids = {s.id for s in plan.storages}
@@ -322,6 +323,38 @@ def _check_power_provenance(plan: Plan, producer: PlanProducer | None) -> None:
         f"machine type(s) is synthesized from pre-overclock recipe figures and understates the "
         f"real draw ({', '.join(affected)}); power nets may be sized too thin"
         + (f" [producer: {producer.value}]" if producer is not None else ""),
+        AdapterWarning,
+        stacklevel=2,
+    )
+
+
+def _check_dataset_version(plan: Plan, physical: PhysicalDataset | None) -> None:
+    """Warn when the plan was balanced against a different GTNH pack than the loaded dataset.
+
+    Machine display names, recipe ids and item ids all move between pack releases, and the join from
+    a plan's machine to its physical record is by name. So a mismatch does not fail: it *quietly
+    degrades*, resolving some machines to the wrong footprint and missing others into the 1x1x1
+    default, which is the shape of bug the whole dataset lane exists to remove.
+
+    Silent when no dataset is loaded (every machine is 1x1x1 anyway, so there is nothing to
+    mis-join) and when the plan does not state a single pack version (:func:`plan_pack_version`).
+
+    Also silent for a **non-census** dump. The committed ``data/multiblocks/`` fixtures are a
+    two-machine sample whose ``pack_version`` is nominal rather than surveyed, and they are what a
+    fresh clone resolves to - so trusting it here would greet every new contributor with a mismatch
+    against the shipped examples. This is the same reading ``identifies_single_blocks`` already
+    applies to that dump: a sample is evidence of nothing beyond the machines in it.
+    """
+    if physical is None or not physical.meta.census:
+        return
+    stated = plan_pack_version(plan)
+    if stated is None or stated == physical.meta.pack_version:
+        return
+    warnings.warn(
+        f"plan was balanced against GTNH {stated}, but the loaded physical dataset is "
+        f"{physical.meta.pack_version}; machine names move between packs, so footprints may be "
+        f"resolved from the wrong machine or missed entirely. "
+        f"Pass --dataset-version {stated} once a dump for it exists.",
         AdapterWarning,
         stacklevel=2,
     )

@@ -1,4 +1,4 @@
-"""Which gtnh-factory-flow fork produced an exported plan.
+"""Provenance of an exported plan: which gtnh-factory-flow fork made it, against which pack.
 
 Two live forks emit plans this solver can load, and they are **not** distinguishable by
 ``schemaVersion``: MrBruh's fork bumped to 2 when it added the ``resolved`` block, while
@@ -91,3 +91,37 @@ def describe_markers(plan: Plan) -> str:
         f"machineHandlers="
         f"{'present' if any(r.machine_handlers for r in plan.recipes) else 'absent'}"
     )
+
+
+def strip_dataset_channel(dataset_version_id: str) -> str:
+    """``"stable-2.8.4"`` -> ``"2.8.4"``, ``"local-2.9.0-beta-2"`` -> ``"2.9.0-beta-2"``.
+
+    The exporter namespaces its recipe dataset by release channel; our ``data/<version>/`` folders
+    are named by pack version alone, so the channel has to come off for the two to join. The rule is
+    "drop a leading segment that is not itself part of the version", tested by whether what follows
+    starts with a digit - which leaves an already-bare ``2.9.0-beta-2`` untouched, since ``beta-2``
+    does not. Returns the input unchanged when there is nothing to strip.
+    """
+    head, _, tail = dataset_version_id.partition("-")
+    if tail and not head[:1].isdigit() and tail[:1].isdigit():
+        return tail
+    return dataset_version_id
+
+
+def plan_pack_version(plan: Plan) -> str | None:
+    """The GTNH pack version this plan was balanced against, or ``None`` if it does not say one.
+
+    Read from ``recipes[].source.datasetVersionId``, which both forks emit, with the channel
+    stripped so it names a ``data/<version>/`` folder directly. ``None`` when no recipe carries one
+    (some non-GregTech recipe kinds do not) **or when they disagree**: a plan spanning two datasets
+    has no single answer, and picking a winner there would silently size a layout against the wrong
+    pack, which is the failure this function exists to prevent.
+    """
+    versions = {
+        strip_dataset_channel(recipe.source.dataset_version_id)
+        for recipe in plan.recipes
+        if recipe.source is not None and recipe.source.dataset_version_id
+    }
+    if len(versions) != 1:
+        return None
+    return versions.pop()

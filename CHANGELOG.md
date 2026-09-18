@@ -249,6 +249,25 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   3 nodes, and the only fixture that exercises the single-block path (its Forge Hammers declare
   `kind: "single"` and are correctly absent from the multiblock census).
 
+- **The physical dataset follows the pack the plan was balanced against.** `data/<version>/` dumps
+  have coexisted for a while, but which one loaded was decided by *modification time*, so a 2.9 plan
+  silently resolved its footprints against a 2.8.4 dump merely because that was the newest one on
+  the machine. The join from a plan's machine to its physical record is by display name, and names
+  move between pack releases, so a mismatch does not fail: it resolves some machines to the wrong
+  footprint and drops others to the 1x1x1 default.
+
+  Both forks state the pack per recipe (`source.datasetVersionId`, as `stable-2.8.4` or
+  `local-2.9.0-beta-2`), so that is now read, channel-stripped to name a `data/<version>/` folder,
+  and used as the default for `--dataset-version`. A plan whose recipes disagree, or that states
+  nothing, keeps the previous resolution. A **derived** version is a preference rather than a pin:
+  if no local dump provides it, resolution falls back instead of pinning a folder that does not
+  exist and losing every real footprint. An explicit `--dataset-version` is never second-guessed.
+
+  A remaining mismatch warns, naming both packs. The check abstains for a **non-census** dump: the
+  committed `data/multiblocks/` fixtures are a two-machine sample whose `pack_version` is nominal,
+  and they are what a fresh clone resolves to, so trusting it would greet every new contributor with
+  a spurious mismatch against the shipped examples.
+
 - **Hatches render as real GT hatch blocks, at their own facing, vertical ones included
   (`previewer/`, `tools/`).** A hatch was previously invisible: the previewer drew the casing block
   it displaced. It now resolves to the actual `(block, meta)` GT would place - an `Input Bus (HV)`,
