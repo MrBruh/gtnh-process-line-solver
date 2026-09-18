@@ -17,9 +17,10 @@ for the gauge and skinned with the real cable/pipe sprite where the manifest res
 unresolved route keeps its flat coloured bar - never a checkerboard, which on a noodle threaded
 through a layout reads as damage rather than as missing data) - the cells, their connections, their
 size and their two baked looks all resolved in Python and read straight off ``scene.routes[].cells``,
-so the build guide and the preview cannot disagree about what a layout is made of (#4); auto-output is a small arrow on each source-machine face
-perpendicular to the ejecting
-direction (so one stays visible however the machines are packed). A side panel lists the
+so the build guide and the preview cannot disagree about what a layout is made of (#4); auto-output
+is a small arrow on each source-machine face perpendicular to the ejecting direction (so one stays
+visible however the machines are packed), drawn for **single-block sources only** - a multiblock
+ejects from a hatch's own face, not from its bounding box, so there is no box face to mark (#153). A side panel lists the
 machine/route legend (materials footnoted as stand-ins where they are) plus the
 system's boundary inputs, outputs, and power (``scene.io``), with a per-tick / per-second rate
 toggle. The view frames the layout's *actual* extent (``scene.bounds``), not the solver's
@@ -478,12 +479,22 @@ for (const r of SCENE.routes) {
 // direction - the two side faces perpendicular to it plus the top and bottom. (The output face and
 // its opposite can't show an in-plane arrow.) At least one is visible from any angle, however
 // tightly the machines are packed together, so the flow direction is never fully occluded.
+//
+// SINGLE-BLOCK SOURCES ONLY (GitHub #153). The decal is positioned off the machine's bounding box,
+// which is only where the ejection happens when the machine IS one cell - then it is its own hatch.
+// A multiblock ejects from an output hatch's own front face (GT's MTEHatchOutput /
+// MTEHatchOutputBus push to getFrontFacing(); the controller has no auto-output at all), so an
+// arrow on the bounding box marks a casing face that moves nothing - four of them 3.5 blocks off
+// the nearest hatch on the 7x7x7 Chemical Plant. router.auto already picks the real casing cells;
+// until the decal can be drawn at the hatch that LayoutResult.hatches records, no arrow beats a
+// wrong one.
 const arrows = [];   // the auto-output arrow decals, shown/hidden by #arrowToggle
 let arrowsOn = true;
 for (const ac of SCENE.autoConnections) {
   const src = centerById[ac.source], n = FACE_NORMAL[ac.sourceFace];
   if (!src || !n) continue;
   const size = sizeById[ac.source] || [1, 1, 1], cellY = Math.round(src.y - size[1] / 2);
+  if (size[0] * size[1] * size[2] > 1) continue;   // multiblock: the ejecting face is a hatch's, not this box's
   // Sit the arrow just OUTSIDE the machine's rendered surface so it is never buried in the geometry:
   // an expanded machine draws full-size (0.50 half-extent) textured block cubes, a placeholder its
   // 0.92-scaled box (0.46). The extra 0.03 also clears the front name plate (+0.012), so the arrow

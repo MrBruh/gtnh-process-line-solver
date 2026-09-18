@@ -16,6 +16,7 @@ import pytest
 
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.ir import (
+    AutoConnection,
     CellBox,
     CellCoord,
     Commodity,
@@ -29,7 +30,7 @@ from gtnh_solver.ir import (
 )
 from gtnh_solver.previewer import build_scene, render_html, write_preview
 from gtnh_solver.solver import solve
-from tests._helpers import consumer, net, producer
+from tests._helpers import at, consumer, net, producer
 
 _SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
 
@@ -280,6 +281,55 @@ def test_render_html_auto_output_arrow_draws_on_top_of_the_machine() -> None:
     assert "expandedById" in arrows  # arrow clears full-size textured cubes, not just the flat box
     front = html[html.index("function frontFace(") : html.index("const TEXTURES")]
     assert "fillRect(0, 0, W, H)" in front  # ...and the name keeps its opaque, readable backing
+
+
+def test_render_html_draws_auto_output_arrows_for_single_block_sources_only() -> None:
+    # GitHub #153: the decal is positioned off the source machine's BOUNDING BOX, which is where the
+    # ejection actually happens only when the machine is one cell - then it IS its own hatch. GT
+    # gives a multiblock controller no auto-output at all (doesAutoOutput lives on MTEBasicMachine,
+    # and MTEMultiBlockBase never mentions it); its output hatch/bus pushes to that HATCH's own front
+    # face. So an arrow on the controller's box marks a casing face that moves nothing - four of them
+    # 3.5 blocks off the nearest hatch on nitrobenzene's 7x7x7 Chemical Plant. The WebGL result is
+    # eye-validated, so assert the mechanism on its own code, as #30's test above does.
+    html = render_html(_sand_scene())
+    arrows = html[
+        html.index("for (const ac of SCENE.autoConnections)") : html.index("const layer =")
+    ]
+    guard = "size[0] * size[1] * size[2] > 1"
+    assert guard in arrows  # a multi-cell source is skipped...
+    assert arrows.index(guard) < arrows.index("faceArrow(")  # ...before any decal is built for it
+
+
+def test_scene_still_carries_a_multiblock_auto_connection_it_draws_no_arrow_for() -> None:
+    # The other half of #153: the arrow goes, the CONNECTION stays. It is a real connection - the
+    # build guide lists it and the validator re-checks it - so the fix belongs in the renderer, not
+    # in the scene contract. Filtering these out of `autoConnections` would silently drop them from
+    # every other consumer (and from the boundary-storage glyph orientation in `textures`).
+    source = producer("mb").model_copy(update={"footprint": CellBox(sx=3, sy=3, sz=3)})
+    problem = InputIR(
+        bounding_region=CellBox(sx=6, sy=4, sz=6),
+        machines=[source, consumer("c")],
+        nets=[net("n0", "mb", "c")],
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[at("mb", 0, 0, 0), at("c", 3, 0, 0)],
+        auto_connections=[
+            AutoConnection(
+                net_id="n0",
+                source_machine_id="mb",
+                source_face=Facing.EAST,
+                target_machine_id="c",
+                target_face=Facing.WEST,
+            )
+        ],
+    )
+    scene = build_scene(problem, layout)
+    (auto,) = scene["autoConnections"]
+    assert (auto["source"], auto["sourceFace"]) == ("mb", "east")
+    size = next(m["size"] for m in scene["machines"] if m["id"] == "mb")
+    assert size[0] * size[1] * size[2] > 1  # ...and it is the multi-cell source the viewer skips
 
 
 def test_render_html_marks_an_unresolved_block_face_as_missing_not_grey() -> None:
