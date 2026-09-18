@@ -42,11 +42,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   of N machines would have been handed the whole group's draw. An unconsumed output collects into
   **one** buffer per node rather than one per machine.
 
-  **A parallel plan does not reach a VALID layout yet.** The placer packs machines tightly enough
-  that interior ones are left one free face for three ports and the power net cannot dock. The
-  place-route feedback penalty makes this worse rather than better, because it pulls a failed net's
-  machines *tighter*, which is the wrong direction for a face-starvation failure. That is a
-  placement-cost problem and the remaining half of #76.
+  **A parallel plan does not reach a VALID layout yet**, and the cause is **cross-router cell
+  contention**, not packing. Audited against free adjacent non-front cells, every machine in the
+  nine-machine fixture has *enough* faces; what consumes them is item route **paths**. The item
+  router docks its terminals up front and freezes them (negotiated congestion prices routes, never
+  docks), then `solver/core` routes power **last** with every item route cell as a hard obstacle - so
+  power can find no free face to dock on, while `route_power` on the same placement in isolation
+  succeeds. The fix belongs in the routing order (reserve a power dock per machine before item
+  routing), not in the placement cost, and is the remaining half of #76.
 
 ### Fixed
 - **Multiblocks resolve to their real footprint instead of silently becoming one block.** The
