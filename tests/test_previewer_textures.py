@@ -17,8 +17,8 @@ from typing import Any
 
 import pytest
 
-from gtnh_solver.adapter import adapt_file
 from gtnh_solver.dataset.schema import MultiblockDoc
+from gtnh_solver.ir import InputIR, LayoutResult
 from gtnh_solver.previewer.bake import bake_layers
 from gtnh_solver.previewer.scene import build_scene
 from gtnh_solver.previewer.textures import (
@@ -28,7 +28,6 @@ from gtnh_solver.previewer.textures import (
     primary_variant,
     texturize_scene,
 )
-from gtnh_solver.solver import solve
 
 pytest.importorskip("PIL")
 from PIL import Image
@@ -1402,7 +1401,9 @@ def test_routes_skin_even_with_no_multiblock_dump(tmp_path: Path) -> None:
     assert summary.route_cells_textured == 1
 
 
-def test_the_shipped_lines_texture_every_route_cell_they_draw() -> None:
+def test_the_shipped_lines_texture_every_route_cell_they_draw(
+    solved_nitrobenzene: tuple[InputIR, LayoutResult],
+) -> None:
     """The whole chain on a real artifact, against the committed manifest: solve, build the scene,
     and resolve every route cell's block the way the texture pass does.
 
@@ -1413,8 +1414,8 @@ def test_the_shipped_lines_texture_every_route_cell_they_draw() -> None:
     nothing to do with textures.
     """
     manifest = TextureManifest.load(_COMMITTED_MANIFEST)
-    problem = adapt_file("examples/gtnh-nitrobenzene.json")
-    scene = build_scene(problem, solve(problem))
+    problem, layout = solved_nitrobenzene
+    scene = build_scene(problem, layout)
 
     blocks = {c["block"] for r in scene["routes"] for c in r["cells"]}
     assert blocks, "nitrobenzene routes power and fluids; both must name a block"

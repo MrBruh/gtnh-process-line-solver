@@ -123,6 +123,86 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   correct render, the gap is reported in the texture summary instead.
 
 ### Changed
+- **Insertion ranking stops scoring candidates that cannot win (`placement/`).**
+  `_marginal_insertion_cost` now takes the incumbent's cost as a `bound` and returns `inf` above
+  it, skipping the whole auto term for candidates already out of the running: the `Placement` it
+  would have to build to ask with, and an `auto_output_possible` call per pair. That rule got
+  dearer when it started asking what the router actually answers (#107), so the early-out is worth
+  more than it would have been. `_best_insertion` keeps a candidate only on a strict `<`, so an
+  admissible bound cannot change the argmin: both shipped lines still hash exactly as before.
+
+  **The bound has to account for the auto reward being subtracted.** The running `wire + cable`
+  total is an *upper* bound on the result, so testing it against the incumbent directly would
+  discard candidates the reward would have pulled under - a wrong answer, not a slow one.
+  Subtracting the largest reward still available makes it admissible.
+  `test_the_pruning_bound_never_changes_which_cost_is_reported` fails with `inf == 6.0` against
+  the naive form.
+
+  Nitrobenzene 6.32s -> 4.36s, and 7.95s -> 4.36s (-45%) across both placement changes; the test
+  suite 191s -> 76s. Solve figures are medians of 5 runs taken back to back against `main` in one
+  session, the suite one run each the same way.
+
+- **Insertion ranking stops re-deriving what every candidate shares (`placement/`).** A
+  nitrobenzene solve spent 63% of itself in `_best_insertion`, which evaluates ~50
+  (origin, orientation) candidates per insertion and rebuilt the same already-placed quantities
+  for each one. Output is byte-identical - both shipped lines hash the same before and after -
+  because nothing about the cost changed, only how many times its invariant parts are computed.
+
+  - A net's half-perimeter is the bounding box of its members' centroids. Every member but the
+    candidate is fixed during an insertion, so `_placed_invariants` precomputes that box once per
+    net (`_NetBox`) and each candidate only widens it. Same two operands subtracted, so the span
+    is identical; what goes away is ~1.9M `max()`, ~2.1M `min()` and ~1.9M list appends per solve.
+    The penalized-power term cannot collapse to a box (it is a nearest-member distance, not a
+    span) but its centroids are hoisted the same way (`_PowerAttach`).
+  - `Machine.is_power_source` is a Pydantic property that rescans `faces.ports` on every read and
+    depends on the machine alone, yet `_feed_ok` was asking it once per candidate - ~647k times a
+    solve, ~4% of it. `_feed_ok_for` takes the answer as an argument so the loop hoists it, and
+    `_feed_ok` delegates, keeping the feed rule in one place.
+
+  Nitrobenzene solves in 4.27s against 5.81s, a 26% cut; the test suite drops 104s to 73s.
+  `_cost` is deliberately untouched - it is a global recompute over all placements where
+  everything may have moved, so it has no equivalent cross-call invariant.
+
+- **The shipped example lines are solved once per session, not once per test (`tests/`).** A probe
+  over a serial run put 53.0s of 75s inside `solve()`, and the same two lines were being re-solved
+  from scratch by several modules that only needed *a* real layout to render or validate. A
+  nitrobenzene solve is ~5.6s.
+
+  `solved_sand` and `solved_nitrobenzene` in `tests/conftest.py` do the real `adapt_file` + `solve`
+  once and hand each test a private deep copy. The copy is load-bearing rather than defensive:
+  `InputIR` and `LayoutResult` are `StrictModel`, so a session-scoped object one test edits is a
+  failure the *next* test reports, and a deep copy is ~0.4ms against a ~570ms solve. Tests whose
+  subject is the act of solving keep their own call - determinism needs two independent solves to
+  compare, and a different `physical` dataset, `objective`, `seed` or `optimize` is a different
+  problem that cannot be served the cached one.
+
+  Property-test budgets now come from `property_examples()` (`tests/_helpers.py`): the full
+  200/50/300 whenever `CI` is set, a quarter of it locally, tunable with
+  `GTNH_TEST_HYPOTHESIS_FRACTION`. Every PR is still held to the full generated space; only local
+  iteration is cheaper. Scaled rather than re-set per test, so the ratio between the three budgets
+  survives - the largest one fuzzes `validate`, not `solve`.
+
+  Local `pytest` goes 175s to 93s; a CI-equivalent run (full budget, all cores) goes 175s to 141s,
+  with coverage unchanged at 98%.
+
+- **A local test run leaves the machine usable (`tests/conftest.py`).** `addopts` carries
+  `-n auto`, which means *every* core, so `pytest` pinned the box at 100% for its whole run and
+  nothing else stayed responsive. Two dials now bound it, both off when `CI` is set so GitHub
+  Actions still gets the whole runner:
+
+  - `pytest_xdist_auto_num_workers` scales `-n auto` to `floor(GTNH_TEST_CPU_FRACTION * cores)`,
+    floor 1. It **defaults to `1.0`** - a run takes the whole machine, as `-n auto` always did -
+    so the dial hands cores back on demand rather than withholding them. An explicit `-n 4` still
+    wins, and xdist's own `PYTEST_XDIST_AUTO_NUM_WORKERS` escape hatch is left untouched.
+  - every process, controller and each xdist worker, drops to a below-normal scheduler priority
+    (`GTNH_TEST_NICE=0` opts out), so the cores it does hold yield to the foreground.
+
+  **Handing a core back costs no wall clock.** Measured on a 4-core box at `--no-cov`: `-n 4` 56s,
+  `-n 3` 54s, `-n 2` 58s. The fourth worker oversubscribes the cores the controller also needs, so
+  `GTNH_TEST_CPU_FRACTION=0.75` there is if anything faster. The priority drop is done per-process
+  rather than once in the controller because that does not depend on Windows priority-class
+  inheritance through `execnet`'s popen.
+
 - **Placement asks its geometry questions of the boxes, not of every cell (`ir/`, `placement/`).**
   Two predicates in the hot loop walked cell sets whose size is machine *volume*, so a solve got
   slower as the physical dataset gave machines their real footprints - exactly backwards, since

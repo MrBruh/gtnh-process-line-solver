@@ -92,11 +92,85 @@ and has no hatch, cable or pipe entries at all.
 - Whether a layout actually runs in GT:NH - covered by the in-game Assignment, not CI.
 - Previewer visual correctness - smoke-test the render path; eyeball the rest.
 
+## How much of your machine a run takes
+
+`addopts` runs the suite under `-n auto` (it is CPU-bound and every test is independent), but
+`auto` means *every* core, which pins the box for the whole run. `tests/conftest.py` bounds that
+with two dials, both disabled when `CI` is set so the GitHub runner still gets all of itself:
+
+| Env var | Default | Effect |
+|---|---|---|
+| `GTNH_TEST_CPU_FRACTION` | `1.0` | `-n auto` uses `floor(fraction * cores)` workers, floor 1 |
+| `GTNH_TEST_NICE` | on | every process drops to a below-normal scheduler priority |
+| `GTNH_TEST_HYPOTHESIS_FRACTION` | `0.25` | share of each property test's `max_examples` a local run takes |
+
+An explicit `-n 4` overrides the first (the hook only fires for `auto`/`logical`), as does xdist's
+own `PYTEST_XDIST_AUTO_NUM_WORKERS`.
+
+A run takes every core by default, as `-n auto` always did; the fraction is there to hand cores
+back when you want the machine while it runs. **It is close to free when you do.** On a 4-core box
+at `--no-cov` the suite runs 56s on `-n 4`, 54s on `-n 3` and 58s on `-n 2`: the last worker
+oversubscribes the cores the controller needs, so `GTNH_TEST_CPU_FRACTION=0.75` there costs
+nothing at all.
+
+The priority drop is the dial doing most of the work, which is why it is the one left on by
+default: it costs no wall clock on an idle machine and still lets the foreground preempt the run.
+
+**`solve()` is the suite.** A probe over a serial run puts 53.0s of 73.5s (72%) inside `solve()`
+across 592 calls, against 0.10s in `adapt_file` - parsing an export is free, annealing a layout is
+not. Two things dominate, and each has a lever below: the hypothesis property tests (500 generated
+solves) and the shipped example lines. A nitrobenzene solve is ~5.6s against sand's ~0.6s.
+
+### Reuse a shipped-line solve; do not re-run one
+
+`solved_sand` and `solved_nitrobenzene` (in `tests/conftest.py`) adapt and solve each shipped line
+**once per session** and hand every test a private deep copy. Take them whenever a test needs *a*
+real layout to render, measure or validate:
+
+```python
+def test_something(solved_nitrobenzene: tuple[InputIR, LayoutResult]) -> None:
+    problem, layout = solved_nitrobenzene
+```
+
+The copy is what makes the sharing safe - `InputIR` and `LayoutResult` are `StrictModel`, so they
+are mutable, and a session-scoped object one test edits is a failure the *next* test reports. It
+costs ~0.4ms against a ~570ms solve, so it is free.
+
+Two cases must still call `solve` themselves, and both are about the act of solving rather than
+its output:
+
+- **Determinism tests**, which need two independent solves to compare.
+- **Anything passing a different configuration.** The fixtures are `adapt_file(path)` with *no*
+  physical dataset; `adapt_file(path, physical=...)`, `optimize=False`, a non-default `objective`
+  or a pinned `seed` are all different problems, and the dataset one especially (see the section
+  above - the resolved dataset differs between your machine and CI).
+
+### Property-test budgets are reduced locally, full in CI
+
+`property_examples(full)` in `tests/_helpers.py` scales each `max_examples`: the full budget
+whenever `CI` is set, a quarter of it locally (200/50/300 becomes 50/12/75). Every PR is still
+held to the full space; only local iteration is cheaper. The ratio between the three budgets is
+preserved, because they are not interchangeable - the largest one fuzzes `validate`, not `solve`.
+
+Run `GTNH_TEST_HYPOTHESIS_FRACTION=1.0 pytest` before pushing a change to the solver or the
+validator, and read the outcome mix with `--hypothesis-show-statistics` as the section above says:
+a reduced budget reaches a smaller slice of the generated space, so a local green is weaker
+evidence than a CI green.
+
+**Coverage is a 3x multiplier**, and `addopts` enables it: serial, the suite is 73s at `--no-cov`
+and 282s with `--cov`. Pass `--no-cov` while iterating; `COVERAGE_CORE=sysmon` does not help,
+because `sys.monitoring` cannot measure branches before Python 3.14 and coverage silently falls
+back to its tracer.
+
 ## Commands
 
 ```bash
-pytest            # all tests
+pytest                    # all tests
+pytest --no-cov           # ~3x faster; coverage is on by default via addopts
 pytest -q tests/golden    # the corpus
-ruff check .      # lint
-mypy              # types
+ruff check .              # lint
+mypy                      # types
+
+# the full property-test space, as CI runs it - before pushing solver/validator work
+GTNH_TEST_HYPOTHESIS_FRACTION=1.0 pytest --hypothesis-show-statistics
 ```
