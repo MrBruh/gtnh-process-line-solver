@@ -29,7 +29,7 @@ either way.
 from __future__ import annotations
 
 from ._grid import claims_by_machine
-from .auto import AutoAssignment, assign_auto_outputs
+from .auto import AutoAssignment, assign_auto_outputs, auto_output_possible
 from .core import RouteResult, route
 from .hatches import HatchPlan, place_hatches
 from .power import PowerRouteResult, route_power
@@ -40,6 +40,7 @@ __all__ = [
     "PowerRouteResult",
     "RouteResult",
     "assign_auto_outputs",
+    "auto_output_possible",
     "claims_by_machine",
     "place_hatches",
     "route",
