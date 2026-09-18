@@ -223,6 +223,32 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
   Yields a 296-controller census dump against 2.8.4's 208. Local-only per the dataset policy, so the
   dump itself is not committed; only the pins and the port are.
+- **The adapter knows which gtnh-factory-flow fork exported a plan, and says so when it cannot
+  tell (`adapter/producer.py`, `--plan-schema`).** Two live forks emit plans this solver loads, and
+  `schemaVersion` cannot tell them apart: MrBruh's bumped to 2 when it added the `resolved` block,
+  arodoid's kept 1 through a thousand diverging commits. An arodoid plan therefore used
+  to load with **zero warnings** and then size its power network from `recipe.eut`, the
+  *pre-overclock* figure - 6.1x low across a whole plan and 256x low on a single machine, because
+  an EV machine running an LV recipe draws 4^3 times its base value. Under-sized cable is the one
+  failure a builder cannot see in the preview.
+
+  Detection reads structural markers instead of the version integer: `resolved`/`app` (or
+  `schemaVersion >= 2`) mark MrBruh's fork, `recipes[].machineHandlers` marks arodoid's.
+  `--plan-schema {auto,mrbruh-v2,arodoid-v1}` pins it, `auto` is the default, and an
+  undetermined plan is reported on stderr with the evidence, since naming the fork on the command
+  line is advice only the CLI can give.
+
+  The new `AdapterWarning` fires **only where it can matter**: a plan with no resolved figures
+  whose own `machineHandlers` declare a machine `multiblock`. Base EU/t is exact for a single block
+  at its recipe's tier, so `examples/gtnh-parallel-sand.json` stays correctly silent. Detection
+  itself never warns - an undetermined result is normal for any hand-built plan, and warning there
+  would fire across the suite and teach readers to filter `AdapterWarning` out, costing us the one
+  warning that matters.
+
+- **`examples/gtnh-parallel-sand.json`**, the first committed export from the arodoid fork:
+  3 nodes, and the only fixture that exercises the single-block path (its Forge Hammers declare
+  `kind: "single"` and are correctly absent from the multiblock census).
+
 - **Hatches render as real GT hatch blocks, at their own facing, vertical ones included
   (`previewer/`, `tools/`).** A hatch was previously invisible: the previewer drew the casing block
   it displaced. It now resolves to the actual `(block, meta)` GT would place - an `Input Bus (HV)`,

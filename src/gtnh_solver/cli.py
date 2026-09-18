@@ -32,7 +32,13 @@ from typing import Final
 from pydantic import ValidationError
 
 from gtnh_solver import __version__
-from gtnh_solver.adapter import adapt_file
+from gtnh_solver.adapter import (
+    PlanProducer,
+    describe_markers,
+    load_plan,
+    resolve_producer,
+    to_input_ir,
+)
 from gtnh_solver.buildguide import build_guide
 from gtnh_solver.dataset import PhysicalDataset, list_versions, load_physical_dataset
 from gtnh_solver.dataset.coverage import format_report, measure
@@ -94,6 +100,16 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "decode an existing .schematic and print what is in it (blocks, machines, hatches, "
             "routes), then exit; takes no plan"
+        ),
+    )
+    parser.add_argument(
+        "--plan-schema",
+        choices=("auto", *(producer.value for producer in PlanProducer)),
+        default="auto",
+        help=(
+            "which gtnh-factory-flow fork exported the plan: 'mrbruh-v2' (carries a resolved "
+            "throughput block) or 'arodoid-v1' (carries machineHandlers instead); 'auto', "
+            "the default, reads the plan's own structure and warns if it cannot tell"
         ),
     )
     parser.add_argument(
@@ -316,8 +332,21 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     physical = _load_physical_or_warn(args.dataset_version)  # real footprints; None -> 1x1x1
+    # "auto" is the absence of a pin, which is what resolve_producer's None already means.
+    pin = None if args.plan_schema == "auto" else PlanProducer(args.plan_schema)
     try:
-        problem = adapt_file(args.export, physical=physical)
+        # Loaded here rather than through adapt_file so an undetermined producer can be reported
+        # before the mapping runs: the advice is to pass --plan-schema, which only the CLI can give.
+        plan = load_plan(args.export)
+        producer = resolve_producer(plan, pin)
+        if producer is None:
+            print(
+                f"warning: could not tell which gtnh-factory-flow fork exported "
+                f"{args.export} ({describe_markers(plan)}); producer-specific handling is "
+                f"disabled. Pass --plan-schema to say which it is.",
+                file=sys.stderr,
+            )
+        problem = to_input_ir(plan, physical=physical, producer=producer)
     except (OSError, ValueError, ValidationError) as exc:
         print(f"error: could not load {args.export!r}: {exc}", file=sys.stderr)
         return 2

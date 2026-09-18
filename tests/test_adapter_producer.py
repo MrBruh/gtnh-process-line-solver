@@ -1,0 +1,315 @@
+"""Tests for producer detection: which gtnh-factory-flow fork exported a plan.
+
+The point of this lane is that an arodoid plan used to load with **zero** warnings and then
+size its power from pre-overclock EU/t figures. So these tests care about two things: that the two
+forks are told apart by structure rather than by ``schemaVersion`` (which both spell as a small
+integer, incompatibly), and that the resulting warning fires on exactly the plans it should and
+stays quiet on the rest. A warning that cries wolf is worse than none, because the next reader
+filters ``AdapterWarning`` out.
+"""
+
+from __future__ import annotations
+
+import warnings
+from pathlib import Path
+
+import pytest
+
+import gtnh_solver.cli as cli_module
+from gtnh_solver.adapter import (
+    AdapterWarning,
+    MachineHandler,
+    Node,
+    Plan,
+    PlanProducer,
+    Recipe,
+    ResolvedBlock,
+    Resource,
+    describe_markers,
+    detect_producer,
+    load_plan,
+    resolve_producer,
+    to_input_ir,
+)
+from gtnh_solver.adapter.core import _check_power_provenance, _effective_handler
+from gtnh_solver.cli import main
+from gtnh_solver.dataset import PhysicalDataset
+from gtnh_solver.ir import InputIR, LayoutResult
+
+_EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+_SAND = _EXAMPLES / "gtnh-sand.json"
+_NITROBENZENE = _EXAMPLES / "gtnh-nitrobenzene.json"
+#: The only committed arodoid-fork export: no ``resolved`` block, ``machineHandlers`` present.
+_PARALLEL_SAND = _EXAMPLES / "gtnh-parallel-sand.json"
+
+
+def _plan(
+    *handlers: MachineHandler,
+    resolved: ResolvedBlock | None = None,
+    schema_version: int = 1,
+    handler_id: str = "",
+    eut: float = 30.0,
+) -> Plan:
+    """A one-node plan whose recipe lists ``handlers``, for the detection/provenance branches."""
+    return Plan(
+        schema_version=schema_version,
+        resolved=resolved,
+        recipes=[
+            Recipe(
+                id="r",
+                machine_type="Recipe Map Name",
+                eut=eut,
+                duration_ticks=10.0,
+                outputs=[Resource(kind="item", id="x", amount=1.0)],
+                machine_handlers=list(handlers),
+            )
+        ],
+        nodes=[
+            Node(id="n", recipe_id="r", overclock_tier="LV", machine_handler_id=handler_id),
+        ],
+    )
+
+
+def _multiblock(handler_id: str = "mb", label: str = "Controller Name") -> MachineHandler:
+    return MachineHandler(id=handler_id, kind="multiblock", label=label)
+
+
+def _single(handler_id: str = "sb", label: str = "Basic Machine") -> MachineHandler:
+    return MachineHandler(id=handler_id, kind="single", label=label)
+
+
+# ------------------------------------------------------------------ detection, real fixtures
+
+
+@pytest.mark.parametrize("path", [_SAND, _NITROBENZENE])
+def test_committed_mrbruh_fixtures_detect_as_mrbruh(path: Path) -> None:
+    assert detect_producer(load_plan(path)) is PlanProducer.MRBRUH_V2
+
+
+def test_committed_arodoid_fixture_detects_despite_schema_version_1() -> None:
+    # The whole hazard in one assertion: this plan says schemaVersion 1, exactly as an old MrBruh
+    # plan would, and is told apart only by carrying machineHandlers.
+    plan = load_plan(_PARALLEL_SAND)
+    assert plan.schema_version == 1
+    assert plan.resolved is None
+    assert detect_producer(plan) is PlanProducer.ARODOID_V1
+
+
+# ------------------------------------------------------------------ detection, branches
+
+
+def test_resolved_block_alone_identifies_mrbruh() -> None:
+    assert detect_producer(_plan(resolved=ResolvedBlock())) is PlanProducer.MRBRUH_V2
+
+
+def test_schema_version_2_alone_identifies_mrbruh() -> None:
+    assert detect_producer(_plan(schema_version=2)) is PlanProducer.MRBRUH_V2
+
+
+def test_machine_handlers_alone_identify_arodoid() -> None:
+    assert detect_producer(_plan(_single())) is PlanProducer.ARODOID_V1
+
+
+def test_no_markers_is_undetermined() -> None:
+    # A hand-built or minimal plan carries neither marker. Undetermined, not an error - which is
+    # why detection must stay silent here (most of the suite builds plans like this).
+    assert detect_producer(_plan()) is None
+
+
+def test_both_markers_is_undetermined() -> None:
+    # Would mean a fork grew the other's field and this heuristic needs revisiting, so it must not
+    # silently pick a side.
+    assert detect_producer(_plan(_single(), resolved=ResolvedBlock())) is None
+
+
+def test_detection_emits_no_warning_even_when_undetermined() -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert detect_producer(_plan()) is None
+        assert resolve_producer(_plan()) is None
+
+
+# ------------------------------------------------------------------ resolve precedence
+
+
+def test_explicit_pin_wins_over_the_markers() -> None:
+    # The override exists to correct a wrong or impossible detection, so it is taken on trust and
+    # deliberately not cross-checked against markers that say otherwise.
+    plan = _plan(resolved=ResolvedBlock())
+    assert resolve_producer(plan, PlanProducer.ARODOID_V1) is PlanProducer.ARODOID_V1
+
+
+def test_no_pin_falls_back_to_detection() -> None:
+    assert resolve_producer(_plan(_single())) is PlanProducer.ARODOID_V1
+
+
+def test_describe_markers_names_every_signal() -> None:
+    described = describe_markers(_plan(_single()))
+    assert "schemaVersion=1" in described
+    assert "resolved=absent" in described
+    assert "app=absent" in described
+    assert "machineHandlers=present" in described
+
+
+# ------------------------------------------------------------------ effective handler
+
+
+def test_explicit_handler_id_selects_that_handler() -> None:
+    plan = _plan(_multiblock("first"), _multiblock("second"), handler_id="second")
+    handler = _effective_handler(plan.recipes[0], plan.nodes[0])
+    assert handler is not None
+    assert handler.id == "second"
+
+
+def test_absent_handler_id_selects_the_first_as_default() -> None:
+    # Verified against every node of the committed arodoid fixture: no id means the default,
+    # and the default is the head of the list.
+    plan = _plan(_multiblock("first"), _multiblock("second"))
+    handler = _effective_handler(plan.recipes[0], plan.nodes[0])
+    assert handler is not None
+    assert handler.id == "first"
+
+
+def test_unknown_handler_id_falls_back_to_the_default() -> None:
+    plan = _plan(_multiblock("first"), handler_id="not-in-the-list")
+    handler = _effective_handler(plan.recipes[0], plan.nodes[0])
+    assert handler is not None
+    assert handler.id == "first"
+
+
+def test_no_handlers_is_no_information() -> None:
+    # Must not read as "single block": several arodoid machine types carry an empty list.
+    plan = _plan()
+    assert _effective_handler(plan.recipes[0], plan.nodes[0]) is None
+
+
+# ------------------------------------------------------------------ power provenance warning
+
+
+def test_warns_when_a_multiblock_has_no_resolved_figures() -> None:
+    plan = _plan(_multiblock(label="Industrial Centrifuge"))
+    with pytest.warns(AdapterWarning, match="understates the real draw"):
+        _check_power_provenance(plan, PlanProducer.ARODOID_V1)
+
+
+def test_the_warning_names_the_controller_and_the_producer() -> None:
+    plan = _plan(_multiblock(label="Industrial Centrifuge"))
+    with pytest.warns(AdapterWarning) as caught:
+        _check_power_provenance(plan, PlanProducer.ARODOID_V1)
+    message = str(caught[0].message)
+    # The controller's own name, not the recipe-map name, because that is what a builder places.
+    assert "Industrial Centrifuge" in message
+    assert "arodoid-v1" in message
+
+
+def test_quiet_for_a_single_block_machine() -> None:
+    # The committed arodoid fixture is exactly this shape (LV Forge Hammers). Base recipe
+    # EU/t is *exact* for a single block at its own tier, so warning here would be crying wolf.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _check_power_provenance(_plan(_single()), PlanProducer.ARODOID_V1)
+
+
+def test_quiet_when_the_plan_carries_resolved_figures() -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _check_power_provenance(
+            _plan(_multiblock(), resolved=ResolvedBlock()), PlanProducer.MRBRUH_V2
+        )
+
+
+def test_quiet_when_no_handler_declares_the_machine_kind() -> None:
+    # Without handlers there is no evidence the machine is a multiblock, so there is nothing to
+    # claim; the undetermined-producer report on the CLI covers this case instead.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _check_power_provenance(_plan(), None)
+
+
+def test_the_committed_arodoid_fixture_stays_quiet_through_the_mapping() -> None:
+    # End to end on the real fixture: detection fires, the provenance warning correctly does not.
+    plan = load_plan(_PARALLEL_SAND)
+    for node in plan.nodes:  # machineCount > 1 is still rejected; not what this test is about
+        node.machine_count = 1
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        to_input_ir(plan)
+
+
+# ------------------------------------------------------------------ CLI wiring
+
+
+@pytest.fixture
+def stub_solve(monkeypatch: pytest.MonkeyPatch, solved_sand: tuple[InputIR, LayoutResult]) -> None:
+    """Swap the CLI's solver for the session-cached sand layout.
+
+    These tests are about flag plumbing, not solving, and the cached layout is a real one. Only
+    usable where the export under test *is* sand, since the guide is rendered against the pair.
+    """
+    _, layout = solved_sand
+
+    def cached_solve(problem: InputIR, **kwargs: object) -> LayoutResult:
+        return layout
+
+    monkeypatch.setattr(cli_module, "solve", cached_solve)
+
+
+def test_cli_threads_the_pinned_producer_into_the_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_solve: None,
+) -> None:
+    captured: dict[str, PlanProducer | None] = {}
+
+    def spy(
+        plan: Plan,
+        *,
+        physical: PhysicalDataset | None = None,
+        producer: PlanProducer | None = None,
+    ) -> InputIR:
+        captured["producer"] = producer
+        return to_input_ir(plan, physical=physical, producer=producer)
+
+    monkeypatch.setattr(cli_module, "to_input_ir", spy)
+    assert main([str(_SAND), "--plan-schema", "arodoid-v1"]) == 0
+    assert captured["producer"] is PlanProducer.ARODOID_V1
+
+
+def test_cli_auto_detects_when_the_flag_is_omitted(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_solve: None,
+) -> None:
+    captured: dict[str, PlanProducer | None] = {}
+
+    def spy(
+        plan: Plan,
+        *,
+        physical: PhysicalDataset | None = None,
+        producer: PlanProducer | None = None,
+    ) -> InputIR:
+        captured["producer"] = producer
+        return to_input_ir(plan, physical=physical, producer=producer)
+
+    monkeypatch.setattr(cli_module, "to_input_ir", spy)
+    assert main([str(_SAND)]) == 0
+    assert captured["producer"] is PlanProducer.MRBRUH_V2
+
+
+def test_cli_reports_an_undetermined_producer_on_stderr(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The advice is "pass --plan-schema", which only the CLI can give, so this is the one place the
+    # undetermined case is reported at all.
+    plan = _plan(eut=0.0)
+    export = tmp_path / "markerless.json"
+    export.write_text(plan.model_dump_json(by_alias=True), encoding="utf-8")
+    assert main([str(export)]) == 0
+    err = capsys.readouterr().err
+    assert "could not tell which gtnh-factory-flow fork" in err
+    assert "--plan-schema" in err
+
+
+def test_cli_rejects_an_unknown_plan_schema() -> None:
+    with pytest.raises(SystemExit) as exc:
+        main([str(_SAND), "--plan-schema", "samiracle64-v0"])
+    assert exc.value.code == 2

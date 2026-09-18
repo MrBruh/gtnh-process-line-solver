@@ -56,8 +56,9 @@ from gtnh_solver.ir import (
 from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 
 from ._errors import AdapterError, AdapterWarning
-from .plan import Edge, Node, Plan, Recipe, ResolvedMachine
+from .plan import Edge, MachineHandler, Node, Plan, Recipe, ResolvedMachine
 from .power import synthesize_power
+from .producer import PlanProducer, resolve_producer
 
 # Crude single-block physical defaults until the dataset lane provides real footprints/faces.
 _DEFAULT_FOOTPRINT = CellBox()  # 1x1x1
@@ -79,13 +80,19 @@ def load_plan(path: str | Path) -> Plan:
     return Plan.model_validate(data)
 
 
-def adapt_file(path: str | Path, *, physical: PhysicalDataset | None = None) -> InputIR:
+def adapt_file(
+    path: str | Path,
+    *,
+    physical: PhysicalDataset | None = None,
+    producer: PlanProducer | None = None,
+) -> InputIR:
     """Load an exported plan file and map it to the solver's ``InputIR``.
 
     ``physical`` is an optional multiblock dataset (``dataset.load_physical_dataset``); when given,
     a node whose machine type it knows gets that machine's real footprint (see :func:`to_input_ir`).
+    ``producer`` pins which gtnh-factory-flow fork exported the plan; ``None`` detects it.
     """
-    return to_input_ir(load_plan(path), physical=physical)
+    return to_input_ir(load_plan(path), physical=physical, producer=producer)
 
 
 def _block_key_for(recipe: Recipe, resolved: ResolvedMachine | None) -> str | None:
@@ -133,13 +140,25 @@ def _footprint_for(
     return _DEFAULT_FOOTPRINT
 
 
-def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> InputIR:
+def to_input_ir(
+    plan: Plan,
+    *,
+    physical: PhysicalDataset | None = None,
+    producer: PlanProducer | None = None,
+) -> InputIR:
     """Map a typed :class:`Plan` to an ``InputIR`` (referential integrity enforced on build).
 
     When ``physical`` is supplied, each node's machine footprint comes from that dataset if it knows
     the machine type; otherwise (and for boundary storages/buffers, which are never in the dataset)
     the crude 1x1x1 default stands.
+
+    ``producer`` pins which gtnh-factory-flow fork exported the plan. ``None`` (the default) detects
+    it from the plan's structural markers (``producer.resolve_producer``), which is itself allowed to
+    come back undetermined - the two meanings never collide, because a *parameter* of ``None`` asks
+    for detection while a *detected* ``None`` disables producer-specific handling.
     """
+    resolved_producer = resolve_producer(plan, producer)
+    _check_power_provenance(plan, resolved_producer)
     recipes = {r.id: r for r in plan.recipes}
     nodes_by_id = {n.id: n for n in plan.nodes}
     storage_ids = {s.id for s in plan.storages}
@@ -251,6 +270,61 @@ def _node_eut(recipe: Recipe, node: Node, resolved: dict[str, ResolvedMachine]) 
             stacklevel=2,
         )
     return machine.total_eut
+
+
+def _effective_handler(recipe: Recipe, node: Node) -> MachineHandler | None:
+    """The machine a node actually runs in: its ``machineHandlerId``, else the list's first entry.
+
+    The first entry is the exporter's default, which is what a node with no explicit id is running
+    (see :class:`plan.MachineHandler`). ``None`` when the recipe lists no handlers at all - common
+    even on an arodoid plan, where several machine types carry an empty list - so callers must
+    treat "no handler" as "no information", never as "single block".
+    """
+    if not recipe.machine_handlers:
+        return None
+    if node.machine_handler_id:
+        for handler in recipe.machine_handlers:
+            if handler.id == node.machine_handler_id:
+                return handler
+    return recipe.machine_handlers[0]
+
+
+def _check_power_provenance(plan: Plan, producer: PlanProducer | None) -> None:
+    """Warn when a plan's multiblocks will be powered from pre-overclock EU/t figures.
+
+    With no ``resolved`` block, every machine's draw falls back to ``recipe.eut * parallel``
+    (:func:`_node_eut`), which does not model overclocking. For a single-block machine running at
+    its recipe's own tier that is exact, which is why this stays quiet on such a plan. For a
+    multiblock overclocked above its recipe tier it is low by a factor of 4 per tier step, and the
+    cable amperage is sized from it - so the layout is buildable and under-powered, the one failure
+    mode a builder cannot see in the preview.
+
+    Scoped to plans that declare their machines via ``machineHandlers``, since that is the only
+    evidence available here of a machine being a multiblock at all; a plan whose handlers are all
+    empty says nothing and stays quiet.
+    """
+    if plan.resolved is not None:
+        return
+    recipes = {r.id: r for r in plan.recipes}
+    affected = sorted(
+        {
+            handler.label or recipe.machine_type
+            for node in plan.nodes
+            if (recipe := recipes.get(node.recipe_id)) is not None
+            and (handler := _effective_handler(recipe, node)) is not None
+            and handler.kind == "multiblock"
+        }
+    )
+    if not affected:
+        return
+    warnings.warn(
+        f"plan carries no resolved throughput block, so EU/t for {len(affected)} multiblock "
+        f"machine type(s) is synthesized from pre-overclock recipe figures and understates the "
+        f"real draw ({', '.join(affected)}); power nets may be sized too thin"
+        + (f" [producer: {producer.value}]" if producer is not None else ""),
+        AdapterWarning,
+        stacklevel=2,
+    )
 
 
 def _check_resolved_power(plan: Plan, nets: list[Net]) -> None:

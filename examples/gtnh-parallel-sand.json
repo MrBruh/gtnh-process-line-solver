@@ -1,0 +1,2028 @@
+{
+  "schemaVersion": 1,
+  "id": "manual-project",
+  "name": "parallel-sand",
+  "recipes": [
+    {
+      "id": "oracle:local-2.9.0-beta-2:gregtech:gt-recipe-hammer:806be14ba316f4d7",
+      "name": "Forge Hammer: Cobblestone",
+      "kind": "gregtech_machine",
+      "category": "gregtech",
+      "machineType": "Forge Hammer",
+      "minimumTier": "LV",
+      "durationTicks": 10,
+      "eut": 15,
+      "inputs": [
+        {
+          "kind": "item",
+          "id": "minecraft:stone",
+          "amount": 1,
+          "displayName": "Stone",
+          "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/stone-21345afefcc2.png",
+          "dominantColor": "#545454",
+          "modId": "minecraft",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "minecraft:stone",
+              "displayName": "Stone",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/stone-21345afefcc2.png",
+              "dominantColor": "#545454",
+              "modId": "minecraft",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stone",
+              "displayName": "Colored Stone (White Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_stone_white_frequency-41d88f41d659.png",
+              "dominantColor": "#9d9d9e",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stone@1",
+              "displayName": "Colored Stone (Orange Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_stone_orange_frequency-6cac5fb23338.png",
+              "dominantColor": "#653f1f",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stone@2",
+              "displayName": "Colored Stone (Magenta Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_stone_magenta_frequency-128698ed329b.png",
+              "dominantColor": "#7a3e8c",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stone@3",
+              "displayName": "Colored Stone (Light Blue Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_stone_light_blue_frequency-a813047ca3e7.png",
+              "dominantColor": "#354b65",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stone@4",
+              "displayName": "Colored Stone (Yellow Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_stone_yellow_frequency-8ed95f491543.png",
+              "dominantColor": "#8c8c2f",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stone@5",
+              "displayName": "Colored Stone (Lime Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_stone_lime_frequency-4b20cb42955d.png",
+              "dominantColor": "#547f1a",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stone@6",
+              "displayName": "Colored Stone (Pink Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_stone_pink_frequency-01b3f52e814f.png",
+              "dominantColor": "#714252",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stone@7",
+              "displayName": "Colored Stone (Gray Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_stone_gray_frequency-54bf0c6a7584.png",
+              "dominantColor": "#151515",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stone@8",
+              "displayName": "Colored Stone (Light Gray Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_stone_light_gray_frequency-357c2bd7d157.png",
+              "dominantColor": "#323232",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stone@9",
+              "displayName": "Colored Stone (Cyan Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_stone_cyan_frequency-ff501e7444cb.png",
+              "dominantColor": "#375462",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stone@10",
+              "displayName": "Colored Stone (Purple Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_stone_purple_frequency-d6ce43709b51.png",
+              "dominantColor": "#553173",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stone@11",
+              "displayName": "Colored Stone (Blue Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_stone_blue_frequency-58566da433cc.png",
+              "dominantColor": "#27356f",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stone@12",
+              "displayName": "Colored Stone (Brown Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_stone_brown_frequency-445500ae481c.png",
+              "dominantColor": "#3b2e21",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stone@13",
+              "displayName": "Colored Stone (Green Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_stone_green_frequency-3a386b03eaf4.png",
+              "dominantColor": "#425026",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stone@14",
+              "displayName": "Colored Stone (Red Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_stone_red_frequency-c653a2e5f826.png",
+              "dominantColor": "#512020",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stone@15",
+              "displayName": "Colored Stone (Black Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_stone_black_frequency-9e3ef8261662.png",
+              "dominantColor": "#6b7280",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "etfuturum:deepslate",
+              "displayName": "Deepslate",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/deepslate-a78ff295c40a.png",
+              "dominantColor": "#404040",
+              "modId": "etfuturum",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "etfuturum:tuff",
+              "displayName": "Tuff",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/tuff-2b8fddc5ab88.png",
+              "dominantColor": "#3f3f38",
+              "modId": "etfuturum",
+              "amount": 1
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "item",
+          "id": "minecraft:cobblestone",
+          "amount": 1,
+          "displayName": "Cobblestone",
+          "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/cobblestone-1712976ff384.png",
+          "dominantColor": "#525252",
+          "modId": "minecraft",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "minecraft:cobblestone",
+              "displayName": "Cobblestone",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/cobblestone-1712976ff384.png",
+              "dominantColor": "#525252",
+              "modId": "minecraft",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick",
+              "displayName": "Colored Cobblestone (White Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_white_frequency-f06c5c76e44a.png",
+              "dominantColor": "#848485",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@1",
+              "displayName": "Colored Cobblestone (Orange Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_orange_frequency-20d2e987a5c6.png",
+              "dominantColor": "#59391c",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@2",
+              "displayName": "Colored Cobblestone (Magenta Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_magenta_frequency-9f83feefc894.png",
+              "dominantColor": "#5e2f6c",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@3",
+              "displayName": "Colored Cobblestone (Light Blue Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_light_blue_frequency-3a0a3a365abc.png",
+              "dominantColor": "#2b3b50",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@4",
+              "displayName": "Colored Cobblestone (Yellow Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_yellow_frequency-bcdbabd6f9e8.png",
+              "dominantColor": "#6c6c24",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@5",
+              "displayName": "Colored Cobblestone (Lime Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_lime_frequency-dcc7f700b207.png",
+              "dominantColor": "#426315",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@6",
+              "displayName": "Colored Cobblestone (Pink Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_pink_frequency-43898a5e9e89.png",
+              "dominantColor": "#593340",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@7",
+              "displayName": "Colored Cobblestone (Gray Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_gray_frequency-e660fa4cd275.png",
+              "dominantColor": "#121212",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@8",
+              "displayName": "Colored Cobblestone (Light Gray Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_light_gray_frequency-ca4dcc80e64d.png",
+              "dominantColor": "#2b2b2b",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@9",
+              "displayName": "Colored Cobblestone (Cyan Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_cyan_frequency-44d65bc2fab9.png",
+              "dominantColor": "#2b424d",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@10",
+              "displayName": "Colored Cobblestone (Purple Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_purple_frequency-5973a0aeca63.png",
+              "dominantColor": "#422659",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@11",
+              "displayName": "Colored Cobblestone (Blue Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_blue_frequency-64202ed8e058.png",
+              "dominantColor": "#1e2a57",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@12",
+              "displayName": "Colored Cobblestone (Brown Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_brown_frequency-809d3e526fb2.png",
+              "dominantColor": "#2f251b",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@13",
+              "displayName": "Colored Cobblestone (Green Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_green_frequency-d64cd0fe962d.png",
+              "dominantColor": "#34401e",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@14",
+              "displayName": "Colored Cobblestone (Red Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_red_frequency-8cc984cbe211.png",
+              "dominantColor": "#451b1b",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@15",
+              "displayName": "Colored Cobblestone (Black Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_black_frequency-6cd728da8eb0.png",
+              "dominantColor": "#6b7280",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "minecraft:mossy_cobblestone@32767",
+              "displayName": "Mossy Cobblestone",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/mossy_cobblestone-0b65f02795a6.png",
+              "dominantColor": "#284528",
+              "modId": "minecraft",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "thaumicbases:oldcobble",
+              "displayName": "Ancient Cobblestone",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/ancient_cobblestone-b4126c2f635e.png",
+              "dominantColor": "#4f4f4f",
+              "modId": "thaumicbases",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "thaumicbases:oldcobblemossy",
+              "displayName": "Ancient Mossy Cobblestone",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/ancient_mossy_cobblestone-42e43f3ade23.png",
+              "dominantColor": "#163316",
+              "modId": "thaumicbases",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "etfuturum:cobbled_deepslate",
+              "displayName": "Cobbled Deepslate",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/cobbled_deepslate-9e1a9ac8ea5d.png",
+              "dominantColor": "#2b2b2e",
+              "modId": "etfuturum",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "etfuturum:blackstone",
+              "displayName": "Blackstone",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/blackstone-bbafd8738ffe.png",
+              "dominantColor": "#211d24",
+              "modId": "etfuturum",
+              "amount": 1
+            }
+          ]
+        }
+      ],
+      "specialValue": 0,
+      "notes": "Exported by the GTNH calculation oracle from gregtech.api.recipe.RecipeMap.",
+      "machineHandlers": [
+        {
+          "machineType": "Forge Hammer",
+          "minimumTier": "LV",
+          "maximumTier": "UMV",
+          "availableTiers": [
+            "LV",
+            "MV",
+            "HV",
+            "EV",
+            "IV",
+            "LuV",
+            "ZPM",
+            "UV",
+            "UHV",
+            "UEV",
+            "UIV",
+            "UMV"
+          ],
+          "id": "forge-hammer",
+          "label": "Forge Hammer",
+          "kind": "single"
+        },
+        {
+          "machineType": "High Pressure Steam Forge Hammer",
+          "minimumTier": "LV",
+          "id": "high-pressure-steam-forge-hammer",
+          "label": "High Pressure Steam Forge Hammer",
+          "kind": "single"
+        },
+        {
+          "machineType": "Steam Forge Hammer",
+          "minimumTier": "LV",
+          "id": "steam-forge-hammer",
+          "label": "Steam Forge Hammer",
+          "kind": "single"
+        },
+        {
+          "machineType": "Industrial Sledgehammer",
+          "minimumTier": "LV",
+          "durationTicks": 5,
+          "id": "industrial-sledgehammer",
+          "label": "Industrial Sledgehammer",
+          "kind": "multiblock",
+          "machineConfigControls": [
+            {
+              "id": "machineParallel",
+              "label": "Parallel",
+              "minimumKey": "fixed-6",
+              "defaultKey": "fixed-6",
+              "tiers": [
+                {
+                  "key": "fixed-6",
+                  "label": "6 Parallels",
+                  "parallelMultiplier": 6,
+                  "resource": {
+                    "kind": "item",
+                    "id": "factoryflow:machine_config/fixed-6",
+                    "amount": 1,
+                    "displayName": "6 Parallels",
+                    "tooltip": [
+                      "Imported from machine catalyst tooltip",
+                      "Parallels: 6"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "machineType": "Steam Presser",
+          "minimumTier": "LV",
+          "durationTicks": 8,
+          "id": "steam-presser",
+          "label": "Steam Presser",
+          "kind": "multiblock",
+          "machineConfigControls": [
+            {
+              "id": "steamPressure",
+              "label": "Pressure",
+              "minimumKey": "normal",
+              "defaultKey": "normal",
+              "tiers": [
+                {
+                  "key": "normal",
+                  "label": "Normal Pressure",
+                  "resource": {
+                    "kind": "item",
+                    "id": "factoryflow:machine_config/steam_pressure_normal",
+                    "amount": 1,
+                    "displayName": "Normal Pressure",
+                    "tooltip": [
+                      "Steam machine build",
+                      "High-Pressure Doubles Speed and Steam Usage"
+                    ]
+                  }
+                },
+                {
+                  "key": "high",
+                  "label": "High Pressure",
+                  "durationMultiplier": 0.5,
+                  "resource": {
+                    "kind": "item",
+                    "id": "factoryflow:machine_config/steam_pressure_high",
+                    "amount": 1,
+                    "displayName": "High Pressure",
+                    "tooltip": [
+                      "Steam machine build",
+                      "Doubles speed and steam usage",
+                      "High-Pressure Doubles Speed and Steam Usage"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "machineParallel",
+              "label": "Parallel",
+              "minimumKey": "fixed-8",
+              "defaultKey": "fixed-8",
+              "tiers": [
+                {
+                  "key": "fixed-8",
+                  "label": "8 Parallels",
+                  "parallelMultiplier": 8,
+                  "resource": {
+                    "kind": "item",
+                    "id": "factoryflow:machine_config/fixed-8",
+                    "amount": 1,
+                    "displayName": "8 Parallels",
+                    "tooltip": [
+                      "Imported from machine catalyst tooltip",
+                      "Parallels: 8"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "runtimeCalculation": {
+        "sourceKind": "gregtech-overclock-calculator",
+        "sourceClass": "gregtech.api.util.OverclockCalculator",
+        "recipeMap": "Forge Hammer",
+        "status": "computed",
+        "oracleEligible": true,
+        "strict": true,
+        "generatedAt": "2026-08-29T17:30:14.599Z",
+        "variants": [
+          {
+            "id": "tier-lv",
+            "label": "LV",
+            "overclockTier": "LV",
+            "durationTicks": 10,
+            "eut": 15,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-mv",
+            "label": "MV",
+            "overclockTier": "MV",
+            "durationTicks": 5,
+            "eut": 60,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-hv",
+            "label": "HV",
+            "overclockTier": "HV",
+            "durationTicks": 2,
+            "eut": 240,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-ev",
+            "label": "EV",
+            "overclockTier": "EV",
+            "durationTicks": 1,
+            "eut": 960,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-iv",
+            "label": "IV",
+            "overclockTier": "IV",
+            "durationTicks": 1,
+            "eut": 3840,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-luv",
+            "label": "LuV",
+            "overclockTier": "LuV",
+            "durationTicks": 1,
+            "eut": 15360,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-zpm",
+            "label": "ZPM",
+            "overclockTier": "ZPM",
+            "durationTicks": 1,
+            "eut": 61440,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uv",
+            "label": "UV",
+            "overclockTier": "UV",
+            "durationTicks": 1,
+            "eut": 245760,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uhv",
+            "label": "UHV",
+            "overclockTier": "UHV",
+            "durationTicks": 1,
+            "eut": 983040,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uev",
+            "label": "UEV",
+            "overclockTier": "UEV",
+            "durationTicks": 1,
+            "eut": 3932160,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uiv",
+            "label": "UIV",
+            "overclockTier": "UIV",
+            "durationTicks": 1,
+            "eut": 15728640,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-umv",
+            "label": "UMV",
+            "overclockTier": "UMV",
+            "durationTicks": 1,
+            "eut": 62914560,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uxv",
+            "label": "UXV",
+            "overclockTier": "UXV",
+            "durationTicks": 1,
+            "eut": 251658240,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-max",
+            "label": "MAX",
+            "overclockTier": "MAX",
+            "durationTicks": 1,
+            "eut": 1080863910568919000,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:cobblestone",
+                "amount": 1
+              }
+            ]
+          }
+        ]
+      },
+      "source": {
+        "datasetVersionId": "local-2.9.0-beta-2",
+        "recipeMap": "Forge Hammer",
+        "exporter": "gtnh-oracle",
+        "rawRecipeId": "gt.recipe.hammer:806be14ba316f4d7"
+      },
+      "metadata": {
+        "recipeMapId": "gt.recipe.hammer",
+        "specialValue": 0
+      },
+      "nei": {
+        "additionalInfo": [
+          "Special value: 0"
+        ]
+      }
+    },
+    {
+      "id": "oracle:local-2.9.0-beta-2:gregtech:gt-recipe-hammer:9bbf2b3837dbcbaa",
+      "name": "Forge Hammer: Gravel",
+      "kind": "gregtech_machine",
+      "category": "gregtech",
+      "machineType": "Forge Hammer",
+      "minimumTier": "LV",
+      "durationTicks": 10,
+      "eut": 15,
+      "inputs": [
+        {
+          "kind": "item",
+          "id": "minecraft:cobblestone",
+          "amount": 1,
+          "displayName": "Cobblestone",
+          "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/cobblestone-1712976ff384.png",
+          "dominantColor": "#525252",
+          "modId": "minecraft",
+          "alternatives": [
+            {
+              "kind": "item",
+              "id": "minecraft:cobblestone",
+              "displayName": "Cobblestone",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/cobblestone-1712976ff384.png",
+              "dominantColor": "#525252",
+              "modId": "minecraft",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick",
+              "displayName": "Colored Cobblestone (White Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_white_frequency-f06c5c76e44a.png",
+              "dominantColor": "#848485",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@1",
+              "displayName": "Colored Cobblestone (Orange Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_orange_frequency-20d2e987a5c6.png",
+              "dominantColor": "#59391c",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@2",
+              "displayName": "Colored Cobblestone (Magenta Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_magenta_frequency-9f83feefc894.png",
+              "dominantColor": "#5e2f6c",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@3",
+              "displayName": "Colored Cobblestone (Light Blue Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_light_blue_frequency-3a0a3a365abc.png",
+              "dominantColor": "#2b3b50",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@4",
+              "displayName": "Colored Cobblestone (Yellow Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_yellow_frequency-bcdbabd6f9e8.png",
+              "dominantColor": "#6c6c24",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@5",
+              "displayName": "Colored Cobblestone (Lime Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_lime_frequency-dcc7f700b207.png",
+              "dominantColor": "#426315",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@6",
+              "displayName": "Colored Cobblestone (Pink Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_pink_frequency-43898a5e9e89.png",
+              "dominantColor": "#593340",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@7",
+              "displayName": "Colored Cobblestone (Gray Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_gray_frequency-e660fa4cd275.png",
+              "dominantColor": "#121212",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@8",
+              "displayName": "Colored Cobblestone (Light Gray Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_light_gray_frequency-ca4dcc80e64d.png",
+              "dominantColor": "#2b2b2b",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@9",
+              "displayName": "Colored Cobblestone (Cyan Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_cyan_frequency-44d65bc2fab9.png",
+              "dominantColor": "#2b424d",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@10",
+              "displayName": "Colored Cobblestone (Purple Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_purple_frequency-5973a0aeca63.png",
+              "dominantColor": "#422659",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@11",
+              "displayName": "Colored Cobblestone (Blue Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_blue_frequency-64202ed8e058.png",
+              "dominantColor": "#1e2a57",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@12",
+              "displayName": "Colored Cobblestone (Brown Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_brown_frequency-809d3e526fb2.png",
+              "dominantColor": "#2f251b",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@13",
+              "displayName": "Colored Cobblestone (Green Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_green_frequency-d64cd0fe962d.png",
+              "dominantColor": "#34401e",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@14",
+              "displayName": "Colored Cobblestone (Red Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_red_frequency-8cc984cbe211.png",
+              "dominantColor": "#451b1b",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "extrautilities:color_stonebrick@15",
+              "displayName": "Colored Cobblestone (Black Frequency)",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/colored_cobblestone_black_frequency-6cd728da8eb0.png",
+              "dominantColor": "#6b7280",
+              "modId": "ExtraUtilities",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "minecraft:mossy_cobblestone@32767",
+              "displayName": "Mossy Cobblestone",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/mossy_cobblestone-0b65f02795a6.png",
+              "dominantColor": "#284528",
+              "modId": "minecraft",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "thaumicbases:oldcobble",
+              "displayName": "Ancient Cobblestone",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/ancient_cobblestone-b4126c2f635e.png",
+              "dominantColor": "#4f4f4f",
+              "modId": "thaumicbases",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "thaumicbases:oldcobblemossy",
+              "displayName": "Ancient Mossy Cobblestone",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/ancient_mossy_cobblestone-42e43f3ade23.png",
+              "dominantColor": "#163316",
+              "modId": "thaumicbases",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "etfuturum:cobbled_deepslate",
+              "displayName": "Cobbled Deepslate",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/cobbled_deepslate-9e1a9ac8ea5d.png",
+              "dominantColor": "#2b2b2e",
+              "modId": "etfuturum",
+              "amount": 1
+            },
+            {
+              "kind": "item",
+              "id": "etfuturum:blackstone",
+              "displayName": "Blackstone",
+              "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/blackstone-bbafd8738ffe.png",
+              "dominantColor": "#211d24",
+              "modId": "etfuturum",
+              "amount": 1
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "item",
+          "id": "minecraft:gravel",
+          "amount": 1,
+          "displayName": "Gravel",
+          "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/gravel-8075e5ae8c4a.png",
+          "dominantColor": "#585757",
+          "modId": "minecraft"
+        }
+      ],
+      "specialValue": 0,
+      "notes": "Exported by the GTNH calculation oracle from gregtech.api.recipe.RecipeMap.",
+      "machineHandlers": [
+        {
+          "machineType": "Forge Hammer",
+          "minimumTier": "LV",
+          "maximumTier": "UMV",
+          "availableTiers": [
+            "LV",
+            "MV",
+            "HV",
+            "EV",
+            "IV",
+            "LuV",
+            "ZPM",
+            "UV",
+            "UHV",
+            "UEV",
+            "UIV",
+            "UMV"
+          ],
+          "id": "forge-hammer",
+          "label": "Forge Hammer",
+          "kind": "single"
+        },
+        {
+          "machineType": "High Pressure Steam Forge Hammer",
+          "minimumTier": "LV",
+          "id": "high-pressure-steam-forge-hammer",
+          "label": "High Pressure Steam Forge Hammer",
+          "kind": "single"
+        },
+        {
+          "machineType": "Steam Forge Hammer",
+          "minimumTier": "LV",
+          "id": "steam-forge-hammer",
+          "label": "Steam Forge Hammer",
+          "kind": "single"
+        },
+        {
+          "machineType": "Industrial Sledgehammer",
+          "minimumTier": "LV",
+          "durationTicks": 5,
+          "id": "industrial-sledgehammer",
+          "label": "Industrial Sledgehammer",
+          "kind": "multiblock",
+          "machineConfigControls": [
+            {
+              "id": "machineParallel",
+              "label": "Parallel",
+              "minimumKey": "fixed-6",
+              "defaultKey": "fixed-6",
+              "tiers": [
+                {
+                  "key": "fixed-6",
+                  "label": "6 Parallels",
+                  "parallelMultiplier": 6,
+                  "resource": {
+                    "kind": "item",
+                    "id": "factoryflow:machine_config/fixed-6",
+                    "amount": 1,
+                    "displayName": "6 Parallels",
+                    "tooltip": [
+                      "Imported from machine catalyst tooltip",
+                      "Parallels: 6"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "machineType": "Steam Presser",
+          "minimumTier": "LV",
+          "durationTicks": 8,
+          "id": "steam-presser",
+          "label": "Steam Presser",
+          "kind": "multiblock",
+          "machineConfigControls": [
+            {
+              "id": "steamPressure",
+              "label": "Pressure",
+              "minimumKey": "normal",
+              "defaultKey": "normal",
+              "tiers": [
+                {
+                  "key": "normal",
+                  "label": "Normal Pressure",
+                  "resource": {
+                    "kind": "item",
+                    "id": "factoryflow:machine_config/steam_pressure_normal",
+                    "amount": 1,
+                    "displayName": "Normal Pressure",
+                    "tooltip": [
+                      "Steam machine build",
+                      "High-Pressure Doubles Speed and Steam Usage"
+                    ]
+                  }
+                },
+                {
+                  "key": "high",
+                  "label": "High Pressure",
+                  "durationMultiplier": 0.5,
+                  "resource": {
+                    "kind": "item",
+                    "id": "factoryflow:machine_config/steam_pressure_high",
+                    "amount": 1,
+                    "displayName": "High Pressure",
+                    "tooltip": [
+                      "Steam machine build",
+                      "Doubles speed and steam usage",
+                      "High-Pressure Doubles Speed and Steam Usage"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "machineParallel",
+              "label": "Parallel",
+              "minimumKey": "fixed-8",
+              "defaultKey": "fixed-8",
+              "tiers": [
+                {
+                  "key": "fixed-8",
+                  "label": "8 Parallels",
+                  "parallelMultiplier": 8,
+                  "resource": {
+                    "kind": "item",
+                    "id": "factoryflow:machine_config/fixed-8",
+                    "amount": 1,
+                    "displayName": "8 Parallels",
+                    "tooltip": [
+                      "Imported from machine catalyst tooltip",
+                      "Parallels: 8"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "runtimeCalculation": {
+        "sourceKind": "gregtech-overclock-calculator",
+        "sourceClass": "gregtech.api.util.OverclockCalculator",
+        "recipeMap": "Forge Hammer",
+        "status": "computed",
+        "oracleEligible": true,
+        "strict": true,
+        "generatedAt": "2026-08-29T17:30:14.603Z",
+        "variants": [
+          {
+            "id": "tier-lv",
+            "label": "LV",
+            "overclockTier": "LV",
+            "durationTicks": 10,
+            "eut": 15,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-mv",
+            "label": "MV",
+            "overclockTier": "MV",
+            "durationTicks": 5,
+            "eut": 60,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-hv",
+            "label": "HV",
+            "overclockTier": "HV",
+            "durationTicks": 2,
+            "eut": 240,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-ev",
+            "label": "EV",
+            "overclockTier": "EV",
+            "durationTicks": 1,
+            "eut": 960,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-iv",
+            "label": "IV",
+            "overclockTier": "IV",
+            "durationTicks": 1,
+            "eut": 3840,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-luv",
+            "label": "LuV",
+            "overclockTier": "LuV",
+            "durationTicks": 1,
+            "eut": 15360,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-zpm",
+            "label": "ZPM",
+            "overclockTier": "ZPM",
+            "durationTicks": 1,
+            "eut": 61440,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uv",
+            "label": "UV",
+            "overclockTier": "UV",
+            "durationTicks": 1,
+            "eut": 245760,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uhv",
+            "label": "UHV",
+            "overclockTier": "UHV",
+            "durationTicks": 1,
+            "eut": 983040,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uev",
+            "label": "UEV",
+            "overclockTier": "UEV",
+            "durationTicks": 1,
+            "eut": 3932160,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uiv",
+            "label": "UIV",
+            "overclockTier": "UIV",
+            "durationTicks": 1,
+            "eut": 15728640,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-umv",
+            "label": "UMV",
+            "overclockTier": "UMV",
+            "durationTicks": 1,
+            "eut": 62914560,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uxv",
+            "label": "UXV",
+            "overclockTier": "UXV",
+            "durationTicks": 1,
+            "eut": 251658240,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-max",
+            "label": "MAX",
+            "overclockTier": "MAX",
+            "durationTicks": 1,
+            "eut": 1080863910568919000,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:gravel",
+                "amount": 1
+              }
+            ]
+          }
+        ]
+      },
+      "source": {
+        "datasetVersionId": "local-2.9.0-beta-2",
+        "recipeMap": "Forge Hammer",
+        "exporter": "gtnh-oracle",
+        "rawRecipeId": "gt.recipe.hammer:9bbf2b3837dbcbaa"
+      },
+      "metadata": {
+        "recipeMapId": "gt.recipe.hammer",
+        "specialValue": 0
+      },
+      "nei": {
+        "additionalInfo": [
+          "Special value: 0"
+        ]
+      }
+    },
+    {
+      "id": "oracle:local-2.9.0-beta-2:gregtech:gt-recipe-hammer:efff3c15335f3fe4",
+      "name": "Forge Hammer: Sand",
+      "kind": "gregtech_machine",
+      "category": "gregtech",
+      "machineType": "Forge Hammer",
+      "minimumTier": "LV",
+      "durationTicks": 10,
+      "eut": 15,
+      "inputs": [
+        {
+          "kind": "item",
+          "id": "minecraft:gravel",
+          "amount": 1,
+          "displayName": "Gravel",
+          "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/gravel-8075e5ae8c4a.png",
+          "dominantColor": "#585757",
+          "modId": "minecraft"
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "item",
+          "id": "minecraft:sand",
+          "amount": 1,
+          "displayName": "Sand",
+          "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/sand-4c6fee7fee56.png",
+          "dominantColor": "#9b9471",
+          "modId": "minecraft"
+        }
+      ],
+      "specialValue": 0,
+      "notes": "Exported by the GTNH calculation oracle from gregtech.api.recipe.RecipeMap.",
+      "machineHandlers": [
+        {
+          "machineType": "Forge Hammer",
+          "minimumTier": "LV",
+          "maximumTier": "UMV",
+          "availableTiers": [
+            "LV",
+            "MV",
+            "HV",
+            "EV",
+            "IV",
+            "LuV",
+            "ZPM",
+            "UV",
+            "UHV",
+            "UEV",
+            "UIV",
+            "UMV"
+          ],
+          "id": "forge-hammer",
+          "label": "Forge Hammer",
+          "kind": "single"
+        },
+        {
+          "machineType": "High Pressure Steam Forge Hammer",
+          "minimumTier": "LV",
+          "id": "high-pressure-steam-forge-hammer",
+          "label": "High Pressure Steam Forge Hammer",
+          "kind": "single"
+        },
+        {
+          "machineType": "Steam Forge Hammer",
+          "minimumTier": "LV",
+          "id": "steam-forge-hammer",
+          "label": "Steam Forge Hammer",
+          "kind": "single"
+        },
+        {
+          "machineType": "Industrial Sledgehammer",
+          "minimumTier": "LV",
+          "durationTicks": 5,
+          "id": "industrial-sledgehammer",
+          "label": "Industrial Sledgehammer",
+          "kind": "multiblock",
+          "machineConfigControls": [
+            {
+              "id": "machineParallel",
+              "label": "Parallel",
+              "minimumKey": "fixed-6",
+              "defaultKey": "fixed-6",
+              "tiers": [
+                {
+                  "key": "fixed-6",
+                  "label": "6 Parallels",
+                  "parallelMultiplier": 6,
+                  "resource": {
+                    "kind": "item",
+                    "id": "factoryflow:machine_config/fixed-6",
+                    "amount": 1,
+                    "displayName": "6 Parallels",
+                    "tooltip": [
+                      "Imported from machine catalyst tooltip",
+                      "Parallels: 6"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "machineType": "Steam Presser",
+          "minimumTier": "LV",
+          "durationTicks": 8,
+          "id": "steam-presser",
+          "label": "Steam Presser",
+          "kind": "multiblock",
+          "machineConfigControls": [
+            {
+              "id": "steamPressure",
+              "label": "Pressure",
+              "minimumKey": "normal",
+              "defaultKey": "normal",
+              "tiers": [
+                {
+                  "key": "normal",
+                  "label": "Normal Pressure",
+                  "resource": {
+                    "kind": "item",
+                    "id": "factoryflow:machine_config/steam_pressure_normal",
+                    "amount": 1,
+                    "displayName": "Normal Pressure",
+                    "tooltip": [
+                      "Steam machine build",
+                      "High-Pressure Doubles Speed and Steam Usage"
+                    ]
+                  }
+                },
+                {
+                  "key": "high",
+                  "label": "High Pressure",
+                  "durationMultiplier": 0.5,
+                  "resource": {
+                    "kind": "item",
+                    "id": "factoryflow:machine_config/steam_pressure_high",
+                    "amount": 1,
+                    "displayName": "High Pressure",
+                    "tooltip": [
+                      "Steam machine build",
+                      "Doubles speed and steam usage",
+                      "High-Pressure Doubles Speed and Steam Usage"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "machineParallel",
+              "label": "Parallel",
+              "minimumKey": "fixed-8",
+              "defaultKey": "fixed-8",
+              "tiers": [
+                {
+                  "key": "fixed-8",
+                  "label": "8 Parallels",
+                  "parallelMultiplier": 8,
+                  "resource": {
+                    "kind": "item",
+                    "id": "factoryflow:machine_config/fixed-8",
+                    "amount": 1,
+                    "displayName": "8 Parallels",
+                    "tooltip": [
+                      "Imported from machine catalyst tooltip",
+                      "Parallels: 8"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "runtimeCalculation": {
+        "sourceKind": "gregtech-overclock-calculator",
+        "sourceClass": "gregtech.api.util.OverclockCalculator",
+        "recipeMap": "Forge Hammer",
+        "status": "computed",
+        "oracleEligible": true,
+        "strict": true,
+        "generatedAt": "2026-08-29T17:30:14.605Z",
+        "variants": [
+          {
+            "id": "tier-lv",
+            "label": "LV",
+            "overclockTier": "LV",
+            "durationTicks": 10,
+            "eut": 15,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-mv",
+            "label": "MV",
+            "overclockTier": "MV",
+            "durationTicks": 5,
+            "eut": 60,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-hv",
+            "label": "HV",
+            "overclockTier": "HV",
+            "durationTicks": 2,
+            "eut": 240,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-ev",
+            "label": "EV",
+            "overclockTier": "EV",
+            "durationTicks": 1,
+            "eut": 960,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-iv",
+            "label": "IV",
+            "overclockTier": "IV",
+            "durationTicks": 1,
+            "eut": 3840,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-luv",
+            "label": "LuV",
+            "overclockTier": "LuV",
+            "durationTicks": 1,
+            "eut": 15360,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-zpm",
+            "label": "ZPM",
+            "overclockTier": "ZPM",
+            "durationTicks": 1,
+            "eut": 61440,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uv",
+            "label": "UV",
+            "overclockTier": "UV",
+            "durationTicks": 1,
+            "eut": 245760,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uhv",
+            "label": "UHV",
+            "overclockTier": "UHV",
+            "durationTicks": 1,
+            "eut": 983040,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uev",
+            "label": "UEV",
+            "overclockTier": "UEV",
+            "durationTicks": 1,
+            "eut": 3932160,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uiv",
+            "label": "UIV",
+            "overclockTier": "UIV",
+            "durationTicks": 1,
+            "eut": 15728640,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-umv",
+            "label": "UMV",
+            "overclockTier": "UMV",
+            "durationTicks": 1,
+            "eut": 62914560,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-uxv",
+            "label": "UXV",
+            "overclockTier": "UXV",
+            "durationTicks": 1,
+            "eut": 251658240,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          },
+          {
+            "id": "tier-max",
+            "label": "MAX",
+            "overclockTier": "MAX",
+            "durationTicks": 1,
+            "eut": 1080863910568919000,
+            "parallel": 1,
+            "inputs": [],
+            "outputs": [
+              {
+                "kind": "item",
+                "id": "minecraft:sand",
+                "amount": 1
+              }
+            ]
+          }
+        ]
+      },
+      "source": {
+        "datasetVersionId": "local-2.9.0-beta-2",
+        "recipeMap": "Forge Hammer",
+        "exporter": "gtnh-oracle",
+        "rawRecipeId": "gt.recipe.hammer:efff3c15335f3fe4"
+      },
+      "metadata": {
+        "recipeMapId": "gt.recipe.hammer",
+        "specialValue": 0
+      },
+      "nei": {
+        "additionalInfo": [
+          "Special value: 0"
+        ]
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "id": "node-520d2e94-3cf4-491e-9b7e-5d45111be789",
+      "recipeId": "oracle:local-2.9.0-beta-2:gregtech:gt-recipe-hammer:806be14ba316f4d7",
+      "machineCount": 3,
+      "parallel": 1,
+      "overclockTier": "LV",
+      "recipeInputOverrides": {
+        "0": {
+          "kind": "item",
+          "id": "minecraft:stone",
+          "amount": 1,
+          "displayName": "Stone",
+          "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/stone-21345afefcc2.png",
+          "dominantColor": "#545454",
+          "modId": "minecraft"
+        }
+      },
+      "enabled": true,
+      "position": {
+        "x": -260,
+        "y": -160
+      }
+    },
+    {
+      "id": "node-e53ac8ed-affa-4267-aff9-d92443c747bf",
+      "recipeId": "oracle:local-2.9.0-beta-2:gregtech:gt-recipe-hammer:9bbf2b3837dbcbaa",
+      "machineCount": 3,
+      "parallel": 1,
+      "overclockTier": "LV",
+      "recipeInputOverrides": {
+        "0": {
+          "kind": "item",
+          "id": "minecraft:cobblestone",
+          "amount": 1,
+          "displayName": "Cobblestone",
+          "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/cobblestone-1712976ff384.png",
+          "dominantColor": "#525252",
+          "modId": "minecraft"
+        }
+      },
+      "enabled": true,
+      "position": {
+        "x": 180,
+        "y": -160
+      }
+    },
+    {
+      "id": "node-1979ee2a-883a-408b-8903-a4316ed9f84b",
+      "recipeId": "oracle:local-2.9.0-beta-2:gregtech:gt-recipe-hammer:efff3c15335f3fe4",
+      "machineCount": 3,
+      "parallel": 1,
+      "overclockTier": "LV",
+      "recipeInputOverrides": {
+        "0": {
+          "kind": "item",
+          "id": "minecraft:gravel",
+          "amount": 1,
+          "displayName": "Gravel",
+          "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/gravel-8075e5ae8c4a.png",
+          "dominantColor": "#585757",
+          "modId": "minecraft"
+        }
+      },
+      "enabled": true,
+      "position": {
+        "x": 620,
+        "y": -160
+      }
+    }
+  ],
+  "storages": [
+    {
+      "id": "storage-e7a7cfc2-8d7d-467e-9a76-7a3c9556d4ab",
+      "kind": "item",
+      "resourceId": "minecraft:stone",
+      "displayName": "Stone",
+      "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/stone-21345afefcc2.png",
+      "dominantColor": "#545454",
+      "position": {
+        "x": -460,
+        "y": -140
+      }
+    },
+    {
+      "id": "storage-1be6e593-bcf4-4018-b5f3-2952b23c3bd7",
+      "kind": "item",
+      "resourceId": "minecraft:sand",
+      "displayName": "Sand",
+      "iconPath": "/datasets/gtnh/local-2.9.0-beta-2/textures/rendered/sand-4c6fee7fee56.png",
+      "dominantColor": "#9b9471",
+      "position": {
+        "x": 1120,
+        "y": -140
+      }
+    }
+  ],
+  "annotations": [],
+  "pockets": [],
+  "edges": [
+    {
+      "id": "edge-3ba1a1b2-bb5c-496e-bbf7-159d937312eb",
+      "source": "storage-e7a7cfc2-8d7d-467e-9a76-7a3c9556d4ab",
+      "target": "node-520d2e94-3cf4-491e-9b7e-5d45111be789",
+      "sourceHandle": "output:item:minecraft%3Astone",
+      "targetHandle": "input:item:minecraft%3Astone",
+      "resourceKind": "item",
+      "resourceId": "minecraft:stone",
+      "label": "Stone"
+    },
+    {
+      "id": "edge-433ca11c-5481-4170-ba04-5d4c7c65a005",
+      "source": "node-520d2e94-3cf4-491e-9b7e-5d45111be789",
+      "target": "node-e53ac8ed-affa-4267-aff9-d92443c747bf",
+      "sourceHandle": "output:item:minecraft%3Acobblestone:0",
+      "targetHandle": "input:item:minecraft%3Acobblestone:0",
+      "resourceKind": "item",
+      "resourceId": "minecraft:cobblestone",
+      "label": "Cobblestone"
+    },
+    {
+      "id": "edge-5d4de04a-f32e-48bc-840e-da80b61d55e2",
+      "source": "node-e53ac8ed-affa-4267-aff9-d92443c747bf",
+      "target": "node-1979ee2a-883a-408b-8903-a4316ed9f84b",
+      "sourceHandle": "output:item:minecraft%3Agravel:0",
+      "targetHandle": "input:item:minecraft%3Agravel:0",
+      "resourceKind": "item",
+      "resourceId": "minecraft:gravel",
+      "label": "Gravel"
+    },
+    {
+      "id": "edge-989406ac-e022-4e21-908b-be736ca604e9",
+      "source": "node-1979ee2a-883a-408b-8903-a4316ed9f84b",
+      "target": "storage-1be6e593-bcf4-4018-b5f3-2952b23c3bd7",
+      "sourceHandle": "output:item:minecraft%3Asand",
+      "targetHandle": "input:item:minecraft%3Asand",
+      "resourceKind": "item",
+      "resourceId": "minecraft:sand",
+      "label": "Sand"
+    }
+  ],
+  "fuelProfiles": [
+    {
+      "id": "benzene",
+      "name": "Benzene",
+      "fuelFluidId": "benzene",
+      "euPerLiter": 32000,
+      "notes": "GTNH generator fuel value."
+    },
+    {
+      "id": "biodiesel",
+      "name": "Biodiesel",
+      "fuelFluidId": "biodiesel",
+      "euPerLiter": 12800,
+      "notes": "GTNH generator fuel value."
+    },
+    {
+      "id": "steam",
+      "name": "Steam",
+      "fuelFluidId": "steam",
+      "euPerLiter": 16,
+      "notes": "GTNH steam turbine value."
+    }
+  ],
+  "selectedFuelProfileId": "biodiesel",
+  "notes": "Dataset-backed plan. Recipes must come from a normalized GTNH dataset.",
+  "metadata": {
+    "createdAt": "2026-08-04T23:34:59.333Z",
+    "updatedAt": "2026-09-18T15:06:00.306Z"
+  }
+}

@@ -19,7 +19,7 @@ import pytest
 
 import gtnh_solver.cli as cli_module
 from gtnh_solver import __version__
-from gtnh_solver.adapter import adapt_file
+from gtnh_solver.adapter import Plan, PlanProducer, adapt_file, to_input_ir
 from gtnh_solver.cli import _load_physical_or_warn, main
 from gtnh_solver.dataset import (
     DatasetError,
@@ -356,18 +356,23 @@ def test_cli_threads_the_dataset_into_the_adapter(
     capsys: pytest.CaptureFixture[str],
     solve_calls: list[dict[str, object]],
 ) -> None:
-    # Prove the wiring: the CLI must hand the loaded physical dataset to adapt_file so multiblocks
+    # Prove the wiring: the CLI must hand the loaded physical dataset to the mapping so multiblocks
     # resolve to real footprints (not the 1x1x1 default the no-arg adapt would give).
     captured: dict[str, PhysicalDataset | None] = {}
 
-    # Calls the real adapt_file through its own module rather than through `cli_module`, which
-    # only re-exports it: same function, and the spy now carries adapt_file's actual signature,
-    # so a change to it fails here instead of being absorbed by an `object` parameter.
-    def spy(path: str | Path, *, physical: PhysicalDataset | None = None) -> InputIR:
+    # Calls the real to_input_ir through its own module rather than through `cli_module`, which
+    # only re-exports it: same function, and the spy carries to_input_ir's actual signature, so a
+    # change to it fails here instead of being absorbed by an `object` parameter.
+    def spy(
+        plan: Plan,
+        *,
+        physical: PhysicalDataset | None = None,
+        producer: PlanProducer | None = None,
+    ) -> InputIR:
         captured["physical"] = physical
-        return adapt_file(path, physical=physical)
+        return to_input_ir(plan, physical=physical, producer=producer)
 
-    monkeypatch.setattr(cli_module, "adapt_file", spy)
+    monkeypatch.setattr(cli_module, "to_input_ir", spy)
     assert main([_SAND]) == 0
     dataset = captured["physical"]
     assert isinstance(dataset, PhysicalDataset)

@@ -57,6 +57,38 @@ class RecipeSource(BaseModel):
     machine_block: MachineBlock | None = None
 
 
+class MachineHandler(BaseModel):
+    """One machine a recipe can run in: the **controller**, as distinct from the recipe map.
+
+    arodoid's export lists every machine that can run a recipe and lets the node pick one with
+    ``machineHandlerId``; with no id the node uses the FIRST entry, the default (which holds for
+    every node in ``examples/gtnh-parallel-sand.json``). MrBruh's fork does not emit this list at
+    all, which is what identifies the producer (:func:`producer.detect_producer`).
+
+    Two fields are load-bearing rather than descriptive:
+
+    ``label``
+        The controller's own display name ("Dangote Distillus", "Electric Blast Furnace"), which is
+        what the structure dump is keyed by. ``machine_type`` is the localized *recipe-map* name
+        ("Distillation Tower", "Blast Furnace") and for a GT++ machine the two differ, so the dump
+        never joins on ``machine_type`` alone.
+    ``kind``
+        ``"single"`` or ``"multiblock"``. This decides what a **census miss means**: absence of a
+        ``single`` handler is positive evidence the machine is a single block (GT's
+        ``MTEBasicMachine`` intake rule applies), while absence of a ``multiblock`` one is an
+        extraction gap worth reporting. Treating both the same way is how a name-alias table
+        silently swallows real misses.
+    """
+
+    model_config = _CFG
+
+    id: str = ""
+    kind: str = ""  # "single" | "multiblock"
+    label: str = ""
+    machine_type: str = ""
+    minimum_tier: str = ""
+
+
 class Recipe(BaseModel):
     """A placed recipe: its machine type, power/time, and item/fluid I/O."""
 
@@ -69,6 +101,8 @@ class Recipe(BaseModel):
     inputs: list[Resource] = Field(default_factory=list)
     outputs: list[Resource] = Field(default_factory=list)
     source: RecipeSource | None = None
+    #: Empty on a MrBruh-fork plan, which never emits it; see :class:`MachineHandler`.
+    machine_handlers: list[MachineHandler] = Field(default_factory=list)
 
 
 class Node(BaseModel):
@@ -81,6 +115,9 @@ class Node(BaseModel):
     machine_count: int = 1
     parallel: int = 1
     overclock_tier: str  # LV/MV/HV/... -> IR voltage_tier
+    #: Which of the recipe's :class:`MachineHandler` entries this node runs in. Empty means the
+    #: default, the first entry; empty also on every MrBruh-fork plan, which emits no handlers.
+    machine_handler_id: str = ""
 
 
 class Storage(BaseModel):

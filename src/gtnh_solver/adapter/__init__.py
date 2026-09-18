@@ -19,6 +19,7 @@ from .plan import (
     AppInfo,
     Edge,
     MachineBlock,
+    MachineHandler,
     Node,
     Plan,
     Recipe,
@@ -32,6 +33,7 @@ from .plan import (
     Resource,
     Storage,
 )
+from .producer import PlanProducer, describe_markers, detect_producer, resolve_producer
 
 __all__ = [
     "AdapterError",
@@ -39,8 +41,10 @@ __all__ = [
     "AppInfo",
     "Edge",
     "MachineBlock",
+    "MachineHandler",
     "Node",
     "Plan",
+    "PlanProducer",
     "Recipe",
     "RecipeSource",
     "ResolvedBlock",
@@ -52,6 +56,9 @@ __all__ = [
     "Resource",
     "Storage",
     "adapt_file",
+    "describe_markers",
+    "detect_producer",
     "load_plan",
+    "resolve_producer",
     "to_input_ir",
 ]
