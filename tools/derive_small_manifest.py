@@ -130,6 +130,29 @@ def _route_keys(full: dict[str, Any], tiers: set[str]) -> set[str]:
     return {by_name[name] for name in wanted if name in by_name}
 
 
+#: The real GT block that stands in for the power source the adapter synthesizes. ``Power Source
+#: (LV)`` is our invention, not a block, so nothing in the pack is named after it and the machine
+#: rule below can never keep anything for it - which left a preview's source as a placeholder and
+#: would leave a hole in a ``.schematic`` export (#96) exactly where the feed goes. The maintainer
+#: builds these with GT's Debug Power Generator, which is what the goldens under
+#: ``tests/golden/schematic/`` use (mID 15498). Move this to the shared policy when the exporter
+#: lands and needs the same answer.
+POWER_SOURCE_STAND_IN = "Debug Power Generator"
+
+
+def _power_source_stand_in_keys(full: dict[str, Any]) -> set[str]:
+    """``"<block>|<meta>"`` for the block that substitutes a synthesized power source.
+
+    Exact display-name match, like ``pipe_block``: near-miss here would ship a confidently wrong
+    block rather than an obvious gap.
+    """
+    return {
+        key
+        for key, entry in full["blocks"].items()
+        if entry.get("kind") == "mte" and entry.get("display_name") == POWER_SOURCE_STAND_IN
+    }
+
+
 def _fixture_block_keys() -> set[str]:
     """``"<block>|<meta>"`` keys the two committed multiblock fixtures place."""
     keys: set[str] = set()
@@ -158,10 +181,11 @@ def main() -> None:
     fixture_keys = _fixture_block_keys()
     hatch_keys = _hatch_keys(full, tiers)
     route_keys = _route_keys(full, tiers)
+    source_keys = _power_source_stand_in_keys(full)
     keep: dict[str, Any] = {}
     for key, entry in full["blocks"].items():
-        if key in hatch_keys or key in route_keys:
-            keep[key] = entry  # neither matches a machine name; see the module docstring
+        if key in hatch_keys or key in route_keys or key in source_keys:
+            keep[key] = entry  # none matches a machine name; see the module docstring
         elif entry.get("kind") == "mte":
             name = _norm(entry.get("display_name") or "")
             if name and any(t and t in name for t in types):
@@ -187,7 +211,9 @@ def main() -> None:
             "note": (
                 "SMALL committed manifest: only the blocks the shipped example lines and the two "
                 "multiblock fixtures need - plus every hatch kind at the tiers those lines use, "
-                "since a hatch matches no machine name - so `gtnh-solve --preview examples/*.json` "
+                "the cables and pipes those tiers route, and the block that stands in for a "
+                "synthesized power source, none of which matches a machine name - so "
+                "`gtnh-solve --preview examples/*.json` "
                 "skins out of the box. The full dump is local and version-namespaced "
                 "(data/<version>/textures/manifest.json), never committed. Regenerate with "
                 "tools/derive_small_manifest.py."
