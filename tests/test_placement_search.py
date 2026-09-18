@@ -26,12 +26,20 @@ from gtnh_solver.ir import (
     Placement,
     Port,
 )
-from gtnh_solver.ir.geometry import Cell, front_on_boundary, occupied_cells
+from gtnh_solver.ir.geometry import (
+    Cell,
+    box_in_region,
+    front_on_boundary,
+    occupied_cells,
+    rotated_footprint,
+)
 from gtnh_solver.placement import optimize_placement, place
 from gtnh_solver.placement.search import (
     _apply_occupied_delta,
     _AutoPair,
+    _box_offsets,
     _marginal_insertion_cost,
+    _occupancy_grid,
     _placed_invariants,
     _relocate,
     _SearchContext,
@@ -579,3 +587,133 @@ def test_placed_invariants_summarise_only_the_placed_members() -> None:
     assert len(boxes) == 1
     assert boxes[0].x0 == boxes[0].x1, "one placed member is a degenerate box, not an empty one"
     assert [len(pa.centroids) for pa in power] == [1]
+
+
+# ------------------------------------------------------- the flat occupancy grid
+
+
+def _flat(cell: Cell, region: CellBox) -> int:
+    x, y, z = cell
+    return x + y * region.sx + z * region.sx * region.sy
+
+
+def test_occupancy_grid_marks_exactly_occupied_and_reserved() -> None:
+    """The grid is a restatement of ``occupied | reserved``, so it must mark those and nothing more.
+
+    A byte set where no body sits would reject legal placements; one missed would admit an overlap
+    the validator then has to catch. Both directions are asserted over every cell of the region.
+    """
+    region = CellBox(sx=4, sy=2, sz=3)
+    occupied = {(0, 0, 0), (3, 1, 2)}
+    reserved = {(2, 0, 1)}
+    grid = _occupancy_grid(region, occupied, reserved)
+
+    assert len(grid) == region.sx * region.sy * region.sz
+    blocked = occupied | reserved
+    for z in range(region.sz):
+        for y in range(region.sy):
+            for x in range(region.sx):
+                want = 1 if (x, y, z) in blocked else 0
+                assert grid[_flat((x, y, z), region)] == want, (x, y, z)
+
+
+def test_occupancy_grid_ignores_a_reserved_cell_outside_the_region() -> None:
+    """``reserved`` comes from the plan, so it is the one input that can name an out-of-bounds cell.
+
+    Marking it would corrupt an unrelated index (the flat layout wraps), so it is dropped. Every
+    ``occupied`` cell cleared ``box_in_region`` to get into the set and is trusted unguarded.
+    """
+    region = CellBox(sx=2, sy=1, sz=2)
+    grid = _occupancy_grid(region, set(), {(9, 9, 9), (-1, 0, 0), (1, 0, 1)})
+    assert list(grid) == [0, 0, 0, 1]
+
+
+def test_box_offsets_address_exactly_the_body_cells() -> None:
+    """Offsets are the body's cells expressed once, relative to the origin, instead of per candidate.
+
+    Pinned against ``occupied_cells`` (the shared primitive the router and validator also read) at
+    a non-cubic machine turned both ways, because a turn is what makes the two disagree if the
+    offsets were ever built from the declared rather than the rotated box.
+    """
+    region = CellBox(sx=6, sy=2, sz=6)
+    machine = _wide()
+    for orientation in (Facing.NORTH, Facing.EAST):
+        box = rotated_footprint(machine.footprint, orientation)
+        offsets = _box_offsets(box, region)
+        for origin in (CellCoord(x=0, y=0, z=0), CellCoord(x=2, y=1, z=3)):
+            base = _flat((origin.x, origin.y, origin.z), region)
+            got = sorted(base + off for off in offsets)
+            want = sorted(
+                _flat(c, region) for c in occupied_cells(origin, machine.footprint, orientation)
+            )
+            assert got == want, (orientation, origin)
+
+
+def test_the_grid_fit_test_agrees_with_the_set_test_everywhere() -> None:
+    """The equivalence the speedup rests on, asserted over every origin and orientation.
+
+    The grid walk replaced ``reserved.isdisjoint(cells) and occupied.isdisjoint(cells)``. It is a
+    faster spelling of that predicate or it is a bug, so this compares the two answers directly
+    rather than trusting that a solve still produces the same layout.
+    """
+    region = CellBox(sx=5, sy=2, sz=5)
+    machine = _wide()
+    occupied: set[Cell] = {(1, 0, 1), (4, 1, 4)}
+    reserved: set[Cell] = {(3, 0, 2)}
+    grid = _occupancy_grid(region, occupied, reserved)
+
+    checked = 0
+    for z in range(region.sz):
+        for y in range(region.sy):
+            for x in range(region.sx):
+                origin = CellCoord(x=x, y=y, z=z)
+                for orientation in (Facing.NORTH, Facing.EAST):
+                    if not box_in_region(origin, machine.footprint, orientation, region):
+                        continue  # the grid walk is only defined behind this gate
+                    cells = list(occupied_cells(origin, machine.footprint, orientation))
+                    want = reserved.isdisjoint(cells) and occupied.isdisjoint(cells)
+                    box = rotated_footprint(machine.footprint, orientation)
+                    base = _flat((x, y, z), region)
+                    got = not any(grid[base + off] for off in _box_offsets(box, region))
+                    assert got == want, (origin, orientation)
+                    checked += 1
+    assert checked > 50, "the sweep must actually reach in-region placements"
+
+
+def test_the_grid_never_drifts_from_occupied_during_a_recreate() -> None:
+    """The invariant the whole optimisation depends on: grid == occupied | reserved, every call.
+
+    ``_ruin_and_recreate`` now builds the grid once and sets bits as each machine lands, instead of
+    rebuilding it per insertion. If those two ever drift, ``_best_insertion`` starts answering the
+    fit test against a stale world - silently admitting an overlap or refusing a free cell - and
+    the failure surfaces far downstream in the validator, if at all. So this re-derives the grid
+    from scratch on every single call and asserts it matches the one being carried.
+    """
+    import gtnh_solver.placement.search as search_module
+
+    real = search_module._best_insertion
+    seen = 0
+
+    def checking_best_insertion(
+        p: Placement,
+        placed: list[Placement],
+        occupied: set[Cell],
+        grid: bytearray,
+        ctx: _SearchContext,
+        rng: random.Random,
+    ) -> tuple[CellCoord, Facing] | None:
+        nonlocal seen
+        seen += 1
+        assert grid == _occupancy_grid(ctx.region, occupied, ctx.reserved), (
+            f"grid drifted from occupied on call {seen}"
+        )
+        return real(p, placed, occupied, grid, ctx, rng)
+
+    search_module._best_insertion = checking_best_insertion
+    try:
+        result = optimize_placement(_star(5), seed=3)
+    finally:
+        search_module._best_insertion = real
+
+    assert result.ok
+    assert seen > 0, "the recreate move never ran; the invariant went unchecked"

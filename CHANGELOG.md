@@ -123,6 +123,29 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   correct render, the gap is reported in the texture summary instead.
 
 ### Changed
+- **The placement fit test indexes a byte grid instead of building a cell list (`placement/`).**
+  `_best_insertion` asked `reserved.isdisjoint(cells) and occupied.isdisjoint(cells)` of a freshly
+  materialised list, so every candidate built one tuple per cell of the body. That is nothing when
+  a machine is 1x1x1 and ruinous once the real dataset gives the Distillation Tower a 7x7x7 body:
+  line profiling put it at **90% of every `occupied_cells` yield in a solve** (22.8M of 25.3M) and
+  made it the single hottest line in the solver at 36% of `_best_insertion`.
+
+  `_occupancy_grid` restates `occupied | reserved` as one byte per region cell, and `_box_offsets`
+  expresses a rotated body once as flat offsets from its origin. The test becomes an indexed walk
+  that breaks on the first hit, with no allocation and no hashing per candidate: 29.2s to 6.9s of
+  instrumented time. `_ruin_and_recreate` builds the grid once and sets bits as each machine lands
+  rather than rebuilding per insertion, which took the build itself from 3.1s to 0.4s.
+
+  The grid is **unpadded** on purpose. `box_in_region` already gates every test with six
+  comparisons on the rotated box's corners, so an index built from a passing origin is always in
+  range and a blocked border would buy a bounds check that has already been paid for.
+
+  Nitrobenzene solves in 10.76s against 15.19s, a 29% cut, with both shipped lines byte-identical
+  (sand `591509cf937c621d`, nitrobenzene `eb408e8beef528a7`). **The win is invisible on the
+  committed fixtures** (4.07s against 4.03s), because they collapse every machine to 1x1x1 and the
+  old list was one tuple; it only appears against a real structure dump, which is the trap
+  docs/TESTING.md names.
+
 - **Insertion ranking stops scoring candidates that cannot win (`placement/`).**
   `_marginal_insertion_cost` now takes the incumbent's cost as a `bound` and returns `inf` above
   it, skipping the whole auto term for candidates already out of the running: the `Placement` it
