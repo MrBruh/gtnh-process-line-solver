@@ -24,6 +24,34 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
   Two files claiming the same **block_key** is still an error: that is one controller dumped twice.
 ### Fixed
+- **Multiblocks resolve to their real footprint instead of silently becoming one block.** The
+  exporter names a machine by its localized **recipe map** ("Blast Furnace", "Macerator"); the
+  structure dump is keyed by the **controller's** own display name ("Electric Blast Furnace",
+  "Industrial Maceration Stack"). For a GT++ machine the two differ, so joining on the recipe-map
+  name resolved only 5 of 9 nodes on one real plan and 34 of 53 on another, dropping the rest to the
+  1x1x1 default: a real multiblock modelled as a single block, which is the "coarse-cell abstraction
+  can lie" failure arriving quietly.
+
+  The join now tries, in order, the controller-block id (`registry@meta`, exact and unbeatable), then
+  the node's effective `machineHandlers` entry's `label`, which *is* the controller name, then the
+  recipe-map name, each also through a three-entry alias table for the machines whose handler list is
+  empty. That takes those two plans to **9 of 9** and **51 of 53**. The footprint and the hatch
+  ceiling now come from the one resolved record rather than two separate lookups, so they cannot
+  describe different built forms of the same machine.
+
+  Additive for the committed fixtures: they carry `machineBlock`, so the exact identity already
+  resolved every one of their machines and the name ladder adds nothing.
+
+- **A census miss is read according to what the machine is.** A census dump enumerates every
+  multiblock controller, so a miss is a positive fact, but the fact depends on `handler.kind` and the
+  two readings are opposites. `kind: "single"` (or no handler, which is every MrBruh-fork plan) means
+  the machine is basic, so GT's `maxAmperesIn` ceiling applies and the under-supply check can run.
+  `kind: "multiblock"` means the **dump** is incomplete, not that the machine is basic: claiming it
+  would state the wrong intake formula and reserve 1x1x1 for a real structure, so it is reported and
+  left unclaimed. Conflating the two is how an alias table swallows a genuine extraction gap.
+
+  The alias table is a stopgap and says so: every entry is a wrong answer waiting for a pack release
+  to move a display name. The durable fix is the controller-block id.
 - **Power and throughput follow the figures a machine actually runs at, not the recipe's base
   values.** `recipe.eut` and `recipe.durationTicks` are the values at the recipe's *minimum* tier; a
   machine run above it draws 4x and runs 2x faster per step. The adapter read the base values, so a
