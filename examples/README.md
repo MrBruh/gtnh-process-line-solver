@@ -10,7 +10,7 @@ producer from structural markers and `--plan-schema` overrides it:
 | Fixture | Fork | Identified by |
 |---|---|---|
 | `gtnh-sand.json`, `gtnh-nitrobenzene.json` | [MrBruh/gtnh-factory-flow](https://github.com/MrBruh/gtnh-factory-flow) | a `resolved` throughput block, `app`, `schemaVersion: 2` |
-| `gtnh-parallel-sand.json` | [arodoid/gtnh-factory-flow](https://github.com/arodoid/gtnh-factory-flow) | `recipes[].machineHandlers`; no `resolved`, `schemaVersion: 1` |
+| `gtnh-parallel-sand.json` | the arodoid fork | `recipes[].machineHandlers`; no `resolved`, `schemaVersion: 1` |
 
 The original upstream both forks descend from is
 [Samiracle64/gtnh-factory-flow](https://github.com/Samiracle64/gtnh-factory-flow).

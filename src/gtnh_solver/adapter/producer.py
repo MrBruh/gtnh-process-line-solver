@@ -12,7 +12,7 @@ Detection reads **structural markers that only one producer emits**, never the s
 
 ===================  ====================================================================
 MrBruh fork          ``resolved`` or ``app`` present, or ``schemaVersion >= 2``
-arodoid fork   ``recipes[].machineHandlers`` non-empty on any recipe
+arodoid fork         ``recipes[].machineHandlers`` non-empty on any recipe
 ===================  ====================================================================
 
 Resolution order::

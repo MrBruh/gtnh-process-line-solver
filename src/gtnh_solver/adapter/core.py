@@ -56,7 +56,16 @@ from gtnh_solver.ir import (
 from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 
 from ._errors import AdapterError, AdapterWarning
-from .plan import Edge, MachineHandler, Node, Plan, Recipe, ResolvedMachine, Resource
+from .plan import (
+    Edge,
+    MachineHandler,
+    Node,
+    Plan,
+    Recipe,
+    ResolvedMachine,
+    Resource,
+    RuntimeVariant,
+)
 from .power import synthesize_power
 from .producer import PlanProducer, plan_pack_version, resolve_producer
 
@@ -72,6 +81,8 @@ _STORAGE_TYPE = {"item": "Super Chest", "fluid": "Super Tank"}
 # the recipe-derived synthesis: wide enough for float noise, tight enough that any modelling
 # difference (overclocking, duty cycling) trips the warning.
 _RESOLVED_EUT_TOLERANCE = 1e-6
+#: The machine-configuration control that sets a GT++ multiblock's parallel batch count.
+_PARALLEL_CONTROL = "machineParallel"
 
 
 def load_plan(path: str | Path) -> Plan:
@@ -185,6 +196,7 @@ def to_input_ir(
                 f"Split it into single-machine nodes in the export."
             )
         _check_input_overrides(recipe, node)
+        _check_unmodelled_parallel(recipe, node)
         block_key = _block_key_for(recipe, resolved_machines.get(node.id))
         record = physical.get(recipe.machine_type, block_key=block_key) if physical else None
         # One fluid-output count drives both the reserved shape and its hatch ceiling, so the two
@@ -238,23 +250,53 @@ def to_input_ir(
     machines, nets = _add_output_buffers(machines, nets, storage_ids)
     # The export has no power source; invent it. ``single_block_ids`` is what lets the synthesis
     # state a basic machine's own intake ceiling without guessing at a multiblock's.
-    machines, nets = synthesize_power(machines, nets, single_block_ids=frozenset(single_block_ids))
+    # _supply_tier absorbs an implausible draw from the MrBruh fork's recipe model. An arodoid
+    # plan does not have that defect - its figures come from GT's own overclock calculator - so there
+    # the workaround would re-tier machines that were already right. Disabled only for the producer
+    # positively known not to need it: an undetermined plan keeps the defensive behaviour, since the
+    # workaround changes only the voltage supplied and never the stated draw.
+    machines, nets = synthesize_power(
+        machines,
+        nets,
+        single_block_ids=frozenset(single_block_ids),
+        allow_retier=resolved_producer is not PlanProducer.ARODOID_V1,
+    )
     _check_resolved_power(plan, nets)
     region = _bounding_region([m.footprint for m in machines])
     return InputIR(bounding_region=region, machines=machines, nets=nets)
 
 
+def _synthesized_eut(recipe: Recipe, node: Node) -> float:
+    """The node's draw from the plan's own runtime figures, best available source first.
+
+    The matched :class:`RuntimeVariant` wins, because its ``eut`` is post-overclock and the recipe's
+    is the base value at the recipe's minimum tier; on a machine run a few tiers up those differ by
+    4x per step. ``recipe.eut * parallel`` remains the floor for a node whose variant cannot be
+    identified, and for a plan carrying no runtime figures at all.
+
+    Producer-independent on purpose: both forks emit ``runtimeCalculation``, so this needs no branch
+    on which one exported the plan.
+    """
+    variant = _matched_variant(recipe, node)
+    if variant is not None:
+        return variant.eut * variant.parallel * node.parallel
+    return recipe.eut * node.parallel
+
+
 def _node_eut(recipe: Recipe, node: Node, resolved: dict[str, ResolvedMachine]) -> float:
     """The EU/t a node draws, which the power synthesis sizes amperage from.
 
-    Synthesized as ``recipe.eut * parallel``: ``parallel`` runs the recipe that many times at
-    once, matching how ``_rate`` scales throughput (``machineCount`` is forced to 1 upstream).
-    When a v2 export's ``resolved`` block covers the node, its ``totalEut`` is trusted instead -
-    the exporter's balancer models overclocking, which the raw recipe figure cannot - but is
-    cross-checked against the synthesis: a mismatch beyond float tolerance warns and the
-    resolved figure still wins (#2). v1 plans (no ``resolved``) always use the synthesis.
+    A v2 export's ``resolved.totalEut`` still wins where it covers the node: it is the exporter's own
+    balancer output and accounts for machine count and parallelism that :func:`_synthesized_eut`
+    cannot see. It is cross-checked against the synthesis, and a mismatch beyond float tolerance
+    warns while the resolved figure still wins (#2).
+
+    **The two disagree by 24.5x on one real node** (an Industrial Coke Oven resolving to 2355 EU/t
+    where GT's own overclock calculator says 96) with nothing in the export to arbitrate, which is
+    why the order is "the producer's balancer, then GT's calculator, then the base value" rather than
+    a single source.
     """
-    computed = recipe.eut * node.parallel
+    computed = _synthesized_eut(recipe, node)
     machine = resolved.get(node.id)
     if machine is None:
         return computed
@@ -272,6 +314,91 @@ def _node_eut(recipe: Recipe, node: Node, resolved: dict[str, ResolvedMachine]) 
             stacklevel=2,
         )
     return machine.total_eut
+
+
+def _matched_variant(recipe: Recipe, node: Node) -> RuntimeVariant | None:
+    """The runtime variant describing how this node runs the recipe, or ``None`` if not identifiable.
+
+    Matching is on **fields, never on the variant id**: ids carry suffixes beyond the tier and coil
+    (``tier-ev-perfect-oc``), so composing one from ``overclock_tier`` misses roughly half the nodes
+    of a real plan while appearing to work.
+
+    Narrowed in two steps. The node's ``overclock_tier`` selects candidates; then, if those
+    candidates are coil-keyed, the node's ``coil_tier`` picks among them. A node that leaves
+    ``coil_tier`` empty against coil-keyed variants stays ambiguous, and ambiguity returns ``None``
+    rather than a guess, because every coil is a different heat bonus and so a different EU/t.
+    """
+    if recipe.runtime_calculation is None:
+        return None
+    candidates = [
+        variant
+        for variant in recipe.runtime_calculation.variants
+        if variant.overclock_tier == node.overclock_tier
+    ]
+    if node.coil_tier and any(variant.coil_tier is not None for variant in candidates):
+        narrowed = [variant for variant in candidates if variant.coil_tier == node.coil_tier]
+        candidates = narrowed or candidates
+    if len(candidates) != 1:
+        return None
+    return candidates[0]
+
+
+def _handler_parallel(recipe: Recipe, node: Node) -> float:
+    """The parallel multiplier this node's machine configuration applies, or 1.
+
+    Read only to report it (:func:`_check_unmodelled_parallel`). The multiplier lives on the
+    handler's ``machineParallel`` control and appears in neither ``node.parallel`` (always 1 on the
+    plans seen) nor any runtime variant (all of which report ``parallel: 1``), so it is the one
+    runtime figure the export does not compose for us.
+    """
+    handler = _effective_handler(recipe, node)
+    if handler is None:
+        return 1.0
+    for control in handler.machine_config_controls:
+        if control.id != _PARALLEL_CONTROL:
+            continue
+        chosen = node.machine_config_tiers.get(_PARALLEL_CONTROL) or control.default_key
+        for tier in control.tiers:
+            if tier.key == chosen:
+                return tier.parallel_multiplier
+    return 1.0
+
+
+def _check_unmodelled_parallel(recipe: Recipe, node: Node) -> None:
+    """Warn when a node's machine runs parallel batches the adapter does not account for.
+
+    Deliberately not composed into the draw. Multiplying the variant through would be re-deriving
+    the exporter's machine model in this codebase, and GT parallel multiblocks do not all scale EU/t
+    linearly (several carry a parallel discount), so a composed figure would be confidently wrong
+    with nothing to check it against. Reporting it keeps the error visible and one-directional: the
+    layout is under-powered by a known factor rather than wrong by an unknown one.
+    """
+    multiplier = _handler_parallel(recipe, node)
+    if multiplier <= 1.0:
+        return
+    handler = _effective_handler(recipe, node)
+    name = (handler.label if handler is not None else "") or recipe.machine_type
+    warnings.warn(
+        f"node {node.id!r} runs {name} at {multiplier:g}x parallel, which the export states only as "
+        f"a machine-configuration multiplier and the adapter does not model; its EU/t and throughput "
+        f"are those of a single batch, so the layout under-provisions this machine by up to "
+        f"{multiplier:g}x",
+        AdapterWarning,
+        stacklevel=3,
+    )
+
+
+def _effective_duration(recipe: Recipe, node: Node) -> float:
+    """The recipe's duration as this node runs it: the matched variant's, else the base figure.
+
+    Overclocking halves duration per tier step, so a throughput computed from the base figure is low
+    by the same factor the draw would be. Fixing EU/t without this would leave every pipe on an
+    overclocked machine sized for a fraction of the flow it carries.
+    """
+    variant = _matched_variant(recipe, node)
+    if variant is not None and variant.duration_ticks > 0:
+        return variant.duration_ticks
+    return recipe.duration_ticks
 
 
 def _effective_handler(recipe: Recipe, node: Node) -> MachineHandler | None:
@@ -294,16 +421,20 @@ def _effective_handler(recipe: Recipe, node: Node) -> MachineHandler | None:
 def _check_power_provenance(plan: Plan, producer: PlanProducer | None) -> None:
     """Warn when a plan's multiblocks will be powered from pre-overclock EU/t figures.
 
-    With no ``resolved`` block, every machine's draw falls back to ``recipe.eut * parallel``
-    (:func:`_node_eut`), which does not model overclocking. For a single-block machine running at
-    its recipe's own tier that is exact, which is why this stays quiet on such a plan. For a
-    multiblock overclocked above its recipe tier it is low by a factor of 4 per tier step, and the
-    cable amperage is sized from it - so the layout is buildable and under-powered, the one failure
-    mode a builder cannot see in the preview.
+    A machine whose draw falls all the way to ``recipe.eut * parallel`` (:func:`_node_eut`) is being
+    sized from the base value at its recipe's minimum tier. For a single-block machine running at
+    that tier the figure is exact, which is why this stays quiet on such a plan. For a multiblock
+    overclocked above it, the figure is low by 4x per tier step and the cable amperage is sized from
+    it, so the layout comes out buildable and under-powered: the one failure a builder cannot see in
+    the preview.
 
-    Scoped to plans that declare their machines via ``machineHandlers``, since that is the only
-    evidence available here of a machine being a multiblock at all; a plan whose handlers are all
-    empty says nothing and stays quiet.
+    **Both better sources silence it.** A ``resolved`` block covers the whole plan, and a matched
+    runtime variant covers the node, so neither is a fallback. Warning merely because ``resolved`` is
+    absent would fire on every arodoid plan forever, including the ones whose figures now come
+    from GT's own overclock calculator and are right.
+
+    Scoped to machines a handler declares ``multiblock``, since that is the only evidence available
+    here of a machine being one at all; a plan whose handlers are empty says nothing and stays quiet.
     """
     if plan.resolved is not None:
         return
@@ -315,6 +446,7 @@ def _check_power_provenance(plan: Plan, producer: PlanProducer | None) -> None:
             if (recipe := recipes.get(node.recipe_id)) is not None
             and (handler := _effective_handler(recipe, node)) is not None
             and handler.kind == "multiblock"
+            and _matched_variant(recipe, node) is None
         }
     )
     if not affected:
@@ -624,12 +756,15 @@ def _rate(recipe: Recipe, resource_id: str, node: Node, *, outputs: bool) -> flo
     # the recipe here would sum nothing and rate the net at zero.
     pool = recipe.outputs if outputs else _effective_inputs(recipe, node)
     amount = sum(res.amount for res in pool if res.id == resource_id)
-    if recipe.duration_ticks <= 0:
+    # The duration this node actually runs at, not the recipe's base figure: overclocking halves it
+    # per tier step, so the base value understates flow by the factor it understates draw.
+    duration = _effective_duration(recipe, node)
+    if duration <= 0:
         return 0.0
     # `parallel` only, matching `_node_eut`: `machineCount` is forced to 1 upstream, so carrying
     # it here scaled nothing while implying the two paths disagree about multi-instance nodes.
     # When instance-aware routing lands (#76) both have to change together, deliberately.
-    return amount * node.parallel / recipe.duration_ticks
+    return amount * node.parallel / duration
 
 
 #: Multiplier on the summed footprint floor area when sizing the region's side (leaves routing

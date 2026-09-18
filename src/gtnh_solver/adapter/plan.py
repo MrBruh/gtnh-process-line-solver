@@ -63,6 +63,32 @@ class RecipeSource(BaseModel):
     dataset_version_id: str = ""
 
 
+class MachineConfigTier(BaseModel):
+    """One setting of a machine-configuration control, e.g. one parallel step of a GT++ multiblock."""
+
+    model_config = _CFG
+
+    key: str = ""
+    #: Fractional in practice (1.5, 2.5, 3.5 all occur), so this is a throughput multiplier rather
+    #: than a batch count - one more reason the adapter reports it instead of composing it.
+    parallel_multiplier: float = 1.0
+
+
+class MachineConfigControl(BaseModel):
+    """A configurable dimension of a machine: its parallel step, coil, pipe casing, solenoid.
+
+    Only ``machineParallel`` is read, and only to *report* that the adapter is not modelling it
+    (``core._handler_parallel``). The node names its chosen setting in
+    ``Node.machine_config_tiers``; absent, ``default_key`` is what the machine is running.
+    """
+
+    model_config = _CFG
+
+    id: str = ""  # e.g. "machineParallel"
+    default_key: str = ""
+    tiers: list[MachineConfigTier] = Field(default_factory=list)
+
+
 class MachineHandler(BaseModel):
     """One machine a recipe can run in: the **controller**, as distinct from the recipe map.
 
@@ -93,6 +119,48 @@ class MachineHandler(BaseModel):
     label: str = ""
     machine_type: str = ""
     minimum_tier: str = ""
+    #: Handler-level overrides the recipe's own ``runtime_calculation`` does not account for, most
+    #: importantly a parallel multiplier. See :class:`MachineConfigControl`.
+    machine_config_controls: list[MachineConfigControl] = Field(default_factory=list)
+
+
+class RuntimeVariant(BaseModel):
+    """The recipe as GT would actually run it at one tier (and coil, casing, ...) of a machine.
+
+    ``eut`` and ``duration_ticks`` here are **post-overclock**: the recipe's own figures are the base
+    values at its minimum tier, and a machine one tier up draws 4x and runs 2x faster. Reading the
+    base values instead understates a whole plan's draw by 6.1x and a single machine by up to 256x.
+
+    ``inputs``/``outputs`` are deliberately **not modelled**. Some variants carry an empty ``inputs``
+    list even for a recipe that plainly has inputs, so the array cannot be read as the recipe's I/O;
+    amounts keep coming from the recipe (with the node's overrides applied).
+    """
+
+    model_config = _CFG
+
+    id: str = ""  # "tier-ev", "tier-ev-coil-hss_g", "tier-ev-perfect-oc": NOT parseable, see below
+    overclock_tier: str = ""
+    #: Present only on variants of a coil-bearing machine (an EBF), where the coil sets the heat
+    #: bonus. Absence means the machine has no coil dimension, not that the coil is unknown.
+    coil_tier: str | None = None
+    eut: float = 0.0
+    duration_ticks: float = 0.0
+    parallel: int = 1
+
+
+class RuntimeCalculation(BaseModel):
+    """Per-tier runtime figures, computed by the exporter against GT's own overclock calculator.
+
+    Both forks emit this (``sourceClass: gregtech.api.util.OverclockCalculator``), which is why
+    reading it needs no producer branch. Selection must match on the variant's **fields**
+    (:func:`core._matched_variant`), never by building an id string: ids carry suffixes beyond the
+    tier and coil (``tier-ev-perfect-oc``), so string matching silently misses about half the nodes
+    of a real plan.
+    """
+
+    model_config = _CFG
+
+    variants: list[RuntimeVariant] = Field(default_factory=list)
 
 
 class Recipe(BaseModel):
@@ -102,8 +170,10 @@ class Recipe(BaseModel):
 
     id: str
     machine_type: str  # machineType, e.g. "Forge Hammer", "Large Chemical Reactor"
+    #: Base figures at the recipe's minimum tier. Prefer the matched :class:`RuntimeVariant`.
     eut: float = 0.0
     duration_ticks: float = 0.0
+    runtime_calculation: RuntimeCalculation | None = None
     inputs: list[Resource] = Field(default_factory=list)
     outputs: list[Resource] = Field(default_factory=list)
     source: RecipeSource | None = None
@@ -124,6 +194,12 @@ class Node(BaseModel):
     #: Which of the recipe's :class:`MachineHandler` entries this node runs in. Empty means the
     #: default, the first entry; empty also on every MrBruh-fork plan, which emits no handlers.
     machine_handler_id: str = ""
+    #: The heating coil this machine is built with, which selects among coil-keyed
+    #: :class:`RuntimeVariant`s. Empty for a machine with no coil dimension.
+    coil_tier: str = ""
+    #: Chosen settings of the machine's :class:`MachineConfigControl`s, keyed by control id
+    #: (``{"machineParallel": "fixed-12"}``). A control the node does not name runs its default.
+    machine_config_tiers: dict[str, str] = Field(default_factory=dict)
     #: Per-node replacements for ``recipe.inputs``, keyed by index into that list. A recipe is
     #: shared between nodes while an override belongs to one node, so these are resolved per node
     #: and never written back onto the recipe (``core._effective_inputs``). Keys arrive as JSON

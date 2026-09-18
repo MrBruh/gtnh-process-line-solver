@@ -24,6 +24,45 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
   Two files claiming the same **block_key** is still an error: that is one controller dumped twice.
 ### Fixed
+- **Power and throughput follow the figures a machine actually runs at, not the recipe's base
+  values.** `recipe.eut` and `recipe.durationTicks` are the values at the recipe's *minimum* tier; a
+  machine run above it draws 4x and runs 2x faster per step. The adapter read the base values, so a
+  whole plan came out **6.1x** under-powered and a single machine up to **256x** (an EV machine on an
+  LV recipe is 4³), with every pipe sized for a matching fraction of its flow. Under-sized cable is
+  the one failure a builder cannot see in the preview.
+
+  Both forks already ship the real per-tier figures in `recipes[].runtimeCalculation`, computed
+  against GT's own `OverclockCalculator`, so consuming them needs **no producer branch**. The draw
+  now resolves best-source-first: a `resolved` block, then the matched runtime variant, then the base
+  value. `resolved` stays on top because it is the exporter's own balancer and accounts for machine
+  count and parallelism a variant cannot see; the two disagree by 24.5x on one real node with nothing
+  in the export to arbitrate, which is why this is a ladder and not a single source.
+
+  Selection matches on the variant's **fields**, never on its id: real ids carry suffixes beyond the
+  tier and coil (`tier-ev-perfect-oc`), so composing an id silently misses about half the nodes of a
+  real plan. A coil-bearing machine is narrowed by the node's coil, and a node that leaves the coil
+  unstated against coil-keyed variants stays **unmatched** rather than guessing, since every coil is a
+  different heat bonus and so a different EU/t.
+
+  Verified additive: all three committed fixtures run at their recipe's own tier, so their EU/t,
+  durations and layouts are untouched.
+
+- **`_supply_tier` no longer re-tiers an arodoid plan.** That workaround absorbs an implausible
+  draw from the MrBruh fork's recipe model; pointed at figures from GT's own calculator it would move
+  machines that were already right. Disabled only for the producer positively known not to need it,
+  so an undetermined plan keeps the defensive behaviour (it changes only the voltage supplied, never
+  the stated draw).
+
+- **A machine's unmodelled parallelism is reported.** A GT++ multiblock can run parallel batches set
+  by a machine-configuration control, and that multiplier appears in neither `node.parallel` (always
+  1 on every plan seen) nor any runtime variant (all of which report `parallel: 1`). It is **not**
+  composed into the draw: doing so would re-derive the exporter's machine model here, and these
+  multipliers are fractional in practice (1.5, 2.5, 3.5), so they are throughput factors rather than
+  batch counts and several GT machines carry a parallel EU discount. An `AdapterWarning` names the
+  machine and the factor, keeping the error visible and one-directional.
+
+  The provenance warning added above is correspondingly narrowed: a node covered by a matched variant
+  is no longer a fallback, so a plan whose figures are now right stays silent.
 - **`nodes[].recipeInputOverrides` is applied, so a wildcard recipe input no longer fails the
   load.** A GT recipe can accept any metadata of an item (`minecraft:log@32767`, Forge's
   `OreDictionary.WILDCARD_VALUE`), and the exporter records which one the player actually feeds it.

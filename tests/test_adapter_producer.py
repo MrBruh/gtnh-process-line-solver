@@ -26,6 +26,8 @@ from gtnh_solver.adapter import (
     RecipeSource,
     ResolvedBlock,
     Resource,
+    RuntimeCalculation,
+    RuntimeVariant,
     describe_markers,
     detect_producer,
     load_plan,
@@ -232,6 +234,18 @@ def test_quiet_for_a_single_block_machine() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         _check_power_provenance(_plan(_single()), PlanProducer.ARODOID_V1)
+
+
+def test_quiet_when_a_runtime_variant_covers_the_node() -> None:
+    # A matched variant is post-overclock, straight from GT's own calculator, so the draw is not a
+    # fallback and warning would cry wolf on every arodoid plan forever.
+    plan = _plan(_multiblock())
+    plan.recipes[0].runtime_calculation = RuntimeCalculation(
+        variants=[RuntimeVariant(id="tier-lv", overclock_tier="LV", eut=30.0, duration_ticks=10.0)]
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _check_power_provenance(plan, PlanProducer.ARODOID_V1)
 
 
 def test_quiet_when_the_plan_carries_resolved_figures() -> None:
