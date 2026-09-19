@@ -7,6 +7,25 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`.schematic` files can be read back, not just written (`schematic/`, `cli`).**
+  `read_schematic()` is the inverse of the exporter's lowering, and
+  `gtnh-solve --inspect-schematic FILE` prints what a file holds: dimensions, a block histogram by
+  registry name, and every tile entity with its `mID` resolved to a machine name.
+
+  It exists because the format punishes re-deriving it. Three conventions decode to plausible
+  nonsense rather than to an error, so each is now settled against the goldens and pinned by a
+  test: cell order is MCEdit's `(y * Length + z) * Width + x`; `AddBlocks` gives an **even** cell
+  index the **high** nibble (the other way round leaves 224 of the reference build's 1386 cells
+  unmapped and 47 tile entities floating in air); and an id absent from `SchematicaMapping` reads
+  back as `<unmapped:2417>` rather than being given an invented registry name. Round-tripping our
+  own export covers the no-`AddBlocks` path, which the goldens cannot, since the exporter numbers
+  ids compactly from 1.
+
+  An unresolved `mID` **names the manifest that was asked**. The committed manifest is
+  example-scoped, so against it most of a real build resolves to nothing, and a bare "not found"
+  reads like a corrupt file when it only means the small manifest was consulted.
+  `TextureManifest.display_name()` is the accessor this needed, alongside the existing
+  `source_class` / `kind` / `te_base_type` family. (#96)
 - **`gtnh-solve <plan> --schematic FILE` exports a solved layout as a Schematica build ghost
   (`schematic/`, `cli`).** Minecraft 1.7.10 has no Litematica; the consumer is Schematica, which
   loads a classic MCEdit `.schematic` as a build overlay. The lowering is three-way, because GT

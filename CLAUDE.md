@@ -28,6 +28,7 @@ disagree, the doc is the intent - fix one of them and say which.
 | `src/gtnh_solver/validator/` | Independent geometric + rule checks (the safety net) |
 | `src/gtnh_solver/buildguide/` | Bill of materials, per-layer build instructions |
 | `src/gtnh_solver/previewer/` | three.js previewer + output-layout JSON emit |
+| `src/gtnh_solver/schematic/` | Schematica `.schematic` export **and** reading one back (`read_schematic`) |
 | `src/gtnh_solver/cli.py` | `gtnh-solve` entry point |
 | `examples/` | Sample gtnh-factory-flow exported plans for adapter/solver tests |
 
@@ -53,6 +54,13 @@ disagree, the doc is the intent - fix one of them and say which.
 
 ## Domain gotchas (easy to get wrong)
 
+- **Never hand-parse a `.schematic`.** `read_schematic()` (`schematic/read.py`) decodes one, and
+  `gtnh-solve --inspect-schematic FILE` prints what is in it. The format has three traps that all
+  decode to plausible nonsense rather than to an error: cell order is `(y * Length + z) * Width + x`,
+  `AddBlocks` gives an **even** cell index the **high** nibble, and an id absent from
+  `SchematicaMapping` has no name at all. All three are settled against the goldens in
+  `tests/golden/schematic/` and pinned by tests; re-deriving them by hand is how you get a file that
+  reads back subtly wrong.
 - **Litematica does NOT run on 1.7.10.** GT:NH is Minecraft 1.7.10. The in-game schematic
   consumer is **Schematica-Plus** (classic `.schematic`, numeric block IDs). Don't target
   Litematica/`litemapy`. (Export is a post-v1 milestone anyway.)

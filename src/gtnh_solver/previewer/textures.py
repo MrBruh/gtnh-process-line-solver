@@ -413,6 +413,21 @@ class TextureManifest:
         """
         return self._pipes_by_name.get(display_name)
 
+    def display_name(self, block: str, meta: int) -> str | None:
+        """The name the pack shows for ``(block, meta)``, or ``None`` if the manifest has none.
+
+        The inverse of :meth:`mte_block`, and the lookup a ``.schematic`` reader needs: a file
+        names its machines only by ``mID``, which is this entry's meta. A plain casing carries no
+        ``display_name``, so ``None`` here means either "not a named machine" or "not in this
+        manifest at all" - and the committed manifest is example-scoped, so the second case is
+        routine and is why the caller should say which manifest it asked.
+        """
+        entry = self._blocks.get(f"{block}|{meta}")
+        if entry is None:
+            return None
+        value = entry.get("display_name")
+        return str(value) if value else None
+
     def kind(self, block: str, meta: int) -> str | None:
         """What the extractor called this entry: ``"mte"``, ``"pipe"``, ``"block"``, or ``None``.
 
