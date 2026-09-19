@@ -13,11 +13,33 @@ question: what a file Schematica accepts actually contains.
 |------|--------|------------|
 | `sand.schematic` | **golden** | Close enough to the line the solver builds to pin the format. The exporter's output for the sand plan should match its *shape*: same tag layout, same lowering of machines/cables to blocks + tile entities. |
 | `nitrobenzene-reference.schematic` | reference only | A hand-built example of one way to arrange the blocks. **Not solver output**, and not the layout the solver produces. Kept because it is the only sample containing multiblock casings, a controller and hatches. Never assert our output against it cell for cell. |
+| `sand-parallel-reference.schematic` | reference only | The maintainer's own build of `examples/gtnh-parallel-sand.json`, saved from the instance: the same 9 Forge Hammers, 2 Super Chests and power source the solver places, in a 3x3x4 box. **Not solver output**, and well beyond what the solver can currently express. It is the quality target for that line, and the evidence behind the routing limits it is filed under. Never assert our output against it cell for cell. |
 
-Neither file is a byte-for-byte expectation for our exporter. Both were built by hand in
+None of these is a byte-for-byte expectation for our exporter. All were built by hand in
 game, so they will differ from a solved layout in placement, and the nitrobenzene one also
 contains blocks from other mods (EnderIO, StorageDrawers, ExtraUtilities) that the solver
 never emits.
+
+## What `sand-parallel-reference.schematic` measures
+
+It is the only file here that is a **quality** reference rather than a format one, so the
+numbers are the point. Decoded with `gtnh-solve --inspect-schematic` against the same plan the
+solver solves:
+
+| | reference | solver |
+|---|---|---|
+| bounding box | 3x3x4 = 36 cells | 11x4x5 = 220 cells |
+| solid blocks | 27 | 75 |
+| item pipes | 12 (6 huge, 6 large) | 40 (all plain `gt_pipe_tin`) |
+| cables | 3 (2x `cable.tin.08`, 1x `cable.tin.12`) | 23 (3x 1x, 18x 2x, 2x 4x) |
+| machines | 9 hammers, 2 chests, 1 source | the same |
+
+Two things in it the solver cannot currently produce. One pipe column carries several
+material flows at once, because a larger gauge has the throughput for it, while our router
+holds every route to its own cells (one route per cell, `validator.core`). And a single
+3-cell cable column feeds all nine machines off adjacency, which needs the machines packed
+tightly enough around it to reach. Both are tracked; see the routing issues on the tracker
+rather than treating this file as a failing test.
 
 ## What they establish
 
