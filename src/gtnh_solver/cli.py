@@ -7,6 +7,7 @@ human-readable build guide out::
     gtnh-solve plan.json -o guide.txt             # ...or write it to a file
     gtnh-solve plan.json --preview view.html      # write a double-clickable 3D preview
     gtnh-solve plan.json --schematic line.schematic  # write a Schematica build ghost
+    gtnh-solve --inspect-schematic line.schematic # ...and read one back: blocks + machines
     gtnh-solve plan.json --seed 3                 # pick the solver seed
     gtnh-solve plan.json --fast                   # skip optimization (instant, constructive)
     gtnh-solve plan.json --objective volume       # what "compact" means: footprint|volume|balanced
@@ -23,6 +24,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+from typing import Final
 
 from pydantic import ValidationError
 
@@ -30,11 +32,16 @@ from gtnh_solver import __version__
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.buildguide import build_guide
 from gtnh_solver.dataset import PhysicalDataset, list_versions, load_physical_dataset
+from gtnh_solver.dataset.roots import resolve_dataset_path
 from gtnh_solver.ir import InputIR, LayoutResult, LayoutStatus
 from gtnh_solver.previewer import write_preview
-from gtnh_solver.schematic import SchematicError, write_schematic
+from gtnh_solver.previewer.textures import TextureManifest
+from gtnh_solver.schematic import SchematicError, read_schematic, write_schematic
 from gtnh_solver.solver import solve
 from gtnh_solver.validator import validate
+
+#: Every GT machine, cable and pipe is a meta of this one block; an mID IS its meta.
+_GT_BLOCK: Final = "gregtech:gt.blockmachines"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -75,6 +82,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--schematic",
         metavar="FILE",
         help="write a Schematica .schematic build ghost to FILE (1.7.10; not Litematica)",
+    )
+    parser.add_argument(
+        "--inspect-schematic",
+        metavar="FILE",
+        help=(
+            "decode an existing .schematic and print what is in it (blocks, machines, hatches, "
+            "routes), then exit; takes no plan"
+        ),
     )
     parser.add_argument(
         "--dataset-version",
@@ -154,6 +169,76 @@ def _enable_previewer_logging() -> None:
     logger.setLevel(logging.INFO)
 
 
+def _inspect_schematic(path: str, version: str | None) -> int:
+    """Print what is in the ``.schematic`` at ``path``. Returns the process exit code.
+
+    Reading is pure (:func:`~gtnh_solver.schematic.read.read_schematic`); the only thing the
+    dataset is needed for is turning an ``mID`` into a machine name, so a missing manifest degrades
+    to raw ids rather than failing. **Which manifest answered is printed**, because the committed
+    one is example-scoped: against it most of a real build's machines resolve to nothing, and an
+    unqualified "not in this manifest" reads like a corrupt file when it only means the small
+    manifest was asked.
+    """
+    try:
+        schematic = read_schematic(path)
+    except (OSError, SchematicError) as exc:
+        print(f"error: could not read {path}: {exc}", file=sys.stderr)
+        return 2
+
+    manifest_path = resolve_dataset_path("textures/manifest.json", version=version)
+    manifest: TextureManifest | None = None
+    try:
+        manifest = TextureManifest.load(manifest_path)
+    except (OSError, ValueError):
+        print(f"warning: no texture manifest at {manifest_path}; mIDs stay raw", file=sys.stderr)
+
+    width, height, length = schematic.size
+    solid = sum(schematic.histogram().values())
+    print(f"{Path(path).name}: {width}x{height}x{length} = {schematic.volume} cells, {solid} solid")
+    print(
+        f"Materials={schematic.materials!r}  "
+        f"entities={len(schematic.root.get('Entities', []))}  "
+        f"tile entities={len(schematic.tile_entities)}"
+    )
+
+    print("\nblocks")
+    for name, count in schematic.histogram().items():
+        print(f"  {count:5d}  {name}")
+
+    if not schematic.tile_entities:
+        return 0
+
+    tally: dict[tuple[int | None, str], int] = {}
+    for tile in schematic.tile_entities:
+        tally[(tile.mid, tile.id)] = tally.get((tile.mid, tile.id), 0) + 1
+
+    print(f"\ntile entities (names from {manifest_path})")
+    unresolved: set[int] = set()
+    for (mid, tile_id), count in sorted(tally.items(), key=lambda kv: (-kv[1], str(kv[0]))):
+        if mid is None:
+            label = "not a GT machine"
+        else:
+            machine = manifest.display_name(_GT_BLOCK, mid) if manifest is not None else None
+            if machine is None:
+                unresolved.add(mid)
+                label = "NOT IN THIS MANIFEST"
+            else:
+                label = machine
+        print(f"  {count:5d}  mID {mid!s:<6} {tile_id:<26} {label}")
+
+    if unresolved:
+        print(
+            f"\n{len(unresolved)} mID(s) did not resolve: {', '.join(str(m) for m in sorted(unresolved))}",
+            file=sys.stderr,
+        )
+        print(
+            "the committed manifest is example-scoped; a full local dump "
+            "(--dataset-version, see data/<version>/) names far more",
+            file=sys.stderr,
+        )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -165,6 +250,9 @@ def main(argv: list[str] | None = None) -> int:
         if not versions:
             print("no generated dataset versions; using the committed fixtures", file=sys.stderr)
         return 0
+
+    if args.inspect_schematic:
+        return _inspect_schematic(args.inspect_schematic, args.dataset_version)
 
     # `export` is nargs="?" with this manual check (not argparse `required`) so main([]) can be
     # unit-tested for the exit-2 path without argparse raising SystemExit.
