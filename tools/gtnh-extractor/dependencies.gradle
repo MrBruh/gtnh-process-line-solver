@@ -47,4 +47,16 @@ dependencies {
     // StructureLib - the multiblock structure framework (LGPL, GTNewHorizons).
     // Pinned from DreamAssemblerXXL manifest 2.8.4; matches GT5U's transitive requirement.
     implementation("com.github.GTNewHorizons:StructureLib:1.4.23:dev")
+
+    // JUnit 4, for the ASM icon-name matcher only (#98). Deliberately a SEPARATE suite from the
+    // project's pytest gate: run it with `./gradlew test` from this directory. It is not wired
+    // into CI, because the extractor is a local-only tool whose real gate is a dump run, and the
+    // Python suite must not acquire a Forge toolchain dependency to stay fast.
+    //
+    // JUnit 4 rather than 5: this compiles to Java 8 bytecode (Jabel gives modern syntax, not a
+    // modern stdlib), and 4 is what the 1.7.10 toolchain resolves without extra platform wiring.
+    //
+    // ASM itself needs no declaration - org.objectweb.asm 5.0.3 is already on both classpaths via
+    // net.minecraft:launchwrapper, which is exactly why this route costs no new dependency.
+    testImplementation("junit:junit:4.13.2")
 }

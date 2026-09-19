@@ -27,6 +27,39 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   coverage report is not worth a 135 MB download nobody asked for, and the report says it skipped
   the question rather than implying it passed. `previewer.jar.cached_jar()` is the accessor for
   that, and it never downloads. (#98)
+- **Icon names are recovered from unstripped bytecode, closing 73 of the dataset's 118 texture gaps
+  (`dataset/`, extractor).** FML's `SideTransformer` deletes every `@SideOnly(CLIENT)` member as a
+  class loads, so a name that exists only as a string literal inside a client-only method is
+  unreachable by reflection. The `.class` in the jar is untouched, though, and
+  `LaunchClassLoader.getClassBytes` returns the pre-transform copy, so an ASM matcher can read what
+  the server cannot call. A stub `IIconRegister` cannot substitute: that interface is itself
+  client-only, so a class implementing it will not load (measured: found on 806 blocks, threw on
+  all 806).
+
+  **Recovering the name is the whole fix.** The holders these names belong in (`BlockGTCasingsTT`'s
+  `eM0..eM14`, `TTMultiblockBase`'s `ScreenON`/`ScreenOFF`) are *not* stripped, merely null, because
+  the `new CustomIcon("...")` that would have filled them sits in a deleted method. Filling them
+  lets every existing route answer unchanged: `BlockGTCasingsTT.getIcon` is a plain switch over its
+  own fields and survives, per-side variants and all. No new resolution path, and no table. This is
+  the sibling of `injectQueuedIconContainers`, which names containers GT *built*; these were never
+  built at all.
+
+  Three instruction shapes, each read out of real bytes before being written: `registerIcon` into a
+  scalar field, a `CustomIcon` constructed into a holder, and `registerIcon` into an `IIcon[]` at a
+  **constant** index. A computed index is refused, which is the line between this and the shared
+  tier arrays the notes warn against. Anything unrecognised contributes nothing and keeps its gap.
+
+  Measured against the 2.8.4 dump: **unresolved pairs 118 -> 45, multiblocks with a gap 70 -> 56**.
+  All six tectech casing families and 25 of the 29 controller hulls now resolve. Of the 56 that
+  remain, **34 are held only by `IC2:blockAlloyGlass`**, a declared non-goal, leaving 22 with
+  anything still fixable. The four remaining hulls fail for unrelated reasons (a `NoSuchMethodError`
+  and a `getTexture` NPE), not for want of a name.
+
+  Two things the notes had wrong, both found by disassembling rather than reasoning: the monorepo
+  jar is **not uniformly deobfuscated** (tectech calls `registerIcon`, gtnhintergalactic calls the
+  SRG `func_94245_a`, and knowing only one silently skips the other's whole mod), and the array
+  shape exists at all. The allowlist is explicit, per class, and never widens to "anything that
+  matches". (#98)
 - **`.schematic` files can be read back, not just written (`schematic/`, `cli`).**
   `read_schematic()` is the inverse of the exporter's lowering, and
   `gtnh-solve --inspect-schematic FILE` prints what a file holds: dimensions, a block histogram by
