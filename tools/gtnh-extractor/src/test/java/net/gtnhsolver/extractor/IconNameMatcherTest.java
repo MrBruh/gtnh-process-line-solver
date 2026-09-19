@@ -5,9 +5,12 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 import org.junit.Test;
 import org.objectweb.asm.ClassWriter;
@@ -206,10 +209,18 @@ public class IconNameMatcherTest {
     }
 
     @Test
-    public void unreadable_or_empty_bytes_yield_nothing_rather_than_throwing() {
+    public void nothing_to_read_yields_nothing() {
         assertTrue(IconNameMatcher.iconNames(null).isEmpty());
         assertTrue(IconNameMatcher.iconNames(new byte[0]).isEmpty());
-        assertTrue(IconNameMatcher.iconNames(new byte[] { 1, 2, 3, 4 }).isEmpty());
+    }
+
+    @Test(expected = IconNameMatcher.UnreadableClassException.class)
+    public void bytes_that_will_not_parse_are_loud_rather_than_empty() {
+        // "could not read it" must not arrive looking like "read it, found nothing". ASM 5.0.3
+        // refuses anything past Java 8 bytecode with a bare IllegalArgumentException, which is what
+        // a multi-release jar's versioned overlay produces, and swallowing that would drop a whole
+        // mod's sprites from a run that still reported success.
+        IconNameMatcher.iconNames(new byte[] { 1, 2, 3, 4 });
     }
 
     // ------------------------------------------------------------------------------------ helpers
@@ -262,19 +273,48 @@ public class IconNameMatcherTest {
         return cw.toByteArray();
     }
 
-    /** Read a class file off the test classpath, or null when the jar does not carry it. */
+    /**
+     * Read a class file from the pinned jar, or null when it does not carry it.
+     *
+     * <p>
+     * <b>Deliberately NOT {@code getResourceAsStream}.</b> GT5U 2.9 ships a <b>multi-release</b>
+     * jar: the base entry is Java 8 bytecode, and {@code META-INF/versions/17/} holds a Java 17
+     * copy of the same class. A modern JVM's classloader prefers the versioned overlay, so a test
+     * reading through the classloader gets major-61 bytes that ASM 5.0.3 refuses, while the dump
+     * itself - a Forge 1.7.10 server on Java 8, reading through
+     * {@code LaunchClassLoader.getClassBytes} - gets the base Java 8 entry and parses it fine.
+     *
+     * <p>
+     * A test that reads the overlay is therefore testing bytes no dump will ever see, and it fails
+     * for a reason the production path does not have. Opening the jar with {@link ZipFile}, which
+     * knows nothing about multi-release versioning, pins the base entry: the same bytes the
+     * extractor works on.
+     */
     private static byte[] classBytes(String resource) throws IOException {
-        try (InputStream in = IconNameMatcherTest.class.getClassLoader()
-            .getResourceAsStream(resource)) {
-            if (in == null) {
-                return null;
+        for (String entry : System.getProperty("java.class.path").split(File.pathSeparator)) {
+            if (!entry.endsWith(".jar")) {
+                continue;
             }
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] buffer = new byte[8192];
-            for (int read = in.read(buffer); read > 0; read = in.read(buffer)) {
-                out.write(buffer, 0, read);
+            try (ZipFile jar = new ZipFile(entry)) {
+                ZipEntry found = jar.getEntry(resource);
+                if (found == null) {
+                    continue;
+                }
+                try (InputStream in = jar.getInputStream(found)) {
+                    ByteArrayOutputStream out = new ByteArrayOutputStream();
+                    byte[] buffer = new byte[8192];
+                    // `!= -1`, not `> 0`: a stream may legally return 0 without being at EOF, and
+                    // stopping there hands ClassReader a truncated class, which it rejects with a
+                    // bare IllegalArgumentException that reads exactly like "bytecode too new".
+                    for (int read = in.read(buffer); read != -1; read = in.read(buffer)) {
+                        out.write(buffer, 0, read);
+                    }
+                    return out.toByteArray();
+                }
+            } catch (IOException e) {
+                // not a readable jar; try the next classpath entry
             }
-            return out.toByteArray();
         }
+        return null;
     }
 }

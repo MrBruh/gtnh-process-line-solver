@@ -485,24 +485,71 @@ def test_bbox_mismatch_raises_dataset_error() -> None:
         to_physical(doc)
 
 
-def test_duplicate_machine_key_raises(tmp_path: Path) -> None:
-    meta = {
+def _dump_meta(count: int = 2) -> dict[str, object]:
+    return {
         "schema": 1,
         "pack_version": "test",
         "generated_at": "now",
         "extractor_sha": "0",
-        "controller_count": 2,
+        "controller_count": count,
     }
-    (tmp_path / "_meta.json").write_text(json.dumps(meta), encoding="utf-8")
-    doc = {
+
+
+def _doc(meta_id: int, display_name: str, registry: str = "r") -> dict[str, object]:
+    return {
         "schema": 1,
-        "controller": {"registry_name": "r", "meta": 0, "display_name": "Dup", "source_class": "C"},
+        "controller": {
+            "registry_name": registry,
+            "meta": meta_id,
+            "display_name": display_name,
+            "source_class": f"C{meta_id}",
+        },
         "variants": [{"trigger_stack_size": 1, "blocks": _cube_blocks(1), "bbox": [1, 1, 1]}],
     }
+
+
+def test_the_same_controller_dumped_twice_raises(tmp_path: Path) -> None:
+    # One controller in two files is a corrupt dump, not a fact about the pack, so it still fails.
+    (tmp_path / "_meta.json").write_text(json.dumps(_dump_meta()), encoding="utf-8")
+    doc = _doc(0, "Dup")
     (tmp_path / "a.json").write_text(json.dumps(doc), encoding="utf-8")
     (tmp_path / "b.json").write_text(json.dumps(doc), encoding="utf-8")
-    with pytest.raises(DatasetError, match="Dup"):
+    with pytest.raises(DatasetError, match="controller block 'r@0'"):
         load_physical_dataset(tmp_path)
+
+
+def test_two_controllers_sharing_a_display_name_load_and_withhold_the_name(tmp_path: Path) -> None:
+    """GTNH 2.9 registers 52 display names twice, so refusing to load would make the pack unusable.
+
+    "Mega Chemical Reactor" is BartWorks' legacy controller AND GT's own, at different metas. Both
+    records are kept and stay reachable by ``block_key``; only the shared *name* is withheld, so a
+    name lookup abstains instead of silently returning the wrong one of two real machines.
+    """
+    (tmp_path / "_meta.json").write_text(json.dumps(_dump_meta()), encoding="utf-8")
+    (tmp_path / "legacy.json").write_text(
+        json.dumps(_doc(13366, "Mega Chemical Reactor")), encoding="utf-8"
+    )
+    (tmp_path / "current.json").write_text(
+        json.dumps(_doc(15515, "Mega Chemical Reactor")), encoding="utf-8"
+    )
+    dataset = load_physical_dataset(tmp_path)
+
+    assert dataset.get("Mega Chemical Reactor") is None  # the name is unusable, and says so
+    assert dataset.ambiguous_names == frozenset({"Mega Chemical Reactor"})
+    # Neither record was dropped: both are addressable by the identity that is unique.
+    assert dataset.get("Mega Chemical Reactor", block_key="r@13366") is not None
+    assert dataset.get("Mega Chemical Reactor", block_key="r@15515") is not None
+    assert {m.meta for m in dataset.by_block_key.values()} == {13366, 15515}
+
+
+def test_an_unambiguous_name_is_unaffected_by_a_collision_elsewhere(tmp_path: Path) -> None:
+    (tmp_path / "_meta.json").write_text(json.dumps(_dump_meta(3)), encoding="utf-8")
+    (tmp_path / "a.json").write_text(json.dumps(_doc(1, "Shared")), encoding="utf-8")
+    (tmp_path / "b.json").write_text(json.dumps(_doc(2, "Shared")), encoding="utf-8")
+    (tmp_path / "c.json").write_text(json.dumps(_doc(3, "Unique")), encoding="utf-8")
+    dataset = load_physical_dataset(tmp_path)
+    assert dataset.get("Unique") is not None
+    assert dataset.get("Shared") is None
 
 
 # ---------------------------------------------------------- opt-in gtnh-factory-flow wiring

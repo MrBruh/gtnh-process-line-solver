@@ -77,6 +77,15 @@ tags on the two mod repos match these versions.
 | Pack (manifest) | GT5-Unofficial | StructureLib |
 | --------------- | -------------- | ------------ |
 | 2.8.4           | 5.09.51.482    | 1.4.23       |
+| 2.9.0-beta-2    | 5.09.54.20     | 1.4.42       |
+
+2.9.0-beta-2 is a **beta**, against the "stable release" rule above, and is pinned anyway because the
+adapter now reads plans from a fork that is 2.9-only. Its dump is 296 controllers against 2.8.4's 208.
+Two known rough edges are GT's, not ours: `meta.14003` and `meta.15755` fail extraction on
+client-only classes (`TileEntitySpaceElevatorCable`, `GTSoundLoop`), and two controllers report an
+**unlocalized lang key** as their display name
+(`gt.blockmachines.industrialsifter.controller.tier.single.name`, and the arc furnace's), so those
+cannot be joined by name at all.
 
 Only these two mods are pinned by hand. Every other hard dependency (IndustrialCraft2,
 NotEnoughItems, NotEnoughIds, GTNHLib, ModularUI, waila, AE2, ...) is a runtime dependency
