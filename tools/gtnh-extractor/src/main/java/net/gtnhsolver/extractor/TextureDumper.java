@@ -39,6 +39,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 
+import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.registry.FMLControlledNamespacedRegistry;
 import cpw.mods.fml.common.registry.GameData;
 import gregtech.api.GregTechAPI;
@@ -147,6 +148,46 @@ final class TextureDumper {
 
     private String lastIconError;
 
+    /**
+     * Whether this dump is running inside a CLIENT JVM, which changes where icon names come from.
+     *
+     * <p>
+     * Everything else in this file exists because a dedicated server cannot ask a sprite its name:
+     * every method on {@code net.minecraft.util.IIcon} is {@code @SideOnly(Side.CLIENT)},
+     * {@code getIconName()} included, so FML's SideTransformer deletes it at class-load time. In a
+     * client JVM nothing is stripped - {@code registerBlockIcons} actually runs, the atlas is
+     * stitched, and the sprite a block hands back names itself.
+     *
+     * <p>
+     * The PHYSICAL side, via {@code getSide()}, not {@code getEffectiveSide()}. The texture pass
+     * runs on the integrated server's thread, so the effective side is SERVER even on a client; the
+     * question here is which JVM this is, and therefore whether the client-only members survived.
+     */
+    private static final boolean CLIENT_JVM = FMLCommonHandler.instance().getSide().isClient();
+
+    /**
+     * Whether to inject {@link NamedIcon}s over GT's own icon fields before dumping.
+     *
+     * <p>
+     * Defaults to on for a server (it is the only way names are recoverable there) and off for a
+     * client, for two reasons. Measurement: injecting stubs over real sprites would hide exactly the
+     * difference a client run is there to observe. Safety: the render thread is drawing from those
+     * same fields while this runs, and a {@link NamedIcon} carries no real atlas coordinates.
+     *
+     * <p>
+     * Overridable with {@code -PinjectIcons=true|false} so both arrangements can be measured rather
+     * than assumed - three inferences in this lane were wrong until a run settled them.
+     */
+    private final boolean injectIcons = resolveInjectIcons();
+
+    private static boolean resolveInjectIcons() {
+        String configured = System.getProperty("gtnhextractor.injectIcons");
+        if (configured != null && !configured.trim().isEmpty()) {
+            return Boolean.parseBoolean(configured.trim());
+        }
+        return !CLIENT_JVM;
+    }
+
     TextureDumper(World world) {
         this.world = world;
     }
@@ -250,7 +291,13 @@ final class TextureDumper {
     int run(File textureOut, String packVersion, Map<String, String> modVersions, String extractorSha)
         throws IOException {
         textureOut.mkdirs();
-        populateIconNames();
+        LOG.info(
+            "gtnh-extractor: texture pass on a {} JVM, icon injection {}",
+            CLIENT_JVM ? "CLIENT" : "SERVER",
+            injectIcons ? "ON" : "OFF");
+        if (injectIcons) {
+            populateIconNames();
+        }
         verifyCasingTable();
         enumerateBasicMachineOverlays();
 
@@ -915,6 +962,15 @@ final class TextureDumper {
      * {@link #iconName} for what assuming either one cost the shipped manifest.
      */
     private String[] iconRef(Object container) {
+        // The sprite a container is holding is ground truth: it IS the texture that gets drawn, and
+        // in a client JVM it names itself. Server-side this reads back our own injected NamedIcon -
+        // the same answer the routes below produce - or nothing at all, so those routes remain the
+        // server's real answer and nothing about a server run changes.
+        String sprite = spriteName(readField(container, "mIcon"));
+        if (sprite != null) {
+            String[] live = splitIconName(sprite, ICON_DOMAIN);
+            return new String[] { live[0].toLowerCase(java.util.Locale.ROOT), live[1] };
+        }
         if (container instanceof Enum) {
             return new String[] { ICON_DOMAIN, "iconsets/" + ((Enum<?>) container).name() };
         }
@@ -958,6 +1014,77 @@ final class TextureDumper {
     /** The path a {@code <domain>:<rel>} block icon occupies inside its mod jar. */
     private static String assetPath(String domain, String rel) {
         return "assets/" + domain + "/textures/blocks/" + rel + ".png";
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // The name a live sprite gives itself (the client route)
+    // ------------------------------------------------------------------------------------------
+    //
+    // Two helpers, and between them they are the whole of a client JVM's advantage. Every other
+    // naming route in this file - the casing table, the queued-container injection, the bytecode
+    // matcher - exists to recover a name that `IIcon.getIconName()` would simply have returned, had
+    // the SideTransformer not deleted it server-side. Where the method survives, ask it.
+    //
+    // The call has to be REFLECTIVE. Writing `icon.getIconName()` compiles to an
+    // `invokeinterface net/minecraft/util/IIcon.getIconName`, and that instruction dies with
+    // NoSuchMethodError on a server, where the method does not exist - the same cliff that killed
+    // the `IIconContainer.getIcon()` route at GT 2.9. Going through the INSTANCE's own class asks
+    // the question only where it can be answered and returns null where it cannot, so one binary
+    // serves both sides and a server run keeps behaving exactly as it does today.
+
+    /** MCP then SRG spelling of {@code IIcon.getIconName}, mirroring {@link #GET_ICON_NAMES}. */
+    private static final String[] GET_ICON_NAME_NAMES = { "getIconName", "func_94215_i" };
+
+    /**
+     * The raw name a live sprite gives itself, or null where nothing can be asked.
+     *
+     * <p>
+     * Null covers three cases a caller treats alike: no icon at all, a server JVM where
+     * {@code getIconName} was stripped, and an icon that answers with nothing. A {@link NamedIcon}
+     * short-circuits rather than being reflected on - it is our own injection and carries the
+     * answer directly, and the result is identical either way.
+     */
+    private static String spriteName(Object icon) {
+        if (icon == null) {
+            return null;
+        }
+        if (icon instanceof NamedIcon) {
+            return ((NamedIcon) icon).iconName;
+        }
+        for (String name : GET_ICON_NAME_NAMES) {
+            try {
+                Object raw = icon.getClass().getMethod(name).invoke(icon);
+                if (raw instanceof String && !((String) raw).isEmpty()) {
+                    return (String) raw;
+                }
+            } catch (Throwable ignored) {
+                // The other spelling, or a server JVM where the method is gone: try, then give up.
+            }
+        }
+        return null;
+    }
+
+    /**
+     * A live sprite as a {@link NamedIcon}, or null if it names nothing.
+     *
+     * <p>
+     * The domain is lower-cased for the reason {@link #namedTextureIcon} lower-cases it: a mod id
+     * need not be lower-case ("GoodGenerator") while its assets always are, and a mis-cased domain
+     * yields an asset path the previewer cannot fetch.
+     */
+    private static NamedIcon spriteIcon(Object icon, String fallbackDomain) {
+        String raw = spriteName(icon);
+        if (raw == null) {
+            return null;
+        }
+        String[] ref = splitIconName(raw, fallbackDomain);
+        String domain = ref[0].toLowerCase(java.util.Locale.ROOT);
+        return new NamedIcon(domain + ":" + ref[1], assetPath(domain, ref[1]));
+    }
+
+    /** The mod domain a block is registered under, for a sprite name that carries none of its own. */
+    private static String blockDomain(Block block) {
+        return registryDomain(String.valueOf(GameData.getBlockRegistry().getNameForObject(block)));
     }
 
     /**
@@ -1217,7 +1344,7 @@ final class TextureDumper {
         if (getIcon == null) {
             return null;
         }
-        NamedIcon icon = iconAt(block, getIcon, face, meta);
+        NamedIcon icon = iconAt(block, getIcon, face, meta, blockDomain(block));
         if (icon != null) {
             icons.putIfAbsent(icon.iconName, icon.assetPath);
         }
@@ -1364,7 +1491,9 @@ final class TextureDumper {
                     continue;
                 }
                 // side 2 (north) as the representative face
-                NamedIcon icon = getIcon == null ? null : iconAt(block, getIcon, 2, meta);
+                NamedIcon icon = getIcon == null
+                    ? null
+                    : iconAt(block, getIcon, 2, meta, registryDomain(registryName));
                 String why = getIcon == null
                     ? "no server-side getIcon override (" + getIconError + ")"
                     : "no icon for meta (" + lastIconError + ")";
@@ -2219,13 +2348,35 @@ final class TextureDumper {
         }
     }
 
-    private NamedIcon iconAt(Block block, MethodHandle getIcon, int side, int meta) {
+    /**
+     * The icon a block's own {@code getIcon(side, meta)} hands back, named.
+     *
+     * <p>
+     * Server-side the only nameable answer is a {@link NamedIcon} we injected, which is why this
+     * used to reject everything else as "a foreign icon". A client JVM hands back the real
+     * {@code TextureAtlasSprite} instead, and that sprite knows its own name - so the rejection
+     * becomes a name and the block is dumped rather than gapped. This is the single seam where
+     * running on a client turns into data.
+     *
+     * <p>
+     * {@code fallbackDomain} resolves a sprite name that carries no domain of its own (vanilla's do
+     * not); GT's own are already qualified and pass through {@link #splitIconName} untouched.
+     */
+    private NamedIcon iconAt(Block block, MethodHandle getIcon, int side, int meta, String fallbackDomain) {
         try {
             Object icon = getIcon.invoke(block, side, meta);
             if (icon instanceof NamedIcon) {
                 return (NamedIcon) icon;
             }
-            lastIconError = icon == null ? "getIcon returned null" : "getIcon returned a foreign icon";
+            NamedIcon named = spriteIcon(icon, fallbackDomain);
+            if (named != null) {
+                return named;
+            }
+            // The class name goes into the gap: "a foreign icon" alone does not say whether the
+            // route needs a name reader or a different route entirely.
+            lastIconError = icon == null
+                ? "getIcon returned null"
+                : "getIcon returned a foreign icon (" + icon.getClass().getName() + ")";
         } catch (Throwable t) {
             lastIconError = t.getClass().getSimpleName();
         }
@@ -2386,7 +2537,10 @@ final class TextureDumper {
         Map<String, Entry> blocks) throws IOException {
         JsonObject root = new JsonObject();
         root.addProperty("schema", SCHEMA_VERSION);
-        root.addProperty("method", "server-itexture-reflection");
+        // Never a method this run did not use. A client dump reads names off the stitched
+        // atlas; a server dump recovers them. Two manifests that differ in how much they
+        // resolved have to say which mechanism produced them, or the comparison means nothing.
+        root.addProperty("method", CLIENT_JVM ? "client-atlas-sprite-names" : "server-itexture-reflection");
 
         JsonObject provenance = new JsonObject();
         provenance.addProperty("pack_version", packVersion);
@@ -2414,6 +2568,8 @@ final class TextureDumper {
         checks.addProperty("pipe_isotropy_failures", pipeIsotropyFailures);
         checks.addProperty("pipe_roles_differ", pipeRolesDiffer);
         checks.addProperty("key_collisions", keyCollisions);
+        checks.addProperty("physical_side", CLIENT_JVM ? "CLIENT" : "SERVER");
+        checks.addProperty("icon_injection", injectIcons);
         JsonArray insulation = new JsonArray();
         for (short channel : cableInsulationRgba) {
             insulation.add(new JsonPrimitive(channel));
