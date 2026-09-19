@@ -25,6 +25,35 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Two files claiming the same **block_key** is still an error: that is one controller dumped twice.
 
 ### Added
+- **The texture dump can run in a client JVM, where nothing is `@SideOnly`-stripped
+  (`tools/gtnh-extractor/`).** Every method on `net.minecraft.util.IIcon` is `@SideOnly(CLIENT)`,
+  `getIconName()` included, so a dedicated server cannot ask a sprite what it is called. The five
+  resolution routes, the hand-transcribed casing table, the icon injection and the bytecode matcher
+  all exist to recover that one deleted answer. A client runs `registerBlockIcons`, stitches the
+  atlas, and hands back a real sprite that names itself.
+
+  `iconAt` and `iconRef` read that name first and fall back to every existing route, and
+  `build.gradle.kts` forwards the `-P` run properties to `runClient` instead of only to an exact
+  `runServer` match. The read is reflective on purpose: a direct `invokeinterface
+  IIcon.getIconName` would die with `NoSuchMethodError` on the server running the same binary. Icon
+  injection defaults **off** on a client, because writing `NamedIcon` stubs over live sprites would
+  both mask the measurement and race the render thread; `-PinjectIcons` overrides it either way.
+  The manifest now records which mechanism produced it, the physical side, and whether injection
+  ran, so two dumps can be compared without guessing.
+
+  **A bare sprite name belongs to the `minecraft` domain**, whatever registered it: `TextureMap`
+  keys a sprite by the exact string given to `registerIcon` and resolves it with `new
+  ResourceLocation(name)`. Resolving it against the block's own registry domain instead, which *is*
+  right for the un-annotated `textureNames` fields, put 34 unfetchable paths like
+  `assets/bartworks/textures/blocks/stone.png` in the first client manifest.
+
+  Measured across both packs, same binary and same pins, differing only in the host JVM: **2.9 goes
+  from 261 unresolved pairs and 208 of 296 gapped multiblocks to 12 and 13 of 296; 2.8.4 from 45 and
+  56 of 208 to 1 and 1 of 208.** Nothing resolves worse: 4642 drawable keys gained and 0 lost at
+  2.8.4, 7134 and 0 at 2.9, and `gregtech` icons naming a PNG the jar does not carry fall from 147
+  to 2. A server dump is unchanged, verified at both packs. It needs a GL window and a human to load
+  a world, so it does not replace the server path yet; `docs/dataset-extraction/client-dump-spike.md`
+  has the numbers and the recommendation that follows from them. (#169)
 - **The icon-name matcher works on GT 2.9 as well as 2.8.4 (`dataset/`, extractor).** 2.9 refactored
   `Textures.BlockIcons` from an enum into a class, and the icon holder went with it:
   `new CustomIcon(name)` became `Textures.BlockIcons.custom(name)`, a static factory returning the

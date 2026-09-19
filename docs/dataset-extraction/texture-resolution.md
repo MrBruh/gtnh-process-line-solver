@@ -4,6 +4,11 @@ How `TextureDumper` turns a `(block, meta)` into an iconset name, why it needs f
 and what is still unreachable. Written from a live dedicated-server dump at pack 2.8.4 /
 GT5-Unofficial 5.09.51.482; every claim is either verified against a run or flagged as inference.
 
+> **A spike has since measured the alternative.** Running the same dump in a client JVM, where none
+> of this is stripped, takes 2.9 from 208 of 296 gapped multiblocks to 13 and 2.8.4 from 56 of 208 to
+> 1, with nothing resolving worse. Most of the machinery below exists only to work around the fact
+> this section opens with. See [`client-dump-spike.md`](client-dump-spike.md).
+
 ## The one fact everything follows from
 
 The texture pass runs inside a headless **dedicated server**. FML's `SideTransformer` deletes every
