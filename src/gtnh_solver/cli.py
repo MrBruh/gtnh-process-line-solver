@@ -8,6 +8,7 @@ human-readable build guide out::
     gtnh-solve plan.json --preview view.html      # write a double-clickable 3D preview
     gtnh-solve plan.json --schematic line.schematic  # write a Schematica build ghost
     gtnh-solve --inspect-schematic line.schematic # ...and read one back: blocks + machines
+    gtnh-solve --dataset-coverage                 # what the local dataset cannot draw, ranked
     gtnh-solve plan.json --seed 3                 # pick the solver seed
     gtnh-solve plan.json --fast                   # skip optimization (instant, constructive)
     gtnh-solve plan.json --objective volume       # what "compact" means: footprint|volume|balanced
@@ -21,8 +22,10 @@ explicit infeasibility (the reason is printed to stderr), 2 when the export coul
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
+import zipfile
 from pathlib import Path
 from typing import Final
 
@@ -32,9 +35,11 @@ from gtnh_solver import __version__
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.buildguide import build_guide
 from gtnh_solver.dataset import PhysicalDataset, list_versions, load_physical_dataset
+from gtnh_solver.dataset.coverage import format_report, measure
 from gtnh_solver.dataset.roots import resolve_dataset_path
 from gtnh_solver.ir import InputIR, LayoutResult, LayoutStatus
 from gtnh_solver.previewer import write_preview
+from gtnh_solver.previewer.jar import cached_jar
 from gtnh_solver.previewer.textures import TextureManifest
 from gtnh_solver.schematic import SchematicError, read_schematic, write_schematic
 from gtnh_solver.solver import solve
@@ -97,6 +102,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "use the generated dataset in data/<VERSION>/ (multiblocks + textures); default resolves "
             "the newest local data/<version>/ if any is present, else the committed fixtures"
+        ),
+    )
+    parser.add_argument(
+        "--dataset-coverage",
+        action="store_true",
+        help=(
+            "report what the resolved dataset cannot draw (controllers that never dumped, blocks "
+            "with no sprite, sprites with no PNG), then exit; takes no plan"
         ),
     )
     parser.add_argument(
@@ -167,6 +180,45 @@ def _enable_previewer_logging() -> None:
         handler.setFormatter(logging.Formatter("%(message)s"))
         logger.addHandler(handler)
     logger.setLevel(logging.INFO)
+
+
+def _dataset_coverage(version: str | None) -> int:
+    """Print the dataset coverage report. Returns the process exit code.
+
+    Exit 0 even with gaps: the local dump is expected to have them (the shipped examples are what
+    must resolve, and they do), so this is a measurement rather than a gate. Exit 2 is reserved for
+    "could not read the dataset at all", which is the same contract the rest of the CLI uses.
+
+    The sprite-bytes half needs the GT jar. It is checked only when the jar is ALREADY cached: a
+    coverage report is not worth a 135 MB download the caller did not ask for, and saying the
+    question was skipped is honest in a way that silently passing it is not.
+    """
+    multiblocks = resolve_dataset_path("multiblocks", version=version)
+    manifest_path = resolve_dataset_path("textures/manifest.json", version=version)
+    if not multiblocks.is_dir():
+        print(f"error: no multiblock dataset at {multiblocks}", file=sys.stderr)
+        return 2
+    try:
+        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"error: could not read {manifest_path}: {exc}", file=sys.stderr)
+        return 2
+
+    jar_assets: frozenset[str] | None = None
+    jar = cached_jar(manifest_path)
+    if jar is None:
+        print("note: no cached GT jar; sprite bytes not checked", file=sys.stderr)
+    else:
+        try:
+            with zipfile.ZipFile(jar) as archive:
+                jar_assets = frozenset(archive.namelist())
+        except (OSError, zipfile.BadZipFile) as exc:
+            print(f"warning: could not read {jar}: {exc}", file=sys.stderr)
+
+    print(f"dataset: {multiblocks}", file=sys.stderr)
+    print(f"manifest: {manifest_path}", file=sys.stderr)
+    print(format_report(measure(multiblocks, raw, jar_assets=jar_assets)), end="")
+    return 0
 
 
 def _inspect_schematic(path: str, version: str | None) -> int:
@@ -250,6 +302,9 @@ def main(argv: list[str] | None = None) -> int:
         if not versions:
             print("no generated dataset versions; using the committed fixtures", file=sys.stderr)
         return 0
+
+    if args.dataset_coverage:
+        return _dataset_coverage(args.dataset_version)
 
     if args.inspect_schematic:
         return _inspect_schematic(args.inspect_schematic, args.dataset_version)

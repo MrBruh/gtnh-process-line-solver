@@ -103,6 +103,20 @@ def fetch_jar(
     return dest
 
 
+def cached_jar(manifest_path: str | Path, cache_dir: str | Path | None = None) -> Path | None:
+    """The already-cached jar matching ``manifest_path``'s version, or ``None``. Never downloads.
+
+    :func:`fetch_jar` exists for the preview path, where the 135 MB download is the point. A caller
+    that merely wants to ASK something of the jar (which sprites it carries, say) must not trigger
+    one as a side effect, and must be able to tell "the jar says no" from "there was no jar" - so
+    this answers ``None`` rather than fetching, and the caller reports which happened.
+    """
+    version = gt5u_version_from_manifest(manifest_path) or JAR_VERSION
+    directory = default_cache_dir() if cache_dir is None else Path(cache_dir)
+    candidate = directory / _jar_name(version)
+    return candidate if candidate.is_file() else None
+
+
 def extract_icons(jar_path: str | Path, icon_paths: Mapping[str, str]) -> dict[str, bytes]:
     """Read the requested ``{icon_name: asset_path}`` PNG entries out of the jar zip.
 

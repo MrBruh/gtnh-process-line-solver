@@ -7,6 +7,26 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`gtnh-solve --dataset-coverage` reports what the local dataset cannot draw (`dataset/`, `cli`).**
+  #98's scope asked for this and it existed only as prose: three questions, each failing
+  differently, each previously answered by a throwaway script. Which controllers never dumped
+  (`_meta.json`), which `(block, meta)` a multiblock places has no sprite **name** (the dump's
+  `gaps`), and which resolved name has no sprite **bytes** in the jar the previewer fetches.
+
+  **Gaps rank by multiblocks touched, not by raw count.** The manifest's `gaps` list runs to
+  thousands and is dominated by fluid and ore blocks nothing ever places; sorting that way is how
+  the wrong lane gets worked on (`texture-resolution.md`, trap 6).
+
+  **Placed and substitutable blocks are counted apart**, which the first run showed is not a
+  stylistic choice: `IC2:blockAlloyGlass` is in 4 controllers' block lists and is a `glass` channel
+  alternative in 33 more. Every earlier count of it, this project's own notes included, said 4,
+  because nothing was looking at substitutions. Reporting only that reads as a rounding error;
+  reporting only the sum of 37 reads as 37 broken builds. Both numbers now ship, separately.
+
+  The sprite-bytes half needs the GT jar and is checked **only if one is already cached**: a
+  coverage report is not worth a 135 MB download nobody asked for, and the report says it skipped
+  the question rather than implying it passed. `previewer.jar.cached_jar()` is the accessor for
+  that, and it never downloads. (#98)
 - **`.schematic` files can be read back, not just written (`schematic/`, `cli`).**
   `read_schematic()` is the inverse of the exporter's lowering, and
   `gtnh-solve --inspect-schematic FILE` prints what a file holds: dimensions, a block histogram by
