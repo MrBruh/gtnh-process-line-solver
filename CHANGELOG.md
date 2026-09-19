@@ -383,6 +383,22 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unchanged.
 
 ### Fixed
+- **The Heat Proof Machine Casing is no longer dumped as a UIV machine casing (`dataset/`).**
+  `BlockCasings1.getIcon` answers `gt.blockcasings` metas 10-15 from its own switch (bronze plated
+  bricks, heat proof, the three dimensional casings, the superconducting coil) and only falls
+  through to the tiered `MACHINECASINGS_*` arrays below that, but the extractor's casing table
+  claimed 0-14 and runs ahead of the `getIcon` route, so those six metas were skinned as the tier
+  casing sitting at their index. Meta 11 shipped as `MACHINE_UIV_SIDE` and meta 12 as
+  `MACHINE_UMV_SIDE`.
+
+  This is the one failure mode nothing downstream can catch: a checkerboard is recoverable, a
+  confident wrong sprite is not. It reached every clean clone rather than only local dumps, because
+  the Electric Blast Furnace is one of the two committed multiblock fixtures and Heat Proof is the
+  casing it is built from; and since #128 made the controller's casing the background for every
+  formed hatch, one wrong casing propagated across every hatch of any multiblock using it. The
+  bound is now the switch's rather than the block's 16 metas, and a golden guard over the committed
+  manifest pins meta 11 to its own sprite. Metas 0-9 are unchanged. (#130)
+
 - **Auto-output arrows are drawn for single-block sources only (`previewer/`).** The decal is
   positioned off the source machine's bounding box, which is where the ejection happens only when
   the machine is one cell, because then it is its own hatch. A multiblock controller has no

@@ -1646,9 +1646,14 @@ final class TextureDumper {
     private static final String TIER_SIDE = ARRAY_MARKER + "MACHINECASINGS_SIDE";
 
     static {
-        // gt.blockcasings - the tiered machine casings. Metas 10-15 always worked through getIcon;
-        // 0-9 never did, which is why an ExxonMobil Chemical Plant rendered mostly grey.
-        for (int meta = 0; meta < 15; meta++) {
+        // gt.blockcasings - the tiered machine casings, and ONLY metas 0-9: those are the ones
+        // BlockCasings1.getIcon reaches through the MACHINECASINGS_* arrays, and they never
+        // resolved on their own, which is why an ExxonMobil Chemical Plant rendered mostly grey.
+        // Metas 10-15 have their own switch arms (bronze bricks, heat proof, the three dimensional
+        // casings, the superconducting coil), so the bound is that switch's and not the block's 16
+        // metas. Tabling them shadowed the right sprite with a tier casing: meta 11, Heat Proof,
+        // shipped as UIV on the Electric Blast Furnace (#130).
+        for (int meta = 0; meta < 10; meta++) {
             sided("gregtech:gt.blockcasings", meta, TIER_BOTTOM, TIER_TOP, TIER_SIDE);
         }
 
