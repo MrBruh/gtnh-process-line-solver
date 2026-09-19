@@ -6,6 +6,8 @@ import java.io.Writer;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
+import java.lang.reflect.Array;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -18,6 +20,7 @@ import java.util.TreeSet;
 
 import net.minecraft.block.Block;
 import net.minecraft.init.Blocks;
+import net.minecraft.launchwrapper.Launch;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.tileentity.TileEntity;
@@ -1538,6 +1541,7 @@ final class TextureDumper {
         }
         LOG.info("gtnh-extractor: named {} BlockIcons constants", ok);
         injectQueuedIconContainers();
+        injectMatchedIconNames();
     }
 
     /**
@@ -1584,6 +1588,212 @@ final class TextureDumper {
             }
         }
         LOG.info("gtnh-extractor: named {} queued icon containers ({} unnameable)", ok, skipped);
+    }
+
+    /**
+     * Classes whose icon names are recovered from bytecode, and nowhere else (GitHub #98).
+     *
+     * <p>
+     * <b>An explicit allowlist of classes, never "any class with a stripped member".</b> The
+     * generality is precisely the unsafe part: a rule that widened to anything matching would
+     * eventually name a block by a literal that is not its sprite, and a plausible wrong sprite is
+     * worse than a gap because nothing downstream can detect it (trap 3, and #130 for what that
+     * costs in practice). Every name here was confirmed to yield names by scanning the pinned jar,
+     * and the families have tests in {@code IconNameMatcherTest} pinning what they read.
+     *
+     * <p>
+     * Scope is the tectech and gtnhintergalactic families that {@code --dataset-coverage} reports
+     * as gapped, plus two singles it also reports: bartworks' Windmill and kekztech's TFFT storage
+     * field. The jar holds two further classes this matcher can read - gregtech's World Accelerator
+     * and gtnhlanth's beamline pipe - deliberately left out, because neither closes a multiblock
+     * gap (one is a single-block machine, the other a route block, which is #4).
+     */
+    private static final String[] ASM_ICON_CLASSES = {
+        // tectech casings: the base layer of every tectech controller hull as well as the casings
+        // themselves, since a hull's own getTexture copies casingTexturePages[page][n].
+        "tectech.thing.casing.BlockGTCasingsTT",
+        "tectech.thing.casing.BlockGTCasingsBA0",
+        "tectech.thing.casing.BlockGodforgeCasings",
+        "tectech.thing.casing.SpacetimeCompressionFieldCasing",
+        "tectech.thing.casing.StabilisationFieldCasing",
+        "tectech.thing.casing.TimeAccelerationFieldCasing",
+        // tectech controllers: the overlay half. The base class carries the default pair and a
+        // subclass may declare its own, so both are listed - four of these are named in the gap
+        // report and would stay gapped if only the base class were injected.
+        "tectech.thing.metaTileEntity.multi.base.TTMultiblockBase",
+        "tectech.thing.metaTileEntity.multi.MTEEyeOfHarmony",
+        "tectech.thing.metaTileEntity.multi.MTEQuantumComputer",
+        "tectech.thing.metaTileEntity.multi.MTETeslaTower",
+        "tectech.thing.metaTileEntity.multi.godforge.MTEForgeOfGods",
+        "tectech.thing.metaTileEntity.multi.godforge.MTEBaseModule",
+        // tectech hatches and pipes, which stand in the same structures.
+        "tectech.thing.metaTileEntity.hatch.MTEHatchCapacitor",
+        "tectech.thing.metaTileEntity.hatch.MTEHatchCreativeMaintenance",
+        "tectech.thing.metaTileEntity.hatch.MTEHatchDataConnector",
+        "tectech.thing.metaTileEntity.hatch.MTEHatchObjectHolder",
+        "tectech.thing.metaTileEntity.hatch.MTEHatchRack",
+        "tectech.thing.metaTileEntity.hatch.MTEHatchUncertainty",
+        "tectech.thing.metaTileEntity.pipe.MTEPipeData",
+        "tectech.thing.metaTileEntity.pipe.MTEPipeLaser",
+        "tectech.thing.metaTileEntity.pipe.MTEPipeLaserMirror",
+        // gtnhintergalactic: the Space Elevator casings and the modules that ride them.
+        "gtnhintergalactic.block.BlockCasingSpaceElevator",
+        "gtnhintergalactic.block.BlockCasingSpaceElevatorMotor",
+        "gtnhintergalactic.block.BlockSpaceElevatorCable",
+        "gtnhintergalactic.tile.multi.elevatormodules.TileEntityModuleAssembler",
+        "gtnhintergalactic.tile.multi.elevatormodules.TileEntityModuleMiner",
+        "gtnhintergalactic.tile.multi.elevatormodules.TileEntityModulePump",
+        // Two singles the coverage report names, reachable with no new shape.
+        "bartworks.common.tileentities.multis.MTEWindmill",
+        "kekztech.common.blocks.BlockTFFTStorageField", };
+
+    /**
+     * Fill the icon holders whose names exist only in bytes, so every existing route can resolve
+     * them (GitHub #98).
+     *
+     * <p>
+     * This is the sibling of {@link #injectQueuedIconContainers}, for the case that one cannot
+     * reach. That pass names containers GT <b>constructed</b> and queued; these were never
+     * constructed at all, because the {@code new CustomIcon("...")} that would have made them sits
+     * inside a {@code @SideOnly} method the server deleted. The field is left holding null, GT's
+     * own {@code getIcon} hands that null straight back, and the block resolves no layer on any
+     * side - the "resolved no layer on any side" gap reason.
+     *
+     * <p>
+     * <b>Recovering the name is the whole job.</b> Once the holder exists carrying the right name,
+     * nothing else changes: {@code BlockGTCasingsTT.getIcon} is a plain switch over its own static
+     * fields and is not itself stripped, so the ordinary {@code getIcon} route answers, per-side
+     * variants and all. No new resolution path, and no table to maintain.
+     *
+     * <p>
+     * <b>A non-null holder is never overwritten.</b> Anything already resolved was resolved by a
+     * route that actually ran, and replacing it with a bytecode match is how a working sprite
+     * silently becomes a wrong one.
+     */
+    private void injectMatchedIconNames() {
+        int classes = 0;
+        int injected = 0;
+        int unapplied = 0;
+        for (String className : ASM_ICON_CLASSES) {
+            byte[] bytes = preTransformBytes(className);
+            if (bytes == null) {
+                LOG.debug("gtnh-extractor: no class bytes for {}", className);
+                continue;
+            }
+            Map<String, String> names = IconNameMatcher.iconNames(bytes);
+            if (names.isEmpty()) {
+                LOG.debug("gtnh-extractor: no icon names matched in {}", className);
+                continue;
+            }
+            Class<?> owner;
+            try {
+                owner = Class.forName(className, false, TextureDumper.class.getClassLoader());
+            } catch (Throwable t) {
+                LOG.debug("gtnh-extractor: cannot load {}: {}", className, t.toString());
+                continue;
+            }
+            classes++;
+            for (Map.Entry<String, String> entry : names.entrySet()) {
+                if (injectIconName(owner, entry.getKey(), entry.getValue())) {
+                    injected++;
+                } else {
+                    unapplied++;
+                }
+            }
+        }
+        LOG.info(
+            "gtnh-extractor: recovered {} icon name(s) from {} class(es) by bytecode match "
+                + "({} already set or not applicable)",
+            injected,
+            classes,
+            unapplied);
+    }
+
+    /** The class's bytes as the jar holds them, BEFORE FML stripped its client-only members. */
+    private static byte[] preTransformBytes(String className) {
+        try {
+            return Launch.classLoader.getClassBytes(className);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * Put icon {@code rawName} into {@code owner}'s static {@code key}, which is either a field name
+     * or {@code field[index]} for the array shape. Returns whether anything was written.
+     */
+    private boolean injectIconName(Class<?> owner, String key, String rawName) {
+        String fieldName = key;
+        int index = -1;
+        int bracket = key.indexOf(91); // '['
+        if (bracket > 0 && key.endsWith("]")) {
+            fieldName = key.substring(0, bracket);
+            try {
+                index = Integer.parseInt(key.substring(bracket + 1, key.length() - 1));
+            } catch (NumberFormatException e) {
+                return false;
+            }
+        }
+        try {
+            Field field = owner.getDeclaredField(fieldName);
+            field.setAccessible(true);
+            Class<?> type = field.getType();
+            if (index >= 0) {
+                Object array = field.get(null);
+                if (array == null || !type.isArray() || index >= Array.getLength(array)) {
+                    return false;
+                }
+                if (Array.get(array, index) != null) {
+                    return false; // already resolved by a route that ran; leave it alone
+                }
+                Object value = iconHolder(type.getComponentType(), rawName);
+                if (value == null) {
+                    return false;
+                }
+                Array.set(array, index, value);
+                return true;
+            }
+            if (field.get(null) != null) {
+                return false; // never overwrite a holder that already resolved
+            }
+            Object value = iconHolder(type, rawName);
+            if (value == null) {
+                return false;
+            }
+            field.set(null, value);
+            return true;
+        } catch (Throwable t) {
+            LOG.debug("gtnh-extractor: cannot inject {}.{}: {}", owner.getName(), key, t.toString());
+            return false;
+        }
+    }
+
+    /**
+     * A holder of {@code type} carrying {@code rawName}, or null when we cannot make one.
+     *
+     * <p>
+     * An {@code IIcon} field takes a {@link NamedIcon} directly. A container field takes a real
+     * instance of its own class, constructed from the raw literal, because the container's own
+     * constructor is what decides the domain: GT's {@code CustomIcon} runs a bare name through
+     * {@code GregTech.getResourcePath} and leaves an already qualified one alone. Doing that
+     * arithmetic here instead is what once pointed 46 icons at paths that do not exist.
+     */
+    private Object iconHolder(Class<?> type, String rawName) {
+        if (IIcon.class.isAssignableFrom(type)) {
+            String[] ref = splitIconName(rawName, ICON_DOMAIN);
+            return new NamedIcon(ref[0] + ":" + ref[1], assetPath(ref[0], ref[1]));
+        }
+        if (IIconContainer.class.isAssignableFrom(type)) {
+            try {
+                Constructor<?> ctor = type.getDeclaredConstructor(String.class);
+                ctor.setAccessible(true);
+                return ctor.newInstance(rawName);
+            } catch (Throwable t) {
+                LOG.debug("gtnh-extractor: cannot construct {}: {}", type.getName(), t.toString());
+                return null;
+            }
+        }
+        return null;
     }
 
     /**
