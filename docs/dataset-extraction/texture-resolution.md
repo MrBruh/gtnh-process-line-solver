@@ -122,6 +122,12 @@ the shipped example lines, which resolve completely.
 | `gt.blockcasingsSE` | 11 | names exist only as literals in `registerBlockIcons` |
 | `IC2:blockAlloyGlass` | 4 | external mod, not in the GT jar or the reference checkout |
 
+The first three groups are work that has not been done; the `IC2` row is not. Closing it means
+fetching a second mod's assets, which is a declared non-goal of
+[#98](https://github.com/MrBruh/gtnh-process-line-solver/issues/98) along with the vanilla and AE2
+sprites below (the four multiblocks are the Lapotronic Supercapacitor, the Neutron Activator and the
+two Solid-Oxide Fuel Cells).
+
 **Mode D in detail.** The affected controllers take their overlay from a `CustomIcon` static declared
 under a comment reading `// region Client side variables` and assigned *only* inside
 `@SideOnly registerIcons`. It stays null, `GTTextureBuilder.addIcon` has no null check, and
@@ -131,6 +137,43 @@ guards rendering with `isValidTexture()`.
 The tempting fix - emit the layers that do resolve and gap only the null one - **does not work**. The
 base casing layer is a copied-block texture pointing at `BlockGTCasingsTT`, whose own icons are also
 client-only, so all six faces resolve to zero layers. There is nothing to partially emit.
+
+### A resolved name with no bytes behind it
+
+Everything above is about a pair the dump could not **name**. There is a second, smaller class the
+`gaps` list cannot see, because the name resolved perfectly: the sprite it names is not in the jar
+`previewer/jar.py` fetches. That jar is GT5-Unofficial's, and because GT5U is a monorepo its assets
+cover bartworks, tectech, kekztech, gtPlusPlus (`miscutils`), goodgenerator, ggfab and gtnhlanth, so
+almost everything a multiblock places is in there. Measured over the 208 locally dumped multiblocks
+at 2.8.4, **16 asset paths are absent, touching 14 multiblocks**, and they are three unrelated
+problems wearing one symptom.
+
+| Group | Paths | Multiblocks | Standing |
+|---|---|---|---|
+| vanilla Minecraft (`water_still`, `lava_still`, `iron_block`, `brick`, `planks`, `hardened_clay`, `farmland`, `redstone_lamp_off`, `glass`) | 10 | 11 | non-goal, see below |
+| `appliedenergistics2:BlockQuartzLamp` (Large Molecular Assembler) | 1 | 1 | non-goal, see below |
+| `gregtech:`-prefixed paths that are not gregtech's | 5 | 2 | **a fixable domain bug** |
+
+The first two are **declared non-goals of [#98](https://github.com/MrBruh/gtnh-process-line-solver/issues/98)**,
+for the same reason as `IC2:blockAlloyGlass` in the table above: closing them means fetching a second
+asset source. For AE2 and IC2 that is another mod jar; for vanilla it is the Minecraft client jar,
+which this project neither downloads nor could redistribute the way it handles GT's LGPL sprites
+(read from the cached jar at preview time, embedded in the emitted HTML, never committed). A literal
+reading of "no block renders as a placeholder" cannot be met without that decision, so #98's
+acceptance is scoped to blocks reachable from the GT5-Unofficial jar.
+
+The third is **not** a non-goal and should not be written off with them. It is the **domain** mode
+from the table at the top of this file, caught here rather than at name resolution: the four
+`OVERLAY_FRONT_ADV_ASSLINE*` layers of ggfab's Advanced Assembly Line really live at
+`assets/ggfab/textures/blocks/iconsets/`, and kekztech's T.F.F.T names `INSTANCE`, which is not an
+icon name at all but the field name of that mod's icon-container singleton. Both cost an extractor
+fix, not a second asset source.
+
+Worth knowing about this whole class: **a run's own log is what surfaces it, not the `gaps` list**. A
+missing PNG is dropped silently by `extract_icons` by design (a manifest one icon ahead of the jar
+degrades rather than failing the preview), so the block falls back to a placeholder and the only
+signal is the preview summary line naming that type. Ranking it needs the jar diff in
+*Running and measuring* below, not the gap count.
 
 ### Dead end: a stub `IIconRegister` (verified, do not retry)
 
@@ -314,6 +357,11 @@ python -m gtnh_solver.cli examples/gtnh-nitrobenzene.json \
 For the wider local dump, diff the manifest's `blocks` against the `(block, meta)` pairs that
 `data/<version>/multiblocks/*.json` reference, and rank the misses by how many multiblocks touch each
 - not by raw gap count (trap 6).
+
+That diff answers "which pair has no name". The second question, "which name has no bytes", needs the
+jar as well: resolve every layer icon of those same pairs to its `icons[]` asset path and check it
+against `zipfile.ZipFile(<cached jar>).namelist()`. A path that is absent is one of the three groups
+in *A resolved name with no bytes behind it* above, and nothing in the manifest flags it.
 
 An unresolved face renders as Minecraft's magenta/black missing-texture checkerboard rather than
 casing grey, so a gap is visible in the preview instead of passing for a plain casing.
