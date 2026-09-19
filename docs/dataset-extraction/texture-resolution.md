@@ -112,21 +112,35 @@ standing argument for replacing the table with the ASM route below.
 
 ## What is still unreachable, and why
 
-91 unresolved pairs at the time of writing, 40 of 208 multiblocks carrying at least one. None affect
-the shipped example lines, which resolve completely.
+118 unresolved pairs at the time of writing, 70 of 208 multiblocks carrying at least one. None
+affect the shipped example lines, which resolve completely. Run `gtnh-solve --dataset-coverage` for
+the current figures rather than trusting these; they are a snapshot.
+
+An earlier revision of this file said 91 pairs across 40 multiblocks. That count was low because it
+looked only at each controller's block list and ignored `substitutions`, which are real blocks a
+builder puts down: the glass or coil tier a channel swaps in. The difference is not evenly spread,
+and it is almost entirely one block (see the `IC2` row).
 
 | Group | Multiblocks | Why |
 |---|---|---|
 | `gt.blockmachines` controller hulls | 29 | mode D |
 | tectech casings (`blockcasingsTT`, `godforgecasing`, `blockcasingsBA0`) | 15 | mode D, same root cause |
 | `gt.blockcasingsSE` | 11 | names exist only as literals in `registerBlockIcons` |
-| `IC2:blockAlloyGlass` | 4 | external mod, not in the GT jar or the reference checkout |
+| `IC2:blockAlloyGlass` | 37 | external mod, not in the GT jar or the reference checkout |
 
 The first three groups are work that has not been done; the `IC2` row is not. Closing it means
 fetching a second mod's assets, which is a declared non-goal of
 [#98](https://github.com/MrBruh/gtnh-process-line-solver/issues/98) along with the vanilla and AE2
-sprites below (the four multiblocks are the Lapotronic Supercapacitor, the Neutron Activator and the
-two Solid-Oxide Fuel Cells).
+sprites below.
+
+**That 37 is worth reading carefully, because the obvious reading is wrong in both directions.**
+`IC2:blockAlloyGlass` sits in the block list of **4** controllers (the Lapotronic Supercapacitor,
+the Neutron Activator and the two Solid-Oxide Fuel Cells) and is a `glass` channel alternative in
+**33** more. So it is not the 4-build rounding error this row used to imply, and it is not 37 broken
+builds either: the other 33 only draw it if someone picks that glass tier, and every one of them has
+tiers that do resolve. The coverage report prints the split (`4 placed + 33 substitutable`) for
+exactly this reason. The other three rows have no substitutable half at all, so their counts are
+unchanged.
 
 **Mode D in detail.** The affected controllers take their overlay from a `CustomIcon` static declared
 under a comment reading `// region Client side variables` and assigned *only* inside
@@ -354,14 +368,22 @@ python -m gtnh_solver.cli examples/gtnh-nitrobenzene.json \
   --preview out/nitrobenzene.html 2>&1 | grep "no sprite"
 ```
 
-For the wider local dump, diff the manifest's `blocks` against the `(block, meta)` pairs that
-`data/<version>/multiblocks/*.json` reference, and rank the misses by how many multiblocks touch each
-- not by raw gap count (trap 6).
+For the wider local dump, do not hand-roll the diff; it has been written wrong more than once:
 
-That diff answers "which pair has no name". The second question, "which name has no bytes", needs the
-jar as well: resolve every layer icon of those same pairs to its `icons[]` asset path and check it
-against `zipfile.ZipFile(<cached jar>).namelist()`. A path that is absent is one of the three groups
-in *A resolved name with no bytes behind it* above, and nothing in the manifest flags it.
+```sh
+gtnh-solve --dataset-coverage                      # newest local dataset
+gtnh-solve --dataset-coverage --dataset-version 2.8.4
+```
+
+It answers all three questions at once - which controllers never dumped, which `(block, meta)` has
+no sprite name, and which resolved name has no sprite bytes - ranks the misses by how many
+multiblocks touch each rather than by raw gap count (trap 6), and counts blocks a controller
+*places* apart from ones a channel can *substitute* in. That last split is why the tool exists
+rather than a one-liner: every hand count before it silently ignored substitutions and undercounted
+by 27 pairs.
+
+The sprite-bytes half needs the jar, so it runs only when one is already cached and says it skipped
+the question otherwise. It never downloads (`previewer.jar.cached_jar`).
 
 An unresolved face renders as Minecraft's magenta/black missing-texture checkerboard rather than
 casing grey, so a gap is visible in the preview instead of passing for a plain casing.
