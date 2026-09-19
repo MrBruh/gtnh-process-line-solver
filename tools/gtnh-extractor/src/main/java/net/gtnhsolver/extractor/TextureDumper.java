@@ -9,6 +9,8 @@ import java.lang.invoke.MethodType;
 import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -123,6 +125,25 @@ final class TextureDumper {
     private final Map<String, String> icons = new TreeMap<>();
     /** unresolved (block, meta, side, reason) units, surfaced in the manifest diff. */
     private final List<Gap> gaps = new ArrayList<>();
+
+    /**
+     * Container instance -> its {@code Textures.BlockIcons} field name, for GT >= 5.09.54.20.
+     *
+     * <p>
+     * Up to 2.8.4 {@code BlockIcons} was an <b>enum</b>, so a container could name itself: the
+     * constant's {@code name()} IS the sprite, {@code iconsets/&lt;NAME&gt;}. 2.9 turned it into a
+     * class of static {@code IIconContainer} fields, and the containers behind them do not all
+     * carry an {@code mIconName} - {@code GTTextureSetBlockIconContainer} has no such field at all
+     * - so {@code iconRef} had nothing to read and 2939 of them came back unnameable.
+     *
+     * <p>
+     * The field name still is the sprite (verified against the jar: {@code iconsets/MACHINE_UEV_SIDE
+     * .png} and friends exist under exactly those names), so this records it once, up front, and
+     * {@link #iconRef} consults it first. An identity map rather than a write into GT's own fields:
+     * several of those are final, and mutating a mod's state to carry information we already have is
+     * a worse trade than remembering it ourselves.
+     */
+    private final java.util.IdentityHashMap<Object, String> blockIconFieldNames = new java.util.IdentityHashMap<>();
 
     private String lastIconError;
 
@@ -893,9 +914,14 @@ final class TextureDumper {
      * other container carries an {@code mIconName}, and the two families spell it differently - see
      * {@link #iconName} for what assuming either one cost the shipped manifest.
      */
-    private static String[] iconRef(Object container) {
+    private String[] iconRef(Object container) {
         if (container instanceof Enum) {
             return new String[] { ICON_DOMAIN, "iconsets/" + ((Enum<?>) container).name() };
+        }
+        // The 2.9 shape of the same fact: the BlockIcons FIELD this container is held in names it.
+        String fieldName = blockIconFieldNames.get(container);
+        if (fieldName != null) {
+            return new String[] { ICON_DOMAIN, "iconsets/" + fieldName };
         }
         Object mIconName = readField(container, "mIconName");
         if (!(mIconName instanceof String) || ((String) mIconName).isEmpty()) {
@@ -1553,8 +1579,13 @@ final class TextureDumper {
         if (constants == null || mIconField == null) {
             LOG.info(
                 "gtnh-extractor: Textures.BlockIcons is not an enum-with-mIcon (GT >= 5.09.54.20 "
-                    + "shape); its icons are named by the queued-container pass instead");
+                    + "shape); naming its static fields instead of its enum constants");
+            recordBlockIconFieldNames();
             injectQueuedIconContainers();
+            // Both exits run BOTH passes. The bytecode matcher is not enum-shaped and has nothing
+            // to do with which form BlockIcons takes, so skipping it here would silently drop every
+            // recovered name on exactly the pack version this branch exists to support.
+            injectMatchedIconNames();
             return;
         }
         int ok = 0;
@@ -1571,6 +1602,40 @@ final class TextureDumper {
         LOG.info("gtnh-extractor: named {} BlockIcons constants", ok);
         injectQueuedIconContainers();
         injectMatchedIconNames();
+    }
+
+    /**
+     * Record what each {@code Textures.BlockIcons} static field is called, for the GT >= 5.09.54.20
+     * class shape. The class-shaped counterpart of naming the enum constants.
+     *
+     * <p>
+     * See {@link #blockIconFieldNames} for why the field name is the authority here. This only
+     * REMEMBERS names; nothing is written into GT, and a container that already names itself keeps
+     * doing so, since {@link #iconRef} prefers this map only for containers it has an entry for.
+     */
+    private void recordBlockIconFieldNames() {
+        int ok = 0;
+        int empty = 0;
+        for (Field field : Textures.BlockIcons.class.getDeclaredFields()) {
+            if (!Modifier.isStatic(field.getModifiers())
+                || !IIconContainer.class.isAssignableFrom(field.getType())) {
+                continue;
+            }
+            try {
+                field.setAccessible(true);
+                Object container = field.get(null);
+                if (container == null) {
+                    empty++;
+                    continue;
+                }
+                blockIconFieldNames.put(container, field.getName());
+                ok++;
+            } catch (Throwable t) {
+                LOG.debug("gtnh-extractor: cannot read BlockIcons.{}: {}", field.getName(), t.toString());
+                empty++;
+            }
+        }
+        LOG.info("gtnh-extractor: named {} BlockIcons fields ({} null or unreadable)", ok, empty);
     }
 
     /**
@@ -1709,9 +1774,20 @@ final class TextureDumper {
                 LOG.debug("gtnh-extractor: no class bytes for {}", className);
                 continue;
             }
-            Map<String, String> names = IconNameMatcher.iconNames(bytes);
+            Map<String, String> names;
+            try {
+                names = IconNameMatcher.iconNames(bytes);
+            } catch (IconNameMatcher.UnreadableClassException e) {
+                // Loud on purpose: an allowlisted class we cannot parse is a whole family of
+                // sprites silently absent, and the run would otherwise report success.
+                LOG.error("gtnh-extractor: cannot parse {} (bytecode too new for the ASM on the "
+                    + "classpath?); its icons will be missing", className);
+                continue;
+            }
             if (names.isEmpty()) {
-                LOG.debug("gtnh-extractor: no icon names matched in {}", className);
+                // Also loud: every class in the allowlist earned its place by yielding names, so
+                // yielding none means a shape moved under us - the failure mode a pack bump has.
+                LOG.warn("gtnh-extractor: {} is allowlisted but yielded no icon names", className);
                 continue;
             }
             Class<?> owner;
@@ -1813,12 +1889,26 @@ final class TextureDumper {
             return new NamedIcon(ref[0] + ":" + ref[1], assetPath(ref[0], ref[1]));
         }
         if (IIconContainer.class.isAssignableFrom(type)) {
+            if (!type.isInterface()) {
+                try {
+                    Constructor<?> ctor = type.getDeclaredConstructor(String.class);
+                    ctor.setAccessible(true);
+                    return ctor.newInstance(rawName);
+                } catch (Throwable t) {
+                    LOG.debug("gtnh-extractor: cannot construct {}: {}", type.getName(), t.toString());
+                    return null;
+                }
+            }
+            // 2.9 declares these fields as the IIconContainer INTERFACE and fills them from a
+            // static factory, so there is no constructor to call. Asking GT for the container the
+            // same way its own code does keeps the domain arithmetic where it belongs: the factory
+            // decides, exactly as CustomIcon's constructor does on 2.8.4.
             try {
-                Constructor<?> ctor = type.getDeclaredConstructor(String.class);
-                ctor.setAccessible(true);
-                return ctor.newInstance(rawName);
+                Method factory = Textures.BlockIcons.class.getDeclaredMethod("custom", String.class);
+                factory.setAccessible(true);
+                return factory.invoke(null, rawName);
             } catch (Throwable t) {
-                LOG.debug("gtnh-extractor: cannot construct {}: {}", type.getName(), t.toString());
+                LOG.debug("gtnh-extractor: no BlockIcons.custom factory for {}: {}", rawName, t.toString());
                 return null;
             }
         }

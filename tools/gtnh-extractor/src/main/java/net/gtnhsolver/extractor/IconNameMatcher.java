@@ -48,6 +48,13 @@ import org.objectweb.asm.Opcodes;
  *    AASTORE                                   -&gt; keyed "IconSECasing1[0]"
  * </pre>
  *
+ * <pre>
+ * B': the same as B, as GT 2.9 spells it after BlockIcons stopped being an enum
+ *    LDC "iconsets/EM_CONTROLLER"
+ *    INVOKESTATIC Textures$BlockIcons.custom (String)IIconContainer
+ *    PUTSTATIC ScreenOFF : IIconContainer
+ * </pre>
+ *
  * Shape A is {@code BlockGTCasingsTT.registerBlockIcons} and friends; shape B is
  * {@code TTMultiblockBase.registerIcons}, whose two statics are the overlay half of every tectech
  * controller hull; shape C is {@code BlockCasingSpaceElevator}, which writes 4 of its 5 icons that
@@ -80,6 +87,17 @@ import org.objectweb.asm.Opcodes;
  */
 final class IconNameMatcher {
 
+    /** The bytes could not be parsed at all, which is a different fact from finding no names. */
+    static final class UnreadableClassException extends RuntimeException {
+
+        private static final long serialVersionUID = 1L;
+
+        UnreadableClassException(Throwable cause) {
+            super(cause);
+        }
+    }
+
+
     /**
      * The interface method shape A calls, under both spellings it appears in.
      *
@@ -96,6 +114,22 @@ final class IconNameMatcher {
 
     /** Simple name of the icon-holder classes shape B constructs; matched on the internal name. */
     private static final String CUSTOM_ICON_SUFFIX = "CustomIcon";
+
+    /**
+     * Shape B': the static factory 2.9 replaced the {@code CustomIcon} constructor with.
+     *
+     * <p>
+     * GT 2.9 refactored {@code Textures.BlockIcons} from an enum into a class, and the holder that
+     * went with it: {@code new CustomIcon(name)} became {@code Textures.BlockIcons.custom(name)},
+     * returning the {@code IIconContainer} interface rather than a concrete class. Shape B keys on
+     * an {@code INVOKESPECIAL} constructor, so on 2.9 it matches nothing - and "matches nothing" is
+     * silent. Left alone, every tectech controller overlay would quietly regress on the newer pack
+     * while the run still reported success.
+     */
+    private static final String CUSTOM_FACTORY = "custom";
+
+    /** The factory's return type, pinned so an unrelated {@code custom(String)} cannot match. */
+    private static final String ICON_CONTAINER_DESC = "(Ljava/lang/String;)Lgregtech/api/interfaces/IIconContainer;";
 
     /**
      * The methods worth walking; everything else in the class is skipped outright.
@@ -122,8 +156,12 @@ final class IconNameMatcher {
         try {
             new ClassReader(classBytes).accept(new IconClassVisitor(found), ClassReader.SKIP_FRAMES);
         } catch (RuntimeException e) {
-            // A class we cannot read is a class we learned nothing from. Same as no match.
-            return Collections.emptyMap();
+            // "Could not read the class" is NOT the same fact as "read it and it had no names", and
+            // collapsing the two is how a whole mod goes missing quietly. ASM 5.0.3 (what
+            // launchwrapper puts on the classpath) refuses anything past Java 8 bytecode with a bare
+            // IllegalArgumentException, which is exactly what a multi-release jar's versioned
+            // overlay looks like. The caller logs this; it must never read as an empty class.
+            throw new UnreadableClassException(e);
         }
         return found;
     }
@@ -207,7 +245,10 @@ final class IconNameMatcher {
                 && REGISTER_ICON_DESC.equals(desc);
             boolean shapeB = opcode == Opcodes.INVOKESPECIAL && "<init>".equals(name)
                 && "(Ljava/lang/String;)V".equals(desc) && owner.endsWith(CUSTOM_ICON_SUFFIX);
-            if (shapeA || shapeB) {
+            // B' is the same fact as B, spelled the way 2.9 spells it. See CUSTOM_FACTORY.
+            boolean shapeBPrime = opcode == Opcodes.INVOKESTATIC && CUSTOM_FACTORY.equals(name)
+                && ICON_CONTAINER_DESC.equals(desc);
+            if (shapeA || shapeB || shapeBPrime) {
                 consumedByAcceptedCall = true;
             } else {
                 reset(); // the literal went somewhere we do not model; forget it

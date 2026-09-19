@@ -25,6 +25,35 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Two files claiming the same **block_key** is still an error: that is one controller dumped twice.
 
 ### Added
+- **The icon-name matcher works on GT 2.9 as well as 2.8.4 (`dataset/`, extractor).** 2.9 refactored
+  `Textures.BlockIcons` from an enum into a class, and the icon holder went with it:
+  `new CustomIcon(name)` became `Textures.BlockIcons.custom(name)`, a static factory returning the
+  `IIconContainer` **interface**. The matcher keyed on an `INVOKESPECIAL` constructor, so on 2.9 it
+  would have matched nothing, and matching nothing is silent: every tectech controller overlay would
+  have regressed on the newer pack while the run still reported success. Shape B' matches the
+  factory, and the injector asks GT for the container through that same factory, since an
+  interface-typed field has no constructor to call.
+
+  **The `BlockIcons` statics are named again.** Up to 2.8.4 the enum constant named itself, so
+  `iconsets/<NAME>` came free. On 2.9 the containers behind the class's static fields do not all
+  carry an `mIconName` (`GTTextureSetBlockIconContainer` has no such field), so 2939 came back
+  unnameable. The field name still is the sprite, verified against the jar, so the dump records
+  field-name to container once up front and `iconRef` consults that first: 1942 names recovered.
+
+  **Both exits of `populateIconNames` now run both passes.** The 2.9 branch returned early, which
+  skipped the bytecode matcher entirely on exactly the pack version it was added for.
+
+  **A class the matcher cannot parse is now loud.** It used to collapse into an empty result,
+  making "could not read this class" indistinguishable from "read it, found no names" - the way a
+  whole mod goes missing from a run that reports success. Unreadable throws and is logged as an
+  error; an allowlisted class that yields nothing is a warning, because that is what a pack bump
+  moving a shape looks like.
+
+  The matcher's real-bytes tests now read the **base** entry of the jar rather than going through
+  the classloader. GT5U 2.9 ships a multi-release jar whose `META-INF/versions/17/` copies are Java
+  17 bytecode; a modern test JVM prefers those, and ASM 5.0.3 refuses them, while the dump itself
+  runs on Java 8 and reads the base Java 8 entry. The test was asserting on bytes no dump will ever
+  see. (#98)
 - **`gtnh-solve --dataset-coverage` reports what the local dataset cannot draw (`dataset/`, `cli`).**
   #98's scope asked for this and it existed only as prose: three questions, each failing
   differently, each previously answered by a throwaway script. Which controllers never dumped
