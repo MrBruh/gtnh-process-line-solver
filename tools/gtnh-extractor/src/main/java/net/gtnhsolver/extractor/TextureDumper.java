@@ -966,10 +966,10 @@ final class TextureDumper {
         // in a client JVM it names itself. Server-side this reads back our own injected NamedIcon -
         // the same answer the routes below produce - or nothing at all, so those routes remain the
         // server's real answer and nothing about a server run changes.
-        String sprite = spriteName(readField(container, "mIcon"));
+        NamedIcon sprite = spriteIcon(readField(container, "mIcon"));
         if (sprite != null) {
-            String[] live = splitIconName(sprite, ICON_DOMAIN);
-            return new String[] { live[0].toLowerCase(java.util.Locale.ROOT), live[1] };
+            int colon = sprite.iconName.indexOf(':');
+            return new String[] { sprite.iconName.substring(0, colon), sprite.iconName.substring(colon + 1) };
         }
         if (container instanceof Enum) {
             return new String[] { ICON_DOMAIN, "iconsets/" + ((Enum<?>) container).name() };
@@ -1068,23 +1068,30 @@ final class TextureDumper {
      * A live sprite as a {@link NamedIcon}, or null if it names nothing.
      *
      * <p>
-     * The domain is lower-cased for the reason {@link #namedTextureIcon} lower-cases it: a mod id
-     * need not be lower-case ("GoodGenerator") while its assets always are, and a mis-cased domain
-     * yields an asset path the previewer cannot fetch.
+     * <b>A bare sprite name is a {@code minecraft} name, whatever registered it.</b> That is not a
+     * choice: {@code TextureMap} keys a sprite by the exact string passed to {@code registerIcon},
+     * and resolves it to a file with {@code new ResourceLocation(name)}, whose domain defaults to
+     * {@code minecraft} when the string carries no colon. So a bartworks block whose {@code getIcon}
+     * hands back the vanilla stone sprite names it {@code "stone"}, and that sprite IS
+     * {@code minecraft:stone}. Resolving it against the block's own registry domain instead
+     * (plausible, and how {@link #namedTextureIcon} treats the un-annotated {@code textureNames}
+     * fields, where mods do write their own domain) produced 34 unfetchable paths like
+     * {@code assets/bartworks/textures/blocks/stone.png}.
+     *
+     * <p>
+     * {@link #splitIconName} already mirrors {@code ResourceLocation}, one-character drive-letter
+     * rule included, so passing {@code minecraft} as the fallback reproduces MC's own resolution
+     * exactly. The domain is lower-cased for the reason {@link #namedTextureIcon} lower-cases it:
+     * a mod id need not be, while its assets always are.
      */
-    private static NamedIcon spriteIcon(Object icon, String fallbackDomain) {
+    private static NamedIcon spriteIcon(Object icon) {
         String raw = spriteName(icon);
         if (raw == null) {
             return null;
         }
-        String[] ref = splitIconName(raw, fallbackDomain);
+        String[] ref = splitIconName(raw, "minecraft");
         String domain = ref[0].toLowerCase(java.util.Locale.ROOT);
         return new NamedIcon(domain + ":" + ref[1], assetPath(domain, ref[1]));
-    }
-
-    /** The mod domain a block is registered under, for a sprite name that carries none of its own. */
-    private static String blockDomain(Block block) {
-        return registryDomain(String.valueOf(GameData.getBlockRegistry().getNameForObject(block)));
     }
 
     /**
@@ -1344,7 +1351,7 @@ final class TextureDumper {
         if (getIcon == null) {
             return null;
         }
-        NamedIcon icon = iconAt(block, getIcon, face, meta, blockDomain(block));
+        NamedIcon icon = iconAt(block, getIcon, face, meta);
         if (icon != null) {
             icons.putIfAbsent(icon.iconName, icon.assetPath);
         }
@@ -1491,9 +1498,7 @@ final class TextureDumper {
                     continue;
                 }
                 // side 2 (north) as the representative face
-                NamedIcon icon = getIcon == null
-                    ? null
-                    : iconAt(block, getIcon, 2, meta, registryDomain(registryName));
+                NamedIcon icon = getIcon == null ? null : iconAt(block, getIcon, 2, meta);
                 String why = getIcon == null
                     ? "no server-side getIcon override (" + getIconError + ")"
                     : "no icon for meta (" + lastIconError + ")";
@@ -2359,16 +2364,16 @@ final class TextureDumper {
      * running on a client turns into data.
      *
      * <p>
-     * {@code fallbackDomain} resolves a sprite name that carries no domain of its own (vanilla's do
-     * not); GT's own are already qualified and pass through {@link #splitIconName} untouched.
+     * A sprite that names no domain of its own resolves to {@code minecraft}, which is MC's own
+     * rule rather than a guess - see {@link #spriteIcon}.
      */
-    private NamedIcon iconAt(Block block, MethodHandle getIcon, int side, int meta, String fallbackDomain) {
+    private NamedIcon iconAt(Block block, MethodHandle getIcon, int side, int meta) {
         try {
             Object icon = getIcon.invoke(block, side, meta);
             if (icon instanceof NamedIcon) {
                 return (NamedIcon) icon;
             }
-            NamedIcon named = spriteIcon(icon, fallbackDomain);
+            NamedIcon named = spriteIcon(icon);
             if (named != null) {
                 return named;
             }
