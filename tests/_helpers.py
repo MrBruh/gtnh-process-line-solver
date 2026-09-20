@@ -137,6 +137,20 @@ def hatched_dataset(
     miss is no evidence at all and the adapter must state no ceiling. Pass ``key`` to make the
     lookup miss on purpose.
     """
+    record = MachinePhysical(
+        key=key,
+        registry_name="test:block",
+        meta=0,
+        source_class="test.Controller",
+        footprint=CellBox(sx=3, sy=3, sz=3),
+        io_faces=frozenset({Facing.NORTH}),
+        hint_layers=frozenset({0}),
+        coil_layer_count=0,
+        variant_count=1,
+        hatch_cells=hatch_cells,
+        energy_hatch_cells=hatch_cells,
+        upkeep_hatch_count=1,
+    )
     return PhysicalDataset(
         meta=DatasetMeta.model_validate(
             {
@@ -148,22 +162,10 @@ def hatched_dataset(
                 "census": census,
             }
         ),
-        machines={
-            key: MachinePhysical(
-                key=key,
-                registry_name="test:block",
-                meta=0,
-                source_class="test.Controller",
-                footprint=CellBox(sx=3, sy=3, sz=3),
-                io_faces=frozenset({Facing.NORTH}),
-                hint_layers=frozenset({0}),
-                coil_layer_count=0,
-                variant_count=1,
-                hatch_cells=hatch_cells,
-                energy_hatch_cells=hatch_cells,
-                upkeep_hatch_count=1,
-            )
-        },
+        machines={key: record},
+        # by_block_key derives from records (#172); a dump that sets only the name index has no
+        # block identities, so an exact-id lookup against it silently falls back to a name.
+        records=(record,),
     )
 
 

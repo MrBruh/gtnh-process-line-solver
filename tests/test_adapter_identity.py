@@ -81,6 +81,9 @@ def _dump(
             }
         ),
         machines={record.key: record for record in records},
+        # by_block_key derives from records (#172), so a dump that sets only the name index
+        # has no block identities at all and an exact-id lookup silently falls back to a name.
+        records=records,
     )
 
 
