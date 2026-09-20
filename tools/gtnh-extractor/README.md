@@ -345,6 +345,23 @@ Then click **Singleplayer -> Create New World -> Create New World**. The dump fi
 integrated server finishes starting, usually before the loading screen clears, and then exits the
 JVM.
 
+**Or skip the clicking entirely** with `-PautoWorld=true`, which makes the run unattended:
+
+```sh
+./gradlew runClient -PautoWorld=true   -PtextureOut=../../out/textures-client   -PpackVersion=2.9.0-beta-2   "-PmodVersions=GT5-Unofficial=5.09.54.20,StructureLib=1.4.42"
+```
+
+`ClientProxy` waits for the main menu, then makes the same `Minecraft.launchIntegratedServer` call
+the Create New World button makes, on a superflat creative world called `gtnhextractor-scratch`.
+Measured end to end at 2.9: **1 m 29 s from `./gradlew` to `BUILD SUCCESSFUL`**, six seconds of which
+is the settle delay at the menu, and the manifest is byte-for-byte what the same run produces when a
+human clicks through.
+
+It is off by default because `runClient` is also how a person plays the dev environment, and a client
+that swallows its own main menu would be hostile. It deletes **only** `gtnhextractor-scratch`, by that
+exact name: it never enumerates saves and never removes a world it did not create. If the main menu
+never appears, it simply never fires and the run stays clickable by hand.
+
 Notes specific to a client run:
 
 - **Use a throwaway world.** The run ends by exiting the JVM mid-session.

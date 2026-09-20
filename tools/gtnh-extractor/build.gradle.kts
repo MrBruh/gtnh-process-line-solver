@@ -14,6 +14,8 @@ plugins {
 //                          runtime Forge container is the fallback and GT5U's reports "MC1710")
 //   -PinjectIcons=<bool>   override whether the texture pass injects NamedIcons over GT's icon
 //                          fields (default: on a server, off on a client - see TextureDumper)
+//   -PautoWorld=<bool>     runClient only: load a scratch world by itself instead of waiting for
+//                          someone to click through Create New World (see ClientProxy)
 //
 // Both run families, not just runServer. The texture pass has a client route (it reads the
 // stitched atlas rather than recovering names the SideTransformer deleted), and a `it.name ==
@@ -43,6 +45,9 @@ tasks.matching { it.name.startsWith("runServer") || it.name.startsWith("runClien
         }
         (project.findProperty("injectIcons") as String?)?.let {
             systemProperty("gtnhextractor.injectIcons", it)
+        }
+        (project.findProperty("autoWorld") as String?)?.let {
+            systemProperty("gtnhextractor.autoWorld", it)
         }
     }
 }

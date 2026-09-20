@@ -14,6 +14,8 @@ import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.Loader;
 import cpw.mods.fml.common.Mod;
 import cpw.mods.fml.common.ModContainer;
+import cpw.mods.fml.common.SidedProxy;
+import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 import cpw.mods.fml.common.event.FMLServerStartedEvent;
 
 /**
@@ -54,6 +56,29 @@ public class DumperMod {
     public static final String NAME = "GTNH Extractor";
 
     private static final Logger LOG = LogManager.getLogger(MODID);
+
+    /**
+     * The sided half of this mod, which exists solely for the client auto-world harness.
+     *
+     * <p>
+     * {@link ClientProxy} names {@code Minecraft} and {@code GuiMainMenu}, types that do not exist
+     * on a dedicated server, so it must never be loaded there. A {@code @SidedProxy} guarantees
+     * that by construction; guarding a reference behind an {@code isClient()} branch would only
+     * make it true in practice.
+     */
+    @SidedProxy(
+        clientSide = "net.gtnhsolver.extractor.ClientProxy",
+        serverSide = "net.gtnhsolver.extractor.CommonProxy")
+    public static CommonProxy proxy;
+
+    /**
+     * Arrange the client auto-world harness, if {@code -PautoWorld=true} asked for one. A no-op on a
+     * server, and a no-op on a client that did not ask.
+     */
+    @Mod.EventHandler
+    public void preInit(FMLPreInitializationEvent event) {
+        proxy.setUpAutoWorld();
+    }
 
     /**
      * Fires once the server has fully started (world loaded, every mod's post-init complete) - the
