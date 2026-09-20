@@ -291,16 +291,23 @@ properties, which `DumperMod` reads):
 
 Headless notes:
 
-- `runServer` prompts on **stdin** for online-mode and Minecraft EULA acceptance. With no
-  stdin attached (a background or CI run) the prompts read EOF and the task fails with
-  "Minecraft EULA not accepted". Feed the answers in:
+- `runServer` prompts on **stdin** for online-mode and Minecraft EULA acceptance. **Write the
+  answers as files instead of piping them.** Piping works from an interactive terminal:
 
   ```sh
-  printf 'n\ny\n' | ./gradlew runServer
+  printf 'n\ny\n' | ./gradlew runServer     # interactive shells only
   ```
 
-  The first `n` keeps the server offline (no Mojang auth); the `y` accepts the EULA. RFG
-  writes `run/server/eula.txt` and the server `server.properties` from those answers.
+  but it does **not** survive a detached or backgrounded shell: the first answer is consumed, the
+  build dies with "Minecraft EULA not accepted", and if the command is piped into `tail` the shell
+  still reports exit 0, so it reads as a silent success. Write what RFG would have written, once per
+  worktree, and stdin stops mattering:
+
+  ```sh
+  mkdir -p run/server
+  printf 'eula=true\n' > run/server/eula.txt
+  printf 'server-port=25599\nonline-mode=false\n' > run/server.properties
+  ```
 - No `nogui` arg is needed: the GTNH server run config is already headless (it does not open
   the AWT server GUI).
 
@@ -311,6 +318,49 @@ with GT5U + StructureLib + their hard dependencies loaded, `DumperMod` fires on
 decompile and the multi-GB dependency/toolchain download; once cached, a boot is about a
 minute. Nothing in CI runs it: both passes are local-only, so `BUILD SUCCESSFUL` (the real
 exit status, not a piped `tail`'s) is the gate.
+
+### Running the texture pass on a client (`runClient`)
+
+`DumperMod` is not server-only: `FMLServerStartedEvent` fires for a client's **integrated** server
+too, the one that starts when a single-player world loads, and `MinecraftServer.getServer()` is set
+for it just the same. So the same passes run under `runClient`, and the texture pass resolves names
+very differently there.
+
+**Why bother.** Every method on `net.minecraft.util.IIcon` is `@SideOnly(Side.CLIENT)`,
+`getIconName()` included, so a dedicated server cannot ask a sprite what it is called. Most of
+`TextureDumper` exists to recover that one deleted answer. A client runs `registerBlockIcons`,
+stitches the atlas, and hands back a sprite that names itself. Measured at GTNH 2.9: **261 unresolved
+(block, meta) pairs and 208 of 296 gapped multiblocks become 12 and 13 of 296**, with nothing
+resolving worse. See [`docs/dataset-extraction/client-dump-spike.md`](../../docs/dataset-extraction/client-dump-spike.md).
+
+```sh
+export JAVA_HOME="/c/Users/<you>/AppData/Local/Programs/Eclipse Adoptium/jdk-25.0.3+9"
+./gradlew runClient \
+  -PtextureOut=../../out/textures-client \
+  -PpackVersion=2.9.0-beta-2 \
+  "-PmodVersions=GT5-Unofficial=5.09.54.20,StructureLib=1.4.42"
+```
+
+Then click **Singleplayer -> Create New World -> Create New World**. The dump fires the moment the
+integrated server finishes starting, usually before the loading screen clears, and then exits the
+JVM.
+
+Notes specific to a client run:
+
+- **Use a throwaway world.** The run ends by exiting the JVM mid-session.
+- **Prefer a texture-only run** (`-PtextureOut` with no `-PdatasetOut`). The structure pass swaps
+  StructureLib's proxy to capture hints headlessly (`RecordingProxy`), which a real client proxy
+  would be drawing from; the texture-only early return keeps it out of the way.
+- **Icon injection defaults off on a client** and on for a server. Writing `NamedIcon` stubs over
+  live sprites would both mask the difference a client run exists to capture and race the render
+  thread, which is reading those same fields. `-PinjectIcons=true|false` overrides either default.
+- **It cannot run unattended.** It needs a GL window and a human to load a world, so it is not a CI
+  gate and does not replace `runServer` for automation. Nothing in CI runs the extractor either way.
+- `runClient` gets the same `-P` properties as `runServer`; `build.gradle.kts` forwards them to both
+  run families by prefix. Plain `runClient` boots on the pinned toolchain; `runClient17/21/25` are
+  lwjgl3ify fallbacks that have not been needed.
+- The manifest records which mechanism produced it (`method`), the physical side, and whether
+  injection ran, so a client dump and a server dump can be compared without guessing.
 
 ## Licensing
 
