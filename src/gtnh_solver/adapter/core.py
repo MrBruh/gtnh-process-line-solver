@@ -36,13 +36,18 @@ bounding region is sized to fit whatever footprints result (``_bounding_region``
 miss means depends on ``handler.kind`` and the two readings are opposites - see
 ``_classify_census_miss``.
 
+**A node standing for several machines expands** into one ``Machine`` per physical machine
+(``_instance_ids``), all sharing the node's nets - which needed no IR concept, because
+``Net.endpoints`` is already unbounded. The distinction that matters is per machine vs per group:
+``Port.rate`` and ``Machine.eut`` are one machine's (the power synthesis sums them), while
+``Net.throughput`` is the group's (:func:`_group_rate`), because one bus carries what all of them
+move. A single-machine node keeps its bare id, so nothing that predates this moves.
+
 Still crude-on-purpose for Phase 1 (docs/ROADMAP.md): all four horizontal orientations for every
-machine, non-square bases included (``occupied_cells`` rotates the reserved box); hint-derived face
-constraints stay on the dataset record; and **multi-instance nodes (``machineCount > 1``) are
-rejected** rather than mapped - a net endpoint cannot address one instance of a group until routing
-is instance-aware (InputIR v1 dropped ``Machine.count``; see ``ir/__init__.py``, docs/ROADMAP.md).
-The InputIR's own referential-integrity check is the validation gate: a dangling edge or commodity
-mismatch fails loud here, which is the adapter contract (docs/TESTING.md).
+machine, non-square bases included (``occupied_cells`` rotates the reserved box); and hint-derived
+face constraints stay on the dataset record. The InputIR's own referential-integrity check is the
+validation gate: a dangling edge or commodity mismatch fails loud here, which is the adapter
+contract (docs/TESTING.md).
 """
 
 from __future__ import annotations
@@ -241,11 +246,10 @@ def to_input_ir(
         recipe = recipes.get(node.recipe_id)
         if recipe is None:
             raise AdapterError(f"node {node.id!r} references unknown recipe {node.recipe_id!r}")
-        if node.machine_count != 1:
+        if node.machine_count < 1:
             raise AdapterError(
-                f"node {node.id!r} has machineCount={node.machine_count}; multi-instance nodes "
-                f"are not supported yet (instance-aware routing is Phase 2 - see docs/ROADMAP.md). "
-                f"Split it into single-machine nodes in the export."
+                f"node {node.id!r} has machineCount={node.machine_count}; a node stands for at "
+                f"least one machine."
             )
         _check_input_overrides(recipe, node)
         _check_unmodelled_parallel(recipe, node)
@@ -260,9 +264,11 @@ def to_input_ir(
         )
         if record is None and identifies_single_blocks:
             _classify_census_miss(recipe, node, single_block_ids)
-        machines.append(
+        # Every machine of a parallel node is the same build with the same ports and draw; they
+        # differ only in id and, later, in where the placer puts them.
+        machines.extend(
             Machine(
-                id=node.id,
+                id=instance_id,
                 type=recipe.machine_type,
                 block_key=block_key,
                 footprint=footprint,
@@ -281,11 +287,13 @@ def to_input_ir(
                 # Every machine keeps all four horizontal facings: occupied_cells rotates a
                 # non-cubic footprint now, so there is nothing left to pin against.
                 orientation_options=list(_DEFAULT_ORIENTATIONS),
-                # EU/t draw the power synthesis sizes amperage from (see _node_eut).
+                # Per-machine EU/t the power synthesis sizes amperage from (see _node_eut).
                 eut=_node_eut(recipe, node, resolved_machines),
             )
+            for instance_id in _instance_ids(node)
         )
 
+    instances_by_node = {node.id: _instance_ids(node) for node in plan.nodes}
     storage_ports = _storage_ports(plan, storage_ids, nodes_by_id, recipes)
     for storage in plan.storages:
         machines.append(
@@ -299,10 +307,15 @@ def to_input_ir(
             )
         )
 
-    nets = [_net_for_edge(edge, nodes_by_id, recipes) for edge in plan.edges]
+    nets = [_net_for_edge(edge, nodes_by_id, recipes, instances_by_node) for edge in plan.edges]
     # Close the line: collect each unconsumed output (#16). Storages are named by id rather than
     # by their type string - a real GT machine called "Super ..." would have been skipped silently.
-    machines, nets = _add_output_buffers(machines, nets, storage_ids)
+    group_of = {
+        instance_id: node_id
+        for node_id, instance_ids in instances_by_node.items()
+        for instance_id in instance_ids
+    }
+    machines, nets = _add_output_buffers(machines, nets, storage_ids, group_of)
     # The export has no power source; invent it. ``single_block_ids`` is what lets the synthesis
     # state a basic machine's own intake ceiling without guessing at a multiblock's.
     # _supply_tier absorbs an implausible draw from the MrBruh fork's recipe model. An arodoid
@@ -339,36 +352,55 @@ def _synthesized_eut(recipe: Recipe, node: Node) -> float:
 
 
 def _node_eut(recipe: Recipe, node: Node, resolved: dict[str, ResolvedMachine]) -> float:
-    """The EU/t a node draws, which the power synthesis sizes amperage from.
+    """The EU/t **one machine** of this node draws, which the power synthesis sizes amperage from.
+
+    Per instance, because the synthesis gives every machine its own energy hatches and sums their
+    draw over the shared net. A group figure here would be counted ``machineCount`` times over.
 
     A v2 export's ``resolved.totalEut`` still wins where it covers the node: it is the exporter's own
-    balancer output and accounts for machine count and parallelism that :func:`_synthesized_eut`
-    cannot see. It is cross-checked against the synthesis, and a mismatch beyond float tolerance
-    warns while the resolved figure still wins (#2).
+    balancer output and models overclocking the recipe figure cannot. **It is a group total** though
+    (``eutPerMachine x machineCount x parallel``), so it is divided back down before being compared
+    with the per-machine synthesis or returned. That division is what makes the cross-check below an
+    apples-to-apples comparison; it was only ever coherent because ``machineCount`` was forced to 1.
 
-    **The two disagree by 24.5x on one real node** (an Industrial Coke Oven resolving to 2355 EU/t
-    where GT's own overclock calculator says 96) with nothing in the export to arbitrate, which is
-    why the order is "the producer's balancer, then GT's calculator, then the base value" rather than
-    a single source.
+    **The two sources disagree by 24.5x on one real node** (an Industrial Coke Oven resolving to
+    2355 EU/t where GT's own overclock calculator says 96) with nothing in the export to arbitrate,
+    which is why the order is "the producer's balancer, then GT's calculator, then the base value"
+    rather than a single source.
     """
     computed = _synthesized_eut(recipe, node)
     machine = resolved.get(node.id)
     if machine is None:
         return computed
+    instances = max(1, node.machine_count)
+    resolved_per_machine = machine.total_eut / instances
     if not math.isclose(
-        machine.total_eut,
+        resolved_per_machine,
         computed,
         rel_tol=_RESOLVED_EUT_TOLERANCE,
         abs_tol=_RESOLVED_EUT_TOLERANCE,
     ):
         warnings.warn(
-            f"resolved EU/t for node {node.id!r} is {machine.total_eut}, but the recipe "
-            f"synthesizes {computed} (eut {recipe.eut} x parallel {node.parallel}); trusting "
-            f"the resolved figure",
+            f"resolved EU/t for node {node.id!r} is {resolved_per_machine} per machine, but the "
+            f"recipe synthesizes {computed} (eut {recipe.eut} x parallel {node.parallel}); "
+            f"trusting the resolved figure",
             AdapterWarning,
             stacklevel=2,
         )
-    return machine.total_eut
+    return resolved_per_machine
+
+
+def _instance_ids(node: Node) -> list[str]:
+    """One machine id per physical machine this node stands for.
+
+    A single-machine node keeps its **bare** node id, so every existing layout, golden file and
+    preview is byte-identical to before parallel nodes were supported; only a node that really has
+    several machines gains ``#1``-suffixed ids. That mirrors how the power synthesis already names
+    things (``power:in`` alone, ``power:in#1`` when there are several).
+    """
+    if node.machine_count <= 1:
+        return [node.id]
+    return [f"{node.id}#{index + 1}" for index in range(node.machine_count)]
 
 
 def _classify_census_miss(recipe: Recipe, node: Node, single_block_ids: set[str]) -> None:
@@ -390,7 +422,7 @@ def _classify_census_miss(recipe: Recipe, node: Node, single_block_ids: set[str]
     """
     handler = _effective_handler(recipe, node)
     if handler is None or handler.kind != "multiblock":
-        single_block_ids.add(node.id)
+        single_block_ids.update(_instance_ids(node))
         return
     name = handler.label or recipe.machine_type
     warnings.warn(
@@ -754,15 +786,24 @@ def _storage_ports(
 
 
 def _add_output_buffers(
-    machines: list[Machine], nets: list[Net], storage_ids: set[str]
+    machines: list[Machine],
+    nets: list[Net],
+    storage_ids: set[str],
+    group_of: dict[str, str] | None = None,
 ) -> tuple[list[Machine], list[Net]]:
     """Close the line: synthesize a boundary Super Chest/Tank + net to collect each unconsumed
     system output - a machine OUTPUT port (item/fluid) that no net already sources (GitHub #16), so
-    a final product is placed and wired to a buffer instead of exiting into thin air. The net's rate
-    is the port's recorded throughput (``Port.rate``)."""
+    a final product is placed and wired to a buffer instead of exiting into thin air.
+
+    **One buffer per node, not per machine.** ``group_of`` maps each machine id back to the node it
+    is an instance of, so a parallel node's machines collect into a single chest on a shared net, the
+    way a real line is built - rather than each getting a chest of its own. The net's rate is the
+    summed ``Port.rate`` of the instances feeding it, which is the group rate again.
+    """
+    group_of = group_of or {}
     wired = {(ep.machine_id, ep.port_id) for net in nets for ep in net.endpoints}
-    buffers: list[Machine] = []
-    buffer_nets: list[Net] = []
+    #: (group id, port id) -> the instance ports feeding one buffer, in machine order.
+    pending: dict[tuple[str, str], list[tuple[Machine, Port]]] = {}
     for machine in machines:
         if machine.id in storage_ids:
             continue  # a storage's own output is already a boundary, not something to collect
@@ -771,72 +812,108 @@ def _add_output_buffers(
                 continue
             if (machine.id, port.id) in wired:
                 continue  # already consumed by a net
-            resource = _port_resource(port.id)  # strip the "output:" prefix -> the resource id
-            buffer_id = f"output-buffer:{machine.id}:{resource}"
-            in_pid = _port_id(IODirection.INPUT, resource)
-            buffers.append(
-                Machine(
-                    id=buffer_id,
-                    type=_STORAGE_TYPE[port.commodity.value],
-                    footprint=_DEFAULT_FOOTPRINT,
-                    faces=FaceSpec(
-                        ports=[
-                            Port(
-                                id=in_pid,
-                                commodity=port.commodity,
-                                direction=IODirection.INPUT,
-                                rate=port.rate,
-                            )
-                        ]
+            pending.setdefault((group_of.get(machine.id, machine.id), port.id), []).append(
+                (machine, port)
+            )
+
+    buffers: list[Machine] = []
+    buffer_nets: list[Net] = []
+    for (group_id, port_id), feeds in pending.items():
+        resource = _port_resource(port_id)  # strip the "output:" prefix -> the resource id
+        commodity = feeds[0][1].commodity
+        rate = sum(port.rate or 0.0 for _, port in feeds)
+        buffer_id = f"output-buffer:{group_id}:{resource}"
+        in_pid = _port_id(IODirection.INPUT, resource)
+        buffers.append(
+            Machine(
+                id=buffer_id,
+                type=_STORAGE_TYPE[commodity.value],
+                footprint=_DEFAULT_FOOTPRINT,
+                faces=FaceSpec(
+                    ports=[
+                        Port(
+                            id=in_pid,
+                            commodity=commodity,
+                            direction=IODirection.INPUT,
+                            rate=rate,
+                        )
+                    ]
+                ),
+                voltage_tier=_STORAGE_TIER,
+                orientation_options=_DEFAULT_ORIENTATIONS,
+            )
+        )
+        buffer_nets.append(
+            Net(
+                id=f"output-net:{group_id}:{resource}",
+                commodity=commodity,
+                fluid_or_item=resource,
+                throughput=rate,
+                endpoints=[
+                    *(
+                        MachineFaceRef(machine_id=machine.id, port_id=port.id)
+                        for machine, port in feeds
                     ),
-                    voltage_tier=_STORAGE_TIER,
-                    orientation_options=_DEFAULT_ORIENTATIONS,
-                )
+                    MachineFaceRef(machine_id=buffer_id, port_id=in_pid),
+                ],
             )
-            buffer_nets.append(
-                Net(
-                    id=f"output-net:{machine.id}:{resource}",
-                    commodity=port.commodity,
-                    fluid_or_item=resource,
-                    throughput=port.rate or 0.0,
-                    endpoints=[
-                        MachineFaceRef(machine_id=machine.id, port_id=port.id),
-                        MachineFaceRef(machine_id=buffer_id, port_id=in_pid),
-                    ],
-                )
-            )
+        )
     return machines + buffers, nets + buffer_nets
 
 
-def _net_for_edge(edge: Edge, nodes_by_id: dict[str, Node], recipes: dict[str, Recipe]) -> Net:
+def _net_for_edge(
+    edge: Edge,
+    nodes_by_id: dict[str, Node],
+    recipes: dict[str, Recipe],
+    instances_by_node: dict[str, list[str]],
+) -> Net:
+    """One net per edge, reaching **every machine** on each side of it.
+
+    A parallel node's machines share one bus, which is both how GT lines are actually built and what
+    keeps this from needing a new IR concept: ``Net.endpoints`` is already an unbounded list, so N
+    producers and M consumers on one net is expressible today. The router chains the endpoints and
+    the validator permits several producers, so nothing downstream has to learn about groups.
+
+    An endpoint referring to a storage passes through unexpanded: a storage is one block.
+    """
+    source_ids = instances_by_node.get(edge.source, [edge.source])
+    target_ids = instances_by_node.get(edge.target, [edge.target])
+    out_pid = _port_id(IODirection.OUTPUT, edge.resource_id)
+    in_pid = _port_id(IODirection.INPUT, edge.resource_id)
     return Net(
         id=edge.id,
         commodity=_commodity(edge.resource_kind),
         fluid_or_item=edge.resource_id,
         throughput=_throughput(edge, nodes_by_id, recipes),
         endpoints=[
-            MachineFaceRef(
-                machine_id=edge.source, port_id=_port_id(IODirection.OUTPUT, edge.resource_id)
-            ),
-            MachineFaceRef(
-                machine_id=edge.target, port_id=_port_id(IODirection.INPUT, edge.resource_id)
-            ),
+            *(MachineFaceRef(machine_id=mid, port_id=out_pid) for mid in source_ids),
+            *(MachineFaceRef(machine_id=mid, port_id=in_pid) for mid in target_ids),
         ],
     )
 
 
 def _throughput(edge: Edge, nodes_by_id: dict[str, Node], recipes: dict[str, Recipe]) -> float:
-    """Typed rate for an edge: the producing node's output rate, else the consumer's demand."""
+    """Typed rate for an edge: the producing node's group output rate, else the consumer's demand.
+
+    A *group* rate, because the edge is one shared net across however many machines the node stands
+    for (:func:`_group_rate`).
+    """
     source = nodes_by_id.get(edge.source)
     if source is not None:
-        return _rate(recipes[source.recipe_id], edge.resource_id, source, outputs=True)
+        return _group_rate(recipes[source.recipe_id], edge.resource_id, source, outputs=True)
     target = nodes_by_id.get(edge.target)
     if target is not None:
-        return _rate(recipes[target.recipe_id], edge.resource_id, target, outputs=False)
+        return _group_rate(recipes[target.recipe_id], edge.resource_id, target, outputs=False)
     return 0.0  # storage -> storage (no recipe to rate it against)
 
 
 def _rate(recipe: Recipe, resource_id: str, node: Node, *, outputs: bool) -> float:
+    """The rate **one machine** of this node moves, in items/t or mB/t.
+
+    Per instance, not per node: this feeds ``Port.rate``, and a port belongs to one physical machine.
+    ``machineCount`` therefore stays out of it and belongs to :func:`_group_rate`, which is what a
+    shared net carries. Keeping the two apart is the whole distinction a parallel node introduces.
+    """
     # Inputs come from the node's effective list, not the recipe's own: an edge names the
     # concretised id ("minecraft:log@1") while the recipe still says "@32767", so matching against
     # the recipe here would sum nothing and rate the net at zero.
@@ -847,10 +924,17 @@ def _rate(recipe: Recipe, resource_id: str, node: Node, *, outputs: bool) -> flo
     duration = _effective_duration(recipe, node)
     if duration <= 0:
         return 0.0
-    # `parallel` only, matching `_node_eut`: `machineCount` is forced to 1 upstream, so carrying
-    # it here scaled nothing while implying the two paths disagree about multi-instance nodes.
-    # When instance-aware routing lands (#76) both have to change together, deliberately.
     return amount * node.parallel / duration
+
+
+def _group_rate(recipe: Recipe, resource_id: str, node: Node, *, outputs: bool) -> float:
+    """The rate the node's **whole group** moves: :func:`_rate` across all its machines.
+
+    What a net carries, because the node's machines share one bus. A three-machine node feeding a
+    downstream node moves three times one machine's output through that pipe, and sizing the pipe
+    from a single instance would under-provision it by the machine count.
+    """
+    return _rate(recipe, resource_id, node, outputs=outputs) * node.machine_count
 
 
 #: Multiplier on the summed footprint floor area when sizing the region's side (leaves routing

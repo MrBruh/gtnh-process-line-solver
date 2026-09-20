@@ -49,8 +49,19 @@ from gtnh_solver.ir import (
     Placement,
     Route,
 )
-from gtnh_solver.placement import Objective, optimize_placement, place
-from gtnh_solver.router import claims_by_machine, place_hatches, route, route_power
+from gtnh_solver.placement import (
+    Objective,
+    crowded_machines,
+    optimize_placement,
+    place,
+)
+from gtnh_solver.router import (
+    claims_by_machine,
+    place_hatches,
+    reserve_power_docks,
+    route,
+    route_power,
+)
 from gtnh_solver.validator import ValidationReport, ViolationCode, validate
 
 from ._structure import footprint_and_layers, structure_cells, structure_quality
@@ -60,6 +71,11 @@ from .repair import repair_power_sources
 # routes; this caps the work. The penalty step adds to a net's weight each time it fails to route.
 _MAX_FEEDBACK_PASSES = 8
 _PENALTY_STEP = 2.0
+
+#: Added to a machine's own face-term weight each time the crowding gate finds it with nowhere to
+#: put a connection. Per machine on purpose: a global dial re-weights the whole search between
+#: attempts, which makes the multi-start's seeds incomparable and lets the most distorted one win.
+_FACE_PENALTY_STEP = 2.0
 
 
 def solve(
@@ -93,6 +109,13 @@ def solve(
         return _solve_fast(problem, seed, objective)
     penalties: dict[str, float] = {}
     seen_failed: set[frozenset[str]] = set()
+    crowding: Infeasibility | None = None
+    # Machines the gate found no room for, and how hard to lean on each next time.
+    face_penalties: dict[str, float] = {}
+    # The first placement the gate turned away, kept as a parachute. The gate is a heuristic about
+    # geometry and the routers are the authority, so it is only ever allowed to pick BETTER
+    # attempts - never to declare a line unsolvable that the routers would in fact have solved.
+    gated: tuple[Placement, ...] | None = None
     best_valid: LayoutResult | None = None
     best_quality: tuple[int, int, int] | None = None
     best_partial: LayoutResult | None = None
@@ -111,7 +134,11 @@ def solve(
     ]
     for sa_mode, attempt_seed in grid:
         placement = optimize_placement(
-            problem, seed=attempt_seed, net_penalties=penalties, objective=sa_mode
+            problem,
+            seed=attempt_seed,
+            net_penalties=penalties,
+            face_penalties=face_penalties,
+            objective=sa_mode,
         )
         if not placement.ok:
             # The machines do not fit the region at all - seed-independent, so retrying is futile.
@@ -120,6 +147,22 @@ def solve(
                 seed=attempt_seed,
                 infeasibility=placement.infeasibility,
             )
+
+        # Can every connection even get a cell of its own? Decided exactly, before routing:
+        # a crowded placement cannot route, and routing it only to watch an arbitrary net lose
+        # the race for the last free face costs an attempt and reports the wrong machine (#76).
+        crowded = crowded_machines(problem, placement.placements)
+        if crowded:
+            # Lean on the named machines, never on the search as a whole: the attempts are
+            # independent seeds ranked against one objective, so a global dial makes them
+            # incomparable and lets the most distorted one win (see optimize_placement).
+            if crowding is None:
+                crowding, gated = _crowding_infeasibility(crowded), placement.placements
+            for machine_id in crowded:
+                face_penalties[machine_id] = (
+                    face_penalties.get(machine_id, 0.0) + _FACE_PENALTY_STEP
+                )
+            continue
 
         layout, failed_nets = _assemble(problem, placement.placements, attempt_seed, objective)
         if layout.status is LayoutStatus.VALID:
@@ -146,7 +189,15 @@ def solve(
 
     if best_valid is not None:
         return best_valid
-    assert best_partial is not None  # attempt 0 always either returns or sets one of the two
+    if best_partial is None:
+        # Every attempt was turned away, so nothing was ever routed. Do NOT report the crowding as
+        # the verdict: this check is generous about multiblocks and about who may share a power
+        # cell, and a layout it doubts can still route. Lay the first one it rejected and let the
+        # routers say - they are the authority, and a real shortage still surfaces as their own
+        # face_reachability. The gate has then cost an attempt and changed nothing else.
+        assert gated is not None  # the only path that skips every attempt sets both
+        layout, _ = _assemble(problem, gated, seed, objective)
+        return layout
     return best_partial
 
 
@@ -215,7 +266,13 @@ def _assemble(
     thick and only the distance is wrong - so its power net is named as a failed net and the loop
     re-places it nearer, which is precisely the fix the constraint wants.
     """
-    routing = route(problem, placements)  # auto-output where geometry allows + item/fluid pipes
+    # Hold one usable face per power endpoint back BEFORE the pipes are laid. Power routes
+    # last, against every pipe cell as a hard obstacle, and the item router freezes its docks
+    # up front - so without this a machine can end up with no face left for an energy hatch
+    # on a placement `route_power` handles fine in isolation (#76). These cells are hard for
+    # pipes only; the power router below still sees them free and picks its own faces.
+    reserved = reserve_power_docks(problem, placements)
+    routing = route(problem, placements, reserved=reserved)  # auto-output, then item/fluid
     autos = list(routing.auto_connections)
     # Power cables route around the item/fluid pipes already laid, so no cell carries two routes
     # (the crude single-channel capacity the validator enforces). docs/ARCHITECTURE.md #7 - and
@@ -310,6 +367,19 @@ def _assemble(
             and not {e.machine_id for e in n.endpoints}.isdisjoint(starved)
         )
     return layout, ()
+
+
+def _crowding_infeasibility(crowded: tuple[str, ...]) -> Infeasibility:
+    """Why a placement was rejected before routing: machines with nowhere to put a connection."""
+    listed = ", ".join(repr(m) for m in crowded[:3])
+    more = f" (and {len(crowded) - 3} more)" if len(crowded) > 3 else ""
+    return Infeasibility(
+        constraint="face_crowding",
+        detail=f"{len(crowded)} machine(s) cannot host all their connections on distinct free "
+        f"cells at any placement this search reached: {listed}{more}",
+        suggested_relaxation="enlarge the bounding region, or reduce connections per machine "
+        "(fewer parallel machines on one net, or an ME/auto-output connection instead of a pipe)",
+    )
 
 
 def _starved_machines(report: ValidationReport) -> tuple[str, ...]:

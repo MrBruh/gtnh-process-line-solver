@@ -42,6 +42,7 @@ from tests._helpers import at, consumer, net, power_source, producer
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 _SAND = _EXAMPLES / "gtnh-sand.json"
 _NITROBENZENE = _EXAMPLES / "gtnh-nitrobenzene.json"
+_PARALLEL_SAND = _EXAMPLES / "gtnh-parallel-sand.json"
 
 
 def test_solve_sand_items_auto_feed_and_power_is_cabled(
@@ -112,6 +113,22 @@ def test_solve_sand_balanced_objective_is_valid_and_low_wire() -> None:
     assert footprint <= 6
     assert volume <= 12
     assert cables <= 3
+
+
+def test_solve_the_parallel_line_reaches_a_valid_layout() -> None:
+    """The acceptance case for #76: three nodes at three instances each, nine machines, VALID.
+
+    It took two things, because the line was short of room in two different ways at once. The
+    placer packed the nine into a solid row where each had two free cells for three connections,
+    which no routing order can rescue - that is the face-shortfall term plus the crowding gate.
+    And the router docked greedily net by net, stranding a net on a machine that did have room,
+    which is the re-seat rescue. Fixing either alone still left the line partial_invalid, so this
+    test is the one that holds both down.
+    """
+    ir = adapt_file(_PARALLEL_SAND)
+    layout = solve(ir)
+    assert layout.status is LayoutStatus.VALID, layout.infeasibility
+    assert validate(ir, layout).ok
 
 
 # The optimized path's determinism is proven over generated problems by
@@ -392,7 +409,9 @@ def test_solve_gives_up_when_the_same_net_fails_every_attempt(
     )
     stuck = Infeasibility(constraint="routing", detail="rigged: net n never routes")
 
-    def always_fails_the_same_net(prob: InputIR, placements: object) -> RouteResult:
+    def always_fails_the_same_net(
+        prob: InputIR, placements: object, *, reserved: object = ()
+    ) -> RouteResult:
         return RouteResult(infeasibility=stuck, failed_nets=("n",))
 
     monkeypatch.setattr(solver_core, "route", always_fails_the_same_net)
@@ -406,6 +425,7 @@ def test_solve_gives_up_when_the_same_net_fails_every_attempt(
         *,
         seed: int = 0,
         net_penalties: dict[str, float] | None = None,
+        face_penalties: dict[str, float] | None = None,
         objective: Objective = "footprint",
     ) -> PlacementResult:
         nonlocal attempts

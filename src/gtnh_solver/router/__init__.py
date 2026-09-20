@@ -32,7 +32,7 @@ from ._grid import claims_by_machine
 from .auto import AutoAssignment, assign_auto_outputs, auto_output_possible
 from .core import RouteResult, route
 from .hatches import HatchPlan, place_hatches
-from .power import PowerRouteResult, route_power
+from .power import PowerRouteResult, reserve_power_docks, route_power
 
 __all__ = [
     "AutoAssignment",
@@ -43,6 +43,7 @@ __all__ = [
     "auto_output_possible",
     "claims_by_machine",
     "place_hatches",
+    "reserve_power_docks",
     "route",
     "route_power",
 ]
