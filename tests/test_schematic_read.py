@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from gtnh_solver.adapter import adapt_file
+from gtnh_solver.dataset import roots
 from gtnh_solver.previewer.textures import TextureManifest
 from gtnh_solver.schematic import (
     SchematicError,
@@ -244,15 +245,20 @@ def test_cli_inspect_prints_the_blocks_and_machines(capsys: pytest.CaptureFixtur
 
 
 def test_cli_inspect_says_which_manifest_could_not_name_an_mid(
-    capsys: pytest.CaptureFixture[str],
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An unresolved mID names the manifest that was asked, because the committed one is scoped.
 
     Against it most of a real build's machines resolve to nothing, and a bare "not found" reads
     like a corrupt file when it only means the small manifest was asked.
+
+    Hiding any locally staged dump is what makes that the manifest under test. The CLI resolves
+    the newest ``data/<version>/`` by default and a full dump names every mID in this golden, so
+    wherever one is staged this used to assert the opposite of what it says, and failed.
     """
     from gtnh_solver.cli import main
 
+    monkeypatch.setattr(roots, "list_versions", lambda *args, **kwargs: [])
     assert main(["--inspect-schematic", str(_GOLDEN / "nitrobenzene-reference.schematic")]) == 0
     captured = capsys.readouterr()
     assert "ExxonMobil Chemical Plant" in captured.out  # in the committed manifest

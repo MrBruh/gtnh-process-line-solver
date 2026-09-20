@@ -31,12 +31,15 @@ from .multiblocks import (
     to_physical,
 )
 from .pipes import (
+    CABLE_DISPLAY_MATERIAL,
     CABLE_MATERIAL_BY_TIER,
     CABLE_THICKNESS_BLOCKS,
     DEFAULT_PIPE_SIZE,
     DEFAULT_PIPE_THICKNESS_BLOCKS,
+    PIPE_DISPLAY_STEM,
     PIPE_MATERIAL,
     cable_display_name,
+    manifest_names,
     pipe_display_name,
     route_material,
 )
@@ -79,12 +82,15 @@ from .voltage import (
 
 __all__ = [  # noqa: RUF022 - grouped by submodule, not alphabetized
     # cable / pipe stand-in policy
+    "CABLE_DISPLAY_MATERIAL",
     "CABLE_MATERIAL_BY_TIER",
     "CABLE_THICKNESS_BLOCKS",
     "DEFAULT_PIPE_SIZE",
     "DEFAULT_PIPE_THICKNESS_BLOCKS",
+    "PIPE_DISPLAY_STEM",
     "PIPE_MATERIAL",
     "cable_display_name",
+    "manifest_names",
     "pipe_display_name",
     "route_material",
     # voltage / power sizing

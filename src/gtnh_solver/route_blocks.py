@@ -69,8 +69,10 @@ class RouteBlock:
     #: exactly the plausible-confident-wrong failure this whole lane is guarding against.
     label: str
 
-    #: The dataset name that joins this to its texture manifest entry (``"cable.tin.02"``), or
-    #: ``None`` when the route published no material and the block is unspecified.
+    #: The canonical dataset name for the block (``"cable.tin.02"``), or ``None`` when the route
+    #: published no material and the block is unspecified. GT's unlocalized spelling, which is the
+    #: one that does not move between packs; ``dataset/pipes.py``'s ``manifest_names`` is what
+    #: turns it into the key a given texture manifest actually files it under.
     dataset_name: str | None
 
     #: True when ``label``'s *material* is representative rather than chosen (docs/DOMAIN.md). The

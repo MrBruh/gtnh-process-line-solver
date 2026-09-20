@@ -9,7 +9,9 @@ reference, and writes the small committed ``data/textures/manifest.json`` so
 **Cables and pipes are kept the same way, and for the same reason.** ``cable.tin.02`` contains
 no machine-type name either, so the name rule can never reach one. The stand-in policy in
 ``dataset/pipes.py`` says which material each tier is drawn as; this asks it, for every tier the
-examples use and every gauge the router can size to, and keeps exactly those.
+examples use and every gauge the router can size to, and keeps exactly those. One the dump does
+not carry is a hard error rather than a gap: a committed manifest silently missing its cables is
+indistinguishable from a correctly pruned one (#176).
 
 **Hatches are kept by resolution, not by name.** A hatch can never match an example machine's name
 ("Input Bus (LV)" contains no machine type), so keeping them needs a second rule: for every hatch
@@ -42,6 +44,7 @@ from gtnh_solver.dataset import (
     cable_display_name,
     list_versions,
     load_physical_dataset,
+    manifest_names,
     pipe_display_name,
 )
 from gtnh_solver.previewer.textures import HATCH_KIND_BY_CLASS, TextureManifest
@@ -105,19 +108,23 @@ def _route_keys(full: dict[str, Any], tiers: set[str]) -> set[str]:
 
     Cables and pipes are ``kind: "pipe"`` entries whose names ("cable.tin.02", "gt_pipe_bronze")
     contain no machine type, so the name rule at the call site can never keep one - the same hole
-    hatches have, closed the same way. The policy in ``dataset/pipes.py`` is asked directly rather
-    than a list being kept here, so the committed manifest cannot drift from what a preview looks up.
+    hatches have, closed the same way. The policy in ``dataset/pipes.py`` says which blocks are
+    wanted and the previewer's own ``TextureManifest.pipe_block`` finds each one, for the reason
+    ``_hatch_keys`` asks ``hatch_block``: asking the function the preview will ask is what stops the
+    committed manifest drifting from what a preview looks up. It also makes GT's 2.9 rename a
+    non-event here, because that lookup knows both spellings of a block (#176).
 
     Every gauge is kept for each tier the examples use, not just the gauges those lines happen to
     route today: cable thickness follows summed amperage, so re-solving a line at a different seed
     can move a segment between gauges, and a preview that silently lost its cable at 8x would be a
     puzzling bug rather than an obvious one. Six entries per tier is a rounding error in the file.
+
+    **A wanted name that resolves to nothing stops the run.** This used to keep what it found and
+    drop the rest, which against a dump whose spelling had moved on wrote a committed manifest with
+    no cables or pipes in it at all and said nothing (#176) - the one failure a generated artifact
+    must never have, since nothing downstream can tell a pruned manifest from a broken one.
     """
-    by_name = {
-        str(entry["display_name"]): key
-        for key, entry in full["blocks"].items()
-        if entry.get("kind") == "pipe" and entry.get("display_name")
-    }
+    manifest = TextureManifest(full)
     wanted = {
         cable_display_name(CABLE_MATERIAL_BY_TIER[tier], gauge)
         for tier in tiers
@@ -127,7 +134,22 @@ def _route_keys(full: dict[str, Any], tiers: set[str]) -> set[str]:
     wanted |= {
         pipe_display_name(material, DEFAULT_PIPE_SIZE) for material in PIPE_MATERIAL.values()
     }
-    return {by_name[name] for name in wanted if name in by_name}
+    keys: set[str] = set()
+    missing: list[str] = []
+    for name in sorted(wanted):
+        found = manifest.pipe_block(name)
+        if found is None:
+            missing.append(f"{name} (looked for {' or '.join(manifest_names(name))})")
+        else:
+            keys.add(f"{found[0]}|{found[1]}")
+    if missing:
+        raise SystemExit(
+            f"{len(missing)} cable/pipe the examples route is absent from the full manifest, so "
+            "the small one would ship without it:\n  "
+            + "\n  ".join(missing)
+            + "\nre-run the extractor, or reconcile dataset/pipes.py with what the dump names."
+        )
+    return keys
 
 
 #: The real GT block that stands in for the power source the adapter synthesizes. ``Power Source

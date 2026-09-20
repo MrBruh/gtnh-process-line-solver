@@ -40,6 +40,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from gtnh_solver.dataset.pipes import manifest_names
 from gtnh_solver.dataset.roots import resolve_dataset_path
 from gtnh_solver.dataset.schema import MultiblockDoc, Variant, load_multiblock_doc
 
@@ -308,11 +309,13 @@ class TextureManifest:
             block, meta = key.rsplit("|", 1)
             hatch_names[index] = name
             self._hatches[index] = (block, int(meta))
-        # Pipe index: a cable/pipe dataset name ("cable.tin.02", "gt_pipe_bronze") -> its
-        # (block, meta). EXACT names only, with none of ``mte_block``'s normalizing fallback ladder:
-        # both sides of this join are generated from the same policy table (``dataset/pipes.py``),
-        # so a near-miss means the manifest is short, not that the name needs massaging - and a
-        # fuzzy match here is precisely how a route would render as a confidently wrong cable.
+        # Pipe index: a cable/pipe name as the DUMP spelled it ("cable.tin.02" up to 2.8.4, "2x Tin
+        # Cable" from 2.9) -> its (block, meta). Indexed verbatim and looked up verbatim; the two
+        # spellings are reconciled on the asking side (``pipe_block``), where ``dataset/pipes.py``
+        # knows which names mean the same block. EXACT names either way, with none of
+        # ``mte_block``'s normalizing fallback ladder: a near-miss means the manifest is short, not
+        # that the name needs massaging, and a fuzzy match here is precisely how a route would
+        # render as a confidently wrong cable.
         self._pipes_by_name: dict[str, tuple[str, int]] = {}
         for key, entry in self._blocks.items():
             name = entry.get("display_name")
@@ -440,13 +443,19 @@ class TextureManifest:
         """The ``(block, meta)`` of the cable or pipe named ``display_name``, or ``None``.
 
         The analogue of :meth:`hatch_block` for routes, and deliberately the strictest lookup in
-        this class: an exact name or nothing. ``dataset/pipes.py`` generates the name a route
-        publishes and the extractor recorded the same string, so there is no locale, tier prefix or
-        flavour word to reconcile - and a route that resolves to *some other* cable is the
-        unrecoverable failure (docs/dataset-extraction/texture-resolution.md), where a route that
-        resolves to nothing merely keeps its flat bar.
+        this class: an exact name or nothing. It tries each spelling ``dataset/pipes.py`` knows
+        this block by (``manifest_names``, newest dump first), because GT renamed them at 2.9 and a
+        manifest carries one spelling or the other (#176) - but every candidate is still matched
+        whole, with none of ``mte_block``'s normalizing ladder. A route that resolves to *some
+        other* cable is the unrecoverable failure
+        (docs/dataset-extraction/texture-resolution.md), where a route that resolves to nothing
+        merely keeps its flat bar.
         """
-        return self._pipes_by_name.get(display_name)
+        for name in manifest_names(display_name):
+            found = self._pipes_by_name.get(name)
+            if found is not None:
+                return found
+        return None
 
     def display_name(self, block: str, meta: int) -> str | None:
         """The name the pack shows for ``(block, meta)``, or ``None`` if the manifest has none.
@@ -1307,12 +1316,20 @@ def texturize_scene(
         )
     if textured_cells or flat_cells:
         _log.info(
-            "textures: %d/%d route cell(s) drawn as real cable/pipe blocks%s",
+            "textures: %d/%d route cell(s) drawn as real cable/pipe blocks",
             textured_cells,
             textured_cells + flat_cells,
-            f"; unresolved: {', '.join(summary.unresolved_route_blocks)}"
-            if summary.unresolved_route_blocks
-            else "",
+        )
+    if summary.unresolved_route_blocks:
+        # Warn, not info. The flat bar a route with NO material keeps is a correct render, and this
+        # one looks identical - but it is a route that named a block and did not get it, which
+        # means the manifest is short (a dump the names do not join against, #176) and wants a
+        # re-dump. Only this line tells the two apart.
+        _log.warning(
+            "textures: %d cable/pipe block(s) a route asked for are not in the manifest, so those "
+            "cells keep a flat bar: %s; re-run the extractor or check dataset/pipes.py",
+            len(summary.unresolved_route_blocks),
+            ", ".join(summary.unresolved_route_blocks),
         )
     if summary.unskinned_blocks:
         # The checkerboard makes the gap visible in the render; this warning is what makes it
