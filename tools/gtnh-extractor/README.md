@@ -371,8 +371,10 @@ Notes specific to a client run:
 - **Icon injection defaults off on a client** and on for a server. Writing `NamedIcon` stubs over
   live sprites would both mask the difference a client run exists to capture and race the render
   thread, which is reading those same fields. `-PinjectIcons=true|false` overrides either default.
-- **It cannot run unattended.** It needs a GL window and a human to load a world, so it is not a CI
-  gate and does not replace `runServer` for automation. Nothing in CI runs the extractor either way.
+- **It needs a GL window, so it is still not a CI gate.** `-PautoWorld=true` removes the human, but
+  not the window: 1.7.10 is LWJGL2 and needs a real OpenGL context, which is exactly what stitches
+  the atlas this route reads. Scriptable on a desktop, not headless. Nothing in CI runs the
+  extractor either way.
 - `runClient` gets the same `-P` properties as `runServer`; `build.gradle.kts` forwards them to both
   run families by prefix. Plain `runClient` boots on the pinned toolchain; `runClient17/21/25` are
   lwjgl3ify fallbacks that have not been needed.

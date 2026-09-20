@@ -87,9 +87,17 @@ where the client reads the sprite actually bound:
 
 ## What the client run costs
 
-- **A GL window and a human.** `DumperMod` fires on `FMLServerStartedEvent`, which a client raises
-  for its integrated server, so someone has to click through to a single-player world. Unattended
-  runs are out. Nothing in CI references the extractor, so nothing is lost today.
+- **A GL window, but not a human.** `DumperMod` fires on `FMLServerStartedEvent`, which a client
+  raises for its integrated server, so a world has to be loaded. `-PautoWorld=true` loads one:
+  `ClientProxy` waits for the main menu and makes the same `Minecraft.launchIntegratedServer` call
+  the Create New World button makes, on a superflat scratch world it owns and is allowed to delete.
+  A 2.9 client dump then runs start to finish in **1 m 27 s with nobody at the keyboard**, and
+  produces a manifest byte-for-byte identical to the clicked one.
+
+  The GL window is not removable. 1.7.10 is LWJGL2, which needs a real OpenGL context, and the whole
+  point of the client route is reading the atlas that context stitches. It can be minimised out of
+  the way (measured: no effect on the dump, 1 m 27 s minimised against 1 m 29 s visible), but a
+  headless client is not available on Windows. So this is scriptable, and still not a CI job.
 - **Icon injection is off.** A client must not write `NamedIcon` stubs over live sprites: the render
   thread is reading those fields, and it would mask the very difference being measured. Both client
   runs above had `-PinjectIcons` defaulted off and still resolved everything, which means
@@ -184,7 +192,8 @@ spent on the wrong side of the problem.
 Two caveats on the retirement, neither of which changes the recommendation:
 
 1. **Keep the server path working until the client path is the default.** The client route is proven
-   as a *superset*, not as a replacement, and it cannot run unattended.
+   as a *superset*, not as a replacement. It is scriptable now that `-PautoWorld=true` loads its own
+   world, but it still needs a GL window, so it cannot become a CI gate the way `runServer` could.
 2. **Retire in a separate change, deliberately.** This spike added the client route and deleted
    nothing, which is what it was scoped to do.
 
@@ -204,7 +213,8 @@ cd tools/gtnh-extractor
   "-PmodVersions=GT5-Unofficial=<ver>,StructureLib=<ver>"
 ```
 
-Then click through to a throwaway single-player world. Measure with
+Add `-PautoWorld=true` and it loads its own scratch world; without it, click through to a
+throwaway single-player world. Measure with
 `gtnh-solve --dataset-coverage --dataset-version <label>` after staging the manifest under
 `data/<label>/textures/manifest.json`.
 
