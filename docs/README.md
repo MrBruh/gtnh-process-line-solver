@@ -15,6 +15,7 @@ diverge, the doc records the intent, so reconcile one to the other and say which
 | [ROADMAP.md](ROADMAP.md) | The phased v1 plan (Phase 1 thin slice, Phase 2 optimizer core), the parallel lanes, and the deferred v1.1+ work. |
 | [TESTING.md](TESTING.md) | The testing strategy given there is no headless GT simulator: independent validator, hypothesis property tests, golden corpus. |
 | **[dataset-extraction/](dataset-extraction/)** | How the physical dataset, multiblock structures and textures, is extracted from GT5-Unofficial. Its files are below. |
+| **[spikes/](spikes/)** | Design spikes: a reviewed design for a change that has not been built yet, one file per issue, named `<issue>-<slug>.md`. A spike is a *proposal plus its evidence*, not a record of what the code does, so read it as intent for an issue rather than as a description of `src/`. Its files are below. |
 
 ### dataset-extraction/
 
@@ -23,6 +24,12 @@ diverge, the doc records the intent, so reconcile one to the other and say which
 | [requirements.md](dataset-extraction/requirements.md) | What the extraction pipeline must achieve: its outputs, constraints, and acceptance criteria (the *what*). |
 | [implementation.md](dataset-extraction/implementation.md) | How the code achieves it: the Java extractor and the Python consumer, mechanism by mechanism (the *how*). |
 | [texture-resolution.md](dataset-extraction/texture-resolution.md) | Deep dive on the texture pass: the routes `TextureDumper` tries to turn a `(block, meta)` into a sprite name, why a headless dedicated server needs more than one, and what is still unreachable. |
+
+### spikes/
+
+| Doc | One line |
+|-----|----------|
+| [164-channel-capacity.md](spikes/164-channel-capacity.md) | The capacity model for lifting the one-route-per-cell cap, what the validator would assert instead, and the measurement showing the parallel-sand gap is a terminal-docking rule rather than a capacity one. |
 
 ## Keeping this current
 
