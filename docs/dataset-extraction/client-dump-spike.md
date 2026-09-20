@@ -112,6 +112,38 @@ it against the block's own registry domain, which is correct for the un-annotate
 fields and therefore a plausible guess, put 34 unfetchable paths in the first 2.8.4 client manifest.
 Fixed, re-measured, zero remaining.
 
+## The casing table yields to the live sprite
+
+The first client dumps still took their casing sprites from `CASING_ICON_TABLE`, because
+`dumpPlainBlocks` tried the table before `getIcon`. That ordering is right on a server, where the
+call does not exist, and backwards on a client, where the table is a hand-transcribed copy of an
+answer the block will give directly. So on a client the tabled families now resolve per side through
+`getIcon` first, and fall back to the table only for a meta the live call cannot answer on all six
+faces. Scoped to those families deliberately: this is not a licence to prefer `getIcon` generally,
+because `BlockMachines.getIcon` is a vestigial stub that would skin every machine hull as an LV
+casing side.
+
+Measured by re-running the 2.9 client dump with the two orderings, which isolates the change exactly:
+
+- **0 metas where the table and the live sprite named different sprites.** The table is not lying at
+  2.9. The silent-wrong-sprite risk it carries is real but had not fired, and saying otherwise would
+  overstate what was found.
+- **3 metas gained their true top and bottom faces**, which the table had flattened to one sprite:
+
+  | meta | table, all six faces | live sprite, UP and DOWN |
+  |---|---|---|
+  | `gt.blockcasings9\|2` | `PRIMITIVE_WOODEN_CASING_SIDE` | `PRIMITIVE_WOODEN_CASING_TOP` |
+  | `gt.blockcasings10\|5` | `COMPRESSOR_PIPE_CASING` | `COMPRESSOR_PIPE_CASING_TOP` |
+  | `gt.blockcasings12\|4` | `NANOCHIP_FIREWALL_PROJECTION_CASING` | `NANOCHIP_FIREWALL_PROJECTION_CASING_TOP` |
+
+  Those three were being drawn with their side texture on the top and bottom, which is a visible
+  error in the previewer rather than a bookkeeping one.
+- 0 drawable keys gained or lost, coverage unchanged at 12 unresolved pairs and 13 of 296
+  multiblocks, and the server dump is byte-identical again (9998 / 1845 / 25430).
+
+`gt.blockcasings9|2` is one of the 5 entries the table can no longer resolve at 2.9, so it had been
+falling through to the single-face `getIcon` fallback. It now carries all six faces.
+
 ## What going client-side does NOT fix
 
 Three of 2.9's 13 remaining problems are unrelated to which JVM ran the dump:

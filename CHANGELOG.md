@@ -47,6 +47,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   right for the un-annotated `textureNames` fields, put 34 unfetchable paths like
   `assets/bartworks/textures/blocks/stone.png` in the first client manifest.
 
+  **On a client the transcribed casing table yields to the live sprite.** `dumpPlainBlocks` tried
+  `CASING_ICON_TABLE` before `getIcon`, which is right on a server (the call does not exist) and
+  backwards on a client (the table is a hand copy of what the block will answer directly). The
+  tabled families now resolve per side through `getIcon` first and keep the table as the fallback,
+  scoped to those families because `BlockMachines.getIcon` is a vestigial stub that would otherwise
+  skin every machine hull as an LV casing side. Re-running 2.9 with both orderings found **0 metas
+  where the two named different sprites**, so the table is not lying at 2.9, and **3 metas that the
+  table had flattened to a single face** now carry their real top and bottom:
+  `gt.blockcasings9|2`, `gt.blockcasings10|5` and `gt.blockcasings12|4` were each drawn with their
+  side texture on top and bottom.
+
   Measured across both packs, same binary and same pins, differing only in the host JVM: **2.9 goes
   from 261 unresolved pairs and 208 of 296 gapped multiblocks to 12 and 13 of 296; 2.8.4 from 45 and
   56 of 208 to 1 and 1 of 208.** Nothing resolves worse: 4642 drawable keys gained and 0 lost at

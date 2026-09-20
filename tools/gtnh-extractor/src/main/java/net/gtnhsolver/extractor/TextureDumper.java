@@ -1222,6 +1222,38 @@ final class TextureDumper {
     }
 
     /**
+     * Emit one meta from the block's own live sprites, per side when those differ.
+     *
+     * <p>
+     * Six faces rather than the single representative face the {@code getIcon} fallback samples,
+     * because the table this outranks carries per-side data ({@code [DOWN, UP, SIDE]}) and replacing
+     * it with one flattened face would trade a stale answer for a lossy one. All six or none, for
+     * the same reason {@link #emitTableCasing} refuses a half-resolvable meta: half an answer is not
+     * worth keeping, and the gap is the honest record.
+     */
+    private boolean emitLiveSprite(Map<String, Entry> blocks, Block block, MethodHandle getIcon,
+        String registryName, int meta) {
+        NamedIcon[] perSide = new NamedIcon[SIDE_NAMES.length];
+        boolean uniform = true;
+        for (int side = 0; side < SIDE_NAMES.length; side++) {
+            perSide[side] = iconAt(block, getIcon, side, meta);
+            if (perSide[side] == null) {
+                return false;
+            }
+            uniform &= perSide[side].iconName.equals(perSide[0].iconName);
+        }
+        Entry entry = plainEntry(blocks, registryName, meta, block);
+        if (uniform) {
+            entry.sides.put("all", singleLayerState(perSide[0]));
+        } else {
+            for (int side = 0; side < SIDE_NAMES.length; side++) {
+                entry.sides.put(SIDE_NAMES[side], singleLayerState(perSide[side]));
+            }
+        }
+        return true;
+    }
+
+    /**
      * Every werkstoff id, as the meta set of a werkstoff casing block.
      *
      * <p>
@@ -1491,8 +1523,23 @@ final class TextureDumper {
                     stacks++;
                     continue;
                 }
+                // A tabled casing family, but we are on a client: ASK THE BLOCK. The table is a
+                // stand-in for precisely this call, transcribed by hand because the call does not
+                // exist on a server, and it is drifting - 5 of its entries no longer resolve at GT
+                // 2.9. Where the real call works, its answer is the sprite that actually gets drawn
+                // and the transcription is at best a copy of it. Scoped to the tabled families on
+                // purpose: this is not a licence to prefer getIcon generally, because
+                // BlockMachines.getIcon is a vestigial stub that would skin every machine hull as an
+                // LV casing side (see CASING_ICON_TABLE).
+                if (CLIENT_JVM && getIcon != null
+                    && CASING_ICON_TABLE.containsKey(registryName)
+                    && emitLiveSprite(blocks, block, getIcon, registryName, meta)) {
+                    stacks++;
+                    continue;
+                }
                 // A tabled casing family: its getIcon cannot be called server-side at all, so the
-                // meta-to-constant mapping comes from the transcribed table instead.
+                // meta-to-constant mapping comes from the transcribed table instead. Still the
+                // fallback on a client, for a meta the live call cannot answer for every face.
                 if (emitTableCasing(blocks, block, registryName, meta)) {
                     stacks++;
                     continue;
