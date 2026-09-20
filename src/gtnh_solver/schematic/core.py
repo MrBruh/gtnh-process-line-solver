@@ -138,6 +138,37 @@ def _gt_tile(
     return tile
 
 
+def _untypeable(what: str, manifest: TextureManifest) -> SchematicError:
+    """The refusal for a block whose ``te_base_type`` the consulted manifest does not carry.
+
+    **Which manifest answered is half the message** (#166). Resolution prefers the newest local
+    ``data/<version>/`` dump over the committed ``data/textures/manifest.json``, so a dump generated
+    before #158 added the field shadows a committed manifest that has it. The old wording said only
+    "the manifest" and pointed at #158, which reads as "the shipped data is stale" when the truth is
+    the reverse; that misreading is what produced a wrong bug report. So the message names the file
+    it read, dates it, and distinguishes the two ways the field can be absent: a manifest carrying
+    it for **no** block predates the field, while one carrying it for others is merely short of this
+    block, and those want different fixes.
+    """
+    if manifest.carries_te_base_type:
+        why = (
+            "that manifest types other blocks but not this one, so it is short of this block "
+            "rather than old; regenerate the dataset "
+            "(docs/dataset-extraction/implementation.md)"
+        )
+    else:
+        why = (
+            "that manifest carries te_base_type for no block at all, so it predates the field "
+            "(GitHub #158) - if it is a local data/<version>/ dump it is shadowing the committed "
+            "data/textures/manifest.json, which does carry it (GitHub #166); re-run the extractor "
+            "for this pack, or pass --dataset-version to pin a newer dump"
+        )
+    return SchematicError(
+        f"{what} has no te_base_type in {manifest.origin()}, so its Data nibble is unknown and it "
+        f"would rebuild as the wrong kind of tile entity; {why}"
+    )
+
+
 def _cube_cell(
     cube: BlockCube, manifest: TextureManifest, front: Facing, origin: tuple[int, int, int]
 ) -> Cell:
@@ -145,7 +176,7 @@ def _cube_cell(
     kind = manifest.kind(cube.block, cube.meta)
     if kind is None:
         raise SchematicError(
-            f"{cube.block}|{cube.meta} is not in the texture manifest, so it cannot be typed; "
+            f"{cube.block}|{cube.meta} is not in {manifest.origin()}, so it cannot be typed; "
             "regenerate the dataset (docs/dataset-extraction/implementation.md)"
         )
     if kind == "block":
@@ -153,11 +184,7 @@ def _cube_cell(
 
     base = manifest.te_base_type(cube.block, cube.meta)
     if base is None:
-        raise SchematicError(
-            f"{cube.block}|{cube.meta} ({kind}) has no te_base_type, so its Data nibble is "
-            "unknown and it would rebuild as the wrong kind of tile entity; re-run the extractor "
-            "to refresh the manifest (GitHub #158)"
-        )
+        raise _untypeable(f"{cube.block}|{cube.meta} ({kind})", manifest)
     # A hatch points where the router put it; anything else rides the machine's placed front.
     side = Facing(cube.facing.lower()) if cube.facing is not None else front
     x, y, z = (cube.cell[i] - origin[i] for i in range(3))
@@ -180,13 +207,11 @@ def _route_cell(
         )
     found = manifest.pipe_block(str(name))
     if found is None:
-        raise SchematicError(f"{name} is not in the texture manifest; regenerate the dataset")
+        raise SchematicError(f"{name} is not in {manifest.origin()}; regenerate the dataset")
     block, meta = found
     base = manifest.te_base_type(block, meta)
     if base is None:
-        raise SchematicError(
-            f"{name} ({block}|{meta}) has no te_base_type; re-run the extractor (GitHub #158)"
-        )
+        raise _untypeable(f"{name} ({block}|{meta})", manifest)
     # mConnections is a ForgeDirection bitmask. NOTE: both golden files carry 0 throughout, so the
     # bit order is taken from ForgeDirection rather than confirmed against a real wired pipe - it
     # is the one thing here still wanting an in-game check (#96).

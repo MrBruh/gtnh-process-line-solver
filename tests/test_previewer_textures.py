@@ -1507,6 +1507,37 @@ def test_a_manifest_predating_the_field_still_loads() -> None:
     m = TextureManifest(raw)
     assert m.te_base_type("gregtech:gt.blockmachines", 611) is None
     assert m.mte_block("Basic Forge Hammer") == ("gregtech:gt.blockmachines", 611)  # still loads
+    assert not m.carries_te_base_type  # ...and says which kind of None that was
+
+
+def test_carrying_the_field_for_one_block_is_enough_to_prove_the_dump_knows_it() -> None:
+    # The flag separates "this dump predates #158" from "this dump is short of that block", which
+    # want different fixes. One typed entry settles it, even where the asked-for block is untyped.
+    raw = _base_type_manifest()
+    raw["blocks"]["gregtech:gt.blockmachines|612"] = {"kind": "mte", "sides": {}}
+    m = TextureManifest(raw)
+    assert m.carries_te_base_type
+    assert m.te_base_type("gregtech:gt.blockmachines", 612) is None
+
+
+def test_a_manifest_remembers_the_file_it_was_read_from() -> None:
+    """A refusal that says only "the manifest" names two different files depending on whose machine
+    is running, which is exactly how #166 got filed against the wrong one."""
+    m = TextureManifest.load(_COMMITTED_MANIFEST)
+    assert m.source == _COMMITTED_MANIFEST
+    assert m.generated_at is not None, "the committed manifest carries the extractor's stamp"
+    origin = m.origin()
+    assert str(_COMMITTED_MANIFEST) in origin, "which file answered"
+    assert m.generated_at in origin, "and when it was taken"
+
+
+def test_a_manifest_built_from_a_mapping_admits_it_has_no_file() -> None:
+    # The coverage report and the tests build one straight from parsed JSON. Naming a path it never
+    # read would be worse than saying there is none.
+    m = TextureManifest({"blocks": {}, "icons": {}})
+    assert m.source is None
+    assert m.generated_at is None
+    assert m.origin() == "an in-memory manifest"
 
 
 def test_the_committed_manifest_ships_the_power_source_stand_in() -> None:

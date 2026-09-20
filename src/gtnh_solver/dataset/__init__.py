@@ -40,7 +40,13 @@ from .pipes import (
     pipe_display_name,
     route_material,
 )
-from .roots import DEFAULT_DATA, list_versions, resolve_dataset_path
+from .roots import (
+    DEFAULT_DATA,
+    DatasetWarning,
+    generated_at,
+    list_versions,
+    resolve_dataset_path,
+)
 from .schema import (
     SCHEMA_VERSION,
     Block,
@@ -119,6 +125,8 @@ __all__ = [  # noqa: RUF022 - grouped by submodule, not alphabetized
     "load_physical_dataset",
     # dataset location (version-namespaced local folders + committed fixtures)
     "DEFAULT_DATA",
+    "DatasetWarning",
+    "generated_at",
     "list_versions",
     "resolve_dataset_path",
 ]
