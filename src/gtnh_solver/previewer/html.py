@@ -7,7 +7,11 @@ solid boxes skinned with their real GT casing texture where ``scene.textures`` s
 six per-face icons ride ``machine.texture``; a face with no resolved icon draws the missing-texture
 checkerboard, while a machine with no doc at all keeps a flat type-coloured box), with
 the machine name on the front face and, since a textured cube shows no name, a hover name tag that
-floats a block's machine name above it (raycast pick); a state control swaps every machine between
+floats above whatever the pointer picks out (raycast): a machine's name, a Super Chest/Tank's name
+AND what it holds, or - hovering a pipe or cable - the resource that route carries, its commodity
+and its rate, which is the only way to tell one noodle of a crossing bundle from the next (#155).
+Resource ids are shown verbatim as the plan carries them, never a display name invented here; a
+state control swaps every machine between
 its idle and running
 skin where the two differ (the running faces ride ``scene.texturesActive``, default idle); routes
 (cables and
@@ -62,7 +66,7 @@ _TEMPLATE = """<!doctype html>
 <style>__STYLE__</style>
 </head>
 <body>
-<div id="hud">loading...<div id="hint">drag: rotate &middot; right-drag / arrows: pan &middot; scroll: zoom &middot; hover: name</div></div>
+<div id="hud">loading...<div id="hint">drag: rotate &middot; right-drag / arrows: pan &middot; scroll: zoom &middot; hover: name / contents</div></div>
 <div id="legend"></div>
 <div id="controls">
   <span>layer <b id="layerVal">all</b></span>
@@ -102,7 +106,10 @@ _STYLE = """
   #nametag { position: fixed; z-index: 20; left: 0; top: 0; display: none; pointer-events: none;
              transform: translate(-50%, -100%); background: rgba(20,22,28,0.92);
              border: 1px solid #3a4150; border-radius: 4px; padding: 2px 7px; white-space: nowrap;
-             font-weight: 600; box-shadow: 0 2px 6px rgba(0,0,0,0.45); }
+             font-weight: 600; box-shadow: 0 2px 6px rgba(0,0,0,0.45); text-align: center; }
+  /* What the hovered thing holds or carries, under its headline: the same secondary weight the
+     legend's labels use, so the name/resource stays the thing the eye lands on. */
+  #nametag div + div { color: #aab2bd; font-weight: 400; }
 """
 
 #: The inline ``<script type="importmap">`` body, verbatim, for the same reason. Bare
@@ -400,11 +407,15 @@ function blockMaterials(faces) {
 }
 
 const centerById = {}, sizeById = {}, expandedById = {};
-// Hover identification (#): every machine box and every per-block cube is a raycast target tagged
-// with its machine id, so hovering any block floats that machine's name above it - the textures
-// alone don't say which machine is which. nameById maps the id to the label to show.
+// Hover identification (#): every machine box, per-block cube AND route block is a raycast target
+// tagged with what it is, so hovering any of them floats a tag above it - the textures alone don't
+// say which machine is which, and one pipe of a crossing bundle looks like the next. nameById maps
+// a machine id to its label; contentsById to what a boundary storage holds (#155), which is the
+// only thing that tells four identical Super Tanks apart. A machine that holds nothing keeps the
+// single type line its tag always was.
 const hoverables = [];
 const nameById = Object.fromEntries(SCENE.machines.map((m) => [m.id, m.type]));
+const contentsById = Object.fromEntries(SCENE.machines.map((m) => [m.id, m.contents || []]));
 for (const m of SCENE.machines) {
   const [sx, sy, sz] = m.size;
   const pos = new THREE.Vector3(m.cell[0] + sx / 2, m.cell[1] + sy / 2, m.cell[2] + sz / 2);
@@ -470,6 +481,12 @@ for (const r of SCENE.routes) {
       if (faces) gtBlockUVs(geo, b.center, e.cell);   // sample the sprite the way Minecraft does
       const mesh = new THREE.Mesh(geo, faces || routeFlat(r.color));
       mesh.position.set(b.center[0], b.center[1], b.center[2]);
+      // Hover -> what this pipe or cable carries (#155). Tagged with both the ROUTE and the CELL:
+      // the route says what flows and how fast, the cell says where to float the tag, since one
+      // route spans a whole layout and its middle is nowhere near the block under the pointer.
+      mesh.userData.route = r;
+      mesh.userData.cell = e.cell;
+      hoverables.push(mesh);
       track(mesh, y, y);
     }
   }
@@ -658,32 +675,77 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// Hover name tag: raycast the pointer against the machine boxes + block cubes and float the hovered
-// machine's name above its centre. Only VISIBLE targets count (the layer slider hides blocks), and
-// the tag reprojects every frame so it stays glued to the block while the camera orbits.
+// Hover name tag: raycast the pointer against the machine boxes, block cubes and route blocks, and
+// float a tag over whatever is under it - a machine's name (plus what a Super Chest/Tank holds), or
+// what a pipe carries, its commodity and its rate (#155). Only VISIBLE targets count (the layer
+// slider hides blocks), and the tag reprojects every frame so it stays glued while the camera
+// orbits.
+//
+// The hover state carries its ANCHOR, not just an id, because the two targets anchor differently: a
+// machine's tag sits above the box it names, but a route spans the whole layout, so its tag belongs
+// at the hovered CELL - the block under the pointer, not the middle of the run. Both put it the
+// same 0.15 above the block's top face. The lines are produced by a closure rather than baked at
+// hover time so the rate unit toggle (#rateUnit) is reflected in a tag that is already open.
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const nametag = document.getElementById('nametag');
-let hoverId = null;
+let hover = null;   // { lines: () => string[], anchor: [x, y, z] }
+function machineHover(id) {
+  const c = centerById[id];
+  if (!c || !nameById[id]) return null;
+  const s = sizeById[id] || [1, 1, 1];
+  // A boundary storage's contents under its type, in the system-i/o panel's own words: 'in:' is a
+  // buffer the builder keeps stocked, 'out:' one a product collects in. A machine that holds
+  // nothing adds no line at all, so its tag is the single name it has always been.
+  return {
+    lines: () => [nameById[id], ...contentsById[id].map((c) => c.flow + ': ' + c.resource)],
+    anchor: [c.x, c.y + s[1] / 2 + 0.15, c.z],
+  };
+}
+function routeHover(r, cell) {
+  return { lines: () => routeLines(r), anchor: [cell[0] + 0.5, cell[1] + 1 + 0.15, cell[2] + 0.5] };
+}
+// A route's tag: the resource it carries, then its commodity and rate. Resource ids are shown
+// EXACTLY as the plan carries them (`gregtech:gt.metaitem.01@2032`, `minecraft:log@32767`), the
+// same way the system-i/o panel prints them - an id a builder can search NEI for beats a display
+// name we would have to author from memory (#155, and see route_blocks on GT material names). A
+// power net names no fluid or item, so there its commodity is the headline instead.
+function routeLines(r) {
+  const sfx = perSecond ? '/s' : '/t';
+  const rate = r.rate != null ? rateText(r.rate) + ' ' + r.unit + sfx : '';
+  const detail = ((r.resource ? r.commodity + '   ' : '') + rate).trim();
+  return detail ? [r.resource || r.commodity, detail] : [r.resource || r.commodity];
+}
 renderer.domElement.addEventListener('pointermove', (ev) => {
   const rect = renderer.domElement.getBoundingClientRect();
   pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(pointer, camera);
   const hit = raycaster.intersectObjects(hoverables, false).find((h) => h.object.visible);
-  hoverId = hit ? hit.object.userData.machineId : null;
+  const what = hit ? hit.object.userData : null;
+  if (!what) hover = null;
+  else if (what.route) hover = routeHover(what.route, what.cell);
+  else hover = machineHover(what.machineId);
 });
-renderer.domElement.addEventListener('pointerleave', () => { hoverId = null; });
+renderer.domElement.addEventListener('pointerleave', () => { hover = null; });
 const _tagPos = new THREE.Vector3();
+let _tagText = null;
 function updateNametag() {
-  const c = hoverId != null ? centerById[hoverId] : null;
-  if (!c || !nameById[hoverId]) { nametag.style.display = 'none'; return; }
-  const s = sizeById[hoverId] || [1, 1, 1];
-  _tagPos.set(c.x, c.y + s[1] / 2 + 0.15, c.z).project(camera);
+  const lines = hover ? hover.lines() : null;
+  if (!lines) { nametag.style.display = 'none'; return; }
+  const a = hover.anchor;
+  _tagPos.set(a[0], a[1], a[2]).project(camera);
   if (_tagPos.z >= 1) { nametag.style.display = 'none'; return; }   // behind the camera
   nametag.style.left = ((_tagPos.x * 0.5 + 0.5) * window.innerWidth) + 'px';
   nametag.style.top = ((-_tagPos.y * 0.5 + 0.5) * window.innerHeight) + 'px';
-  nametag.textContent = nameById[hoverId];
+  // One DOM text node per line, never innerHTML: every line here is a machine name or a resource
+  // id out of the plan, which is somebody else's file (#111). Rebuilt only when the text actually
+  // changes, so an open tag is not re-created 60 times a second.
+  const text = lines.join('\\n');
+  if (text !== _tagText) {
+    _tagText = text;
+    nametag.replaceChildren(...lines.map((t) => el('div', t)));
+  }
   nametag.style.display = 'block';
 }
 
