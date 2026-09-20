@@ -2498,6 +2498,55 @@ final class TextureDumper {
 
     static {
         MATERIAL_INDEXED_BLOCKS.add("gregtech:gt.blockframes");
+        // Same indexing, same evidence: BlockSheetMetal holds an Int2ObjectFunction<IOreMaterial>
+        // keyed by meta, and its sprites live under materialicons/<TEXSET>/sheetmetal.png exactly as
+        // the frame's do under .../frameGt.png. Dumped 2.9 multiblocks reference gt.sheetmetal|81,
+        // |305, |324 and |974, none of which a 0..15 scan can reach, so 11 of the 12 pairs a 2.9
+        // dump could not draw were this one block. Widening alone is not enough though - see
+        // realMetas, and note this only pays off in a client dump, where getIcon can be called. (#174)
+        MATERIAL_INDEXED_BLOCKS.add("gregtech:gt.sheetmetal");
+    }
+
+    /**
+     * The material map a material-indexed block keys its sub-blocks by, or null if it has none.
+     *
+     * <p>
+     * This is the block's own answer to "is meta N a real sub-block", and it is needed because the
+     * display-name test in {@link #realMetas} cannot answer it for every block. GT 5.09.54.20's
+     * {@code BlockSheetMetal.getLocalizedName(int)} falls back to {@code Materials._NULL} for an
+     * unknown meta, so every meta to 1000 "named itself" and the test accepted all of them; its
+     * {@code getTextures(int)} then answers any meta too, with {@code TextureSet.SET_NONE}. The two
+     * together emitted <b>1000 entries of which 480 were generic filler</b>, which is the same trap
+     * the coil block set for a blanket wide scan, one step further along.
+     *
+     * <p>
+     * {@code materials.get(meta)} returns null for a slot no material occupies (GT's own is
+     * {@code meta -> GTDataUtils.getIndexSafe(sGeneratedMaterials, meta)}), so asking it turns that
+     * sweep into exactly the real set. Read as a field and invoked reflectively: the value is a
+     * fastutil {@code Int2ObjectFunction}, usually a lambda, so the method has to be made accessible
+     * before it can be called.
+     *
+     * <p>
+     * Note what this is NOT bounded by. {@code BlockSheetMetal} also declares a {@code maxMeta}, and
+     * it looks like the natural limit until you read the construction site: {@code gt.sheetmetal}
+     * passes 1000, exactly the sweep width already in use, while {@code bw.sheetmetal} passes
+     * {@code Short.MAX_VALUE}. The declared bound is either redundant or far worse, so the material
+     * map is the thing to ask.
+     */
+    private static Method materialLookup(Block block) {
+        Object materials = readField(block, "materials");
+        if (materials == null) {
+            return null;
+        }
+        try {
+            Method get = materials.getClass()
+                .getMethod("get", int.class);
+            get.setAccessible(true);
+            return get;
+        } catch (Throwable t) {
+            LOG.debug("gtnh-extractor: no usable materials.get(int) on {}: {}", block, t.toString());
+            return null;
+        }
     }
 
     /**
@@ -2521,9 +2570,20 @@ final class TextureDumper {
         Item item = Item.getItemFromBlock(block);
         TreeSet<Integer> metas = new TreeSet<>();
         if (item != null) {
-            int limit = MATERIAL_INDEXED_BLOCKS.contains(registryName) ? GregTechAPI.sGeneratedMaterials.length : 16;
+            boolean wide = MATERIAL_INDEXED_BLOCKS.contains(registryName);
+            int limit = wide ? GregTechAPI.sGeneratedMaterials.length : 16;
+            // Ask the block's own material map where it has one: a block that answers a display
+            // name for every meta cannot be bounded by asking it for names. See materialLookup.
+            Method materials = wide ? materialLookup(block) : null;
+            Object materialsOwner = materials == null ? null : readField(block, "materials");
             for (int meta = 0; meta < limit; meta++) {
                 try {
+                    if (materials != null) {
+                        if (materials.invoke(materialsOwner, meta) != null) {
+                            metas.add(meta);
+                        }
+                        continue;
+                    }
                     String name = new ItemStack(item, 1, meta).getDisplayName();
                     if (name != null && !name.contains(".name")) {
                         metas.add(meta);
