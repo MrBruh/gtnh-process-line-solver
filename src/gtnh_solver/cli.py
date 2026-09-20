@@ -32,7 +32,15 @@ from typing import Final
 from pydantic import ValidationError
 
 from gtnh_solver import __version__
-from gtnh_solver.adapter import adapt_file
+from gtnh_solver.adapter import (
+    Plan,
+    PlanProducer,
+    describe_markers,
+    load_plan,
+    plan_pack_version,
+    resolve_producer,
+    to_input_ir,
+)
 from gtnh_solver.buildguide import build_guide
 from gtnh_solver.dataset import PhysicalDataset, list_versions, load_physical_dataset
 from gtnh_solver.dataset.coverage import format_report, measure
@@ -97,6 +105,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--plan-schema",
+        choices=("auto", *(producer.value for producer in PlanProducer)),
+        default="auto",
+        help=(
+            "which gtnh-factory-flow fork exported the plan: 'mrbruh-v2' (carries a resolved "
+            "throughput block) or 'arodoid-v1' (carries machineHandlers instead); 'auto', "
+            "the default, reads the plan's own structure and warns if it cannot tell"
+        ),
+    )
+    parser.add_argument(
         "--dataset-version",
         metavar="VERSION",
         help=(
@@ -118,6 +136,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="list the generated dataset versions available under data/, then exit",
     )
     return parser
+
+
+def _dataset_version_for(plan: Plan, pinned: str | None) -> str | None:
+    """Which ``data/<version>/`` dump to load: the pin, else the pack the plan names, else nothing.
+
+    Following the plan keeps a 2.9 plan from silently resolving its footprints against a 2.8.4 dump
+    merely because that is the newest one on the machine (the default resolution is by modification
+    time, not by pack).
+
+    **A derived version is a preference, not a pin.** If the plan names a pack no local dump
+    provides, this returns ``None`` so resolution falls back to the newest dump, or the committed
+    fixtures - best-effort footprints plus the adapter's mismatch warning, which beats pinning a
+    folder that does not exist and losing every real footprint to the 1x1x1 default. An explicit
+    ``pinned`` is never second-guessed this way: asking for a missing version should fail visibly.
+    """
+    if pinned is not None:
+        return pinned
+    stated = plan_pack_version(plan)
+    if stated is None:
+        return None
+    if any(v.name == stated and (v / "multiblocks").is_dir() for v in list_versions()):
+        return stated
+    return None
 
 
 def _load_physical_or_warn(version: str | None = None) -> PhysicalDataset | None:
@@ -315,9 +356,32 @@ def main(argv: list[str] | None = None) -> int:
         print("error: an export path is required (try 'gtnh-solve --help')", file=sys.stderr)
         return 2
 
-    physical = _load_physical_or_warn(args.dataset_version)  # real footprints; None -> 1x1x1
+    # The plan is loaded before the dataset, because it says which pack it was balanced against and
+    # that is the better default for which dump to load. Loaded here rather than through adapt_file
+    # so an undetermined producer can be reported first: the advice is to pass --plan-schema, which
+    # only the CLI can give.
     try:
-        problem = adapt_file(args.export, physical=physical)
+        plan = load_plan(args.export)
+    except (OSError, ValueError, ValidationError) as exc:
+        print(f"error: could not load {args.export!r}: {exc}", file=sys.stderr)
+        return 2
+
+    # "auto" is the absence of a pin, which is what resolve_producer's None already means.
+    pin = None if args.plan_schema == "auto" else PlanProducer(args.plan_schema)
+    producer = resolve_producer(plan, pin)
+    if producer is None:
+        print(
+            f"warning: could not tell which gtnh-factory-flow fork exported {args.export} "
+            f"({describe_markers(plan)}); producer-specific handling is disabled. "
+            f"Pass --plan-schema to say which it is.",
+            file=sys.stderr,
+        )
+
+    dataset_version = _dataset_version_for(plan, args.dataset_version)
+    physical = _load_physical_or_warn(dataset_version)  # real footprints; None -> 1x1x1
+
+    try:
+        problem = to_input_ir(plan, physical=physical, producer=producer)
     except (OSError, ValueError, ValidationError) as exc:
         print(f"error: could not load {args.export!r}: {exc}", file=sys.stderr)
         return 2
@@ -342,7 +406,9 @@ def main(argv: list[str] | None = None) -> int:
         # the preview path so the normal build-guide run stays quiet.
         _enable_previewer_logging()
         try:
-            write_preview(problem, layout, args.preview, version=args.dataset_version)
+            # The same resolved version the footprints came from, so the textures cannot be drawn
+            # from a different pack than the geometry.
+            write_preview(problem, layout, args.preview, version=dataset_version)
         except OSError as exc:
             print(f"error: could not write {args.preview}: {exc}", file=sys.stderr)
             return 2

@@ -23,6 +23,92 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   machines. Every record stays in the new `PhysicalDataset.records` and addressable by `block_key`.
 
   Two files claiming the same **block_key** is still an error: that is one controller dumped twice.
+### Fixed
+- **Multiblocks resolve to their real footprint instead of silently becoming one block.** The
+  exporter names a machine by its localized **recipe map** ("Blast Furnace", "Macerator"); the
+  structure dump is keyed by the **controller's** own display name ("Electric Blast Furnace",
+  "Industrial Maceration Stack"). For a GT++ machine the two differ, so joining on the recipe-map
+  name resolved only 5 of 9 nodes on one real plan and 34 of 53 on another, dropping the rest to the
+  1x1x1 default: a real multiblock modelled as a single block, which is the "coarse-cell abstraction
+  can lie" failure arriving quietly.
+
+  The join now tries, in order, the controller-block id (`registry@meta`, exact and unbeatable), then
+  the node's effective `machineHandlers` entry's `label`, which *is* the controller name, then the
+  recipe-map name, each also through a three-entry alias table for the machines whose handler list is
+  empty. That takes those two plans to **9 of 9** and **51 of 53**. The footprint and the hatch
+  ceiling now come from the one resolved record rather than two separate lookups, so they cannot
+  describe different built forms of the same machine.
+
+  Additive for the committed fixtures: they carry `machineBlock`, so the exact identity already
+  resolved every one of their machines and the name ladder adds nothing.
+
+- **A census miss is read according to what the machine is.** A census dump enumerates every
+  multiblock controller, so a miss is a positive fact, but the fact depends on `handler.kind` and the
+  two readings are opposites. `kind: "single"` (or no handler, which is every MrBruh-fork plan) means
+  the machine is basic, so GT's `maxAmperesIn` ceiling applies and the under-supply check can run.
+  `kind: "multiblock"` means the **dump** is incomplete, not that the machine is basic: claiming it
+  would state the wrong intake formula and reserve 1x1x1 for a real structure, so it is reported and
+  left unclaimed. Conflating the two is how an alias table swallows a genuine extraction gap.
+
+  The alias table is a stopgap and says so: every entry is a wrong answer waiting for a pack release
+  to move a display name. The durable fix is the controller-block id.
+- **Power and throughput follow the figures a machine actually runs at, not the recipe's base
+  values.** `recipe.eut` and `recipe.durationTicks` are the values at the recipe's *minimum* tier; a
+  machine run above it draws 4x and runs 2x faster per step. The adapter read the base values, so a
+  whole plan came out **6.1x** under-powered and a single machine up to **256x** (an EV machine on an
+  LV recipe is 4³), with every pipe sized for a matching fraction of its flow. Under-sized cable is
+  the one failure a builder cannot see in the preview.
+
+  Both forks already ship the real per-tier figures in `recipes[].runtimeCalculation`, computed
+  against GT's own `OverclockCalculator`, so consuming them needs **no producer branch**. The draw
+  now resolves best-source-first: a `resolved` block, then the matched runtime variant, then the base
+  value. `resolved` stays on top because it is the exporter's own balancer and accounts for machine
+  count and parallelism a variant cannot see; the two disagree by 24.5x on one real node with nothing
+  in the export to arbitrate, which is why this is a ladder and not a single source.
+
+  Selection matches on the variant's **fields**, never on its id: real ids carry suffixes beyond the
+  tier and coil (`tier-ev-perfect-oc`), so composing an id silently misses about half the nodes of a
+  real plan. A coil-bearing machine is narrowed by the node's coil, and a node that leaves the coil
+  unstated against coil-keyed variants stays **unmatched** rather than guessing, since every coil is a
+  different heat bonus and so a different EU/t.
+
+  Verified additive: all three committed fixtures run at their recipe's own tier, so their EU/t,
+  durations and layouts are untouched.
+
+- **`_supply_tier` no longer re-tiers an arodoid plan.** That workaround absorbs an implausible
+  draw from the MrBruh fork's recipe model; pointed at figures from GT's own calculator it would move
+  machines that were already right. Disabled only for the producer positively known not to need it,
+  so an undetermined plan keeps the defensive behaviour (it changes only the voltage supplied, never
+  the stated draw).
+
+- **A machine's unmodelled parallelism is reported.** A GT++ multiblock can run parallel batches set
+  by a machine-configuration control, and that multiplier appears in neither `node.parallel` (always
+  1 on every plan seen) nor any runtime variant (all of which report `parallel: 1`). It is **not**
+  composed into the draw: doing so would re-derive the exporter's machine model here, and these
+  multipliers are fractional in practice (1.5, 2.5, 3.5), so they are throughput factors rather than
+  batch counts and several GT machines carry a parallel EU discount. An `AdapterWarning` names the
+  machine and the factor, keeping the error visible and one-directional.
+
+  The provenance warning added above is correspondingly narrowed: a node covered by a matched variant
+  is no longer a fallback, so a plan whose figures are now right stays silent.
+- **`nodes[].recipeInputOverrides` is applied, so a wildcard recipe input no longer fails the
+  load.** A GT recipe can accept any metadata of an item (`minecraft:log@32767`, Forge's
+  `OreDictionary.WILDCARD_VALUE`), and the exporter records which one the player actually feeds it.
+  The adapter built ports from `recipe.inputs[].id` only, so the edge named `minecraft:log@1`, the
+  machine had no such port, and the load died on `references unknown port`. Both shipped MrBruh
+  fixtures carry overrides and only escaped this because theirs resolve to the id the recipe already
+  names.
+
+  **Only a narrowing is applied.** Real plans also carry overrides that name an entirely different
+  resource at that index (`oxygen` to `water`, `ammonia` to `hydrochloricacid_gt5u`), always one the
+  recipe already lists at the *next* index. Applying those drops a required input and duplicates
+  another, silently shrinking the port set, and nothing in the export distinguishes a stale plan
+  from a deliberate swap. Such an override is refused, the recipe's own input kept, and an
+  `AdapterWarning` names both resources.
+
+  Overrides resolve **per node and never onto the recipe**, which one node's siblings share, and the
+  throughput lookup reads the same resolved list: matching rates against the recipe's own `@32767`
+  entry would find nothing and rate the net at zero.
 
 ### Added
 - **The texture dump can run in a client JVM, where nothing is `@SideOnly`-stripped
@@ -223,6 +309,51 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
   Yields a 296-controller census dump against 2.8.4's 208. Local-only per the dataset policy, so the
   dump itself is not committed; only the pins and the port are.
+- **The adapter knows which gtnh-factory-flow fork exported a plan, and says so when it cannot
+  tell (`adapter/producer.py`, `--plan-schema`).** Two live forks emit plans this solver loads, and
+  `schemaVersion` cannot tell them apart: MrBruh's bumped to 2 when it added the `resolved` block,
+  arodoid's kept 1 through a thousand diverging commits. An arodoid plan therefore used
+  to load with **zero warnings** and then size its power network from `recipe.eut`, the
+  *pre-overclock* figure - 6.1x low across a whole plan and 256x low on a single machine, because
+  an EV machine running an LV recipe draws 4^3 times its base value. Under-sized cable is the one
+  failure a builder cannot see in the preview.
+
+  Detection reads structural markers instead of the version integer: `resolved`/`app` (or
+  `schemaVersion >= 2`) mark MrBruh's fork, `recipes[].machineHandlers` marks arodoid's.
+  `--plan-schema {auto,mrbruh-v2,arodoid-v1}` pins it, `auto` is the default, and an
+  undetermined plan is reported on stderr with the evidence, since naming the fork on the command
+  line is advice only the CLI can give.
+
+  The new `AdapterWarning` fires **only where it can matter**: a plan with no resolved figures
+  whose own `machineHandlers` declare a machine `multiblock`. Base EU/t is exact for a single block
+  at its recipe's tier, so `examples/gtnh-parallel-sand.json` stays correctly silent. Detection
+  itself never warns - an undetermined result is normal for any hand-built plan, and warning there
+  would fire across the suite and teach readers to filter `AdapterWarning` out, costing us the one
+  warning that matters.
+
+- **`examples/gtnh-parallel-sand.json`**, the first committed export from the arodoid fork:
+  3 nodes, and the only fixture that exercises the single-block path (its Forge Hammers declare
+  `kind: "single"` and are correctly absent from the multiblock census).
+
+- **The physical dataset follows the pack the plan was balanced against.** `data/<version>/` dumps
+  have coexisted for a while, but which one loaded was decided by *modification time*, so a 2.9 plan
+  silently resolved its footprints against a 2.8.4 dump merely because that was the newest one on
+  the machine. The join from a plan's machine to its physical record is by display name, and names
+  move between pack releases, so a mismatch does not fail: it resolves some machines to the wrong
+  footprint and drops others to the 1x1x1 default.
+
+  Both forks state the pack per recipe (`source.datasetVersionId`, as `stable-2.8.4` or
+  `local-2.9.0-beta-2`), so that is now read, channel-stripped to name a `data/<version>/` folder,
+  and used as the default for `--dataset-version`. A plan whose recipes disagree, or that states
+  nothing, keeps the previous resolution. A **derived** version is a preference rather than a pin:
+  if no local dump provides it, resolution falls back instead of pinning a folder that does not
+  exist and losing every real footprint. An explicit `--dataset-version` is never second-guessed.
+
+  A remaining mismatch warns, naming both packs. The check abstains for a **non-census** dump: the
+  committed `data/multiblocks/` fixtures are a two-machine sample whose `pack_version` is nominal,
+  and they are what a fresh clone resolves to, so trusting it would greet every new contributor with
+  a spurious mismatch against the shipped examples.
+
 - **Hatches render as real GT hatch blocks, at their own facing, vertical ones included
   (`previewer/`, `tools/`).** A hatch was previously invisible: the previewer drew the casing block
   it displaced. It now resolves to the actual `(block, meta)` GT would place - an `Input Bus (HV)`,

@@ -15,23 +15,34 @@ Mapping (see docs/ARCHITECTURE.md, docs/IR.md):
                 recipe rate.
 - ``power``   -> a source machine + shared-amperage net per voltage tier feed the powered
                 machines (``power`` submodule, docs/DOMAIN.md); the export carries no source.
-                Each machine's EU/t draw comes from a v2 export's ``resolved`` block when it
-                covers the node (the exporter's balancer models overclocking, which
-                ``recipe.eut`` cannot); ``recipe.eut * parallel`` is the v1 fallback and the
-                cross-check - a mismatch warns (``AdapterWarning``) but resolved wins (#2).
 
-Footprints: single-block 1x1x1 by default, or a machine's real multiblock footprint when an
-optional physical dataset (``dataset.load_physical_dataset``) is passed and knows the type - see
-``to_input_ir(plan, physical=...)``; the bounding region is then sized to fit those footprints
-(``_bounding_region``). Still crude-on-purpose for Phase 1 (docs/ROADMAP.md): all four horizontal
-orientations for every machine, non-square bases included (``occupied_cells`` rotates the
-reserved box); hint-derived face constraints
-stay on the dataset record; and **multi-instance nodes (``machineCount > 1``) are rejected**
-rather than mapped - a net endpoint
-cannot address one instance of a group until routing is instance-aware (InputIR v1 dropped
-``Machine.count``; see ``ir/__init__.py``, docs/ROADMAP.md). The InputIR's own
-referential-integrity check is the validation gate: a dangling edge or commodity mismatch fails
-loud here, which is the adapter contract (docs/TESTING.md).
+**A node's EU/t and duration come from the best source the plan offers**, because the recipe's own
+``eut``/``durationTicks`` are the values at its MINIMUM tier and a machine run above that draws 4x
+and runs 2x faster per step::
+
+    resolved.totalEut          the exporter's own balancer; knows machine count and parallelism
+      |                        (cross-checked against the synthesis: mismatch warns, resolved wins)
+      v
+    matched runtimeCalculation variant    GT's own OverclockCalculator, per tier and coil
+      |                                  (matched on FIELDS - variant ids are not parseable)
+      v
+    recipe.eut * parallel      the base value; the floor, and a reported fallback
+
+**A machine is joined to the structure dump by its controller**, not by the recipe-map name the
+export leads with (``_physical_record``): controller-block id, then the handler's ``label``, then
+the recipe-map name, each through a small alias table. Footprints are single-block 1x1x1 until that
+join lands a record, so the solver runs with or without a ``data/multiblocks/`` dump, and the
+bounding region is sized to fit whatever footprints result (``_bounding_region``). What a *census*
+miss means depends on ``handler.kind`` and the two readings are opposites - see
+``_classify_census_miss``.
+
+Still crude-on-purpose for Phase 1 (docs/ROADMAP.md): all four horizontal orientations for every
+machine, non-square bases included (``occupied_cells`` rotates the reserved box); hint-derived face
+constraints stay on the dataset record; and **multi-instance nodes (``machineCount > 1``) are
+rejected** rather than mapped - a net endpoint cannot address one instance of a group until routing
+is instance-aware (InputIR v1 dropped ``Machine.count``; see ``ir/__init__.py``, docs/ROADMAP.md).
+The InputIR's own referential-integrity check is the validation gate: a dangling edge or commodity
+mismatch fails loud here, which is the adapter contract (docs/TESTING.md).
 """
 
 from __future__ import annotations
@@ -41,7 +52,7 @@ import math
 import warnings
 from pathlib import Path
 
-from gtnh_solver.dataset import PhysicalDataset
+from gtnh_solver.dataset import MachinePhysical, PhysicalDataset
 from gtnh_solver.ir import (
     CellBox,
     Commodity,
@@ -56,8 +67,18 @@ from gtnh_solver.ir import (
 from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 
 from ._errors import AdapterError, AdapterWarning
-from .plan import Edge, Node, Plan, Recipe, ResolvedMachine
+from .plan import (
+    Edge,
+    MachineHandler,
+    Node,
+    Plan,
+    Recipe,
+    ResolvedMachine,
+    Resource,
+    RuntimeVariant,
+)
 from .power import synthesize_power
+from .producer import PlanProducer, plan_pack_version, resolve_producer
 
 # Crude single-block physical defaults until the dataset lane provides real footprints/faces.
 _DEFAULT_FOOTPRINT = CellBox()  # 1x1x1
@@ -71,6 +92,8 @@ _STORAGE_TYPE = {"item": "Super Chest", "fluid": "Super Tank"}
 # the recipe-derived synthesis: wide enough for float noise, tight enough that any modelling
 # difference (overclocking, duty cycling) trips the warning.
 _RESOLVED_EUT_TOLERANCE = 1e-6
+#: The machine-configuration control that sets a GT++ multiblock's parallel batch count.
+_PARALLEL_CONTROL = "machineParallel"
 
 
 def load_plan(path: str | Path) -> Plan:
@@ -79,13 +102,19 @@ def load_plan(path: str | Path) -> Plan:
     return Plan.model_validate(data)
 
 
-def adapt_file(path: str | Path, *, physical: PhysicalDataset | None = None) -> InputIR:
+def adapt_file(
+    path: str | Path,
+    *,
+    physical: PhysicalDataset | None = None,
+    producer: PlanProducer | None = None,
+) -> InputIR:
     """Load an exported plan file and map it to the solver's ``InputIR``.
 
     ``physical`` is an optional multiblock dataset (``dataset.load_physical_dataset``); when given,
     a node whose machine type it knows gets that machine's real footprint (see :func:`to_input_ir`).
+    ``producer`` pins which gtnh-factory-flow fork exported the plan; ``None`` detects it.
     """
-    return to_input_ir(load_plan(path), physical=physical)
+    return to_input_ir(load_plan(path), physical=physical, producer=producer)
 
 
 def _block_key_for(recipe: Recipe, resolved: ResolvedMachine | None) -> str | None:
@@ -113,33 +142,87 @@ def _fluid_output_count(recipe: Recipe) -> int:
     return sum(1 for out in recipe.outputs if out.kind == "fluid")
 
 
-def _footprint_for(
-    machine_type: str,
-    physical: PhysicalDataset | None,
-    block_key: str | None = None,
-    fluid_outputs: int = 0,
-) -> CellBox:
-    """The footprint for a machine type: the dataset's real one if known, else the 1x1x1 default.
+#: Exporter recipe-map names whose machine our structure dump keys under a different name, where the
+#: export gives us no handler to bridge the two (its ``machineHandlers`` list is empty for these).
+#: Deliberately tiny and hand-checked. It is a **stopgap**, not a mapping layer: the durable fix is
+#: the controller-block id (``registry@meta``), which joins exactly and cannot rot on a rename, and
+#: every entry here is a silent wrong answer waiting for a pack release to move a display name.
+_MACHINE_NAME_ALIASES = {
+    "Chemical Plant": "ExxonMobil Chemical Plant",
+    "Multiblock Electrolyzer": "Industrial Electrolyzer",
+    "Large Sifter": "Large Sifter Control Block",
+}
 
-    Opt-in by design - with no dataset every machine stays single-block (the Phase 1 behaviour), so
-    the solver runs whether or not a ``data/multiblocks/`` dump is present. The footprint is the
-    machine's *unrotated* box; ``ir.geometry.occupied_cells`` turns it about the vertical axis when
-    the placer faces the machine some way other than north.
+
+def _candidate_names(recipe: Recipe, node: Node) -> list[str]:
+    """The names to try against the structure dump, most authoritative first.
+
+    The exporter names a machine by its localized **recipe map** ("Distillation Tower", "Blast
+    Furnace"), while the dump is keyed by the **controller's** own display name ("Dangote Distillus",
+    "Electric Blast Furnace"). For a GT++ machine the two differ, so joining on the recipe-map name
+    alone resolves only a fraction of a real plan and drops the rest to a 1x1x1 footprint.
+
+    The node's effective handler carries the controller name, so it goes first; the recipe-map name
+    follows for a plan that has no handlers at all. Each is also tried through
+    :data:`_MACHINE_NAME_ALIASES`.
     """
-    if physical is not None:
-        record = physical.get(machine_type, block_key=block_key)
+    names: list[str] = []
+    handler = _effective_handler(recipe, node)
+    if handler is not None and handler.label:
+        names.append(handler.label)
+    names.append(recipe.machine_type)
+    ordered: list[str] = []
+    for name in names:
+        for candidate in (name, _MACHINE_NAME_ALIASES.get(name, "")):
+            if candidate and candidate not in ordered:
+                ordered.append(candidate)
+    return ordered
+
+
+def _physical_record(
+    recipe: Recipe,
+    node: Node,
+    physical: PhysicalDataset | None,
+    block_key: str | None,
+) -> MachinePhysical | None:
+    """This node's machine in the structure dump, or ``None`` if the dump does not have it.
+
+    ``block_key`` is an exact ``registry@meta`` identity and wins whenever the export carries it;
+    the name ladder (:func:`_candidate_names`) is the fallback for the plans that do not.
+    """
+    if physical is None:
+        return None
+    names = _candidate_names(recipe, node)
+    record = physical.get(names[0], block_key=block_key)
+    if record is not None:
+        return record
+    for name in names[1:]:
+        record = physical.get(name)
         if record is not None:
-            return record.footprint_for(fluid_outputs)
-    return _DEFAULT_FOOTPRINT
+            return record
+    return None
 
 
-def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> InputIR:
+def to_input_ir(
+    plan: Plan,
+    *,
+    physical: PhysicalDataset | None = None,
+    producer: PlanProducer | None = None,
+) -> InputIR:
     """Map a typed :class:`Plan` to an ``InputIR`` (referential integrity enforced on build).
 
     When ``physical`` is supplied, each node's machine footprint comes from that dataset if it knows
     the machine type; otherwise (and for boundary storages/buffers, which are never in the dataset)
     the crude 1x1x1 default stands.
+
+    ``producer`` pins which gtnh-factory-flow fork exported the plan. ``None`` (the default) detects
+    it from the plan's structural markers (``producer.resolve_producer``), which is itself allowed to
+    come back undetermined - the two meanings never collide, because a *parameter* of ``None`` asks
+    for detection while a *detected* ``None`` disables producer-specific handling.
     """
+    resolved_producer = resolve_producer(plan, producer)
+    _check_power_provenance(plan, resolved_producer)
+    _check_dataset_version(plan, physical)
     recipes = {r.id: r for r in plan.recipes}
     nodes_by_id = {n.id: n for n in plan.nodes}
     storage_ids = {s.id for s in plan.storages}
@@ -164,14 +247,19 @@ def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> Input
                 f"are not supported yet (instance-aware routing is Phase 2 - see docs/ROADMAP.md). "
                 f"Split it into single-machine nodes in the export."
             )
+        _check_input_overrides(recipe, node)
+        _check_unmodelled_parallel(recipe, node)
         block_key = _block_key_for(recipe, resolved_machines.get(node.id))
-        record = physical.get(recipe.machine_type, block_key=block_key) if physical else None
+        record = _physical_record(recipe, node, physical, block_key)
         # One fluid-output count drives both the reserved shape and its hatch ceiling, so the two
-        # cannot describe different built forms of the same machine.
+        # cannot describe different built forms of the same machine. Both now come from the single
+        # record resolved above, so the footprint cannot be looked up differently from the ceiling.
         fluid_outputs = _fluid_output_count(recipe)
-        footprint = _footprint_for(recipe.machine_type, physical, block_key, fluid_outputs)
+        footprint = (
+            record.footprint_for(fluid_outputs) if record is not None else _DEFAULT_FOOTPRINT
+        )
         if record is None and identifies_single_blocks:
-            single_block_ids.add(node.id)
+            _classify_census_miss(recipe, node, single_block_ids)
         machines.append(
             Machine(
                 id=node.id,
@@ -217,23 +305,53 @@ def to_input_ir(plan: Plan, *, physical: PhysicalDataset | None = None) -> Input
     machines, nets = _add_output_buffers(machines, nets, storage_ids)
     # The export has no power source; invent it. ``single_block_ids`` is what lets the synthesis
     # state a basic machine's own intake ceiling without guessing at a multiblock's.
-    machines, nets = synthesize_power(machines, nets, single_block_ids=frozenset(single_block_ids))
+    # _supply_tier absorbs an implausible draw from the MrBruh fork's recipe model. An arodoid
+    # plan does not have that defect - its figures come from GT's own overclock calculator - so there
+    # the workaround would re-tier machines that were already right. Disabled only for the producer
+    # positively known not to need it: an undetermined plan keeps the defensive behaviour, since the
+    # workaround changes only the voltage supplied and never the stated draw.
+    machines, nets = synthesize_power(
+        machines,
+        nets,
+        single_block_ids=frozenset(single_block_ids),
+        allow_retier=resolved_producer is not PlanProducer.ARODOID_V1,
+    )
     _check_resolved_power(plan, nets)
     region = _bounding_region([m.footprint for m in machines])
     return InputIR(bounding_region=region, machines=machines, nets=nets)
 
 
+def _synthesized_eut(recipe: Recipe, node: Node) -> float:
+    """The node's draw from the plan's own runtime figures, best available source first.
+
+    The matched :class:`RuntimeVariant` wins, because its ``eut`` is post-overclock and the recipe's
+    is the base value at the recipe's minimum tier; on a machine run a few tiers up those differ by
+    4x per step. ``recipe.eut * parallel`` remains the floor for a node whose variant cannot be
+    identified, and for a plan carrying no runtime figures at all.
+
+    Producer-independent on purpose: both forks emit ``runtimeCalculation``, so this needs no branch
+    on which one exported the plan.
+    """
+    variant = _matched_variant(recipe, node)
+    if variant is not None:
+        return variant.eut * variant.parallel * node.parallel
+    return recipe.eut * node.parallel
+
+
 def _node_eut(recipe: Recipe, node: Node, resolved: dict[str, ResolvedMachine]) -> float:
     """The EU/t a node draws, which the power synthesis sizes amperage from.
 
-    Synthesized as ``recipe.eut * parallel``: ``parallel`` runs the recipe that many times at
-    once, matching how ``_rate`` scales throughput (``machineCount`` is forced to 1 upstream).
-    When a v2 export's ``resolved`` block covers the node, its ``totalEut`` is trusted instead -
-    the exporter's balancer models overclocking, which the raw recipe figure cannot - but is
-    cross-checked against the synthesis: a mismatch beyond float tolerance warns and the
-    resolved figure still wins (#2). v1 plans (no ``resolved``) always use the synthesis.
+    A v2 export's ``resolved.totalEut`` still wins where it covers the node: it is the exporter's own
+    balancer output and accounts for machine count and parallelism that :func:`_synthesized_eut`
+    cannot see. It is cross-checked against the synthesis, and a mismatch beyond float tolerance
+    warns while the resolved figure still wins (#2).
+
+    **The two disagree by 24.5x on one real node** (an Industrial Coke Oven resolving to 2355 EU/t
+    where GT's own overclock calculator says 96) with nothing in the export to arbitrate, which is
+    why the order is "the producer's balancer, then GT's calculator, then the base value" rather than
+    a single source.
     """
-    computed = recipe.eut * node.parallel
+    computed = _synthesized_eut(recipe, node)
     machine = resolved.get(node.id)
     if machine is None:
         return computed
@@ -251,6 +369,214 @@ def _node_eut(recipe: Recipe, node: Node, resolved: dict[str, ResolvedMachine]) 
             stacklevel=2,
         )
     return machine.total_eut
+
+
+def _classify_census_miss(recipe: Recipe, node: Node, single_block_ids: set[str]) -> None:
+    """Decide what a **census** dump's failure to find this machine means, and act on it.
+
+    A census enumerates every multiblock controller in the pack, so a miss is a positive fact - but
+    which fact depends on what the machine is, and the two readings are opposites:
+
+    ``kind: "single"``, or no handler at all
+        The machine is a single block. GT's ``MTEBasicMachine`` intake rule applies, so it joins
+        ``single_block_ids`` and the under-supply check can run against a real ceiling.
+    ``kind: "multiblock"``
+        The export says this *is* a multiblock, so the dump is incomplete rather than the machine
+        being basic. Claiming it as a single block would state the wrong intake formula AND reserve a
+        1x1x1 box for a structure that does not fit it - the "coarse-cell abstraction can lie"
+        failure, arriving quietly. Reported instead, and left unclaimed.
+
+    Treating every miss alike is how a name-alias table swallows a real extraction gap.
+    """
+    handler = _effective_handler(recipe, node)
+    if handler is None or handler.kind != "multiblock":
+        single_block_ids.add(node.id)
+        return
+    name = handler.label or recipe.machine_type
+    warnings.warn(
+        f"the structure dataset is a census but does not contain {name!r}, which node "
+        f"{node.id!r} declares a multiblock; it keeps the 1x1x1 default footprint and its power "
+        f"intake stays unmeasured. Re-run the extractor against this plan's pack version.",
+        AdapterWarning,
+        stacklevel=3,
+    )
+
+
+def _matched_variant(recipe: Recipe, node: Node) -> RuntimeVariant | None:
+    """The runtime variant describing how this node runs the recipe, or ``None`` if not identifiable.
+
+    Matching is on **fields, never on the variant id**: ids carry suffixes beyond the tier and coil
+    (``tier-ev-perfect-oc``), so composing one from ``overclock_tier`` misses roughly half the nodes
+    of a real plan while appearing to work.
+
+    Narrowed in two steps. The node's ``overclock_tier`` selects candidates; then, if those
+    candidates are coil-keyed, the node's ``coil_tier`` picks among them. A node that leaves
+    ``coil_tier`` empty against coil-keyed variants stays ambiguous, and ambiguity returns ``None``
+    rather than a guess, because every coil is a different heat bonus and so a different EU/t.
+    """
+    if recipe.runtime_calculation is None:
+        return None
+    candidates = [
+        variant
+        for variant in recipe.runtime_calculation.variants
+        if variant.overclock_tier == node.overclock_tier
+    ]
+    if node.coil_tier and any(variant.coil_tier is not None for variant in candidates):
+        narrowed = [variant for variant in candidates if variant.coil_tier == node.coil_tier]
+        candidates = narrowed or candidates
+    if len(candidates) != 1:
+        return None
+    return candidates[0]
+
+
+def _handler_parallel(recipe: Recipe, node: Node) -> float:
+    """The parallel multiplier this node's machine configuration applies, or 1.
+
+    Read only to report it (:func:`_check_unmodelled_parallel`). The multiplier lives on the
+    handler's ``machineParallel`` control and appears in neither ``node.parallel`` (always 1 on the
+    plans seen) nor any runtime variant (all of which report ``parallel: 1``), so it is the one
+    runtime figure the export does not compose for us.
+    """
+    handler = _effective_handler(recipe, node)
+    if handler is None:
+        return 1.0
+    for control in handler.machine_config_controls:
+        if control.id != _PARALLEL_CONTROL:
+            continue
+        chosen = node.machine_config_tiers.get(_PARALLEL_CONTROL) or control.default_key
+        for tier in control.tiers:
+            if tier.key == chosen:
+                return tier.parallel_multiplier
+    return 1.0
+
+
+def _check_unmodelled_parallel(recipe: Recipe, node: Node) -> None:
+    """Warn when a node's machine runs parallel batches the adapter does not account for.
+
+    Deliberately not composed into the draw. Multiplying the variant through would be re-deriving
+    the exporter's machine model in this codebase, and GT parallel multiblocks do not all scale EU/t
+    linearly (several carry a parallel discount), so a composed figure would be confidently wrong
+    with nothing to check it against. Reporting it keeps the error visible and one-directional: the
+    layout is under-powered by a known factor rather than wrong by an unknown one.
+    """
+    multiplier = _handler_parallel(recipe, node)
+    if multiplier <= 1.0:
+        return
+    handler = _effective_handler(recipe, node)
+    name = (handler.label if handler is not None else "") or recipe.machine_type
+    warnings.warn(
+        f"node {node.id!r} runs {name} at {multiplier:g}x parallel, which the export states only as "
+        f"a machine-configuration multiplier and the adapter does not model; its EU/t and throughput "
+        f"are those of a single batch, so the layout under-provisions this machine by up to "
+        f"{multiplier:g}x",
+        AdapterWarning,
+        stacklevel=3,
+    )
+
+
+def _effective_duration(recipe: Recipe, node: Node) -> float:
+    """The recipe's duration as this node runs it: the matched variant's, else the base figure.
+
+    Overclocking halves duration per tier step, so a throughput computed from the base figure is low
+    by the same factor the draw would be. Fixing EU/t without this would leave every pipe on an
+    overclocked machine sized for a fraction of the flow it carries.
+    """
+    variant = _matched_variant(recipe, node)
+    if variant is not None and variant.duration_ticks > 0:
+        return variant.duration_ticks
+    return recipe.duration_ticks
+
+
+def _effective_handler(recipe: Recipe, node: Node) -> MachineHandler | None:
+    """The machine a node actually runs in: its ``machineHandlerId``, else the list's first entry.
+
+    The first entry is the exporter's default, which is what a node with no explicit id is running
+    (see :class:`plan.MachineHandler`). ``None`` when the recipe lists no handlers at all - common
+    even on an arodoid plan, where several machine types carry an empty list - so callers must
+    treat "no handler" as "no information", never as "single block".
+    """
+    if not recipe.machine_handlers:
+        return None
+    if node.machine_handler_id:
+        for handler in recipe.machine_handlers:
+            if handler.id == node.machine_handler_id:
+                return handler
+    return recipe.machine_handlers[0]
+
+
+def _check_power_provenance(plan: Plan, producer: PlanProducer | None) -> None:
+    """Warn when a plan's multiblocks will be powered from pre-overclock EU/t figures.
+
+    A machine whose draw falls all the way to ``recipe.eut * parallel`` (:func:`_node_eut`) is being
+    sized from the base value at its recipe's minimum tier. For a single-block machine running at
+    that tier the figure is exact, which is why this stays quiet on such a plan. For a multiblock
+    overclocked above it, the figure is low by 4x per tier step and the cable amperage is sized from
+    it, so the layout comes out buildable and under-powered: the one failure a builder cannot see in
+    the preview.
+
+    **Both better sources silence it.** A ``resolved`` block covers the whole plan, and a matched
+    runtime variant covers the node, so neither is a fallback. Warning merely because ``resolved`` is
+    absent would fire on every arodoid plan forever, including the ones whose figures now come
+    from GT's own overclock calculator and are right.
+
+    Scoped to machines a handler declares ``multiblock``, since that is the only evidence available
+    here of a machine being one at all; a plan whose handlers are empty says nothing and stays quiet.
+    """
+    if plan.resolved is not None:
+        return
+    recipes = {r.id: r for r in plan.recipes}
+    affected = sorted(
+        {
+            handler.label or recipe.machine_type
+            for node in plan.nodes
+            if (recipe := recipes.get(node.recipe_id)) is not None
+            and (handler := _effective_handler(recipe, node)) is not None
+            and handler.kind == "multiblock"
+            and _matched_variant(recipe, node) is None
+        }
+    )
+    if not affected:
+        return
+    warnings.warn(
+        f"plan carries no resolved throughput block, so EU/t for {len(affected)} multiblock "
+        f"machine type(s) is synthesized from pre-overclock recipe figures and understates the "
+        f"real draw ({', '.join(affected)}); power nets may be sized too thin"
+        + (f" [producer: {producer.value}]" if producer is not None else ""),
+        AdapterWarning,
+        stacklevel=2,
+    )
+
+
+def _check_dataset_version(plan: Plan, physical: PhysicalDataset | None) -> None:
+    """Warn when the plan was balanced against a different GTNH pack than the loaded dataset.
+
+    Machine display names, recipe ids and item ids all move between pack releases, and the join from
+    a plan's machine to its physical record is by name. So a mismatch does not fail: it *quietly
+    degrades*, resolving some machines to the wrong footprint and missing others into the 1x1x1
+    default, which is the shape of bug the whole dataset lane exists to remove.
+
+    Silent when no dataset is loaded (every machine is 1x1x1 anyway, so there is nothing to
+    mis-join) and when the plan does not state a single pack version (:func:`plan_pack_version`).
+
+    Also silent for a **non-census** dump. The committed ``data/multiblocks/`` fixtures are a
+    two-machine sample whose ``pack_version`` is nominal rather than surveyed, and they are what a
+    fresh clone resolves to - so trusting it here would greet every new contributor with a mismatch
+    against the shipped examples. This is the same reading ``identifies_single_blocks`` already
+    applies to that dump: a sample is evidence of nothing beyond the machines in it.
+    """
+    if physical is None or not physical.meta.census:
+        return
+    stated = plan_pack_version(plan)
+    if stated is None or stated == physical.meta.pack_version:
+        return
+    warnings.warn(
+        f"plan was balanced against GTNH {stated}, but the loaded physical dataset is "
+        f"{physical.meta.pack_version}; machine names move between packs, so footprints may be "
+        f"resolved from the wrong machine or missed entirely. "
+        f"Pass --dataset-version {stated} once a dump for it exists.",
+        AdapterWarning,
+        stacklevel=2,
+    )
 
 
 def _check_resolved_power(plan: Plan, nets: list[Net]) -> None:
@@ -306,13 +632,88 @@ def _port_resource(port_id: str) -> str:
     return port_id.split(":", 1)[1]
 
 
+#: Forge's ``OreDictionary.WILDCARD_VALUE``. A recipe input spelled ``<registry>@32767`` accepts any
+#: metadata of that block/item ("any log"), and the node's override is the exporter recording which
+#: one the player actually feeds it ("oak log"). That narrowing is the only override this adapter
+#: applies; see :func:`_refines`.
+_WILDCARD_META = "32767"
+
+
+def _refines(source: Resource, override: Resource) -> bool:
+    """Whether ``override`` narrows ``source`` rather than replacing it.
+
+    True only for an override that names the same resource more precisely: the same ``kind``, the
+    same registry name, and a ``source`` whose metadata is the wildcard. An identical id is trivially
+    true and costs nothing to apply.
+
+    **Everything else is a substitution and must not be applied.** Real plans contain overrides that
+    name an entirely different resource at that index (``oxygen -> water``,
+    ``ammonia -> hydrochloricacid_gt5u``), always one the recipe already lists at the *next* index.
+    Applying those would drop a required input and duplicate another, silently shrinking the port
+    set; the adapter cannot tell a stale plan from a deliberate swap, so it keeps the recipe's own
+    input and says so (:func:`_check_input_overrides`).
+    """
+    if source.kind != override.kind:
+        return False
+    if source.id == override.id:
+        return True
+    source_name, _, source_meta = source.id.partition("@")
+    override_name, _, _ = override.id.partition("@")
+    return source_name == override_name and source_meta == _WILDCARD_META
+
+
+def _effective_inputs(recipe: Recipe, node: Node) -> list[Resource]:
+    """``recipe.inputs`` with this node's refining overrides applied. Never mutates the recipe.
+
+    One recipe is shared by every node that runs it, so resolving overrides in place would leak one
+    node's ingredient choice into its siblings. The result is what both the ports and the throughput
+    rates are built from, which is what keeps a concretised id from resolving to a rate of zero:
+    ``_rate`` matches amounts by resource id, and the recipe's own list still says ``@32767``.
+    """
+    if not node.recipe_input_overrides:
+        return recipe.inputs
+    effective = list(recipe.inputs)
+    for index, override in node.recipe_input_overrides.items():
+        if 0 <= index < len(effective) and _refines(effective[index], override):
+            effective[index] = override
+    return effective
+
+
+def _check_input_overrides(recipe: Recipe, node: Node) -> None:
+    """Warn once per node for each override :func:`_effective_inputs` declined to apply.
+
+    Separate from the resolution itself so the message lands once per node rather than once per
+    port and per rate lookup, and so the resolution stays a pure function.
+    """
+    for index, override in sorted(node.recipe_input_overrides.items()):
+        if not 0 <= index < len(recipe.inputs):
+            warnings.warn(
+                f"node {node.id!r} overrides input {index} of recipe {recipe.id!r}, which has "
+                f"only {len(recipe.inputs)} input(s); ignoring the override",
+                AdapterWarning,
+                stacklevel=3,
+            )
+            continue
+        source = recipe.inputs[index]
+        if _refines(source, override):
+            continue
+        warnings.warn(
+            f"node {node.id!r} overrides input {index} of recipe {recipe.id!r} from "
+            f"{source.kind}:{source.id} to {override.kind}:{override.id}, which substitutes a "
+            f"different resource rather than narrowing a wildcard; keeping the recipe's own input "
+            f"(applying it would drop {source.id} from the machine's ports)",
+            AdapterWarning,
+            stacklevel=3,
+        )
+
+
 def _recipe_ports(recipe: Recipe, node: Node) -> list[Port]:
     """One input/output port per distinct recipe resource (deduped by id), each carrying the
     throughput it moves (items/t or mB/t) so boundary rates - notably a dangling output's product,
     which no net records - are reportable downstream."""
     ports: dict[str, Port] = {}
     for direction, pool, outputs in (
-        (IODirection.INPUT, recipe.inputs, False),
+        (IODirection.INPUT, _effective_inputs(recipe, node), False),
         (IODirection.OUTPUT, recipe.outputs, True),
     ):
         for res in pool:
@@ -436,14 +837,20 @@ def _throughput(edge: Edge, nodes_by_id: dict[str, Node], recipes: dict[str, Rec
 
 
 def _rate(recipe: Recipe, resource_id: str, node: Node, *, outputs: bool) -> float:
-    pool = recipe.outputs if outputs else recipe.inputs
+    # Inputs come from the node's effective list, not the recipe's own: an edge names the
+    # concretised id ("minecraft:log@1") while the recipe still says "@32767", so matching against
+    # the recipe here would sum nothing and rate the net at zero.
+    pool = recipe.outputs if outputs else _effective_inputs(recipe, node)
     amount = sum(res.amount for res in pool if res.id == resource_id)
-    if recipe.duration_ticks <= 0:
+    # The duration this node actually runs at, not the recipe's base figure: overclocking halves it
+    # per tier step, so the base value understates flow by the factor it understates draw.
+    duration = _effective_duration(recipe, node)
+    if duration <= 0:
         return 0.0
     # `parallel` only, matching `_node_eut`: `machineCount` is forced to 1 upstream, so carrying
     # it here scaled nothing while implying the two paths disagree about multi-instance nodes.
     # When instance-aware routing lands (#76) both have to change together, deliberately.
-    return amount * node.parallel / recipe.duration_ticks
+    return amount * node.parallel / duration
 
 
 #: Multiplier on the summed footprint floor area when sizing the region's side (leaves routing

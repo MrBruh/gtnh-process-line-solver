@@ -106,6 +106,26 @@ To bump: rewrite the two coordinates in `dependencies.gradle` and the entry in
 dropped, because the dump is local-only (see the commit and delivery policy in
 `docs/dataset-extraction/requirements.md`).
 
+### A 2.9 bump is outstanding, and what it is for
+
+The adapter now reads plans from a second gtnh-factory-flow fork (`adapter/producer.py`) which is
+**2.9-only**. Such a plan states its own pack in `recipes[].source.datasetVersionId`, the adapter
+matches the dump to it, and a mismatch warns rather than failing. So against this 2.8.4 dump a 2.9
+plan still solves, but it warns, and machine display names that moved between packs stay unresolved
+and fall back to a 1x1x1 footprint (51 of 53 machines resolve on the largest sample plan; the last
+two are absent from 2.8.4 entirely). Generating `data/2.9.0-beta-2/` is what closes that.
+
+Two things to know before starting, neither of which the steps above imply:
+
+- **The reference checkouts have to move with the pin.** `C:\Users\mdnss\Dev\gtnh-reference` is
+  pinned to the versions in `gtnh.lock.json`. The tool reflects on live GT classes, so a 2.9 API
+  change arrives as a bare `NoSuchMethodError` with no context, and diagnosing one against 2.8.4
+  source is how a wrong-but-convincing answer gets found. Re-clone the affected repo at the new tag
+  **first**, then read (see `CLAUDE.local.md`).
+- **Both dumps are kept, not replaced.** `data/<version>/` is version-namespaced precisely so 2.8.4
+  and 2.9 coexist; `--dataset-version` pins one and the default follows the plan. Nothing about a
+  2.9 dump invalidates the 2.8.4 one, and the shipped example plans are still 2.8.4.
+
 ## GT5U / StructureLib API surface
 
 Kept deliberately tiny (plan risk 9.1: never reference the ~250 controller classes by

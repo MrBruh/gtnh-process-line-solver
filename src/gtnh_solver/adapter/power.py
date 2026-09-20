@@ -280,6 +280,7 @@ def synthesize_power(
     nets: list[Net],
     *,
     single_block_ids: frozenset[str] = frozenset(),
+    allow_retier: bool = True,
 ) -> tuple[list[Machine], list[Net]]:
     """Return ``(machines, nets)`` augmented with synthetic power sources + shared-amperage nets.
 
@@ -294,11 +295,20 @@ def synthesize_power(
     empty by default, which is the abstaining direction: a caller that cannot establish a
     machine's class leaves its intake unmeasured rather than measuring it against the wrong
     formula (#114).
+
+    ``allow_retier`` enables the :func:`_supply_tier` workaround. Pass False when the caller's EU/t
+    figures are trustworthy: that workaround exists to absorb an implausible draw from one
+    exporter's recipe model, and applied to correct figures it would re-tier machines that were
+    already right.
     """
     # Re-tier first (a TEMPORARY workaround, see _supply_tier), because both the hatch count and
     # the net a machine lands on follow from the tier it is actually supplied at.
     powered = {
-        m.id: m.model_copy(update={"voltage_tier": _supply_tier(m)}) for m in machines if m.eut > 0
+        m.id: m.model_copy(
+            update={"voltage_tier": _supply_tier(m) if allow_retier else m.voltage_tier}
+        )
+        for m in machines
+        if m.eut > 0
     }
     if not powered:
         return machines, nets  # nothing draws power (e.g. only storages, or zero-eut recipes)

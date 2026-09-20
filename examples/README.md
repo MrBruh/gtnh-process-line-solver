@@ -3,9 +3,16 @@
 Sample inputs for developing and testing the adapter and solver.
 
 Drop a **gtnh-factory-flow exported plan JSON** here to run the adapter and solver against a
-real plan. Export it from the **maintained fork the adapter consumes**,
-[MrBruh/gtnh-factory-flow](https://github.com/MrBruh/gtnh-factory-flow) (its export carries the
-`resolved` block the adapter reads); the original upstream is
+real plan. Two forks of that app emit plans the adapter reads, and they are **not** distinguishable
+by `schemaVersion` (both spell it as a small integer, incompatibly), so the adapter identifies the
+producer from structural markers and `--plan-schema` overrides it:
+
+| Fixture | Fork | Identified by |
+|---|---|---|
+| `gtnh-sand.json`, `gtnh-nitrobenzene.json` | [MrBruh/gtnh-factory-flow](https://github.com/MrBruh/gtnh-factory-flow) | a `resolved` throughput block, `app`, `schemaVersion: 2` |
+| `gtnh-parallel-sand.json` | the arodoid fork | `recipes[].machineHandlers`; no `resolved`, `schemaVersion: 1` |
+
+The original upstream both forks descend from is
 [Samiracle64/gtnh-factory-flow](https://github.com/Samiracle64/gtnh-factory-flow).
 
 ```bash
