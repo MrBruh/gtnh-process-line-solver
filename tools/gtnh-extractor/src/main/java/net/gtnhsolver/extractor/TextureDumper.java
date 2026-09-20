@@ -1683,8 +1683,18 @@ final class TextureDumper {
      * <p>
      * The active probe re-queries at {@code meta + 16} and keeps the result only when it actually
      * differs from the inactive stack, so a block that does not use the coil render-meta convention
-     * (every block but {@code BlockCasings5} today) simply contributes no active state rather than
-     * mislabelling an unrelated meta's texture as "running".
+     * simply contributes no active state rather than mislabelling an unrelated meta's texture as
+     * "running".
+     *
+     * <p>
+     * <b>That reasoning does not hold for a {@link #MATERIAL_INDEXED_BLOCKS} block, so those are not
+     * probed at all.</b> Their meta space is material ids, where {@code meta + 16} is simply another
+     * material: the two stacks differ for a reason that has nothing to do with running, so
+     * "differs" stops being evidence of an active form. Measured on a 2.9 client dump, which is
+     * where these metas first resolve: <b>129 of 777 {@code gt.blockframes} entries</b> carried
+     * another material as their active state, 774 layer-sets across their sides. Only 34 of those
+     * named a different sprite; the other 95 wear the same sprite under a different material's
+     * tint, which is why an icon-name comparison undercounts this by a factor of four.
      */
     private boolean emitTextureAccessor(Map<String, Entry> blocks, Block block, TextureAccessor accessor,
         String registryName, int meta) {
@@ -1692,7 +1702,8 @@ final class TextureDumper {
         if (inactive == null) {
             return false;
         }
-        Map<String, List<Layer>> active = accessor.perSide
+        boolean probeActive = accessor.perSide && !MATERIAL_INDEXED_BLOCKS.contains(registryName);
+        Map<String, List<Layer>> active = probeActive
             ? textureAccessorLayers(block, accessor, meta + ACTIVE_META_OFFSET)
             : null;
         Entry entry = plainEntry(blocks, registryName, meta, block);
