@@ -141,6 +141,16 @@ texture-only local run still falls back to the committed multiblock fixtures. An
 pins one folder; `list_versions()` backs `gtnh-solve --list-dataset-versions`. Every consumer below
 routes its default path through this.
 
+**A local dump that shadows newer committed data says so** (#166). Presence alone used to decide
+this, so a dump taken before `te_base_type` existed went on outranking a committed manifest that
+carries it, and the `.schematic` export refused a machine the shipped data types fine. Each
+resolution now compares the two `generated_at` stamps (`generated_at()`, read from the manifest's
+`provenance` or a multiblock dump's `_meta.json`, without parsing a 15 MB file) and raises a
+`DatasetWarning` when the local one is older. The local dump still wins: it is the one with the
+coverage, and handing its place to the example-scoped committed data would lose every footprint and
+sprite it exists to provide. Undated on either side means no warning, because an undated dump is not
+evidence of being old.
+
 ### dataset/schema.py: the contract
 Pydantic v2 models with `extra="forbid"` that re-state the extractor's raw facts (controllers,
 variants, blocks, hints, hatch slots, substitutions) and nothing more. This is the cross-language

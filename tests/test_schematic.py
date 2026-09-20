@@ -20,6 +20,8 @@ from typing import Any
 import pytest
 
 from gtnh_solver.adapter import adapt_file
+from gtnh_solver.dataset import roots as dataset_roots
+from gtnh_solver.dataset.roots import DatasetWarning
 from gtnh_solver.ir import (
     CellBox,
     CellCoord,
@@ -206,8 +208,88 @@ def test_an_untypeable_block_is_refused_not_guessed() -> None:
         entry.pop("te_base_type", None)  # a schema 2 manifest
     ir = adapt_file(str(_SAND))
     layout = solve(ir, optimize=False)
-    with pytest.raises(SchematicError, match="te_base_type"):
+    with pytest.raises(SchematicError, match="te_base_type") as caught:
         build_schematic(ir, layout, manifest=TextureManifest(raw))
+    # No file behind this one, so it says so rather than naming a path it does not have.
+    assert "an in-memory manifest" in str(caught.value)
+    assert "predates the field" in str(caught.value)
+
+
+def test_a_manifest_short_of_one_block_is_not_blamed_for_being_old() -> None:
+    """The other way ``te_base_type`` comes back ``None``, and it wants the other fix.
+
+    A manifest that types nothing predates #158 and needs a fresh extractor run; one that types
+    other blocks and not this one is merely short of a block, and re-running the extractor for the
+    same pack would produce the same gap. Telling a reader to re-run it would waste an hour.
+    """
+    raw = json.loads(_COMMITTED_MANIFEST.read_text(encoding="utf-8"))
+    for entry in raw["blocks"].values():
+        entry.pop("te_base_type", None)
+    # One typed entry the sand line never asks for: enough to prove the manifest knows the field.
+    raw["blocks"]["gtnh_solver:unused|0"] = {"kind": "mte", "sides": {}, "te_base_type": 1}
+    ir = adapt_file(str(_SAND))
+    layout = solve(ir, optimize=False)
+    with pytest.raises(SchematicError, match="short of this block") as caught:
+        build_schematic(ir, layout, manifest=TextureManifest(raw))
+    assert "predates the field" not in str(caught.value)
+
+
+def test_an_untypeable_route_block_names_the_manifest_too() -> None:
+    """Both call sites, not only the machine one. A cable given the wrong Data nibble rebuilds as a
+    machine, so a route the manifest cannot type is refused on the same terms."""
+    raw = json.loads(_COMMITTED_MANIFEST.read_text(encoding="utf-8"))
+    for entry in raw["blocks"].values():
+        if entry.get("kind") == "pipe":
+            entry.pop("te_base_type", None)  # machines still type; the cables no longer do
+    ir = adapt_file(str(_SAND))
+    layout = solve(ir, optimize=False)
+    with pytest.raises(SchematicError, match="te_base_type") as caught:
+        build_schematic(ir, layout, manifest=TextureManifest(raw))
+    message = str(caught.value)
+    assert "an in-memory manifest" in message, "the route refusal names its source too"
+    assert "short of this block" in message, "machines still type, so this dump is not old"
+
+
+def test_a_stale_local_dump_shadows_the_committed_manifest_and_the_refusal_says_which(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The #166 reproduction, on the exact path ``gtnh-solve --schematic`` takes.
+
+    Built rather than copied: a real dump is 15 MB, and all this needs is a manifest at a versioned
+    path that predates ``te_base_type``. Resolution prefers it over the committed manifest on
+    presence alone, so the export refuses a Super Chest the shipped data types perfectly well - and
+    the old wording ("re-run the extractor to refresh the manifest") read as "the committed data is
+    stale", which is how this got filed against the wrong file. Two things have to hold now:
+    resolution says out loud which file is the older one, and the refusal names the file it read.
+    """
+    committed = tmp_path / "textures" / "manifest.json"
+    raw = json.loads(_COMMITTED_MANIFEST.read_text(encoding="utf-8"))
+    raw.setdefault("provenance", {})["generated_at"] = "2026-09-18T21:29:30.149Z"
+    committed.parent.mkdir(parents=True)
+    committed.write_text(json.dumps(raw), encoding="utf-8")
+
+    stale = json.loads(json.dumps(raw))  # same coverage, taken before the field existed
+    for entry in stale["blocks"].values():
+        entry.pop("te_base_type", None)
+    stale["provenance"]["generated_at"] = "2026-09-08T00:00:00Z"
+    local = tmp_path / "2.8.4" / "textures" / "manifest.json"
+    local.parent.mkdir(parents=True)
+    local.write_text(json.dumps(stale), encoding="utf-8")
+
+    ir = adapt_file(str(_SAND))
+    layout = solve(ir, optimize=False)
+    monkeypatch.setattr(dataset_roots, "DEFAULT_DATA", tmp_path)
+    with (
+        pytest.warns(DatasetWarning, match="older than the committed"),
+        pytest.raises(SchematicError) as caught,
+    ):
+        write_schematic(ir, layout, tmp_path / "line.schematic")
+
+    message = str(caught.value)
+    assert str(local) in message, "the refusal must name the manifest it actually consulted"
+    assert str(committed) not in message, "the committed manifest is not what failed"
+    assert "2026-09-08" in message, "and date it, since being old is the whole problem"
+    assert "#166" in message
 
 
 def test_a_machine_the_manifest_never_heard_of_is_refused() -> None:
@@ -245,7 +327,7 @@ def test_a_route_with_no_material_is_refused() -> None:
     )
     problem = InputIR(bounding_region=CellBox(sx=4, sy=2, sz=4))
     layout = LayoutResult(status=LayoutStatus.VALID, seed=0, routes=[route])
-    with pytest.raises(SchematicError, match=r"no dataset block|not in the texture manifest"):
+    with pytest.raises(SchematicError, match=r"names no dataset block"):
         build_schematic(problem, layout, manifest=_manifest())
 
 

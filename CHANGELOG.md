@@ -46,6 +46,31 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and is described under Fixed below.
 
 ### Fixed
+- **A stale local dataset dump no longer shadows newer committed data in silence (#166).**
+  `resolve_dataset_path` took the newest local `data/<version>/` that merely *contained* a sub-path,
+  and never asked whether it was as capable as the committed data it outranked. So a dump generated
+  before the extractor learned to write `te_base_type` (#158) went on shadowing a committed manifest
+  that carries it, for as long as it sat on disk, and `gtnh-solve <plan> --schematic FILE` refused a
+  Super Chest the shipped data types perfectly well. A fresh clone has no local dump, which is why
+  CI never saw it.
+
+  Resolution now dates both sides. Each generated artifact carries the extractor's `generated_at`
+  stamp (the texture manifest in its `provenance`, a multiblock dump in its `_meta.json`), and a
+  local dump older than its committed counterpart raises a `DatasetWarning` naming both files and
+  both dates. The local dump **still wins**: it is the one with the coverage, and handing its place
+  to the example-scoped committed data would lose every footprint and sprite it exists to provide.
+  What changes is that it stops winning quietly. An undated dump on either side warns about nothing,
+  because an undated dump is not evidence of being old.
+
+- **An export that cannot type a block names the manifest it consulted, and where it is (#166).**
+  The refusal said only "the manifest" and pointed at #158, which reads as "the committed data is
+  stale" when the truth was the reverse. That misreading is what got this filed against the wrong
+  file in the first place. The message now quotes the manifest's path and generation date, and
+  separates the two ways `te_base_type` can be missing: a manifest that types **no** block predates
+  the field and wants a fresh extractor run, while one that types other blocks is merely short of
+  this block and would come back the same from another run. `TextureManifest` remembers the file it
+  was loaded from (`source`, `origin()`) so every message about what it could not answer can say so.
+
 - **A parallel line lays out: nine machines at three instances each reach a VALID layout (#76).**
   `examples/gtnh-parallel-sand.json` used to stop at `partial_invalid`, reporting
   `face_reachability` on whichever net lost the race for a machine's last free face. The line was

@@ -253,11 +253,28 @@ class TextureManifest:
     additive - every accessor here treats a missing field as "not stated", so a dump from either
     side of the change loads the same way and the version stays reserved for a shape change that
     would make an existing reader wrong.
+
+    **It remembers where it came from** (:attr:`source`, :meth:`origin`). A machine with a local
+    ``data/<version>/`` dump resolves that over the committed manifest, so "the manifest" names two
+    different files depending on whose machine is running and a refusal that says only "the
+    manifest" sends the reader to the wrong file. That misreading produced a wrong bug report
+    (#166), so any message about what this manifest could not answer quotes :meth:`origin`.
     """
 
-    def __init__(self, raw: Mapping[str, Any]) -> None:
+    def __init__(self, raw: Mapping[str, Any], *, source: Path | None = None) -> None:
         self._blocks: Mapping[str, Any] = raw.get("blocks", {})
         self._icons: Mapping[str, str] = raw.get("icons", {})
+        #: The file this was read from, or ``None`` when built straight from a mapping (tests, and
+        #: the coverage report, which already has the parsed JSON in hand).
+        self.source: Path | None = source
+        self._provenance: Mapping[str, Any] = raw.get("provenance", {})
+        #: Whether ANY entry states a ``te_base_type``. One dict lookup per block, and it separates
+        #: the two reasons :meth:`te_base_type` answers ``None``: a manifest written before #158
+        #: added the field (none at all - re-run the extractor) from one that simply does not carry
+        #: this block (short - a different fix). See ``schematic/core.py``.
+        self.carries_te_base_type: bool = any(
+            entry.get("te_base_type") is not None for entry in self._blocks.values()
+        )
         # Reverse index: a single-block machine's display name -> its (block, meta), so a machine
         # type with no multiblock doc (the whole structure IS one block) still resolves to a cube.
         # A normalized index alongside it lets a plan's generically named machine match its
@@ -318,7 +335,25 @@ class TextureManifest:
     @classmethod
     def load(cls, path: str | Path) -> TextureManifest:
         """Parse ``manifest.json`` at ``path`` into a :class:`TextureManifest`."""
-        return cls(json.loads(Path(path).read_text(encoding="utf-8")))
+        return cls(json.loads(Path(path).read_text(encoding="utf-8")), source=Path(path))
+
+    @property
+    def generated_at(self) -> str | None:
+        """The extractor's ISO-8601 stamp for this dump, or ``None`` if it states none."""
+        stamp = self._provenance.get("generated_at")
+        return str(stamp) if stamp is not None else None
+
+    def origin(self) -> str:
+        """This manifest named the way an error should name it: path, and when it was generated.
+
+        Both halves matter to the reader. The path says *which* of the two manifests answered (a
+        local ``data/<version>/`` dump, or the committed example-scoped one), and the stamp says
+        whether the answer is old - the shadowing case #166 is about, where a dump taken before a
+        field existed outranks committed data that has it.
+        """
+        where = "an in-memory manifest" if self.source is None else str(self.source)
+        stamp = self.generated_at
+        return where if stamp is None else f"{where} (generated {stamp})"
 
     def layers(self, block: str, meta: int, side: str, state: str = _STATE) -> list[dict[str, Any]]:
         """The ordered layer stack for ``(block, meta, side, state)``, or ``[]`` if unresolved.
