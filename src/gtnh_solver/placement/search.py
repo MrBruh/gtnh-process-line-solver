@@ -53,7 +53,9 @@ from __future__ import annotations
 
 import math
 import random
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Literal, NamedTuple
 
 from gtnh_solver.ir import (
@@ -91,15 +93,14 @@ _FACE_DELTAS = FACE_OFFSETS
 # through the volume term.
 _W_WIRE = 1.0
 _W_AUTO = 4.0
-#: Weight on the face-shortfall term. The term is only an approximation of the real question
-#: (:func:`_face_shortfall` shares contested cells out rather than deciding the matching); the
-#: exact answer is enforced downstream, by the solver's crowding gate and the router's re-seat
-#: rescue. This weight only has to nudge the search off a pathological pack, such as the solid
-#: row of #76 where nine machines each had two free cells for three connections.
+#: Weight on the face-shortfall term. Large on purpose, and only safe to be large because the
+#: term no longer charges auto-output ports for cells they do not use: with that phantom gone it
+#: reads zero on every layout that is genuinely fine, so it costs those nothing at all.
 #:
-#: Tuned, not derived, and the landscape is rugged: lowering it to 1.0 produced a *better* sand
-#: line on a single seed (enclosing box 8 against this weight's 18) and a worse one across the
-#: solver's full seed grid. Re-measure over the grid, never one seed, before changing it.
+#: Sized by measurement, not taste. The parallel line needs the equivalent of ~9x the old weight
+#: of 8 before the placer will stop packing its nine machines into a wall, and pushing past that
+#: buys nothing: at 48 it still lays 60 pipe cells, at 72 it lays 27, at 120 it drifts back up.
+#: Re-measure over the solver's whole seed grid, never one seed, before changing it.
 _W_FACES = 8.0
 
 #: The selectable compactness objective. "Compact" is ambiguous and the two metrics pull opposite
@@ -207,23 +208,28 @@ def optimize_placement(
     *,
     seed: int = 0,
     net_penalties: dict[str, float] | None = None,
+    face_penalties: dict[str, float] | None = None,
     objective: Objective = "footprint",
-    face_pressure: float = 1.0,
 ) -> PlacementResult:
     """Anneal the constructive placement toward a lower routing-aware cost (seeded, validated).
 
-    ``net_penalties`` (net id -> extra weight) boosts a net's wirelength term so its machines pull
-    tighter - the place<->route feedback signal: the solver penalizes the nets the router could
-    not lay, so the next placement clusters them (shorter routes, or adjacency that auto-outputs).
-    ``objective`` selects what "compact" means (:data:`Objective`): minimum floor area
-    (``footprint``, the default - stack tall), minimum enclosing box (``volume`` - stay flat), or
-    ``balanced`` (both weighted).
+        ``net_penalties`` (net id -> extra weight) boosts a net's wirelength term so its machines pull
+        tighter - the place<->route feedback signal: the solver penalizes the nets the router could
+        not lay, so the next placement clusters them (shorter routes, or adjacency that auto-outputs).
+        ``objective`` selects what "compact" means (:data:`Objective`): minimum floor area
+        (``footprint``, the default - stack tall), minimum enclosing box (``volume`` - stay flat), or
+        ``balanced`` (both weighted).
 
-    ``face_pressure`` scales the face-shortfall term (:data:`_W_FACES`). The solver raises it when
-    its exact crowding gate (``placement.feasibility``) keeps rejecting what this search hands
-    back: the cheap term is an approximation and can be talked out of spreading by a big enough
-    wirelength gain, so when the gate says otherwise the answer is to make crowding cost more,
-    not to re-run the identical search and get the identical layout.
+    ``face_penalties`` (machine id -> extra weight) is the same signal for crowding: the machines
+        the solver's crowding gate found nowhere to put a connection, weighted so the next attempt
+        gives *them* room.
+
+        Per machine, and emphatically not a global dial. An earlier version scaled the whole face term
+        up on every rejection, which quietly broke the multi-start: the attempts are independent seeds
+        meant to be ranked against **one** objective, and re-weighting between them meant the layouts
+        reaching the end were whichever had been annealed under the most distorted setting. The
+        parallel line came out 57% larger that way than the same search at a flat weight (footprint 84
+        against 36), because only the sprawled late attempts survived to be ranked.
     """
     base = place(problem)
     if not base.ok or len(base.placements) < 2:
@@ -277,6 +283,7 @@ def optimize_placement(
         for p in current
         for c in occupied_cells(p.cell, machines[p.machine_id].footprint, p.orientation)
     }
+    faces_penalty = face_penalties or {}
     current_cost = _cost(
         current,
         machines,
@@ -286,7 +293,7 @@ def optimize_placement(
         weights,
         region,
         reserved,
-        face_pressure,
+        faces_penalty,
     )
     best, best_cost = current, current_cost
     iters = min(_MAX_ITERS, max(_MIN_ITERS, _PER_MACHINE * len(current)))
@@ -306,7 +313,7 @@ def optimize_placement(
                 weights,
                 region,
                 reserved,
-                face_pressure,
+                faces_penalty,
             )
             delta = cand_cost - current_cost
             if delta < 0 or rng.random() < math.exp(-delta / temp):
@@ -430,7 +437,7 @@ def _cost(
     weights: tuple[float, float],
     region: CellBox,
     reserved: set[Cell],
-    face_pressure: float,
+    face_penalties: Mapping[str, float],
 ) -> float:
     """Routing-aware cost: weighted item/fluid HPWL + compactness per the objective, minus an
     auto-output reward (the only orientation-dependent term, so reorient moves are not free),
@@ -483,6 +490,7 @@ def _cost(
     volume = footprint * (max_y - min_y + 1)
 
     auto = 0
+    free_ports: set[tuple[str, str]] = set()
     for pair in auto_pairs:
         sp, tp = pos.get(pair.source_id), pos.get(pair.sink_id)
         if sp is None or tp is None:
@@ -496,7 +504,10 @@ def _cost(
             pair.sink_port,
         ):
             auto += 1
-    faces = _face_shortfall(placements, machines, region, reserved)
+            # This pair ejects straight across, so neither end needs a cell to dock a pipe on.
+            free_ports.add((pair.source_id, pair.source_port))
+            free_ports.add((pair.sink_id, pair.sink_port))
+    faces = _face_shortfall(placements, machines, region, reserved, free_ports, face_penalties)
     w_footprint, w_volume = weights
     return (
         _W_WIRE * wire
@@ -504,7 +515,7 @@ def _cost(
         + w_footprint * footprint
         + w_volume * volume
         - _W_AUTO * auto
-        + _W_FACES * face_pressure * faces
+        + _W_FACES * faces
     )
 
 
@@ -548,6 +559,8 @@ def _face_shortfall(
     machines: dict[str, Machine],
     region: CellBox,
     reserved: set[Cell],
+    free_ports: Collection[tuple[str, str]] = (),
+    penalties: Mapping[str, float] = MappingProxyType({}),
 ) -> float:
     """Connections with nowhere to sit, summed over every machine: the unbuildability measure.
 
@@ -556,6 +569,21 @@ def _face_shortfall(
     fewer free cells than it has ports and the layout cannot be built - the routers then report
     whichever net happens to lose the race for the last face, which names the wrong machine and
     reads like a routing bug. Priced here instead, where the packing decision is actually made.
+
+    ``penalties`` (machine id -> extra weight) scales one machine's own shortfall, so the solver
+    can lean on exactly the machines its crowding gate named without re-weighting the whole layout
+    (see :func:`optimize_placement`).
+
+    ``free_ports`` are the ``(machine, port)`` pairs an auto-output covers on this placement, and
+    they are **not** demand: the connection ejects straight from one machine into the next, so no
+    cell is docked at either end. Leaving them in was a standing tax on exactly the tight,
+    zero-pipe layouts this search is supposed to find - it charged the sand line's fully
+    auto-fed chain a phantom shortfall of 3.00 on a layout the exact gate agrees is fine, which
+    forced the weight down, which in turn forced the solver to escalate its way out on lines that
+    were really crowded. The over-exemption is deliberate and safe: a single block has only one
+    auto-output face, so a machine with two possible pairs has both exempted here though only one
+    can really be free. That under-reports rather than invents, and the exact gate
+    (``placement.feasibility``) is what actually rules.
 
     Counting each machine's candidates in isolation is not enough, and #76 is exactly where that
     shows: every machine can clear its own bar while two neighbours are counting **the same** free
@@ -580,22 +608,25 @@ def _face_shortfall(
         for p in placements
         for c in occupied_cells(p.cell, machines[p.machine_id].footprint, p.orientation)
     }
-    demand: list[tuple[int, set[Cell]]] = []
+    exempt = set(free_ports)
+    demand: list[tuple[str, int, set[Cell]]] = []
     for p in placements:
         machine = machines[p.machine_id]
-        needed = len(machine.faces.ports)
+        needed = sum(1 for port in machine.faces.ports if (p.machine_id, port.id) not in exempt)
         if needed:
-            demand.append((needed, _dockable_cells(p, machine, occupied, region, reserved)))
+            demand.append(
+                (p.machine_id, needed, _dockable_cells(p, machine, occupied, region, reserved))
+            )
     contenders: dict[Cell, int] = {}
-    for needed, cells in demand:
+    for _mid, needed, cells in demand:
         if len(cells) > needed:
             continue  # has room to spare, so it will not be fighting anyone for a particular cell
         for cell in cells:
             contenders[cell] = contenders.get(cell, 0) + 1
     short = 0.0
-    for needed, cells in demand:
+    for mid, needed, cells in demand:
         share = sum(1.0 / max(1, contenders.get(cell, 0)) for cell in cells)
-        short += max(0.0, needed - share)
+        short += (1.0 + penalties.get(mid, 0.0)) * max(0.0, needed - share)
     return short
 
 

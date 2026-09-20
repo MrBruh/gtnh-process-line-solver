@@ -72,11 +72,10 @@ from .repair import repair_power_sources
 _MAX_FEEDBACK_PASSES = 8
 _PENALTY_STEP = 2.0
 
-#: How much harder the placer is pushed to spread machines out after its layout was rejected
-#: as unbuildable (``placement.feasibility.crowded_machines``). Multiplicative and applied to
-#: the next attempt, so a line that genuinely needs room gets it within a pass or two instead
-#: of burning the whole seed grid on variations of the same crowded shape.
-_FACE_PRESSURE_STEP = 3.0
+#: Added to a machine's own face-term weight each time the crowding gate finds it with nowhere to
+#: put a connection. Per machine on purpose: a global dial re-weights the whole search between
+#: attempts, which makes the multi-start's seeds incomparable and lets the most distorted one win.
+_FACE_PENALTY_STEP = 2.0
 
 
 def solve(
@@ -110,13 +109,9 @@ def solve(
         return _solve_fast(problem, seed, objective)
     penalties: dict[str, float] = {}
     seen_failed: set[frozenset[str]] = set()
-    # Zero until the crowding gate actually objects, then raised on every further rejection. The
-    # face term is a **rescue**, not a standing tax - the same shape as the power MST pull next to
-    # it in placement.search, which also stays dark until the router fails. Charging it from the
-    # start taxes every line for a hazard most of them do not have: measured, it cost the sand
-    # line its hand-built box (8 cells against 18) while changing nothing about whether it built.
-    face_pressure = 0.0
     crowding: Infeasibility | None = None
+    # Machines the gate found no room for, and how hard to lean on each next time.
+    face_penalties: dict[str, float] = {}
     # The first placement the gate turned away, kept as a parachute. The gate is a heuristic about
     # geometry and the routers are the authority, so it is only ever allowed to pick BETTER
     # attempts - never to declare a line unsolvable that the routers would in fact have solved.
@@ -142,8 +137,8 @@ def solve(
             problem,
             seed=attempt_seed,
             net_penalties=penalties,
+            face_penalties=face_penalties,
             objective=sa_mode,
-            face_pressure=face_pressure,
         )
         if not placement.ok:
             # The machines do not fit the region at all - seed-independent, so retrying is futile.
@@ -158,9 +153,15 @@ def solve(
         # the race for the last free face costs an attempt and reports the wrong machine (#76).
         crowded = crowded_machines(problem, placement.placements)
         if crowded:
+            # Lean on the named machines, never on the search as a whole: the attempts are
+            # independent seeds ranked against one objective, so a global dial makes them
+            # incomparable and lets the most distorted one win (see optimize_placement).
             if crowding is None:
                 crowding, gated = _crowding_infeasibility(crowded), placement.placements
-            face_pressure = max(1.0, face_pressure * _FACE_PRESSURE_STEP)
+            for machine_id in crowded:
+                face_penalties[machine_id] = (
+                    face_penalties.get(machine_id, 0.0) + _FACE_PENALTY_STEP
+                )
             continue
 
         layout, failed_nets = _assemble(problem, placement.placements, attempt_seed, objective)

@@ -425,8 +425,8 @@ def test_solve_gives_up_when_the_same_net_fails_every_attempt(
         *,
         seed: int = 0,
         net_penalties: dict[str, float] | None = None,
+        face_penalties: dict[str, float] | None = None,
         objective: Objective = "footprint",
-        face_pressure: float = 1.0,
     ) -> PlacementResult:
         nonlocal attempts
         attempts += 1
