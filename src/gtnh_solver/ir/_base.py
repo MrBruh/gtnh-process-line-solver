@@ -7,6 +7,14 @@ Two bases, both reject unknown fields (``extra="forbid"``) so the adapter can ne
 - ``FrozenModel``  - immutable, hashable value types (coordinates, boxes) so they can
   live in sets / dict keys during the solve.
 
+Both also reject **non-finite floats** (``allow_inf_nan=False``). Pydantic accepts ``inf`` for a
+``float`` field by default, and ``inf`` passes every bound this IR states (``ge=0.0`` is true of
+it), so an export whose JSON carries ``1e400`` used to validate here and die later as an
+``OverflowError`` inside power synthesis - an ``ArithmeticError``, which is not a ``ValueError``
+and so slipped the CLI's load guard entirely. ``nan`` was rejected only by luck, because
+``nan >= 0.0`` is False. A quantity no arithmetic can use is a contract violation, and it is
+cheaper to name the field than to explain the traceback (#115).
+
 Plus ``check_contract_version``, the guard both IR roots put on their ``version`` field.
 """
 
@@ -18,13 +26,13 @@ from pydantic import BaseModel, ConfigDict
 class StrictModel(BaseModel):
     """Aggregate contract model: unknown fields are an error; assignment is validated."""
 
-    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+    model_config = ConfigDict(extra="forbid", validate_assignment=True, allow_inf_nan=False)
 
 
 class FrozenModel(BaseModel):
     """Immutable, hashable value type: unknown fields are an error."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
 
 def check_contract_version(value: int, current: int, contract: str) -> int:

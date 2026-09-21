@@ -125,6 +125,28 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   degrades to a single connection for the router to report on, while a tier the ladder knows
   cannot survive the run is decided here. `AdapterInfeasible` subclasses `AdapterError`, so a
   caller that only knows the older contract still catches it.
+
+- **A non-finite or unbounded figure in an export is a load failure (exit 2), not a traceback
+  that exits 1 (`adapter/plan.py`, `ir/_base.py`, `cli.py`).** Two ordinary-looking exports died
+  as `OverflowError`: a `totalEut` of `1e400`, which JSON parses to `inf` and which passed every
+  `ge=0` bound on the way in, and a `parallel` with 310 digits, which Python holds as an int until
+  `core._rate` converts it to a float. `OverflowError` is an `ArithmeticError`, not a `ValueError`,
+  so the CLI's one load guard missed both and the run left a raw traceback with exit 1: the code
+  that means "the solver returned an explicit infeasibility", so a script keying on it read a
+  crash as a clean verdict.
+
+  Refused at both contracts now. The plan models and both IR bases set `allow_inf_nan=False`, so a
+  non-finite number fails as a `ValidationError` naming its field (`nan` used to fail only by luck,
+  because `nan >= 0.0` is False). A node's `parallel` (and a runtime variant's) is bounded at
+  `MAX_PARALLEL` (1,000,000) and its `machineCount` at `MAX_MACHINE_COUNT` (1,000), tighter because
+  every instance becomes a machine to place. `machineCount < 1` is refused by the same field rather than by a separate check in the
+  mapping. The CLI's load guard also catches `ArithmeticError`, as the net under anything the
+  contracts do not cover.
+
+  **New exit code 3 for an internal error.** Solving, rendering the guide and building the preview
+  had no guard at all, so any bug there also surfaced as exit 1. They now report
+  `internal error: <type>: <message>` with the traceback, and exit 3, which keeps 1 meaning an
+  explicit infeasibility and 2 meaning the export could not be loaded.
 - **A cable or pipe now joins to its texture entry under either name GT has given it, so a 2.9
   dataset keeps its cables (`dataset/pipes.py`).** Up to pack 2.8.4 the texture dump recorded one
   under GT's unlocalized name (`cable.tin.02`, `gt_pipe_bronze`); GT5U 5.09.54.20 records the

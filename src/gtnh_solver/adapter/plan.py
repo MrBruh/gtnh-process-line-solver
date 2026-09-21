@@ -18,7 +18,30 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-_CFG = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="ignore")
+#: ``allow_inf_nan=False`` because this is the **untrusted** boundary: the export is a file the
+#: solver did not write, and JSON has no literal for a non-finite number but ``1e400`` parses to
+#: ``inf`` all the same. Unbounded, ``inf`` flows through the whole mapping (it satisfies every
+#: ``ge=0`` the IR states) and surfaces as an ``OverflowError`` deep inside power synthesis, which
+#: is an ``ArithmeticError`` rather than a ``ValueError`` and so escaped the CLI as a traceback.
+#: Refused here instead, where the message can still name the field that carried it (#115).
+_CFG = ConfigDict(
+    alias_generator=to_camel, populate_by_name=True, extra="ignore", allow_inf_nan=False
+)
+
+#: Ceiling on a node's ``parallel`` and on the ``parallel`` of one runtime variant. A parallel
+#: count is a throughput multiplier that ends up in ``amount * parallel * machineCount /
+#: duration``, and Python ints are unbounded, so a 310-digit one (an export bug, or a hostile
+#: file) raises ``OverflowError`` the moment that product is converted to a float. This is an
+#: arithmetic sanity bound, not a claim about what GT can run: the largest parallel counts in the
+#: pack are in the low thousands, so anything this far out is a broken export either way.
+MAX_PARALLEL = 1_000_000
+
+#: Ceiling on a node's ``machineCount``. Tighter than :data:`MAX_PARALLEL` because every instance
+#: becomes a real ``Machine`` to place and route (``core._instance_ids``): where a huge
+#: ``parallel`` is one bad multiplication, a huge ``machineCount`` is an allocation the adapter
+#: would sit in until the box ran out of memory. The solver targets tens of machines
+#: (docs/ARCHITECTURE.md decision #6), so this is already far past anything it can lay out.
+MAX_MACHINE_COUNT = 1_000
 
 
 class Resource(BaseModel):
@@ -145,7 +168,7 @@ class RuntimeVariant(BaseModel):
     coil_tier: str | None = None
     eut: float = 0.0
     duration_ticks: float = 0.0
-    parallel: int = 1
+    parallel: int = Field(default=1, ge=1, le=MAX_PARALLEL)
 
 
 class RuntimeCalculation(BaseModel):
@@ -188,8 +211,11 @@ class Node(BaseModel):
 
     id: str
     recipe_id: str
-    machine_count: int = 1
-    parallel: int = 1
+    #: Both are bounded here rather than checked downstream: they are multipliers straight out of
+    #: an untrusted file, and unbounded they reach ``core._rate`` as an int too large to convert
+    #: to a float (:data:`MAX_PARALLEL`, :data:`MAX_MACHINE_COUNT`).
+    machine_count: int = Field(default=1, ge=1, le=MAX_MACHINE_COUNT)
+    parallel: int = Field(default=1, ge=1, le=MAX_PARALLEL)
     overclock_tier: str  # LV/MV/HV/... -> IR voltage_tier
     #: Which of the recipe's :class:`MachineHandler` entries this node runs in. Empty means the
     #: default, the first entry; empty also on every MrBruh-fork plan, which emits no handlers.
@@ -268,6 +294,8 @@ class ResolvedMachine(BaseModel):
     # Consumed as a fallback when a plan's ``resolved`` block is richer than its recipes.
     machine_block: MachineBlock | None = None
     tier: str = ""
+    # Descriptive only: the adapter multiplies by the NODE's counts, never these, so they carry no
+    # bound. Bounding a field nothing reads could only refuse a plan, never protect a calculation.
     machine_count: int = 1
     parallel: int = 1
     eut_per_machine: float = 0.0

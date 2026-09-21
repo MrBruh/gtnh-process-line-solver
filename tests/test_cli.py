@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from functools import cache
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -338,6 +339,108 @@ def _under_a_file(tmp_path: Path, name: str) -> Path:
     blocker = tmp_path / "not-a-directory"
     blocker.write_text("", encoding="utf-8")
     return blocker / name
+
+
+def _spliced(tmp_path: Path, name: str, plan: Any, literal: str) -> str:
+    """Write ``plan`` to ``name``, putting ``literal`` where a ``"REPLACE_ME"`` string stands.
+
+    The two figures under test cannot be written through ``json.dumps``: ``1e400`` round-trips as
+    ``Infinity``, which no real exporter emits, and a 310-digit int has to reach the parser
+    exactly as written. So they go in as raw JSON text.
+    """
+    export = tmp_path / name
+    export.write_text(json.dumps(plan).replace('"REPLACE_ME"', literal), encoding="utf-8")
+    return str(export)
+
+
+def _sand_plan() -> Any:
+    return json.loads(Path(_SAND).read_text(encoding="utf-8"))
+
+
+def test_cli_non_finite_figure_returns_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    # An export whose totalEut is 1e400 (inf, once parsed) is a plan that could not be loaded, so
+    # it must exit 2. It used to raise OverflowError out of power synthesis: an ArithmeticError,
+    # missed by the load guard, which left a traceback and exit 1 - the code that means the solver
+    # returned an explicit infeasibility (#115).
+    plan = _sand_plan()
+    plan["resolved"]["machines"][0]["totalEut"] = "REPLACE_ME"
+    export = _spliced(tmp_path, "inf.json", plan, "1e400")
+    code = main([export])
+    assert code == 2
+    assert "could not load" in capsys.readouterr().err
+    assert not solve_calls
+
+
+def test_cli_unbounded_multiplier_returns_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    # Same contract for the other unvalidated numeric: a 310-digit parallel, which used to reach
+    # core._rate and raise "int too large to convert to float".
+    plan = _sand_plan()
+    plan["nodes"][0]["parallel"] = "REPLACE_ME"
+    export = _spliced(tmp_path, "parallel.json", plan, "9" * 310)
+    code = main([export])
+    assert code == 2
+    assert "could not load" in capsys.readouterr().err
+    assert not solve_calls
+
+
+def test_cli_arithmetic_the_contracts_miss_is_still_a_load_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    solve_calls: list[dict[str, object]],
+) -> None:
+    # The contracts now refuse both figures #115 found, but the mapping multiplies far more than
+    # those two, and OverflowError is an ArithmeticError rather than a ValueError. The load guard
+    # takes the whole family, so the next one of these reads as exit 2 and not as a traceback.
+    def overflowing(*args: object, **kwargs: object) -> InputIR:
+        raise OverflowError("int too large to convert to float")
+
+    monkeypatch.setattr(cli_module, "to_input_ir", overflowing)
+    code = main([_SAND])
+    assert code == 2
+    assert "could not load" in capsys.readouterr().err
+    assert not solve_calls
+
+
+def test_cli_an_unexpected_exception_is_an_internal_error_not_an_infeasibility(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Everything the solve stretch knows how to fail at comes back as an Infeasibility, so an
+    # exception raised there is a bug in this program. It gets its own exit code: a caller keying
+    # on the exit code must not read a crash as exit 1 ("an explicit infeasibility") or as exit 2
+    # ("the export could not be loaded"), and the traceback is kept because filing it is the only
+    # thing to do with it.
+    def exploding_solve(problem: InputIR, **kwargs: object) -> LayoutResult:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(cli_module, "solve", exploding_solve)
+    code = main([_SAND])
+    err = capsys.readouterr().err
+    assert code == cli_module.INTERNAL_ERROR_EXIT == 3
+    assert "internal error: RuntimeError: boom" in err
+    assert "Traceback" in err  # the useful half of an internal error
+
+
+def test_cli_a_preview_that_is_not_a_write_failure_is_an_internal_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    solve_calls: list[dict[str, object]],
+) -> None:
+    # The preview builds a whole scene before it writes anything, and that half had no guard at
+    # all: only OSError was caught, so a scene-build bug escaped as a traceback. An OSError is
+    # still the user's problem (exit 2, "could not write"); anything else is ours.
+    def exploding_preview(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("scene")
+
+    monkeypatch.setattr(cli_module, "write_preview", exploding_preview)
+    code = main([_SAND, "--preview", str(tmp_path / "view.html")])
+    err = capsys.readouterr().err
+    assert code == cli_module.INTERNAL_ERROR_EXIT
+    assert "internal error: RuntimeError: scene" in err
 
 
 def test_cli_unwritable_output_returns_2(

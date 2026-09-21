@@ -73,7 +73,8 @@ gtnh-solve --list-dataset-versions             # ...or see which ones you have
 See [`CONTRIBUTING.md`](CONTRIBUTING.md#setup) for the full dev setup (hooks, tests, lint).
 
 Exit code: 0 when the layout is fully valid, 1 when the solver can only return an explicit
-infeasibility (the reason prints to stderr), 2 when the export can't be loaded. The `--preview`
+infeasibility (the reason prints to stderr), 2 when the export can't be loaded, 3 when the run
+hit a bug in `gtnh-solve` itself (the traceback prints, and it's worth an issue). The `--preview`
 three.js viewer is built; a congestion heatmap, multi-seed compare, and offline (vendored)
 three.js are Phase 2 (see the roadmap).
 

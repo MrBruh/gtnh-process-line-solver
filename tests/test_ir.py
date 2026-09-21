@@ -7,6 +7,8 @@ tests pin both the guarantees and the non-guarantees.
 
 from __future__ import annotations
 
+import math
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -39,6 +41,7 @@ from gtnh_solver.ir import (
     RouteMaterial,
     Segment,
 )
+from gtnh_solver.ir._base import FrozenModel, StrictModel
 
 # --------------------------------------------------------------------------- helpers
 
@@ -633,6 +636,47 @@ def test_enums_serialize_to_doc_strings() -> None:
 
 
 # --------------------------------------------------------------------------- property tests
+
+
+def test_a_non_finite_quantity_is_refused_by_the_contract() -> None:
+    # Pydantic accepts inf for a float field by default, and inf passes every bound this IR
+    # states: inf >= 0.0 is True, so Machine.eut's ge=0.0 let it through and power synthesis died
+    # on it much later as an OverflowError - an ArithmeticError, which is not a ValueError and so
+    # was not caught as a load failure at all (#115). A quantity no arithmetic can use is a
+    # contract violation, named here where the field can still be pointed at.
+    with pytest.raises(ValidationError, match="finite"):
+        _machine(eut=math.inf)
+    with pytest.raises(ValidationError, match="finite"):
+        Port(id="p", commodity=Commodity.POWER, direction=IODirection.INPUT, rate=math.inf)
+
+
+def test_nan_is_refused_for_the_same_reason_rather_than_by_luck() -> None:
+    # nan was already rejected, but only incidentally: nan >= 0.0 is False, so it failed the bound
+    # rather than the type. Any field without a lower bound took it. It is now refused as what it
+    # is, which is what keeps a later unbounded quantity from re-opening the hole.
+    with pytest.raises(ValidationError, match="finite"):
+        Net(
+            id="n",
+            commodity=Commodity.FLUID,
+            fluid_or_item="water",
+            throughput=math.nan,
+            endpoints=[MachineFaceRef(machine_id="m", port_id="p")],
+        )
+
+
+def test_both_bases_refuse_non_finite_floats() -> None:
+    # The value types carry no float field today, so the config would otherwise go untested on
+    # FrozenModel and quietly diverge from StrictModel the first time one gains a coordinate or a
+    # weight. Pinned on the bases themselves rather than on whichever model happens to use them.
+    class _Weighted(FrozenModel):
+        w: float
+
+    class _Sized(StrictModel):
+        w: float
+
+    for model in (_Weighted, _Sized):
+        with pytest.raises(ValidationError, match="finite"):
+            model(w=math.inf)
 
 
 @given(
