@@ -287,12 +287,23 @@ def test_cli_malformed_export_returns_2(
     assert not solve_calls
 
 
+def _under_a_file(tmp_path: Path, name: str) -> Path:
+    """A target whose directory exists as a regular FILE, so no amount of mkdir can write it.
+
+    A merely missing directory used to be how these tests got an unwritable path; the CLI now
+    creates it (#150), so the guard is exercised with a parent that genuinely cannot be one.
+    """
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("", encoding="utf-8")
+    return blocker / name
+
+
 def test_cli_unwritable_output_returns_2(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
 ) -> None:
-    # an unwritable output path (parent dir missing -> OSError) is reported and exits 2 per the
-    # documented 0/1/2 contract, not dumped as a raw traceback (GitHub #39)
-    target = tmp_path / "missing-dir" / "guide.txt"
+    # an unwritable output path (OSError) is reported and exits 2 per the documented 0/1/2
+    # contract, not dumped as a raw traceback (GitHub #39)
+    target = _under_a_file(tmp_path, "guide.txt")
     code = main([_SAND, "-o", str(target)])
     assert code == 2
     err = capsys.readouterr().err
@@ -304,12 +315,49 @@ def test_cli_unwritable_preview_returns_2(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
 ) -> None:
     # same guard on the --preview write path
-    target = tmp_path / "missing-dir" / "view.html"
+    target = _under_a_file(tmp_path, "view.html")
     code = main([_SAND, "--preview", str(target)])
     assert code == 2
     err = capsys.readouterr().err
     assert "could not write" in err
     assert str(target) in err
+
+
+def test_cli_unwritable_schematic_returns_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    # and on the --schematic one, whose writer already made its directory: the three agree
+    target = _under_a_file(tmp_path, "line.schematic")
+    code = main([_SAND, "--schematic", str(target)])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "could not write" in err
+    assert str(target) in err
+
+
+@pytest.mark.parametrize(
+    ("flag", "name"),
+    [("-o", "guide.txt"), ("--preview", "view.html"), ("--schematic", "line.schematic")],
+)
+def test_cli_creates_the_directory_an_output_sits_in(
+    flag: str,
+    name: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    solve_calls: list[dict[str, object]],
+) -> None:
+    # Every other write test builds its target straight under tmp_path, which pytest always
+    # creates, so this case could never arise in them. It is the documented workflow's case,
+    # though: out/ is gitignored, so on a fresh clone `--preview out/sand.html` failed on its
+    # first run, after the whole solve and texture bake (#150). Two levels deep, because one
+    # missing level would not prove the parents=True half. All three flags, because "put it
+    # here" has to mean the same thing for each of them.
+    target = tmp_path / "out" / "nested" / name
+    code = main([_SAND, flag, str(target)])
+    assert code == 0
+    assert target.is_file()
+    assert target.stat().st_size > 0
+    assert "could not write" not in capsys.readouterr().err
 
 
 def test_cli_version_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:

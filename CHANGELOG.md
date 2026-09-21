@@ -99,6 +99,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   purpose: a payload assembled in-process is not a stale dump, and the gate belongs where a file
   crosses into the process. Two doc strings that still said "schema v1" now say v2.
 
+- **`-o/--output` and `--preview` create the directory their file goes in, as `--schematic`
+  already did (`cli.py`, `previewer/__init__.py`).** Pointing either at a path whose directory did
+  not exist yet failed with `error: could not write out/sand.html: [Errno 2] No such file or
+  directory` and exit 2. The write is the last step, so the run had already adapted, solved and
+  (for `--preview`) fetched the jar and baked every texture before throwing it away. It was also
+  the documented workflow that tripped: `out/` is gitignored, so on any fresh clone or worktree
+  the first `gtnh-solve ... --preview out/sand.html` failed. `write_preview` now makes its parent
+  the way `write_schematic` always has, and the CLI does the same before writing the guide. A
+  parent that cannot be made (it exists as a file, or is not creatable) is still reported as
+  `could not write` with exit 2.
 - **A cable or pipe now joins to its texture entry under either name GT has given it, so a 2.9
   dataset keeps its cables (`dataset/pipes.py`).** Up to pack 2.8.4 the texture dump recorded one
   under GT's unlocalized name (`cable.tin.02`, `gt_pipe_bronze`); GT5U 5.09.54.20 records the
