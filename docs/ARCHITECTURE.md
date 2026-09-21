@@ -57,7 +57,9 @@ doc as intent and reconcile.
   (`adapter/plan.py`). No vendoring. On a schema-v2 export it trusts the `resolved` throughput
   block for each machine's EU/t draw (the exporter models overclocking) and cross-checks it
   against the recipe-derived power synthesis - a mismatch warns (`AdapterWarning`) but resolved
-  wins; v1 plans keep the pure synthesis (#2). *(Phase 2, lane A: pin an explicit plan-schema +
+  wins; v1 plans keep the pure synthesis (#2). A plan edge becomes a net, except that the edges
+  meeting at one multiblock port become one net: that port is one hatch feeding one pipe network
+  (#213, docs/DOMAIN.md). *(Phase 2, lane A: pin an explicit plan-schema +
   recipe-dataset version; Phase 1 just tolerates the current export shape via the committed
   `examples/` fixtures.)*
 - **dataset/** - the GT **physical** rules (footprints, faces, pipe/wire physical tiers,

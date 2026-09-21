@@ -53,6 +53,23 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **The edges that meet at one multiblock port are now one net, so its hatch and its terminal agree
+  (#213).** A plan draws an edge per consumer, so a multiblock output feeding two machines was two
+  nets docking two terminals on one port. The router put the port's hatch behind the first terminal
+  and the validator checked it against the last, so `examples/ev-nitrobenzene.json` failed every
+  attempt with `hatch_terminal_mismatch` even when every net routed. In game that port is one hatch
+  with one pipe network behind it, so the adapter now merges those edges into one net, transitively,
+  named by the edges' ids joined with `+`. ev-nitrobenzene maps to 27 nets instead of 31, and no
+  multiblock port sits in two of them.
+
+  A multiblock is any machine the structure dump resolved or the export's handler declares one, so
+  the merge does not depend on a local dump. A merged net carries what its producers move, each
+  counted once: every edge off one output is rated at that output's full rate, so summing them would
+  have doubled an LCR's acid for feeding a plant and an overflow tank. A boundary storage has no
+  hatch, so its shared ports keep one net per edge, and a single-block machine's are left as they
+  were. The shipped sand, nitrobenzene and parallel-sand lines share only storage ports, so their
+  InputIR is byte-identical before and after, with or without a local dump. No InputIR version bump:
+  the schema is unchanged, since `Net.endpoints` was always unbounded.
 - **A GTNH 2.9 multiblock is now drawn and exported as the controller its footprint was reserved
   from, not a different machine that shares its recipe map (#205).** An arodoid plan carries no
   `machineBlock`, so the adapter found each machine's structure record by name (handler label,

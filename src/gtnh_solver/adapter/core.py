@@ -12,7 +12,8 @@ Mapping (see docs/ARCHITECTURE.md, docs/IR.md):
                 separate boundary concept.
 - ``edge``    -> ``Net`` (resourceKind -> commodity, resourceId -> fluid_or_item); endpoints
                 reference the matching out/in ports; typed throughput is computed from the
-                recipe rate.
+                recipe rate. **Edges sharing a multiblock port are one net** (``_edge_groups``):
+                in game one port is one hatch feeding one pipe network (#213).
 - ``power``   -> a source machine + shared-amperage net per voltage tier feed the powered
                 machines (``power`` submodule, docs/DOMAIN.md); the export carries no source.
 
@@ -44,6 +45,26 @@ are opposites - see ``_classify_census_miss``.
 ``Port.rate`` and ``Machine.eut`` are one machine's (the power synthesis sums them), while
 ``Net.throughput`` is the group's (:func:`_group_rate`), because one bus carries what all of them
 move. A single-machine node keeps its bare id, so nothing that predates this moves.
+
+**Edges that meet at one multiblock port become one net** (#213). A plan draws an edge per
+consumer, so an output feeding two machines is two edges from one port; built as two nets they dock
+two terminals on the port, while the build has one hatch there, and the router and the validator
+each paired that hatch with a different one of the two. The edges are grouped by transitive closure
+over the hatch-bearing ``(machine, port)`` pairs they touch::
+
+    plan edges (plan order)        e1: LCR -> Chem Plant   e2: LCR -> Super Tank   e3: Oven -> DT
+      |  _edge_groups: union edges touching one multiblock (machine, port), transitively
+      v
+    groups                         {e1, e2} (share LCR output:x)   {e3}
+      |  _net_for_edges: one net per group; id "e1+e2", endpoints producers then consumers,
+      v                            throughput = each distinct producer's rate once
+    nets                           "e1+e2"                          "e3"   (a lone edge: as before)
+
+Only a multiblock's port merges (:func:`_is_multiblock` says which machines are). A boundary storage
+has no hatch, and its covers can push through several faces, so storage-shared nets stay apart and
+a line that shares only storages lays out exactly as before. A single-block machine sharing a port
+is left unmerged too: it has no hatch to disagree about, and whether it should merge is a separate
+question this does not settle.
 
 Still crude-on-purpose for Phase 1 (docs/ROADMAP.md): all four horizontal orientations for every
 machine, non-square bases included (``occupied_cells`` rotates the reserved box); and hint-derived
@@ -256,6 +277,8 @@ def to_input_ir(
     # two-machine sample, where a miss proves nothing (dataset.PhysicalDataset).
     single_block_ids: set[str] = set()
     identifies_single_blocks = physical is not None and physical.identifies_single_blocks
+    # Machines whose I/O rides hatches, so a port of theirs is one hatch and one net (#213).
+    multiblock_ids: set[str] = set()
     for node in plan.nodes:
         recipe = recipes.get(node.recipe_id)
         if recipe is None:
@@ -282,6 +305,8 @@ def to_input_ir(
         )
         if record is None and identifies_single_blocks:
             _classify_census_miss(recipe, node, single_block_ids)
+        if _is_multiblock(recipe, node, record):
+            multiblock_ids.update(_instance_ids(node))
         # Every machine of a parallel node is the same build with the same ports and draw; they
         # differ only in id and, later, in where the placer puts them.
         machines.extend(
@@ -325,9 +350,13 @@ def to_input_ir(
             )
         )
 
-    nets = [_net_for_edge(edge, nodes_by_id, recipes, instances_by_node) for edge in plan.edges]
+    nets = [
+        _net_for_edges(group, nodes_by_id, recipes, instances_by_node)
+        for group in _edge_groups(plan.edges, instances_by_node, multiblock_ids)
+    ]
     # Close the line: collect each unconsumed output (#16). Storages are named by id rather than
     # by their type string - a real GT machine called "Super ..." would have been skipped silently.
+    # A merged net lists every endpoint its edges did, so the merge changes nothing consumed here.
     group_of = {
         instance_id: node_id
         for node_id, instance_ids in instances_by_node.items()
@@ -450,6 +479,30 @@ def _classify_census_miss(recipe: Recipe, node: Node, single_block_ids: set[str]
         AdapterWarning,
         stacklevel=3,
     )
+
+
+def _is_multiblock(recipe: Recipe, node: Node, record: MachinePhysical | None) -> bool:
+    """Whether this node's machines do their I/O through hatches, so each port is one hatch.
+
+    Either of two pieces of evidence settles it, and they are complementary rather than ranked:
+
+    - **a structure record** (``record``), which the dump holds only for multiblock controllers, and
+      which is what gives a machine the ``hatch_slots`` the router places hatches on;
+    - **the export's own handler** declaring ``kind: "multiblock"``, which holds with no dataset at
+      all, or with one that missed the machine.
+
+    The physical fact is what matters: a multiblock's port is one hatch whether or not a local dump
+    resolved its footprint, so a plan's nets do not change shape with the dataset it is adapted
+    against. Neither piece of evidence proves the opposite, though. A machine with no record and no
+    multiblock handler (a plan whose recipes list no handlers, adapted without a dump) reads as not
+    known to be a multiblock and keeps its edges' nets apart. That costs nothing the router can see:
+    it places hatches only where a record gave slots, so such a machine has no hatch to disagree
+    about.
+    """
+    if record is not None:
+        return True
+    handler = _effective_handler(recipe, node)
+    return handler is not None and handler.kind == "multiblock"
 
 
 def _matched_variant(recipe: Recipe, node: Node) -> RuntimeVariant | None:
@@ -879,13 +932,10 @@ def _add_output_buffers(
     return machines + buffers, nets + buffer_nets
 
 
-def _net_for_edge(
-    edge: Edge,
-    nodes_by_id: dict[str, Node],
-    recipes: dict[str, Recipe],
-    instances_by_node: dict[str, list[str]],
-) -> Net:
-    """One net per edge, reaching **every machine** on each side of it.
+def _edge_sides(
+    edge: Edge, instances_by_node: dict[str, list[str]]
+) -> tuple[list[MachineFaceRef], list[MachineFaceRef]]:
+    """The ``(producers, consumers)`` an edge wires: **every machine** on each side of it.
 
     A parallel node's machines share one bus, which is both how GT lines are actually built and what
     keeps this from needing a new IR concept: ``Net.endpoints`` is already an unbounded list, so N
@@ -894,27 +944,138 @@ def _net_for_edge(
 
     An endpoint referring to a storage passes through unexpanded: a storage is one block.
     """
-    source_ids = instances_by_node.get(edge.source, [edge.source])
-    target_ids = instances_by_node.get(edge.target, [edge.target])
     out_pid = _port_id(IODirection.OUTPUT, edge.resource_id)
     in_pid = _port_id(IODirection.INPUT, edge.resource_id)
-    return Net(
-        id=edge.id,
-        commodity=_commodity(edge.resource_kind),
-        fluid_or_item=edge.resource_id,
-        throughput=_throughput(edge, nodes_by_id, recipes),
-        endpoints=[
-            *(MachineFaceRef(machine_id=mid, port_id=out_pid) for mid in source_ids),
-            *(MachineFaceRef(machine_id=mid, port_id=in_pid) for mid in target_ids),
+    return (
+        [
+            MachineFaceRef(machine_id=mid, port_id=out_pid)
+            for mid in instances_by_node.get(edge.source, [edge.source])
+        ],
+        [
+            MachineFaceRef(machine_id=mid, port_id=in_pid)
+            for mid in instances_by_node.get(edge.target, [edge.target])
         ],
     )
+
+
+def _edge_groups(
+    edges: list[Edge], instances_by_node: dict[str, list[str]], multiblock_ids: set[str]
+) -> list[list[Edge]]:
+    """Partition ``edges`` into the sets that must be one net: those meeting at a multiblock port.
+
+    Union by transitive closure over the hatch-bearing ``(machine, port)`` pairs each edge touches,
+    so an output feeding two consumers is one group and so is an input fed by two producers, and two
+    such ports chained through a shared edge join into one. A port of any other machine joins
+    nothing (see the module docstring for why storages and single blocks stay apart).
+
+    Deterministic by construction: each group lists its edges in plan order, and the groups come
+    out in the plan order of their first edge. An edge that shares no multiblock port is a group of
+    one, which is what keeps every plan without such a port byte-identical to before.
+    """
+    parent = list(range(len(edges)))
+
+    def root(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]  # path halving
+            index = parent[index]
+        return index
+
+    first_edge_at: dict[tuple[str, str], int] = {}
+    for index, edge in enumerate(edges):
+        producers, consumers = _edge_sides(edge, instances_by_node)
+        for ref in (*producers, *consumers):
+            if ref.machine_id not in multiblock_ids:
+                continue
+            here = root(index)
+            there = root(first_edge_at.setdefault((ref.machine_id, ref.port_id), index))
+            # The lower index roots the union, so a group's root is its first edge in plan order.
+            parent[max(here, there)] = min(here, there)
+    groups: dict[int, list[Edge]] = {}
+    for index, edge in enumerate(edges):
+        groups.setdefault(root(index), []).append(edge)
+    return list(groups.values())
+
+
+def _net_for_edges(
+    group: list[Edge],
+    nodes_by_id: dict[str, Node],
+    recipes: dict[str, Recipe],
+    instances_by_node: dict[str, list[str]],
+) -> Net:
+    """One net carrying every edge of ``group`` (:func:`_edge_groups`); a lone edge maps as ever.
+
+    - **id**: the edge ids joined with ``+`` in plan order, so a merged net names every edge it
+      stands for and a lone edge keeps its own id unchanged.
+    - **endpoints**: every producer, then every consumer, each once and in plan order. A shared port
+      is listed once however many of the group's edges touch it, which is the point.
+    - **throughput**: :func:`_group_throughput`, which counts each producer once.
+
+    Every edge must carry the same resource. A port is named for its resource, so sharing one
+    already implies the same id; what can still disagree is the kind, and a port that is somehow
+    both an item and a fluid is a malformed plan, refused here rather than routed as one or other.
+    """
+    first = group[0]
+    for edge in group[1:]:
+        if (edge.resource_kind, edge.resource_id) != (first.resource_kind, first.resource_id):
+            raise AdapterError(
+                f"edges {first.id!r} and {edge.id!r} meet at one multiblock port but carry "
+                f"different resources ({first.resource_kind}:{first.resource_id} vs "
+                f"{edge.resource_kind}:{edge.resource_id}); one port has one resource"
+            )
+    producers: list[MachineFaceRef] = []
+    consumers: list[MachineFaceRef] = []
+    for edge in group:
+        edge_producers, edge_consumers = _edge_sides(edge, instances_by_node)
+        producers.extend(ref for ref in edge_producers if ref not in producers)
+        consumers.extend(ref for ref in edge_consumers if ref not in consumers)
+    return Net(
+        id="+".join(edge.id for edge in group),
+        commodity=_commodity(first.resource_kind),
+        fluid_or_item=first.resource_id,
+        throughput=_group_throughput(group, nodes_by_id, recipes),
+        endpoints=[*producers, *consumers],
+    )
+
+
+def _group_throughput(
+    group: list[Edge], nodes_by_id: dict[str, Node], recipes: dict[str, Recipe]
+) -> float:
+    """What a net of these edges moves: each distinct flow its edges are rated by, counted once.
+
+    Each edge is rated by one node's port (:func:`_throughput`): its producer's group output, or,
+    for a storage-fed edge, its consumer's demand. Summing the edge ratings would double-count a
+    shared port, because every edge off one output is rated at that output's **full** rate: an LCR
+    whose acid feeds a Chemical Plant and an overflow tank moves its acid once, not twice. So a
+    merged fan-out carries its producer's rate and a merged fan-in the sum of its producers', which
+    is the figure a lone edge's net always meant.
+
+    The one approximation: an input fed by both a storage and a machine sums the machine's output
+    with the storage-fed demand, because the plan carries no per-edge rate saying how much of that
+    demand the storage covers. It can only over-state the flow, never under-state it.
+    """
+    rated: dict[tuple[str, IODirection], float] = {}
+    for edge in group:
+        rated.setdefault(_rated_port(edge, nodes_by_id), _throughput(edge, nodes_by_id, recipes))
+    return sum(rated.values())
+
+
+def _rated_port(edge: Edge, nodes_by_id: dict[str, Node]) -> tuple[str, IODirection]:
+    """Whose port :func:`_throughput` rates ``edge`` by, as ``(id, direction)``.
+
+    The producer's output when the producer is a node, else the consumer's input. (A storage to
+    storage edge, rated zero, touches no multiblock and so is only ever a group of one, where the
+    key decides nothing.)
+    """
+    if edge.source in nodes_by_id:
+        return edge.source, IODirection.OUTPUT
+    return edge.target, IODirection.INPUT
 
 
 def _throughput(edge: Edge, nodes_by_id: dict[str, Node], recipes: dict[str, Recipe]) -> float:
     """Typed rate for an edge: the producing node's group output rate, else the consumer's demand.
 
     A *group* rate, because the edge is one shared net across however many machines the node stands
-    for (:func:`_group_rate`).
+    for (:func:`_group_rate`). Which port that reads is :func:`_rated_port`.
     """
     source = nodes_by_id.get(edge.source)
     if source is not None:

@@ -128,6 +128,14 @@ PinnedIO       { net_id, cell: CellCoord, kind: "input" | "output" }
 touches). It does **not** check geometry/rule validity (in-bounds, overlaps, tier caps,
 face reachability) - that is the validator's independent job (docs/TESTING.md).
 
+**A net is a pipe network, not a plan edge.** The adapter maps each plan edge to a net, except that
+the edges meeting at one multiblock port become one net (their ids joined with `+`), because that
+port is one hatch with one pipe behind it (docs/DOMAIN.md, #213). So a multiblock's
+`(machine, port)` sits in at most one net, which the router and the validator rely on when each
+pairs a port's hatch with its terminal. A boundary storage's port may still sit in several. This is
+an adapter guarantee, not a schema rule, and it needed no schema change: `endpoints` was always
+unbounded.
+
 **A machine's power intake is per connection (InputIR v3).** A GT energy hatch accepts 2 amps
 and a multiblock's intake is the sum over its hatches, so a machine that draws more than one
 hatch can take carries several power INPUT ports, each with its own `rate` (its share of `eut`)
