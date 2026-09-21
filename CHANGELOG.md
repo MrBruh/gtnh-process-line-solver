@@ -73,6 +73,26 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   InputIR version bump: the field and its type are unchanged and a set key still means an exact
   controller, recorded as a clarification in `ir/__init__.py`. Only the previewer and exporter read
   it, so no solved layout changes, and the three shipped examples preview byte-identically.
+
+- **`--schematic` now uses the same dataset as `--preview` (#206).** It was handed
+  `--dataset-version` as typed, while the preview and the adapter follow the pack the plan names.
+  So unpinned, a 2.9 plan's export mixed its 2.9 structures with whichever manifest was newest,
+  which on a machine holding a 2.8.4 dump meant 2.8.4 block ids. Now the export reads the pack the
+  preview draws.
+
+  A missing half of a pinned dump is now named. With no `data/<version>/textures/manifest.json`, the
+  export used to fail with a bare "could not write" the output file; it now refuses with the missing
+  path and the extractor run that makes it. With no `data/<version>/multiblocks/`, it used to write
+  every multiblock as a lone controller that never forms; that is refused the same way, because
+  without structures a multiblock cannot be told from a single block.
+
+  A plan's pack is now followed when its local dump holds either half, not only the structures,
+  and a warning names the missing half and how to make it. Declining the folder would not fall back
+  as a whole: the missing half would come from whichever other pack is newest, which is the mixing
+  this fixes. So a 2.9 plan with half a 2.9 dump no longer borrows the other half from another
+  pack. Without the manifest the preview draws placeholder boxes and the export refuses; without the
+  structures every multiblock reserves a 1x1x1 footprint.
+
 - **`validate()` now refuses an item pipe too thin for the streams through it (#190).** It certified
   the maintainer's export of the parallel sand line, which then ran at a third of its rate in game
   because every item run was a plain tin pipe. The new `item_pipe_size_insufficient` violation

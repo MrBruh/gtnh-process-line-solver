@@ -360,12 +360,39 @@ def write_schematic(
     """Write ``layout`` to ``path`` as a Schematica-loadable ``.schematic``.
 
     Resolves the dataset the same way the previewer does, so a preview and an export of one solve
-    describe the same blocks.
-    """
-    from gtnh_solver.dataset.roots import resolve_dataset_path
+    describe the same blocks - provided the caller passes both the same ``version``, which is why
+    the CLI hands each of them the version it derived from the plan (#206).
 
-    manifest = TextureManifest.load(resolve_dataset_path("textures/manifest.json", version=version))
-    docs = load_multiblock_docs(resolve_dataset_path("multiblocks", version=version))
+    **A missing half of the dataset is refused by name** rather than surfacing as a bare
+    ``FileNotFoundError``, which the CLI can only report as "could not write" the output:
+
+    - no texture manifest: nothing can be typed at all, pinned or not;
+    - no ``multiblocks/`` under a **pinned** ``version``: without structures a multiblock cannot be
+      told from a single block, so it would export as a lone controller that never forms - a file
+      that looks buildable and is not. Unpinned resolution always lands on a real folder (a local
+      dump, else the committed fixtures), so there the check has nothing to catch.
+    """
+    from gtnh_solver.dataset.roots import extractor_hint, resolve_dataset_path
+
+    manifest_path = resolve_dataset_path("textures/manifest.json", version=version)
+    if not manifest_path.is_file():
+        raise SchematicError(
+            f"no texture manifest at {manifest_path}, so no block can be typed; "
+            + (
+                extractor_hint("textures/manifest.json", version)
+                if version is not None
+                else "that is the committed fallback, so this checkout is missing it"
+            )
+        )
+    multiblocks = resolve_dataset_path("multiblocks", version=version)
+    if version is not None and not multiblocks.is_dir():
+        raise SchematicError(
+            f"no multiblock structures at {multiblocks}, so a multiblock cannot be told from a "
+            f"single block and would export as a lone controller that never forms; "
+            f"{extractor_hint('multiblocks', version)}"
+        )
+    manifest = TextureManifest.load(manifest_path)
+    docs = load_multiblock_docs(multiblocks)
     root = build_schematic(problem, layout, manifest=manifest, docs=docs)
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)

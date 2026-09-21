@@ -294,6 +294,74 @@ def test_a_stale_local_dump_shadows_the_committed_manifest_and_the_refusal_says_
     assert "#166" in message
 
 
+def test_a_pinned_version_with_no_manifest_is_refused_by_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#206: this used to escape as a bare ``FileNotFoundError``, which the CLI reported as
+    "could not write" the output file - the one thing that was not wrong."""
+    (tmp_path / "2.9.0-beta-2" / "multiblocks").mkdir(parents=True)
+    monkeypatch.setattr(dataset_roots, "DEFAULT_DATA", tmp_path)
+    ir = adapt_file(str(_SAND))
+    with pytest.raises(SchematicError) as caught:
+        write_schematic(
+            ir, solve(ir, optimize=False), tmp_path / "x.schematic", version="2.9.0-beta-2"
+        )
+
+    message = str(caught.value)
+    assert str(tmp_path / "2.9.0-beta-2" / "textures" / "manifest.json") in message
+    assert "runClient" in message, "the refusal names the run that makes the manifest"
+    assert "-PpackVersion=2.9.0-beta-2" in message
+    assert not (tmp_path / "x.schematic").exists()
+
+
+def test_an_unpinned_run_with_no_manifest_anywhere_names_the_committed_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # No local dump and no committed fallback: a broken checkout, and no extractor run to suggest.
+    monkeypatch.setattr(dataset_roots, "DEFAULT_DATA", tmp_path)
+    ir = adapt_file(str(_SAND))
+    with pytest.raises(SchematicError, match="committed fallback") as caught:
+        write_schematic(ir, solve(ir, optimize=False), tmp_path / "x.schematic")
+    assert str(tmp_path / "textures" / "manifest.json") in str(caught.value)
+
+
+def test_a_pinned_version_with_no_structures_is_refused_rather_than_exported_as_lone_controllers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without structures every multiblock is a 1x1x1 machine, and ``machine_cubes`` then finds its
+    controller in the manifest by name - so the export would place a lone controller that never
+    forms, in a file that looks buildable. Refused even for a line of single blocks like this one,
+    because nothing in a manifest alone tells the two apart."""
+    manifest = tmp_path / "2.9.0-beta-2" / "textures" / "manifest.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_bytes(_COMMITTED_MANIFEST.read_bytes())
+    monkeypatch.setattr(dataset_roots, "DEFAULT_DATA", tmp_path)
+    ir = adapt_file(str(_SAND))
+    with pytest.raises(SchematicError) as caught:
+        write_schematic(
+            ir, solve(ir, optimize=False), tmp_path / "x.schematic", version="2.9.0-beta-2"
+        )
+
+    message = str(caught.value)
+    assert str(tmp_path / "2.9.0-beta-2" / "multiblocks") in message
+    assert "lone controller" in message
+    assert "runServer -PdatasetOut=../../data/2.9.0-beta-2" in message
+
+
+def test_a_pinned_version_with_both_halves_exports(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The guard is on absence, not on pinning: a whole pinned dump writes as before.
+    manifest = tmp_path / "2.8.4" / "textures" / "manifest.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_bytes(_COMMITTED_MANIFEST.read_bytes())
+    (tmp_path / "2.8.4" / "multiblocks").mkdir()
+    monkeypatch.setattr(dataset_roots, "DEFAULT_DATA", tmp_path)
+    ir = adapt_file(str(_SAND))
+    out = write_schematic(ir, solve(ir, optimize=False), tmp_path / "x.schematic", version="2.8.4")
+    assert out.is_file()
+
+
 def test_a_machine_the_manifest_never_heard_of_is_refused() -> None:
     problem = InputIR(
         bounding_region=CellBox(sx=4, sy=2, sz=4),

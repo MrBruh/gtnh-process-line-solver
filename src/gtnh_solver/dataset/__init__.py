@@ -57,6 +57,7 @@ from .pipes import (
 from .roots import (
     DEFAULT_DATA,
     DatasetWarning,
+    extractor_hint,
     generated_at,
     list_versions,
     resolve_dataset_path,
@@ -154,6 +155,7 @@ __all__ = [  # noqa: RUF022 - grouped by submodule, not alphabetized
     # dataset location (version-namespaced local folders + committed fixtures)
     "DEFAULT_DATA",
     "DatasetWarning",
+    "extractor_hint",
     "generated_at",
     "list_versions",
     "resolve_dataset_path",
