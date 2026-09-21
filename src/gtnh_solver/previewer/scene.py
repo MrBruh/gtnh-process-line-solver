@@ -109,9 +109,11 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
         {
             "id": pl.machine_id,
             "type": machines[pl.machine_id].type,
-            # The controller block ("<registry>@<meta>") when the export carried one: the exact key
-            # the texture pass joins to the structure dump on, since `type` is the exporter's
-            # recipe-map name and the dump is keyed by the controller block's own name.
+            # The controller block ("<registry>@<meta>") the adapter resolved this machine to, the
+            # record its footprint was reserved from: the exact key the texture pass (and so the
+            # .schematic export) joins to the structure dump on. `type` is the exporter's
+            # recipe-map name, which is not the dump's controller name and can even be another
+            # machine's ("Distillation Tower" for a Dangote Distillus, #205).
             "block_key": machines[pl.machine_id].block_key,
             "cell": [pl.cell.x, pl.cell.y, pl.cell.z],
             # The reserved box AS PLACED: a quarter turn swaps the horizontal extents, and this

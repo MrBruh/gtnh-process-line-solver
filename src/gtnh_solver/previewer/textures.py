@@ -560,11 +560,12 @@ def load_multiblock_docs(data_dir: str | Path) -> dict[str, MultiblockDoc]:
     """Load every ``data/multiblocks/<name>.json`` under ``data_dir``, keyed for lookup.
 
     Each doc is indexed under BOTH its controller display name and its controller block key
-    (``"<registry_name>@<meta>"``), because a plan can name a machine either way: an export from
-    before gtnh-factory-flow #25 only has the localized recipe-map name, while a newer one carries
-    the exact block id (see :func:`machine_cubes`, which prefers the block key). The two key spaces
-    cannot collide - a block key always ends in ``@<int>`` after a registry path, which no GT
-    display name is - so one flat dict serves both without an ambiguity guard.
+    (``"<registry_name>@<meta>"``), because a scene machine can name a machine either way: one the
+    adapter resolved in the dataset carries that record's exact block key, while one it found no
+    record for has only its ``type``, the localized recipe-map name (see :func:`machine_cubes`,
+    which prefers the block key). The two key spaces cannot collide - a block key always ends in
+    ``@<int>`` after a registry path, which no GT display name is - so one flat dict serves both
+    without an ambiguity guard.
 
     Skips ``_meta.json`` and returns ``{}`` if the directory is absent, so a checkout without a
     committed dump texturizes nothing rather than failing. If two files claim one display name
@@ -898,12 +899,16 @@ def machine_cubes(
     """The per-block cubes for a machine: its multiblock doc if committed, else a single-block cube.
 
     The doc is looked up by the machine's ``block_key`` FIRST and by its ``type`` only as a
-    fallback, mirroring :meth:`~gtnh_solver.dataset.multiblocks.PhysicalDataset.get`: the block key
-    is an exact controller identity, while ``type`` is the exporter's localized recipe-map name that
-    for a GT++ machine never matches the dump's controller-block name. Both resolve through the same
-    dict (see :func:`load_multiblock_docs`). Keeping the two lookups in the same precedence order is
-    load-bearing - the adapter reserved the footprint via ``PhysicalDataset.get``, so if this pass
-    resolved a *different* doc the rendered cubes would not match the reserved box.
+    fallback. The block key is the controller the adapter **resolved** the machine to, however it
+    found it (the export's block id, a handler label, the recipe-map name or an alias), so this
+    lookup lands on the very record the footprint was reserved from. ``type`` is the exporter's
+    localized recipe-map name: for a GT++ machine it never matches the dump's controller-block name,
+    and it can name a *different* controller outright ("Distillation Tower" for a Dangote Distillus,
+    GitHub #205), so it serves only a machine the adapter found no record for. Both resolve through
+    the same dict (see :func:`load_multiblock_docs`). The key coming first is load-bearing: if this
+    pass resolved a different doc than the adapter did, the rendered cubes would not match the
+    reserved box, and the ``.schematic`` export, which draws through here too, would build the
+    wrong machine without an error.
 
     A machine whose type has a dumped :class:`MultiblockDoc` expands to that structure. A genuine
     single-block machine (a 1x1x1 footprint) is the trivial one-cube case, resolved by its plan name

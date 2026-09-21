@@ -144,8 +144,13 @@ class Machine(StrictModel):
     #: The GT controller block this machine is, as ``"<registry_name>@<meta>"``
     #: ("gregtech:gt.blockmachines@998"). ``type`` is the exporter's localized recipe-map name,
     #: which for GT++ machines differs from the controller block's name that the structure dataset
-    #: is keyed by - this is the exact join key when the export supplies it, and the dataset falls
-    #: back to matching on ``type`` when it is None (a pre-#25 plan).
+    #: is keyed by, and can even name a different controller ("Distillation Tower" for a Dangote
+    #: Distillus). So this is the controller the adapter RESOLVED in the dataset, however it found
+    #: it (the export's block id, a handler label, the recipe-map name or an alias), and the
+    #: footprint and hatch slots come from that same record; consumers that draw the machine join
+    #: on it exactly. Without a resolved record (no dataset, or a dump miss) it is the export's
+    #: own key, or None when the export carried none; a consumer whose lookup finds nothing under
+    #: it falls back to ``type``. (GitHub #98, #205.)
     block_key: str | None = None
     footprint: CellBox = Field(default_factory=CellBox)
     faces: FaceSpec = Field(default_factory=FaceSpec)

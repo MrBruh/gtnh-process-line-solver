@@ -29,10 +29,16 @@ InputIR
 Machine
   id: str
   type: str                         # GT machine id (keys into dataset)
-  block_key: str | null             # GT controller block as "<registry_name>@<meta>"; the exact
-                                    #  key the physical dataset joins on when the export supplies
-                                    #  it, else null and lookup falls back to `type`. Added in
-                                    #  InputIR v2 (additive). (GitHub #98.)
+  block_key: str | null             # GT controller block as "<registry_name>@<meta>": the
+                                    #  controller the adapter RESOLVED in the physical dataset
+                                    #  (by the export's block id, a handler label, the recipe-map
+                                    #  name or an alias), the same record the footprint and
+                                    #  hatch slots come from, so the previewer and .schematic
+                                    #  export draw that exact machine. With no resolved record
+                                    #  it is the export's own key, or null when the export has
+                                    #  none; a drawing lookup that misses falls back to `type`.
+                                    #  Added in InputIR v2 (additive, #98); stamped from the
+                                    #  resolved record since #205 (a clarification, no bump).
   footprint: CellBox                # 1 cell (single-block, default) or NxMxK (multiblock bbox)
   faces: FaceSpec                   # see DOMAIN.md: front (no I/O) + 5 usable
   voltage_tier: str                 # LV/MV/HV/... - sets cable voltage rating

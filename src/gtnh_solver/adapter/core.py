@@ -30,11 +30,13 @@ and runs 2x faster per step::
 
 **A machine is joined to the structure dump by its controller**, not by the recipe-map name the
 export leads with (``_physical_record``): controller-block id, then the handler's ``label``, then
-the recipe-map name, each through a small alias table. Footprints are single-block 1x1x1 until that
-join lands a record, so the solver runs with or without a ``data/multiblocks/`` dump, and the
-bounding region is sized to fit whatever footprints result (``_bounding_region``). What a *census*
-miss means depends on ``handler.kind`` and the two readings are opposites - see
-``_classify_census_miss``.
+the recipe-map name, each through a small alias table. The record the join lands on also names the
+machine: its ``block_key`` is stamped on the ``Machine``, so the previewer and ``.schematic`` export
+draw the controller the footprint came from instead of re-guessing it from ``type`` (#205).
+Footprints are single-block 1x1x1 until that join lands a record, so the solver runs with or without
+a ``data/multiblocks/`` dump, and the bounding region is sized to fit whatever footprints result
+(``_bounding_region``). What a *census* miss means depends on ``handler.kind`` and the two readings
+are opposites - see ``_classify_census_miss``.
 
 **A node standing for several machines expands** into one ``Machine`` per physical machine
 (``_instance_ids``), all sharing the node's nets - which needed no IR concept, because
@@ -127,7 +129,12 @@ def _block_key_for(recipe: Recipe, resolved: ResolvedMachine | None) -> str | No
 
     Prefers the recipe's own ``source.machineBlock`` and falls back to the ``resolved`` block's
     mirror of it, since gtnh-factory-flow #25 emits it in both places. None for any plan exported
-    before that landed - every such plan keeps matching the dataset on machine-type name.
+    before that landed, and for an arodoid plan, which does not emit it: such a plan joins the
+    dataset by name.
+
+    This is only the export's claim, used to look the record up. The key a ``Machine`` carries is
+    the resolved record's own (see :func:`to_input_ir`), which is what makes a name-resolved machine
+    draw as the controller its footprint came from.
     """
     for block in (
         recipe.source.machine_block if recipe.source is not None else None,
@@ -216,9 +223,11 @@ def to_input_ir(
 ) -> InputIR:
     """Map a typed :class:`Plan` to an ``InputIR`` (referential integrity enforced on build).
 
-    When ``physical`` is supplied, each node's machine footprint comes from that dataset if it knows
-    the machine type; otherwise (and for boundary storages/buffers, which are never in the dataset)
-    the crude 1x1x1 default stands.
+    When ``physical`` is supplied, each node's machine footprint, hatch slots and ``block_key`` come
+    from the record that dataset resolves for it (:func:`_physical_record`), so the machine is drawn
+    as the same controller it was sized from. Otherwise the crude 1x1x1 default stands and the
+    machine keeps whatever block key the export supplied, if any; boundary storages/buffers are
+    never in the dataset and carry none.
 
     ``producer`` pins which gtnh-factory-flow fork exported the plan. ``None`` (the default) detects
     it from the plan's structural markers (``producer.resolve_producer``), which is itself allowed to
@@ -253,8 +262,17 @@ def to_input_ir(
             raise AdapterError(f"node {node.id!r} references unknown recipe {node.recipe_id!r}")
         _check_input_overrides(recipe, node)
         _check_unmodelled_parallel(recipe, node)
-        block_key = _block_key_for(recipe, resolved_machines.get(node.id))
-        record = _physical_record(recipe, node, physical, block_key)
+        exported_key = _block_key_for(recipe, resolved_machines.get(node.id))
+        record = _physical_record(recipe, node, physical, exported_key)
+        # The machine carries the controller that was RESOLVED, however the join found it (block id,
+        # handler label, recipe-map name or alias), not merely the one the export named. Its
+        # footprint and hatch slots below come from `record`, and the previewer and `.schematic`
+        # exporter draw whatever this key names, so the two must be one controller. Stamping only
+        # the export's key left every name-resolved machine keyless (every 2.9 plan), and those
+        # consumers fell back to `type`, a recipe-map name that can belong to a different machine:
+        # a Dangote Distillus drew and exported as a plain Distillation Tower (#205). With no
+        # record, the export's key (or None) passes through as before.
+        block_key = record.block_key if record is not None else exported_key
         # One fluid-output count drives both the reserved shape and its hatch ceiling, so the two
         # cannot describe different built forms of the same machine. Both now come from the single
         # record resolved above, so the footprint cannot be looked up differently from the ceiling.
