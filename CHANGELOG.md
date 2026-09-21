@@ -109,6 +109,22 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the way `write_schematic` always has, and the CLI does the same before writing the guide. A
   parent that cannot be made (it exists as a file, or is not creatable) is still reported as
   `could not write` with exit 2.
+
+- **A machine on a tier too low to power is now an infeasibility, not an unloadable export
+  (`adapter/power.py`, `cli.py`).** The adapter sizes energy hatches for a 16-block cable run
+  (`DESIGN_RUN_BLOCKS`), and at 1 EU/block of loss ULV's 8 V does not survive it, so
+  `energy_hatches_for` raises `UnpowerableError`. `_power_ports` caught only the other half of
+  that pair (`UnknownTierError`), so a ULV machine with a structural record left `adapt_file` as
+  a bare `ValueError` and the CLI reported `error: could not load 'plan.json'` with exit 2, for a
+  file that parsed perfectly.
+
+  It now raises `AdapterInfeasible`, a new `AdapterError` subclass carrying the `Infeasibility`
+  the CLI prints, so the run exits **1** with the machine, its tier and the design run named, in
+  the same shape a solver infeasibility is reported in. The two exceptions mean opposite things
+  and are now treated as such: an off-ladder tier is merely unknown at this stage and still
+  degrades to a single connection for the router to report on, while a tier the ladder knows
+  cannot survive the run is decided here. `AdapterInfeasible` subclasses `AdapterError`, so a
+  caller that only knows the older contract still catches it.
 - **A cable or pipe now joins to its texture entry under either name GT has given it, so a 2.9
   dataset keeps its cables (`dataset/pipes.py`).** Up to pack 2.8.4 the texture dump recorded one
   under GT's unlocalized name (`cable.tin.02`, `gt_pipe_bronze`); GT5U 5.09.54.20 records the

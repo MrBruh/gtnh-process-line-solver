@@ -29,6 +29,7 @@ from gtnh_solver.dataset import (
 )
 from gtnh_solver.ir import InputIR, LayoutResult, LayoutStatus
 from gtnh_solver.solver import solve
+from tests._helpers import hatched_dataset
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 _SAND = str(_EXAMPLES / "gtnh-sand.json")
@@ -256,6 +257,47 @@ def test_cli_partial_invalid_returns_1(tmp_path: Path, capsys: pytest.CaptureFix
     err = capsys.readouterr().err
     assert code == 1
     assert "partial_invalid" in err
+
+
+def test_cli_a_tier_too_low_to_power_returns_1(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    solve_calls: list[dict[str, object]],
+) -> None:
+    # A ULV multiblock: the export parses and maps, but 8 V does not survive the 16-block run the
+    # adapter sizes energy hatches for, so no layout exists to solve for. The answer is the exit-1
+    # infeasibility, printed in the same shape as the solver's own verdict - not exit 2, which
+    # would say the file could not be read, and not the raw UnpowerableError traceback this used
+    # to be (#112). A structural record is what makes the sizing happen at all, so the dataset is
+    # pinned rather than inherited from whichever dump the machine holds.
+    export = tmp_path / "ulv.json"
+    export.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "recipes": [
+                    {
+                        "id": "r",
+                        "machineType": "M",
+                        "durationTicks": 10,
+                        "eut": 6,
+                        "outputs": [{"kind": "item", "id": "x", "amount": 1}],
+                    }
+                ],
+                "nodes": [{"id": "n", "recipeId": "r", "overclockTier": "ULV"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cli_module, "_load_physical_or_warn", lambda *_, **__: hatched_dataset())
+    code = main([str(export)])
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "[infeasible] voltage_drop:" in err
+    assert "ULV" in err
+    assert "try: " in err  # the relaxation, the same line a solver infeasibility prints
+    assert not solve_calls  # the verdict is the adapter's; nothing was solved to reach it
 
 
 def test_cli_missing_export_arg_returns_2(

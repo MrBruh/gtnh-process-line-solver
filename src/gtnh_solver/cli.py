@@ -15,8 +15,10 @@ human-readable build guide out::
 
 It loads + adapts the export, solves (place -> auto-output -> item/fluid + power route ->
 self-validate), and renders ``build_guide`` (and, with ``--preview``, a self-contained three.js
-viewer). Exit code: 0 when the layout is fully VALID, 1 when the solver could only return an
-explicit infeasibility (the reason is printed to stderr), 2 when the export could not be loaded.
+viewer). Exit code: 0 when the layout is fully VALID, 1 when the run could only return an
+explicit infeasibility (the reason is printed to stderr - from the solver, or from the adapter
+for a plan that maps cleanly and states a line no layout satisfies), 2 when the export could not
+be loaded.
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ from pydantic import ValidationError
 
 from gtnh_solver import __version__
 from gtnh_solver.adapter import (
+    InfeasiblePlanError,
     Plan,
     PlanProducer,
     describe_markers,
@@ -45,7 +48,7 @@ from gtnh_solver.buildguide import build_guide
 from gtnh_solver.dataset import PhysicalDataset, list_versions, load_physical_dataset
 from gtnh_solver.dataset.coverage import format_report, measure
 from gtnh_solver.dataset.roots import resolve_dataset_path
-from gtnh_solver.ir import InputIR, LayoutResult, LayoutStatus
+from gtnh_solver.ir import Infeasibility, InputIR, LayoutResult, LayoutStatus
 from gtnh_solver.previewer import write_preview
 from gtnh_solver.previewer.jar import cached_jar
 from gtnh_solver.previewer.textures import TextureManifest
@@ -210,6 +213,20 @@ def _warn_unmeasured_power_intake(problem: InputIR, layout: LayoutResult) -> Non
         f"on {'them' if len(unmeasured) > 1 else 'it'}",
         file=sys.stderr,
     )
+
+
+def _report_infeasibility(status: LayoutStatus, detail: Infeasibility) -> int:
+    """Print why no layout was produced, and return the exit code for it (always 1).
+
+    One printer for both stages that can reach this verdict: the solver, which returns it on a
+    :class:`~gtnh_solver.ir.LayoutResult`, and the adapter, which raises it before a solve is
+    even attempted (``InfeasiblePlanError``, #112). A reader cannot act on which stage noticed, so
+    the two must not read differently.
+    """
+    print(f"\n[{status.value}] {detail.constraint}: {detail.detail}", file=sys.stderr)
+    if detail.suggested_relaxation:
+        print(f"  try: {detail.suggested_relaxation}", file=sys.stderr)
+    return 1
 
 
 def _enable_previewer_logging() -> None:
@@ -382,6 +399,12 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         problem = to_input_ir(plan, physical=physical, producer=producer)
+    except InfeasiblePlanError as exc:
+        # Listed first because it IS an AdapterError (a ValueError): a plan that maps cleanly and
+        # states an unbuildable line is an infeasibility (exit 1), not an unloadable export
+        # (exit 2). Reported in the same shape as the solver's own, since the user cannot act on
+        # "which stage noticed" and the reason reads the same either way (#112).
+        return _report_infeasibility(LayoutStatus.INFEASIBLE, exc.infeasibility)
     except (OSError, ValueError, ValidationError) as exc:
         print(f"error: could not load {args.export!r}: {exc}", file=sys.stderr)
         return 2
@@ -435,11 +458,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     detail = layout.infeasibility
-    if detail is not None:
-        print(f"\n[{layout.status.value}] {detail.constraint}: {detail.detail}", file=sys.stderr)
-        if detail.suggested_relaxation:
-            print(f"  try: {detail.suggested_relaxation}", file=sys.stderr)
-    return 1
+    if detail is None:
+        return 1
+    return _report_infeasibility(layout.status, detail)
 
 
 if __name__ == "__main__":

@@ -224,6 +224,11 @@ def to_input_ir(
     it from the plan's structural markers (``producer.resolve_producer``), which is itself allowed to
     come back undetermined - the two meanings never collide, because a *parameter* of ``None`` asks
     for detection while a *detected* ``None`` disables producer-specific handling.
+
+    Raises :class:`~gtnh_solver.adapter.AdapterError` for a plan that does not map (a dangling
+    reference, an unsupported kind), and :class:`~gtnh_solver.adapter.InfeasiblePlanError` for one
+    that maps but states a line no layout can satisfy - the CLI keeps those apart, reporting the
+    first as an unloadable export and the second as an infeasibility (#112).
     """
     resolved_producer = resolve_producer(plan, producer)
     _check_power_provenance(plan, resolved_producer)
