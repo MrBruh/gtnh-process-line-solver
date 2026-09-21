@@ -3,8 +3,9 @@
 The output-layout contract (``LayoutResult``) references machines by id and leaves their
 geometry in the ``InputIR``; a renderer needs it all in one place. ``build_scene`` flattens both
 into a plain dict the three.js viewer can draw with no further lookups (machine boxes, the hatches
-and buses built into each one's casing, routes as the blocks they are built from - each cell with
-the sides that connect, its gauge and GT's real cross-section (``route_blocks``) - plus the raw
+and buses built into each one's casing, what a boundary storage holds, routes as the blocks they
+are built from - each cell with the sides that connect, its gauge and GT's real cross-section
+(``route_blocks``) - plus the resource each route carries at what rate, the raw
 segments and terminals behind them, auto-output links, the region, a legend, and the ``io`` boundary
 summary - inputs to load, outputs to collect, summed power). This
 is a *previewer-internal* format - NOT the versioned contract - so the un-testable
@@ -21,13 +22,14 @@ from gtnh_solver.ir import (
     Commodity,
     Facing,
     InputIR,
+    IODirection,
     LayoutResult,
     Machine,
     Route,
 )
 from gtnh_solver.ir.geometry import Cell, rotated_footprint
 from gtnh_solver.route_blocks import route_cells
-from gtnh_solver.system_io import RATE_STEM, is_boundary_storage, system_io
+from gtnh_solver.system_io import RATE_STEM, is_boundary_storage, port_resource, system_io
 
 #: Bump if the scene shape the viewer template expects changes.
 SCENE_VERSION = 1
@@ -77,6 +79,14 @@ _COMMODITY_COLOR = {
     Commodity.POWER: "#ffd000",
 }
 
+#: How a boundary storage's port direction reads to the BUILDER, in the ``io`` panel's own two
+#: words. It is the INVERSE of the port's own direction, which is stated from the machine's side: a
+#: storage whose port OUTPUTS into the line is one the builder keeps stocked (an ``in``), and one
+#: the line feeds is where a product collects (an ``out``). ``system_io`` splits the same two cases
+#: the same way (``only_sources`` -> inputs, ``only_sinks`` -> outputs), so the hover tag and the
+#: panel say "in: water" about the same tank.
+_STORAGE_FLOW = {IODirection.OUTPUT: "in", IODirection.INPUT: "out"}
+
 
 def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
     """Flatten ``problem`` + ``layout`` into the self-contained scene dict the viewer renders."""
@@ -114,6 +124,10 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
             # (e.g. "Forge Hammer" at LV -> "Basic Forge Hammer").
             "voltage_tier": machines[pl.machine_id].voltage_tier,
             "role": _role(machines[pl.machine_id]),
+            # What a boundary storage holds, so a hover can tell four identical Super Tanks apart
+            # (GitHub #155). Empty for every other machine - a machine's ports are its recipe, not
+            # its contents. Resource ids verbatim, exactly as the plan carries them.
+            "contents": _contents(machines[pl.machine_id]),
             "color": color_for_type[machines[pl.machine_id].type],
             # The hatches and buses built into this machine's casing, each at the CELL it replaces
             # and facing the way it works. The texture pass swaps them in for the casing cubes
@@ -124,8 +138,10 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
         if pl.machine_id in machines
     ]
 
+    nets = {n.id: n for n in problem.nets}
     scene_routes = []
     for route in layout.routes:
+        net = nets.get(route.net_id)
         tps = route.thickness_per_segment
         segments = [
             {
@@ -151,6 +167,16 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
             {
                 "netId": route.net_id,
                 "commodity": route.commodity.value,
+                # What this pipe or cable actually moves, so hovering one answers it (GitHub #155):
+                # the net's resource (``None`` on power, which names no fluid or item) and its typed
+                # throughput, with ``unit`` the stem the viewer suffixes /t or /s onto - the same
+                # shape ``io`` below uses. The resource id is verbatim, exactly as the plan carries
+                # it: mapping ``gregtech:gt.metaitem.01@2032`` to a name would mean authoring a
+                # table from memory (the reason ``route_blocks`` keeps GT's unlocalized spellings),
+                # and an id a builder can search NEI for beats a guessed name.
+                "resource": net.fluid_or_item if net is not None else None,
+                "rate": net.throughput if net is not None else None,
+                "unit": RATE_STEM[route.commodity],
                 "color": _COMMODITY_COLOR[route.commodity],
                 "segments": segments,
                 "terminals": terminals,
@@ -310,6 +336,30 @@ def _content_bounds(
         region = problem.bounding_region
         return {"min": [0, 0, 0], "max": [region.sx, region.sy, region.sz]}
     return {"min": [v for v in lo if v is not None], "max": [v for v in hi if v is not None]}
+
+
+def _contents(machine: Machine) -> list[dict[str, str]]:
+    """What a boundary storage holds: each resource its ports carry, and which way it flows.
+
+    A Super Chest/Tank is a buffer for one resource, and the port it exposes is the only record of
+    which - ``adapter.core`` encodes it into the port id (``"input:liquid_toluene"``) and
+    ``system_io.port_resource`` is the inverse, so this reads the same encoding the other surfaces
+    do rather than re-deriving it. Power ports are skipped: a storage's power connection is not its
+    contents. Empty for every other machine, whose ports state a recipe rather than a stock.
+
+    ``flow`` is what makes two same-resource buffers tell apart: the nitrobenzene line has a Super
+    Tank the builder fills with water AND one the line fills with water, and "water" alone says the
+    same thing about both.
+    """
+    if not is_boundary_storage(machine.type):
+        return []
+    seen: dict[tuple[str, str], dict[str, str]] = {}
+    for port in machine.faces.ports:
+        if port.commodity is Commodity.POWER:  # a hatch, not something the buffer holds
+            continue
+        entry = {"resource": port_resource(port), "flow": _STORAGE_FLOW[port.direction]}
+        seen.setdefault((entry["resource"], entry["flow"]), entry)
+    return list(seen.values())
 
 
 def _role(machine: Machine) -> str:

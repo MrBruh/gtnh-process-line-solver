@@ -6,6 +6,20 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **The 3D preview answers "what is in this one" for pipes and buffers, not just "what machine is
+  this".** Hovering a route cell now floats the resource that route carries, its commodity and its
+  rate, so a bundle of crossing fluid pipes is readable instead of eight identical blue noodles;
+  hovering a Super Chest or Super Tank adds what it holds and which way that flows (`in:` is a
+  buffer to keep stocked, `out:` one a product collects in), which is what tells the nitrobenzene
+  line's two water tanks apart. Routes were never raycast targets before, and a storage's contents
+  were never in the scene at all.
+
+  Resource ids are shown **exactly as the plan carries them**, metas and all
+  (`gregtech:gt.metaitem.01@2032`, `minecraft:log@32767`), the way the system-i/o panel already
+  prints them: an id a builder can paste into NEI beats a display name authored from memory.
+  Hovering a plain machine is unchanged.
+
 ### Changed
 - **A display name is no longer assumed unique across the multiblock dump, because in GTNH 2.9 it is
   not.** 2.9 shares 52 display names between two controllers each: GT migrated the GT++ machines into

@@ -22,15 +22,17 @@ from gtnh_solver.ir import (
     Commodity,
     Facing,
     InputIR,
+    IODirection,
     LayoutResult,
     LayoutStatus,
+    Port,
     Route,
     Segment,
     Terminal,
 )
 from gtnh_solver.previewer import build_scene, render_html, write_preview
 from gtnh_solver.solver import solve
-from tests._helpers import at, consumer, net, producer
+from tests._helpers import at, consumer, machine, net, producer
 
 _SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
 
@@ -172,6 +174,52 @@ def test_scene_route_carries_its_material_and_says_it_stands_in() -> None:
     }
 
 
+def test_scene_route_carries_the_resource_it_moves_and_at_what_rate(
+    solved_nitrobenzene: tuple[InputIR, LayoutResult],
+) -> None:
+    """What a hovered pipe has to answer (GitHub #155). The scene carried the commodity, the net id
+    and the colour, and nothing that said *what* - so a bundle of crossing fluid pipes was eight
+    identical blue noodles. Nitrobenzene is the fixture because it is the only shipped line that
+    lays actual pipes; sand's item chain all auto-outputs, leaving power alone.
+    """
+    problem, layout = solved_nitrobenzene
+    scene = build_scene(problem, layout)
+    resource_of = {n.id: n.fluid_or_item for n in problem.nets}
+    rate_of = {n.id: n.throughput for n in problem.nets}
+
+    fluids = [r for r in scene["routes"] if r["commodity"] == "fluid"]
+    assert fluids, "the nitrobenzene line pipes fluids; that is what it is the fixture for"
+    for route in fluids:
+        # Verbatim, exactly the id the plan carries - no display name invented here (#155).
+        assert route["resource"] == resource_of[route["netId"]]
+        assert route["rate"] == pytest.approx(rate_of[route["netId"]])
+        assert route["unit"] == "mB"  # stem only; the viewer appends /t or /s, as it does for io
+
+    # A power net names no fluid or item at all, so its route says so instead of inventing one: the
+    # commodity is the whole answer there, and the rate is the EU/t the net moves.
+    power = next(r for r in scene["routes"] if r["commodity"] == "power")
+    assert power["resource"] is None
+    assert power["rate"] == pytest.approx(rate_of[power["netId"]])
+    assert power["unit"] == "EU"
+
+
+def test_scene_route_whose_net_is_gone_says_nothing_about_what_it_carries() -> None:
+    """The previewer draws what it is handed - the validator is the gate, not this - so a route
+    referencing a net the problem does not have degrades to "unknown" rather than raising and
+    taking the whole preview down with it."""
+    route = Route(
+        net_id="no-such-net",
+        commodity=Commodity.ITEM,
+        segments=[Segment(start=CellCoord(x=0, y=0, z=0), end=CellCoord(x=1, y=0, z=0), channel=0)],
+    )
+    problem = InputIR(bounding_region=CellBox(sx=4, sy=2, sz=4))
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, routes=[route])
+    (scene_route,) = build_scene(problem, layout)["routes"]
+    assert scene_route["resource"] is None
+    assert scene_route["rate"] is None
+    assert scene_route["unit"] == "items"  # the commodity is the route's own, so this still stands
+
+
 def test_scene_route_cell_takes_the_fattest_cable_that_meets_it() -> None:
     # A hand-built trunk with known per-segment thicknesses (GitHub #6, docs/DOMAIN.md):
     #
@@ -235,6 +283,78 @@ def test_scene_reports_system_io() -> None:
         "total": pytest.approx(64),
         "byTier": {"LV": {"volts": 32, "amps": 2}},
     }
+
+
+def test_scene_storage_says_what_it_holds_and_which_way_that_flows() -> None:
+    """A Super Chest read "Super Chest" and nothing else (GitHub #155). What it buffers is on its
+    ports - where ``adapter.core`` encoded it - and which way that flows is what tells two buffers
+    of the SAME resource apart: one the builder keeps stocked, one a product collects in.
+    """
+    scene = _sand_scene()
+    held = {
+        (c["flow"], c["resource"])
+        for m in scene["machines"]
+        if m["role"] == "storage"
+        for c in m["contents"]
+    }
+    assert held == {("in", "minecraft:stone"), ("out", "minecraft:sand")}
+    # Only a boundary buffer holds anything: a machine's ports state its recipe, not a stock.
+    assert all(m["contents"] == [] for m in scene["machines"] if m["role"] != "storage")
+    # ...and ``flow`` means what the io panel means by the same two words, which is the INVERSE of
+    # the port's own direction (a storage that OUTPUTS into the line is one the builder fills).
+    # Asserted against the panel rather than against a literal so the two cannot drift apart.
+    io = scene["io"]
+    assert {f["resource"] for f in io["inputs"]} == {r for flow, r in held if flow == "in"}
+    assert {f["resource"] for f in io["outputs"]} == {r for flow, r in held if flow == "out"}
+
+
+def test_scene_storage_contents_skip_its_power_connection() -> None:
+    """A storage's power hatch is not something it holds. No shipped line gives a Super Tank one (a
+    buffer draws no EU), so the hand-built case is what keeps that filter honest."""
+    tank = machine(
+        "t",
+        [
+            Port(id="input:water", commodity=Commodity.FLUID, direction=IODirection.INPUT),
+            Port(id="power:in", commodity=Commodity.POWER, direction=IODirection.INPUT),
+        ],
+        type_="Super Tank",
+    )
+    problem = InputIR(bounding_region=CellBox(sx=4, sy=2, sz=4), machines=[tank])
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=[at("t", 0, 0, 0)])
+    (placed,) = build_scene(problem, layout)["machines"]
+    assert placed["contents"] == [{"resource": "water", "flow": "out"}]
+
+
+def test_the_nitrobenzene_super_tanks_are_individually_identifiable(
+    solved_nitrobenzene: tuple[InputIR, LayoutResult],
+) -> None:
+    """The case GitHub #155 was filed on: which Super Tank holds the toluene was not answerable
+    from the preview at all, since every one of them rendered as "Super Tank".
+
+    Two of this line's tanks hold water - one the builder fills, one the line fills - so the
+    resource alone would still leave that pair identical; the flow is what separates them.
+    """
+    problem, layout = solved_nitrobenzene
+    scene = build_scene(problem, layout)
+    tanks = [m for m in scene["machines"] if m["type"] == "Super Tank"]
+    assert len(tanks) >= 4
+    tags = [tuple((c["flow"], c["resource"]) for c in m["contents"]) for m in tanks]
+    assert len(set(tags)) == len(tags), f"two tanks hover identically: {tags}"
+    assert (("out", "liquid_toluene"),) in tags
+    assert sorted(t for t in tags if t[0][1] == "water") == [
+        (("in", "water"),),
+        (("out", "water"),),
+    ]
+
+    # Resource ids as the IR carries them, metas and all: a builder can paste one into NEI, where a
+    # display name invented here would be a guess (#155, and route_blocks on GT material names).
+    chests = {
+        c["resource"]
+        for m in scene["machines"]
+        if m["type"] == "Super Chest"
+        for c in m["contents"]
+    }
+    assert {"gregtech:gt.metaitem.01@2022", "minecraft:log@32767"} <= chests
 
 
 def test_scene_is_deterministic() -> None:
