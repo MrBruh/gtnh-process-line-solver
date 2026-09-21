@@ -44,6 +44,13 @@ out/
 /data/textures/*
 !/data/textures/manifest.json
 
+# Test fixtures derived from a local dump are local-only too, for the same reason and with no
+# exception: dumper output never ships, not even a filtered slice of it. A test that needs one reads
+# it from tests/fixtures/local/ and skips where it is absent; tools/derive_pipe_names.py writes the
+# one there today from a staged data/<version>/ dump. The whole directory is ignored, so a file
+# dropped into it is ignored by default rather than by someone remembering to. See docs/TESTING.md.
+/tests/fixtures/local/
+
 # Editor / OS
 .idea/
 .vscode/

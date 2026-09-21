@@ -9,9 +9,15 @@ different in kind:
 2. **The choice names blocks that exist.** A table of material names is exactly the sort of thing
    that rots silently against a regenerated dataset, and a stand-in that resolves to nothing renders
    as a flat bar with no error - so the committed manifest is asked directly, tier by tier, and a
-   locally staged dump too where there is one. The committed manifest alone cannot catch this: it
-   is frozen at the pack that generated it, so it kept agreeing with the policy through GT's 2.9
+   real 2.9 dump's cable/pipe namespace too. The committed manifest alone cannot catch this: it is
+   frozen at the pack that generated it, so it kept agreeing with the policy through GT's 2.9
    rename while every consumer of a 2.9 dump lost its cables (#176).
+
+The 2.9 names are read from ``fixtures/local/manifest_pipe_names_2.9.json`` rather than from
+whatever dump sits in ``data/`` on this machine, because the suite pins the dataset it resolves
+(``conftest._pinned_dataset_root``, #182). That list is dumper output, so it is never committed:
+it is generated locally from a staged 2.9 dump by ``tools/derive_pipe_names.py``, and the check
+that reads it skips where nobody has. CI is one of those places, so CI does not run the 2.9 check.
 """
 
 from __future__ import annotations
@@ -36,7 +42,6 @@ from gtnh_solver.dataset import (
     VOLTAGE_BY_TIER,
     UnknownTierError,
     cable_display_name,
-    list_versions,
     manifest_names,
     pipe_display_name,
     route_material,
@@ -57,21 +62,27 @@ def _pipes_by_name() -> dict[str, dict[str, object]]:
     }
 
 
-def _newest_full_dump() -> dict[str, Any] | None:
-    """The newest locally staged full texture dump, or ``None`` on a clean clone.
+#: Every ``kind: "pipe"`` display name a real GTNH 2.9 dump carries: GT's whole cable, wire and
+#: pipe namespace at that pack. It is a filtered slice of extractor output, and nothing a dumper
+#: produced is committed, so it lives in the gitignored ``tests/fixtures/local/`` and exists only
+#: where someone generated it with ``tools/derive_pipe_names.py``. That tool filters the manifest on
+#: ``kind`` and takes ``display_name`` with no solver code involved, so the list cannot agree with
+#: ``dataset/pipes.py`` by construction, and it refuses a pruned manifest, which could.
+_PIPE_NAMES_2_9 = (
+    Path(__file__).resolve().parent / "fixtures" / "local" / "manifest_pipe_names_2.9.json"
+)
 
-    "Full" by the same measure ``tools/derive_small_manifest.py`` uses - a real dump carries well
-    over a thousand blocks where the committed one carries a few dozen - so a pruned manifest that
-    happens to sit under ``data/<version>/`` is not mistaken for one.
-    """
-    for vdir in list_versions():
-        path = vdir / "textures" / "manifest.json"
-        if not path.is_file():
-            continue
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        if raw.get("provenance", {}).get("coverage", {}).get("blocks", 0) >= 100:
-            return dict(raw)
-    return None
+
+def _dump_pipe_names() -> set[str]:
+    """The local 2.9 name list, or a skip that says how to generate it."""
+    if not _PIPE_NAMES_2_9.is_file():
+        pytest.skip(
+            "no local 2.9 cable/pipe name list at tests/fixtures/local/manifest_pipe_names_2.9.json"
+            " (dumper output, never committed); generate it from a staged 2.9 dump with "
+            "`python tools/derive_pipe_names.py data/<2.9 version>/textures/manifest.json`"
+        )
+    raw: dict[str, Any] = json.loads(_PIPE_NAMES_2_9.read_text(encoding="utf-8"))
+    return {str(name) for name in raw["display_names"]}
 
 
 # --------------------------------------------------------------------------------------------- 1
@@ -267,24 +278,21 @@ def test_both_pipe_stand_ins_exist_at_every_size_the_router_lays() -> None:
             assert pipe["thickness"] == pytest.approx(PIPE_THICKNESS_BLOCKS[family][size])
 
 
-def test_a_locally_staged_dump_names_every_cable_and_pipe_the_policy_draws() -> None:
-    """The same guard against whatever dataset is **staged**, which the committed one cannot give.
+def test_a_real_29_dump_names_every_cable_and_pipe_the_policy_draws() -> None:
+    """The same guard against the pack that did the renaming, which the committed one cannot give.
 
     The committed manifest is example-scoped and frozen at the pack that generated it, so it can
     only ever prove that pack's spelling; it shipped three tiers at 2.8.4 and would keep passing
-    through any number of renames after. A local ``data/<version>/`` dump is the newest pack anyone
-    here has extracted, and it is where GT's 2.9 rename actually broke the join (#176). A full dump
-    holds every cable and pipe GT has, so every name on the ladder must resolve under one spelling
-    or the other. Skipped on a clean clone, which has no dump to ask.
+    through any number of renames after. GT's 2.9 rename is where the join actually broke (#176),
+    and a full 2.9 dump holds every cable and pipe GT has, so every name on the ladder must resolve
+    under one spelling or the other.
+
+    This used to read the newest dump staged in ``data/``, which made it run differently per
+    checkout (#182). It now reads a name list generated from such a dump on purpose, so the
+    dataset it checks is a stated input rather than whatever the machine holds. It still skips
+    where that list is absent, and CI has no dump to generate it from, so CI never runs it.
     """
-    full = _newest_full_dump()
-    if full is None:
-        pytest.skip("no full local data/<version>/textures/manifest.json staged")
-    names = {
-        str(entry["display_name"])
-        for entry in full["blocks"].values()
-        if entry.get("kind") == "pipe" and entry.get("display_name")
-    }
+    names = _dump_pipe_names()
 
     wanted = [
         cable_display_name(material, gauge)

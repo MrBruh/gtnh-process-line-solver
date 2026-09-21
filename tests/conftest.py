@@ -1,11 +1,14 @@
-"""How much of the machine a test run is allowed to take.
+"""Session-wide test setup: what the suite resolves, and how much of the machine it takes.
+
+Three things live here. **The dataset pin** (``_pinned_dataset_root``) fixes the one input that
+otherwise varies per machine, so ``pytest`` answers the same question everywhere. **The shipped
+example solves** (``solved_sand``, ``solved_nitrobenzene``) are run once per session and handed out
+as private copies. **The two resource dials** below bound how much of the box a run holds; they
+change nothing about *what* is tested.
 
 ``pyproject.toml`` runs the suite under ``-n auto`` because it is CPU-bound and every test is
-independent (see the ``addopts`` comment). ``auto`` means *every* core, so a local ``pytest``
-pins the box at 100% for the whole run and nothing else on the machine stays responsive. This
-file changes nothing about *what* is tested - only how much of the machine the run holds.
-
-Two dials::
+independent (see the ``addopts`` comment). ``auto`` means *every* core, so a local ``pytest`` pins
+the box at 100% for the whole run and nothing else on the machine stays responsive. Hence::
 
     GTNH_TEST_CPU_FRACTION=0.75  ->  -n auto yields floor(0.75 * cores), floor 1
     GTNH_TEST_NICE=0             ->  keep normal scheduler priority (default: drop below it)
@@ -27,12 +30,15 @@ wants the whole runner and the full property-test budget, so both dials are off 
 from __future__ import annotations
 
 import os
+import shutil
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from gtnh_solver.adapter import adapt_file
+from gtnh_solver.dataset import roots
 from gtnh_solver.ir import InputIR, LayoutResult
 from gtnh_solver.solver import solve
 
@@ -136,6 +142,58 @@ def pytest_configure(config: pytest.Config) -> None:
             ),
             stacklevel=2,
         )
+
+
+# --------------------------------------------------------------- the dataset the suite resolves
+
+_COMMITTED_DATA = Path(__file__).resolve().parents[1] / "data"
+
+#: The sub-paths ``resolve_dataset_path`` falls back to, and the whole of what a fresh clone (and
+#: therefore every CI job) carries: the two multiblock fixtures and the example-scoped texture
+#: manifest. Everything else under ``data/`` is a gitignored ``data/<version>/`` dump.
+_COMMITTED_SUBPATHS = ("multiblocks", "textures/manifest.json")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _pinned_dataset_root(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    """Resolve every unpinned dataset lookup to the committed data, on every machine (#182).
+
+    ``resolve_dataset_path`` answers with the newest local ``data/<version>/`` that provides the
+    wanted sub-path, and only falls back to the committed fixtures when none does. That preference
+    is right for the CLI - "the version you most recently generated wins" is the documented
+    convenience, and ``--dataset-version`` is its escape hatch - but it makes ``pytest`` ask a
+    different question on every machine. Measured on the same tree: 954 passed / 7 skipped with no
+    local dump, 955 passed / 6 skipped with a 2.9 dump staged, and twice the wall clock. CI is
+    always a clean clone, so it only ever sees the first answer, which is how #176 (a break that
+    appears at the newer pack) stayed invisible for weeks.
+
+    The pin is a copy of the committed sub-paths in a session temp dir, with
+    :data:`~gtnh_solver.dataset.roots.DEFAULT_DATA` pointed at it. A *copy* rather than the repo's
+    own ``data/``, because that directory is exactly where local dumps live; a root holding only
+    the committed data has no version folder to prefer, so ``list_versions`` is empty and every
+    resolution lands on the fallback by its own logic rather than by a stubbed function. Patching
+    the one module attribute covers every caller - ``cli``, the previewer, the schematic exporter,
+    ``load_physical_dataset`` - because they all read it through ``roots`` at call time, including
+    the ones that imported ``list_versions`` by name.
+
+    **A test that needs another dataset states it**, and several do: pass ``data_dir`` (most dataset
+    tests), stage a dump under ``tmp_path`` and point ``DEFAULT_DATA`` at that (``test_schematic``),
+    or monkeypatch ``list_versions`` where the version *list* is what is under test (``test_cli``).
+    ``test_dataset_roots`` passes ``data_dir`` throughout, so the real mtime preference keeps its
+    direct coverage. What no test may do is inherit whatever happens to sit on the machine.
+    """
+    root = tmp_path_factory.mktemp("committed-dataset")
+    for rel in _COMMITTED_SUBPATHS:
+        source = _COMMITTED_DATA / rel
+        target = root / rel
+        if source.is_dir():
+            shutil.copytree(source, target)
+        elif source.is_file():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(roots, "DEFAULT_DATA", root)
+        yield root
 
 
 # --------------------------------------------------------------- the shipped example lines
