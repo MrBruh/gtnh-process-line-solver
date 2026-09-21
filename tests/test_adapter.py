@@ -12,6 +12,7 @@ import warnings
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from gtnh_solver.adapter import (
     AdapterError,
@@ -31,6 +32,7 @@ from gtnh_solver.adapter import (
     to_input_ir,
 )
 from gtnh_solver.adapter.core import _bounding_region
+from gtnh_solver.adapter.plan import MAX_MACHINE_COUNT
 from gtnh_solver.dataset import PhysicalDataset
 from gtnh_solver.ir import (
     CellBox,
@@ -91,6 +93,32 @@ def test_load_plan_parses_sand_v2_metadata_and_resolved() -> None:
     assert {rn.edge_id for rn in plan.resolved.nets} == {e.id for e in plan.edges}
     assert plan.resolved.external_io is not None
     assert [f.id for f in plan.resolved.external_io.outputs] == ["minecraft:sand"]
+
+
+def test_a_non_finite_figure_in_the_export_is_refused_at_the_plan(tmp_path: Path) -> None:
+    # JSON has no literal for infinity, but 1e400 parses to one, and the export is a file this
+    # program did not write. Unbounded it satisfied every check downstream (inf >= 0 is True) and
+    # died in power synthesis as an OverflowError, which is not a ValueError and so reached the
+    # user as a traceback (#115). Refused here, where the error still names the field.
+    plan = json.loads(Path(_SAND).read_text(encoding="utf-8"))
+    plan["resolved"]["machines"][0]["totalEut"] = "REPLACE_ME"
+    export = tmp_path / "inf.json"
+    export.write_text(json.dumps(plan).replace('"REPLACE_ME"', "1e400"), encoding="utf-8")
+    with pytest.raises(ValidationError, match="finite"):
+        load_plan(export)
+
+
+def test_an_unbounded_multiplier_is_refused_at_the_plan() -> None:
+    # Python ints are unbounded and floats are not, so a 310-digit parallel raises OverflowError
+    # ("int too large to convert to float") the moment core._rate multiplies it out. Both
+    # multipliers are bounded at the contract; the ceilings are arithmetic sanity, far past any
+    # parallel count or machine group GT can run.
+    with pytest.raises(ValidationError):
+        Node(id="n", recipe_id="r", overclock_tier="LV", parallel=10**310)
+    with pytest.raises(ValidationError):
+        Node(id="n", recipe_id="r", overclock_tier="LV", machine_count=MAX_MACHINE_COUNT + 1)
+    # and the bounds admit what the examples actually carry
+    assert Node(id="n", recipe_id="r", overclock_tier="LV", machine_count=3).machine_count == 3
 
 
 def test_adapt_sand_to_input_ir() -> None:
@@ -156,13 +184,11 @@ def test_a_multi_instance_node_expands_into_one_machine_each() -> None:
 
 
 def test_a_node_standing_for_no_machine_is_rejected() -> None:
-    plan = Plan(
-        schema_version=1,
-        recipes=[Recipe(id="r", machine_type="M", outputs=[_resource("item", "x")])],
-        nodes=[Node(id="n", recipe_id="r", overclock_tier="LV", machine_count=0)],
-    )
-    with pytest.raises(AdapterError, match="at least one machine"):
-        to_input_ir(plan)
+    # Refused by the plan contract itself (``ge=1``) rather than by the mapping, so the message
+    # names the field that carried it. It used to be a mid-mapping AdapterError, which meant the
+    # same value was checked in one place and multiplied in several others.
+    with pytest.raises(ValidationError):
+        Node(id="n", recipe_id="r", overclock_tier="LV", machine_count=0)
 
 
 def test_unsupported_resource_kind_raises() -> None:

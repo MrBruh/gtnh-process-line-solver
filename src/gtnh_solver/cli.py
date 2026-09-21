@@ -18,7 +18,8 @@ self-validate), and renders ``build_guide`` (and, with ``--preview``, a self-con
 viewer). Exit code: 0 when the layout is fully VALID, 1 when the run could only return an
 explicit infeasibility (the reason is printed to stderr - from the solver, or from the adapter
 for a plan that maps cleanly and states a line no layout satisfies), 2 when the export could not
-be loaded.
+be loaded, 3 when the run hit a bug in this program (an exception no stage claimed). 1 and 2 are
+*answers* about the plan; 3 exists so a caller can tell an answer from a crash.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ import argparse
 import json
 import logging
 import sys
+import traceback
 import zipfile
 from pathlib import Path
 from typing import Final
@@ -58,6 +60,21 @@ from gtnh_solver.validator import validate
 
 #: Every GT machine, cable and pipe is a meta of this one block; an mID IS its meta.
 _GT_BLOCK: Final = "gregtech:gt.blockmachines"
+
+#: What "the export could not be loaded" (exit 2) is made of. ``ArithmeticError`` is the one that
+#: is not obvious: a figure the export carries can be well-typed, in range and still unusable - a
+#: non-finite ``eut``, a ``parallel`` with 310 digits - and the arithmetic that finds out raises
+#: ``OverflowError``, which is an ``ArithmeticError`` and NOT a ``ValueError``. Without it such a
+#: plan left ``main`` as a traceback with exit 1, the code reserved for an explicit infeasibility,
+#: so a script keying on the exit code read a crash as a clean verdict (#115). Both boundary
+#: contracts now refuse those values outright (``adapter.plan``, ``ir._base``); this stays as the
+#: net under any arithmetic they do not cover.
+_LOAD_ERRORS: Final = (OSError, ValueError, ArithmeticError, ValidationError)
+
+#: Exit code for an exception no stage claimed: a bug in this program, not a verdict about the
+#: plan. Distinct from 1 (an explicit infeasibility) and 2 (the export could not be loaded)
+#: because those two are *answers*, and a caller must be able to tell an answer from a crash.
+INTERNAL_ERROR_EXIT: Final = 3
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -229,6 +246,29 @@ def _report_infeasibility(status: LayoutStatus, detail: Infeasibility) -> int:
     return 1
 
 
+def _internal_error(exc: BaseException) -> int:
+    """Report an exception the pipeline did not expect, and return the exit code for it.
+
+    The stretch after the export is loaded - solve, guide, preview - has no per-stage error
+    contract: every failure mode it *knows* about is returned as an ``Infeasibility``, so anything
+    raised there is a bug. It still must not reach the shell as a bare traceback with whatever
+    exit code the interpreter chose (1, the code that means "an explicit infeasibility"), which is
+    how a crash came to be indistinguishable from a clean verdict (#115).
+
+    So it is named as an internal error, on its own exit code, with the traceback kept: this is
+    the one place where the traceback is the useful part, because the only thing to do with it is
+    file it.
+    """
+    print(f"internal error: {type(exc).__name__}: {exc}", file=sys.stderr)
+    print(
+        "this is a bug in gtnh-solve, not a problem with the export; "
+        "please report it with the traceback below",
+        file=sys.stderr,
+    )
+    traceback.print_exception(exc, file=sys.stderr)
+    return INTERNAL_ERROR_EXIT
+
+
 def _enable_previewer_logging() -> None:
     """Route ``gtnh_solver`` INFO logs to stderr (idempotently) so ``--preview`` shows the texture
     summary. Scoped to this logger and guarded against double-attaching a handler on re-entry."""
@@ -379,7 +419,7 @@ def main(argv: list[str] | None = None) -> int:
     # only the CLI can give.
     try:
         plan = load_plan(args.export)
-    except (OSError, ValueError, ValidationError) as exc:
+    except _LOAD_ERRORS as exc:
         print(f"error: could not load {args.export!r}: {exc}", file=sys.stderr)
         return 2
 
@@ -405,13 +445,16 @@ def main(argv: list[str] | None = None) -> int:
         # (exit 2). Reported in the same shape as the solver's own, since the user cannot act on
         # "which stage noticed" and the reason reads the same either way (#112).
         return _report_infeasibility(LayoutStatus.INFEASIBLE, exc.infeasibility)
-    except (OSError, ValueError, ValidationError) as exc:
+    except _LOAD_ERRORS as exc:
         print(f"error: could not load {args.export!r}: {exc}", file=sys.stderr)
         return 2
 
-    layout = solve(problem, seed=args.seed, optimize=not args.fast, objective=args.objective)
-    _warn_unmeasured_power_intake(problem, layout)
-    guide = build_guide(problem, layout)
+    try:
+        layout = solve(problem, seed=args.seed, optimize=not args.fast, objective=args.objective)
+        _warn_unmeasured_power_intake(problem, layout)
+        guide = build_guide(problem, layout)
+    except Exception as exc:  # the last-resort guard; see _internal_error
+        return _internal_error(exc)
 
     if args.output:
         try:
@@ -439,6 +482,8 @@ def main(argv: list[str] | None = None) -> int:
         except OSError as exc:
             print(f"error: could not write {args.preview}: {exc}", file=sys.stderr)
             return 2
+        except Exception as exc:  # the scene build, not the write; see _internal_error
+            return _internal_error(exc)
         print(f"wrote preview to {args.preview}", file=sys.stderr)
 
     if args.schematic:

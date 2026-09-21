@@ -251,11 +251,6 @@ def to_input_ir(
         recipe = recipes.get(node.recipe_id)
         if recipe is None:
             raise AdapterError(f"node {node.id!r} references unknown recipe {node.recipe_id!r}")
-        if node.machine_count < 1:
-            raise AdapterError(
-                f"node {node.id!r} has machineCount={node.machine_count}; a node stands for at "
-                f"least one machine."
-            )
         _check_input_overrides(recipe, node)
         _check_unmodelled_parallel(recipe, node)
         block_key = _block_key_for(recipe, resolved_machines.get(node.id))
