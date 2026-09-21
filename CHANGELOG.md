@@ -110,6 +110,25 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pack. Without the manifest the preview draws placeholder boxes and the export refuses; without the
   structures every multiblock reserves a 1x1x1 footprint.
 
+- **A plan drawn without its pack's data now says so (#207).** Two ways a 2.9 plan came out wrong
+  with nothing on stderr. On a checkout with no local 2.9 dump, the solve fell back to the committed
+  two-controller structure sample, so every other multiblock reserved a 1x1x1 footprint and the
+  preview drew it as a lone controller that never forms. The adapter's pack-mismatch warning rightly
+  ignores a sample's nominal pack, so nothing said so. Now a warning names the plan's pack, the
+  machine types that may be multiblocks, and the missing `data/<pack>/multiblocks` folder the
+  extractor makes. A type is left out when it found its structure, or when it is known to be a
+  single block: the plan's handler says `kind: "single"` (arodoid exports), or the resolved texture
+  manifest records it as a basic or steam single-block machine class. A handler saying
+  `"multiblock"` always keeps it listed, and a type nothing identifies is listed rather than guessed
+  away. So on a fresh clone the shipped sand line stays quiet and the nitrobenzene line names its
+  four multiblocks. The warning also stays quiet when the fallback is another pack's full dump,
+  which the mismatch warning already covers.
+
+  A missing texture manifest was logged at INFO, so a pinned 2.9 preview was all placeholder boxes
+  with no reason given to a library caller. It is now a WARNING that names the file, and the
+  extractor run when the path is a `data/<version>/` one. No other pack's manifest stands in for
+  it: block ids move between packs, and a wrong sprite is worse than a placeholder box.
+
 - **`validate()` now refuses an item pipe too thin for the streams through it (#190).** It certified
   the maintainer's export of the parallel sand line, which then ran at a third of its rate in game
   because every item run was a plain tin pipe. The new `item_pipe_size_insufficient` violation

@@ -19,6 +19,7 @@ import pytest
 
 from gtnh_solver.adapter import MachineHandler, Node, Plan, Recipe, Resource, to_input_ir
 from gtnh_solver.dataset import load_physical_dataset
+from gtnh_solver.dataset import roots as dataset_roots
 from gtnh_solver.dataset.schema import MultiblockDoc
 from gtnh_solver.ir import InputIR, LayoutResult, LayoutStatus
 from gtnh_solver.previewer.bake import bake_layers
@@ -1280,15 +1281,52 @@ def test_undocumented_machine_stays_placeholder_and_fetches_nothing(
     assert calls == [], "no icons needed -> the provider is never called"
 
 
-def test_missing_dataset_degrades_to_all_placeholder(tmp_path: Path) -> None:
-    """No committed dump -> every machine stays a placeholder, nothing raises."""
+def test_missing_dataset_degrades_to_all_placeholder(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """No committed dump -> every machine stays a placeholder, nothing raises.
+
+    And it says so at WARNING, naming the file (#207): at INFO, a library caller saw a preview of
+    nothing but boxes with no reason given anywhere.
+    """
     scene = _scene([_machine("m1", "Test EBF", [0, 0, 0], [2, 2, 2])])
-    summary = texturize_scene(
-        scene, multiblocks_dir=tmp_path / "absent", manifest_path=tmp_path / "absent.json"
-    )
+    with caplog.at_level("WARNING", logger="gtnh_solver.previewer.textures"):
+        summary = texturize_scene(
+            scene, multiblocks_dir=tmp_path / "absent", manifest_path=tmp_path / "absent.json"
+        )
     assert summary.textured_types == ()
     assert summary.placeholder_types == ("Test EBF",)
     assert scene["blocks"] == []
+
+    (warning,) = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert str(tmp_path / "absent.json") in warning
+    assert "placeholder boxes" in warning
+    assert "gradlew" not in warning, "an explicit path is not one the extractor would write"
+
+
+def test_a_pinned_version_with_no_manifest_warns_and_borrows_no_other_packs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The 2.9 preview that came out all boxes (#207), with a 2.8.4 manifest sitting right there.
+
+    It stays all boxes: ids move between packs, so the 2.8.4 sprites would be plausible wrong
+    blocks. What changes is that the run names the missing file and the extractor run that makes it.
+    """
+    other = tmp_path / "2.8.4" / "textures" / "manifest.json"
+    other.parent.mkdir(parents=True)
+    other.write_text(json.dumps({"schema": 2, "blocks": {}, "icons": {}}), encoding="utf-8")
+    monkeypatch.setattr(dataset_roots, "DEFAULT_DATA", tmp_path)
+
+    scene = _scene([_machine("m1", "Test EBF", [0, 0, 0], [2, 2, 2])])
+    with caplog.at_level("WARNING", logger="gtnh_solver.previewer.textures"):
+        summary = texturize_scene(scene, version="2.9.0-beta-2")
+
+    assert summary.placeholder_types == ("Test EBF",)
+    (warning,) = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert str(tmp_path / "2.9.0-beta-2" / "textures" / "manifest.json") in warning
+    assert str(other) not in warning
+    assert "runClient" in warning
+    assert "-PtextureOut=../../data/2.9.0-beta-2/textures" in warning
 
 
 # --------------------------------------------------------------------------------------------------

@@ -25,6 +25,7 @@ be loaded, 3 when the run hit a bug in this program (an exception no stage claim
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import sys
@@ -38,14 +39,17 @@ from pydantic import ValidationError
 from gtnh_solver import __version__
 from gtnh_solver.adapter import (
     InfeasiblePlanError,
+    Node,
     Plan,
     PlanProducer,
+    Recipe,
     describe_markers,
     load_plan,
     plan_pack_version,
     resolve_producer,
     to_input_ir,
 )
+from gtnh_solver.adapter.core import _effective_handler
 from gtnh_solver.buildguide import build_guide
 from gtnh_solver.dataset import PhysicalDataset, list_versions, load_physical_dataset
 from gtnh_solver.dataset.coverage import format_report, measure
@@ -235,6 +239,99 @@ def _load_physical_or_warn(version: str | None = None) -> PhysicalDataset | None
         )
         return None
     return physical
+
+
+#: ``source_class`` markers of a GT **single-block** machine, for
+#: :func:`_manifest_says_single_block`: a basic machine (``...implementations.MTEBasicMachine``, and
+#: its ``MTEBasicMachineWithRecipe`` subclass) or a steam single block
+#: (``gregtech.common.tileentities.machines.steam.*``, e.g. ``MTESteamForgeHammerBronze``). The steam
+#: marker keeps its leading ``.machines`` so a ``...machines.multi.steam...`` package cannot match.
+_SINGLE_BLOCK_CLASS_MARKERS: Final = (".MTEBasicMachine", ".machines.steam.")
+
+
+def _manifest_says_single_block(
+    manifest: TextureManifest | None, machine_type: str, tier: str
+) -> bool:
+    """Whether ``manifest`` records ``machine_type`` at ``tier`` as a single-block machine class.
+
+    **A heuristic**, and the only one :func:`_warn_if_plan_pack_undumped` uses: the entry is found
+    the way the previewer finds a single-block machine (:meth:`TextureManifest.mte_block`), and its
+    ``source_class`` is read for one of :data:`_SINGLE_BLOCK_CLASS_MARKERS`. Measured against the
+    full local dumps, no class it accepts is a dumped multiblock controller: 509 accepted MTEs
+    against 296 controllers at 2.9.0-beta-2, 525 against 208 at 2.8.4, overlap zero in both. It
+    can only ever say "single": no manifest, no entry or any other class leaves the answer unknown
+    (``False``), and an unknown type is listed rather than guessed away. Tighten it here.
+    """
+    if manifest is None:
+        return False
+    found = manifest.mte_block(machine_type, tier)
+    if found is None:
+        return False
+    source_class = manifest.source_class(*found)
+    return any(marker in source_class for marker in _SINGLE_BLOCK_CLASS_MARKERS)
+
+
+def _may_be_multiblock(recipe: Recipe, node: Node, manifest: TextureManifest | None) -> bool:
+    """Whether a node's machine is not known to be a single block, for the #207 warning.
+
+    The plan answers first when it can: an arodoid handler states ``kind``, and "multiblock" keeps
+    the machine listed whatever the manifest thinks, since the plan names the machine it built.
+    MrBruh's fork states no kind, so otherwise :func:`_manifest_says_single_block` decides.
+    """
+    handler = _effective_handler(recipe, node)
+    if handler is not None and handler.kind in ("single", "multiblock"):
+        return handler.kind == "multiblock"
+    return not _manifest_says_single_block(manifest, recipe.machine_type, node.overclock_tier)
+
+
+def _warn_if_plan_pack_undumped(
+    plan: Plan, dataset_version: str | None, physical: PhysicalDataset | None, problem: InputIR
+) -> None:
+    """Say so when the plan's pack has no local dump and its multiblocks fell to 1x1x1 (#207).
+
+    The fresh-clone hazard. :func:`_dataset_version_for` declines a pack no local dump provides, so
+    the solve falls back to the newest dump or the committed fixtures. Two of those fallbacks are
+    already reported, and this stays out of their way rather than say it twice: a **census** of
+    another pack draws the adapter's mismatch warning (``_check_dataset_version``), and a failed load
+    draws :func:`_load_physical_or_warn`'s. The quiet one is a **sample**: the committed fixtures
+    hold two controllers, the adapter rightly declines to judge a sample's nominal pack, and every
+    other multiblock in the plan reserves a 1x1x1 footprint - which the previewer then draws (via
+    ``TextureManifest.mte_block``) as a lone controller that never forms, and ``--schematic``
+    exports the same way. Nothing said so.
+
+    **Only what may be a multiblock is named.** A machine type is left out when it found its
+    structure (it lost nothing), or when it is known to be a single block (:func:`_may_be_multiblock`:
+    the plan's handler says so, else the resolved texture manifest's class does). The warning stays
+    quiet when nothing is left, so the shipped sand line (Forge Hammers only) says nothing on a
+    fresh clone while the nitrobenzene line names its four multiblocks.
+    """
+    stated = plan_pack_version(plan)
+    if stated is None or dataset_version is not None:
+        return  # no pack stated, or its dump (or the user's pin) is what loaded
+    if physical is None or physical.meta.census:
+        return  # already reported: the failed load, or the adapter's pack mismatch
+    sized = {m.type for m in problem.machines if m.footprint.volume > 1}
+    recipes = {r.id: r for r in plan.recipes}
+    nodes = [
+        (recipes[n.recipe_id], n)
+        for n in plan.nodes
+        if n.recipe_id in recipes and recipes[n.recipe_id].machine_type not in sized
+    ]
+    if not nodes:
+        return
+    manifest: TextureManifest | None = None  # none to consult: every unsized type stays listed
+    with contextlib.suppress(OSError, ValueError):
+        manifest = TextureManifest.load(resolve_dataset_path("textures/manifest.json"))
+    listed = sorted({r.machine_type for r, n in nodes if _may_be_multiblock(r, n, manifest)})
+    if not listed:
+        return
+    print(
+        f"warning: no local dump for the plan's pack {stated}, so these reserve 1x1x1 footprints "
+        f"and may show as lone controllers in --preview/--schematic: {', '.join(listed)}. Fix: "
+        f"make {resolve_dataset_path('multiblocks', version=stated)} with the extractor "
+        f"(tools/gtnh-extractor/README.md)",
+        file=sys.stderr,
+    )
 
 
 def _warn_unmeasured_power_intake(problem: InputIR, layout: LayoutResult) -> None:
@@ -477,6 +574,7 @@ def main(argv: list[str] | None = None) -> int:
     except _LOAD_ERRORS as exc:
         print(f"error: could not load {args.export!r}: {exc}", file=sys.stderr)
         return 2
+    _warn_if_plan_pack_undumped(plan, dataset_version, physical, problem)
 
     try:
         layout = solve(problem, seed=args.seed, optimize=not args.fast, objective=args.objective)

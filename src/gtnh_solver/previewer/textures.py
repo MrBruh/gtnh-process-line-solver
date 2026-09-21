@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from gtnh_solver.dataset.pipes import manifest_names
-from gtnh_solver.dataset.roots import resolve_dataset_path
+from gtnh_solver.dataset.roots import extractor_hint, resolve_dataset_path
 from gtnh_solver.dataset.schema import MultiblockDoc, Variant, load_multiblock_doc
 
 from .bake import BakeUnavailableError, bake_layers
@@ -1136,8 +1136,22 @@ def texturize_scene(
     # The manifest is the one hard requirement - nothing resolves without it. A missing *multiblock*
     # dump is no longer fatal to the whole pass: single-block machines resolve straight off the
     # manifest, and so do routes, neither of which needs a structure doc.
+    #
+    # **A missing manifest is a WARNING that names the file** (#207). It was INFO, so a pinned 2.9
+    # preview came out as nothing but placeholder boxes with no reason given anywhere a library
+    # caller would see it. **And no other pack's manifest stands in for it**: block ids and metas
+    # move between packs (15512 and 15543 are absent from 2.8.4), so a borrowed manifest draws a
+    # plausible wrong block, while a placeholder box is plainly a placeholder.
     if not Path(mf_path).is_file():
-        _log.info("textures: no manifest; all %d types placeholder", len(all_types))
+        hint = ""
+        if version is not None and manifest_path is None:  # a data/<version>/ path it would write
+            hint = f"; {extractor_hint('textures/manifest.json', version)}"
+        _log.warning(
+            "textures: no texture manifest at %s, so all %d machine type(s) are placeholder boxes%s",
+            mf_path,
+            len(all_types),
+            hint,
+        )
         return TextureSummary((), all_types, 0, 0)
 
     manifest = TextureManifest.load(mf_path)
