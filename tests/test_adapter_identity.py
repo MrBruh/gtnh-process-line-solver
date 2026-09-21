@@ -39,7 +39,7 @@ from gtnh_solver.dataset import (
     PhysicalDataset,
     load_physical_dataset,
 )
-from gtnh_solver.ir import CellBox, Facing
+from gtnh_solver.ir import CellBox, Facing, Machine
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 #: ``ev-nitrobenzene.json`` is deliberately absent (#204). Against the committed two-machine sample
@@ -242,6 +242,40 @@ def test_a_missing_multiblock_is_reported_through_the_mapping() -> None:
         ir = to_input_ir(plan, physical=_dump(_record("Some Other Machine")))
     # Still mapped, with the crude default: reported, not fatal.
     assert ir.machines[0].footprint.volume == 1
+
+
+def _only_machine(recipe: Recipe, dump: PhysicalDataset, handler_id: str = "") -> Machine:
+    """Map a one-node plan running ``recipe`` and return its machine."""
+    plan = Plan(schema_version=1, recipes=[recipe], nodes=[_node(handler_id)])
+    return next(m for m in to_input_ir(plan, physical=dump).machines if m.id == "n")
+
+
+def test_a_machine_resolved_by_its_handler_label_carries_that_controller() -> None:
+    """The Dangote Distillus case (#205) at the adapter: the key follows the record, not ``type``.
+
+    Both names are real controllers in the dump, so a consumer that fell back to the recipe-map name
+    would find a machine - the wrong one. The node's handler says which controller it runs in, the
+    footprint was reserved from that record, and so the stamped key must name it too.
+    """
+    dump = _dump(
+        _record("Distillation Tower", block="gregtech:gt.blockmachines", meta=1126),
+        _record("Dangote Distillus", block="gregtech:gt.blockmachines", meta=31021),
+    )
+    recipe = _recipe(
+        "Distillation Tower",
+        MachineHandler(id="h", kind="multiblock", label="Dangote Distillus"),
+    )
+    machine = _only_machine(recipe, dump, handler_id="h")
+    assert machine.type == "Distillation Tower"  # the recipe map, unchanged
+    assert machine.block_key == "gregtech:gt.blockmachines@31021"
+
+
+def test_a_machine_resolved_through_an_alias_carries_that_controller() -> None:
+    # "Chemical Plant" names no controller at all; only the alias reaches one. Without the key the
+    # previewer would look up "Chemical Plant", find nothing, and draw an empty reserved box.
+    dump = _dump(_record("ExxonMobil Chemical Plant", block="gregtech:gt.blockmachines", meta=998))
+    machine = _only_machine(_recipe("Chemical Plant"), dump)
+    assert machine.block_key == "gregtech:gt.blockmachines@998"
 
 
 @pytest.mark.parametrize("path", _FIXTURES, ids=lambda p: p.name)

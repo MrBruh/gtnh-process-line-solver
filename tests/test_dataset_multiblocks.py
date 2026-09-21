@@ -495,14 +495,16 @@ def _dump_meta(count: int = 2) -> dict[str, object]:
     }
 
 
-def _doc(meta_id: int, display_name: str, registry: str = "r") -> dict[str, object]:
+def _doc(
+    meta_id: int, display_name: str, registry: str = "r", source_class: str | None = None
+) -> dict[str, object]:
     return {
         "schema": 2,
         "controller": {
             "registry_name": registry,
             "meta": meta_id,
             "display_name": display_name,
-            "source_class": f"C{meta_id}",
+            "source_class": source_class or f"C{meta_id}",
         },
         "variants": [{"trigger_stack_size": 1, "blocks": _cube_blocks(1), "bbox": [1, 1, 1]}],
     }
@@ -634,14 +636,77 @@ def test_adapter_reads_the_controller_block_from_the_resolved_block(
     assert machine.footprint == CellBox(sx=3, sy=3, sz=3)  # the Vacuum Freezer's real shape
 
 
-def test_adapter_leaves_block_key_none_for_a_pre_25_plan(dataset: PhysicalDataset) -> None:
+def test_adapter_stamps_the_key_of_a_record_it_resolved_by_name(dataset: PhysicalDataset) -> None:
+    """A plan with no ``machineBlock`` still names the controller its footprint came from (#205).
+
+    Every arodoid (GTNH 2.9) plan is this shape. A None key sent the previewer and the
+    ``.schematic`` exporter back to ``type``, the recipe-map name, which can belong to another
+    controller entirely, so what was drawn silently stopped matching what was reserved.
+    """
     machine = next(
         m
         for m in to_input_ir(_one_machine_plan("Electric Blast Furnace"), physical=dataset).machines
         if m.id == "n"
     )
-    assert machine.block_key is None
-    assert machine.footprint == CellBox(sx=3, sy=4, sz=3)  # still resolved, by name
+    assert machine.block_key == "gregtech:gt.blockmachines@1000"
+    assert machine.footprint == CellBox(sx=3, sy=4, sz=3)  # resolved by name, as before
+
+
+def test_an_unknown_exported_key_gives_way_to_the_record_a_name_resolved(
+    dataset: PhysicalDataset,
+) -> None:
+    """The export names a block the dump lacks, and the name finds a record anyway.
+
+    The footprint comes from that record, so the key must too. Keeping the export's key would send
+    the previewer looking for a controller the dump does not have and on to ``type``, i.e. drawing
+    by a different rule than the one that sized the machine.
+    """
+    plan = _one_machine_plan("Electric Blast Furnace", block_key="gregtech:gt.blockmachines@404")
+    machine = next(m for m in to_input_ir(plan, physical=dataset).machines if m.id == "n")
+    assert machine.footprint == CellBox(sx=3, sy=4, sz=3)
+    assert machine.block_key == "gregtech:gt.blockmachines@1000"
+
+
+@pytest.mark.parametrize(
+    ("machine_type", "exported", "with_dataset"),
+    [
+        ("Some Unknown Machine", "gregtech:gt.blockmachines@404", True),
+        ("Some Unknown Machine", None, True),
+        ("Electric Blast Furnace", "gregtech:gt.blockmachines@1000", False),
+        ("Electric Blast Furnace", None, False),
+    ],
+    ids=["dump-miss-with-key", "dump-miss-no-key", "no-dataset-with-key", "no-dataset-no-key"],
+)
+def test_a_machine_with_no_record_keeps_whatever_the_export_said(
+    dataset: PhysicalDataset, machine_type: str, exported: str | None, with_dataset: bool
+) -> None:
+    # Nothing was resolved, so there is no better identity to stamp: the export's own claim (or
+    # its absence) passes through untouched, and the machine keeps the crude 1x1x1 default.
+    plan = _one_machine_plan(machine_type, block_key=exported)
+    physical = dataset if with_dataset else None
+    machine = next(m for m in to_input_ir(plan, physical=physical).machines if m.id == "n")
+    assert machine.footprint == CellBox()
+    assert machine.block_key == exported
+
+
+def test_a_legacy_name_collision_stamps_the_current_controller(tmp_path: Path) -> None:
+    """GT 2.9 keeps each migrated GT++ controller registered as ``...Legacy`` under the same name.
+
+    The dataset hands the name to the current controller, and the stamped key must be that one. The
+    previewer's own name index keeps the FIRST file sorted instead, so without the key a machine
+    resolved by that name could reserve the current controller and draw the superseded one (18 of
+    the 51 Legacy pairs in 2.9 sort that way). The Legacy file sorts first here to set that trap.
+    """
+    (tmp_path / "_meta.json").write_text(json.dumps(_dump_meta()), encoding="utf-8")
+    registry = "gregtech:gt.blockmachines"
+    legacy = _doc(1159, "Pyrolyse Oven", registry, source_class="gtPlusPlus.MTEPyrolyseOvenLegacy")
+    current = _doc(15546, "Pyrolyse Oven", registry, source_class="gregtech.MTEPyrolyseOven")
+    (tmp_path / "a_legacy.json").write_text(json.dumps(legacy), encoding="utf-8")
+    (tmp_path / "b_current.json").write_text(json.dumps(current), encoding="utf-8")
+
+    ir = to_input_ir(_one_machine_plan("Pyrolyse Oven"), physical=load_physical_dataset(tmp_path))
+    machine = next(m for m in ir.machines if m.id == "n")
+    assert machine.block_key == "gregtech:gt.blockmachines@15546"
 
 
 # ---------------------------------------------- real footprints solve to a non-overlapping layout

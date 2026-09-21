@@ -53,6 +53,26 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **A GTNH 2.9 multiblock is now drawn and exported as the controller its footprint was reserved
+  from, not a different machine that shares its recipe map (#205).** An arodoid plan carries no
+  `machineBlock`, so the adapter found each machine's structure record by name (handler label,
+  recipe-map name or alias) and then threw the record's identity away: every 2.9 multiblock reached
+  the previewer and the `.schematic` exporter with `block_key` unset, and they looked the structure
+  up by `type`, the recipe-map name. Where that name is no controller's, the machine drew as an
+  empty box and the export refused it. Where it IS another controller's, the result was silently
+  wrong: the Dangote Distillus in a nitrobenzene line runs the "Distillation Tower" recipe map, so
+  it drew and would have exported as a plain Distillation Tower (mID 1126 instead of 31021) with
+  no error. The same trap sat under 18 of the 51 display names 2.9 shares between a controller
+  and its `...Legacy` twin: the dataset gives the name to the current controller, while the
+  previewer's name index keeps the first file sorted, which for those 18 is the superseded one.
+
+  The adapter now stamps the key of the record it resolved, so all 14 multiblocks of the 2.9
+  EV nitrobenzene plan carry their controller (31021, 1126 x3, 15512 x3, 998 x2, 1169 x2,
+  15543 x2, 2730) where before all 14 were blank. An export key the dump does not know gives way
+  to the record a name resolved; with no record, the export's key passes through as before. No
+  InputIR version bump: the field and its type are unchanged and a set key still means an exact
+  controller, recorded as a clarification in `ir/__init__.py`. Only the previewer and exporter read
+  it, so no solved layout changes, and the three shipped examples preview byte-identically.
 - **`validate()` now refuses an item pipe too thin for the streams through it (#190).** It certified
   the maintainer's export of the parallel sand line, which then ran at a third of its rate in game
   because every item run was a plain tin pipe. The new `item_pipe_size_insufficient` violation

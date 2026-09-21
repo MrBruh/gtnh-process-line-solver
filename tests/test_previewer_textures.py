@@ -17,8 +17,10 @@ from typing import Any
 
 import pytest
 
+from gtnh_solver.adapter import MachineHandler, Node, Plan, Recipe, Resource, to_input_ir
+from gtnh_solver.dataset import load_physical_dataset
 from gtnh_solver.dataset.schema import MultiblockDoc
-from gtnh_solver.ir import InputIR, LayoutResult
+from gtnh_solver.ir import InputIR, LayoutResult, LayoutStatus
 from gtnh_solver.previewer.bake import bake_layers
 from gtnh_solver.previewer.scene import build_scene
 from gtnh_solver.previewer.textures import (
@@ -28,6 +30,7 @@ from gtnh_solver.previewer.textures import (
     primary_variant,
     texturize_scene,
 )
+from tests._helpers import at
 
 pytest.importorskip("PIL")
 from PIL import Image
@@ -1110,6 +1113,120 @@ def test_block_key_miss_falls_back_to_the_type(dataset: tuple[Path, Path]) -> No
         scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider
     )
     assert summary.block_cubes == 5
+
+
+def _controller_doc(meta: int, name: str, source_class: str, height: int) -> dict[str, Any]:
+    """A 2 x ``height`` x 2 structure whose controller block carries ``meta``, its identity."""
+    blocks: list[dict[str, Any]] = [
+        {"d": [0, 0, 0], "block": "gregtech:gt.blockmachines", "meta": meta}
+    ]
+    blocks += [
+        {"d": [x, y, z], "block": "gregtech:gt.blockcasings", "meta": 11}
+        for y in range(height)
+        for x in range(2)
+        for z in range(2)
+        if (x, y, z) != (0, 0, 0)
+    ]
+    return {
+        "schema": 2,
+        "controller": {
+            "registry_name": "gregtech:gt.blockmachines",
+            "meta": meta,
+            "display_name": name,
+            "source_class": source_class,
+        },
+        "variants": [{"trigger_stack_size": 1, "blocks": blocks, "bbox": [2, height, 2]}],
+    }
+
+
+@pytest.mark.parametrize(
+    ("docs", "machine_type", "handler_label", "drawn"),
+    [
+        # A Dangote Distillus runs the "Distillation Tower" recipe map, which is ALSO the display
+        # name of a real, different controller: `type` resolves, to the wrong machine.
+        (
+            {
+                "distillation_tower.json": (1126, "Distillation Tower", "MTEDistillationTower", 2),
+                "dangote_distillus.json": (31021, "Dangote Distillus", "MTEDangoteDistillus", 3),
+            },
+            "Distillation Tower",
+            "Dangote Distillus",
+            31021,
+        ),
+        # A 2.9 Legacy collision: the dataset gives the name to the current controller, while the
+        # previewer's name index keeps the first file sorted, here the superseded one.
+        (
+            {
+                "a_legacy.json": (1159, "Pyrolyse Oven", "MTEPyrolyseOvenLegacy", 2),
+                "b_current.json": (15546, "Pyrolyse Oven", "MTEPyrolyseOven", 3),
+            },
+            "Pyrolyse Oven",
+            None,
+            15546,
+        ),
+    ],
+    ids=["dangote-not-distillation-tower", "current-not-legacy"],
+)
+def test_a_name_resolved_machine_draws_the_controller_its_footprint_came_from(
+    tmp_path: Path,
+    docs: dict[str, tuple[int, str, str, int]],
+    machine_type: str,
+    handler_label: str | None,
+    drawn: int,
+) -> None:
+    """GitHub #205, through the whole chain: plan -> adapter -> scene -> the texture pass.
+
+    The plan carries no ``machineBlock`` (every GTNH 2.9 plan), so the adapter joins the dump by
+    name. It used to reserve the right footprint and then drop the identity, and this pass - which
+    the ``.schematic`` export draws through too - fell back to ``type`` and silently drew, and would
+    have exported, another controller. Nothing errored; only the controller's mID was wrong.
+    """
+    mb = tmp_path / "multiblocks"
+    mb.mkdir()
+    meta = {
+        "schema": 2,
+        "pack_version": "test",
+        "generated_at": "now",
+        "extractor_sha": "0",
+        "controller_count": len(docs),
+    }
+    (mb / "_meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    for filename, (mid, name, source_class, height) in docs.items():
+        doc = _controller_doc(mid, name, source_class, height)
+        (mb / filename).write_text(json.dumps(doc), encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(_manifest_dict()), encoding="utf-8")
+
+    handlers = (
+        [MachineHandler(id="h", kind="multiblock", label=handler_label)] if handler_label else []
+    )
+    recipe = Recipe(
+        id="r",
+        machine_type=machine_type,
+        eut=30.0,
+        duration_ticks=100.0,
+        outputs=[Resource(kind="item", id="x", amount=1.0)],
+        machine_handlers=handlers,
+    )
+    plan = Plan(
+        schema_version=1,
+        recipes=[recipe],
+        nodes=[Node(id="n", recipe_id="r", overclock_tier="LV", machine_handler_id="h")],
+    )
+    problem = to_input_ir(plan, physical=load_physical_dataset(mb))
+    scene = build_scene(
+        problem, LayoutResult(status=LayoutStatus.VALID, seed=0, placements=[at("n", 0, 0, 0)])
+    )
+    texturize_scene(scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider)
+
+    (machine,) = scene["machines"]
+    assert machine["size"] == [2, 3, 2]  # reserved from the record the adapter resolved...
+    controllers = {
+        b["meta"]
+        for b in scene["blocks"]
+        if b["machine"] == "n" and b["block"] == "gregtech:gt.blockmachines"
+    }
+    assert controllers == {drawn}  # ...and drawn as that same controller
 
 
 def test_docless_multiblock_keeps_placeholder_not_a_lone_cube(dataset: tuple[Path, Path]) -> None:
