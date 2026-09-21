@@ -67,6 +67,7 @@ from .schema import (
     Controller,
     ControllerFailure,
     DatasetMeta,
+    DatasetSchemaError,
     Hint,
     MultiblockDoc,
     Substitution,
@@ -129,7 +130,7 @@ __all__ = [  # noqa: RUF022 - grouped by submodule, not alphabetized
     "tier_voltage",
     "tiers_above",
     "whole_amps",
-    # multiblock schema v1 (raw extractor facts)
+    # multiblock schema v2 (raw extractor facts)
     "SCHEMA_VERSION",
     "Controller",
     "Block",
@@ -139,6 +140,7 @@ __all__ = [  # noqa: RUF022 - grouped by submodule, not alphabetized
     "MultiblockDoc",
     "ControllerFailure",
     "DatasetMeta",
+    "DatasetSchemaError",
     "load_multiblock_doc",
     "load_meta",
     "multiblock_json_schema",

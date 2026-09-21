@@ -375,7 +375,7 @@ def _ebf_doc() -> dict[str, Any]:
         {"d": [0, 1, 0], "block": "gregtech:gt.blockcasings5", "meta": 0},  # the coil layer
     ]
     return {
-        "schema": 1,
+        "schema": 2,
         "controller": {
             "registry_name": "gregtech:gt.blockmachines",
             "meta": 1000,
@@ -697,7 +697,7 @@ def test_expand_machine_yaw_rotates_positions_for_east_facing() -> None:
 def _bar_doc(length: int = 3) -> dict[str, Any]:
     """A non-cubic ``length``x1x1 bar of casings, so a yaw would spill it past a reserved footprint."""
     return {
-        "schema": 1,
+        "schema": 2,
         "controller": {
             "registry_name": "gregtech:gt.blockmachines",
             "meta": 1,

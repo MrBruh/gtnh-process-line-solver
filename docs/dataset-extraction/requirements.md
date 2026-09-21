@@ -114,7 +114,10 @@ GT5-Unofficial version the resolved manifest's provenance records, so its icons 
 
 - Structure dump: **schema v2**, the cross-language contract defined by the Pydantic models in
   `src/gtnh_solver/dataset/schema.py` (a JSON Schema is derived from them for non-Python
-  consumers). A breaking change bumps `SCHEMA_VERSION` there and in the extractor together.
+  consumers). A breaking change bumps `SCHEMA_VERSION` there and in the extractor together, and
+  the loader refuses any file that declares another version, because a dump that predates a field
+  is missing it rather than wrong about it: schema v2's `hatch_slots` read as "no hatch cells
+  recorded" in a v1 file, which every consumer takes as "impose no constraint".
 - Texture manifest: **schema v2**, the layered stack described above.
 
 Field-level shapes live with the code (schema.py and the manifest writer); this doc states only
@@ -124,7 +127,7 @@ Field-level shapes live with the code (schema.py and the manifest writer); this 
 
 - **Golden ground truths** hold (they change only when GTNH does): the EBF main piece is 3x3x4
   with exactly 2 coil layers and hint dots on its hatch layer; the Vacuum Freezer is 3x3x3.
-- Every `data/multiblocks/*.json` validates against schema v1; the `_meta.json` failure count
+- Every `data/multiblocks/*.json` validates against schema v2; the `_meta.json` failure count
   stays under an agreed threshold (start lenient, ratchet down).
 - The texture manifest resolves a non-zero count of blocks, MTEs, and icons; its `gaps` list is
   reviewed for regressions, not required to be empty.

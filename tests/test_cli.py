@@ -332,7 +332,7 @@ def test_package_exposes_a_nonempty_version_string() -> None:
 def _empty_dataset() -> PhysicalDataset:
     meta = DatasetMeta.model_validate(
         {
-            "schema": 1,
+            "schema": 2,
             "pack_version": "test",
             "generated_at": "now",
             "extractor_sha": "0",
