@@ -34,12 +34,23 @@ solver solves:
 | cables | 3 (2x `cable.tin.08`, 1x `cable.tin.12`) | 23 (3x 1x, 18x 2x, 2x 4x) |
 | machines | 9 hammers, 2 chests, 1 source | the same |
 
-Two things in it the solver cannot currently produce. One pipe column carries several
-material flows at once, because a larger gauge has the throughput for it, while our router
-holds every route to its own cells (one route per cell, `validator.core`). And a single
-3-cell cable column feeds all nine machines off adjacency, which needs the machines packed
-tightly enough around it to reach. Both are tracked; see the routing issues on the tracker
-rather than treating this file as a failing test.
+What it does that we cannot is put **many terminals of one net on one pipe block**: 20 item
+terminals on 12 cells, against our 20 on 40. Its 12 pipes are four disjoint 3-cell runs, one
+per net, and no pipe block is shared between nets. An earlier version of this section said the
+opposite, that one pipe column carried several material flows at once; that was read off a
+layer dump without checking connectivity and is wrong. The router forbids the sharing it does
+do, in three places, and #164 tracks them.
+
+**Only the geometry and the block identities in this file are evidence.** Schematica does not
+capture GT:NH tile entity detail faithfully: all 12 of its pipes carry `mConnections = 0`, and
+its machine facings are not reliable either. Our own exporter writes both, on 63 of 63 pipes
+for the same line. So the box size, the block counts and the run shapes above can be trusted,
+while which net each run carries, and any measurement that depends on a facing, cannot be read
+off this file at all. Regenerating the reference through our own exporter and building it in
+game is what would settle those, and is worth doing before anyone reasons from the topology.
+
+Never assert our output against it cell for cell either way: it is hand built, so it differs
+from any solved layout in placement.
 
 ## What they establish
 
