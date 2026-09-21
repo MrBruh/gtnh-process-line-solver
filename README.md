@@ -22,9 +22,13 @@
 If you see any areas in the code or documentation that can be improved, feel free to contribute
 and make issues or PR's!
 
-**Input comes from [gtnh-factory-flow](https://github.com/Samiracle64/gtnh-factory-flow)** (MIT):
-you design and balance a production line there, export it as plan JSON, and `gtnh_solver` turns
-that into a physical, buildable layout.
+**Input comes from gtnh-factory-flow** (MIT): you design and balance a production line there,
+export it as plan JSON, and `gtnh_solver` turns that into a physical, buildable layout. Two forks
+of that app emit plans the adapter reads,
+[MrBruh/gtnh-factory-flow](https://github.com/MrBruh/gtnh-factory-flow) and the arodoid fork, and
+it tells them apart by the plan's structure (see [`examples/README.md`](examples/README.md)). The
+original upstream both forks descend from is
+[Samiracle64/gtnh-factory-flow](https://github.com/Samiracle64/gtnh-factory-flow).
 
 ![The three.js previewer: a solved nitrobenzene line in 3D, machines drawn with their real GT block textures, item, fluid and power runs routed between them, and a legend of machines, route types and system I/O.](docs/images/previewer.png)
 
@@ -102,5 +106,7 @@ quality upgrades on top of it (deeper phase context in [`docs/ROADMAP.md`](docs/
 ## License
 
 Apache-2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). Consumes plan/recipe JSON
-exported by the MIT-licensed [`gtnh-factory-flow`](https://github.com/Samiracle64/gtnh-factory-flow);
+exported by two forks of the MIT-licensed
+[`gtnh-factory-flow`](https://github.com/Samiracle64/gtnh-factory-flow)
+([MrBruh/gtnh-factory-flow](https://github.com/MrBruh/gtnh-factory-flow) and the arodoid fork);
 no third-party code is vendored.
