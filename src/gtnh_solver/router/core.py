@@ -9,7 +9,10 @@ outside a usable, non-front machine face - the front comes from the placement or
 dataset is needed), then A* between the terminals over the free cell grid (machine + reserved
 cells are obstacles). Which face an endpoint docks on is itself decided by routing, not by a
 face ordering: every free face cell is a candidate and multi-goal A* picks the pair (``_dock_net``). Two nets must never share a cell - the crude single-channel cap (one route
-per cell), which the validator independently enforces. Rather than laying nets sequentially (and
+per cell), which the validator independently enforces. Several terminals of ONE net may share a
+dock cell, though, when they belong to different machines: one pipe block wired to several
+neighbours is how GT builds a manifold, and the maintainer's own parallel-sand build puts 20 item
+terminals on 12 cells that way (#164). Rather than laying nets sequentially (and
 being hostage to net order), the router runs **negotiated congestion** (the FPGA PathFinder
 scheme, GitHub #7): every net first routes independently as if alone, then every cell shared by
 two or more nets is *priced* - a present-sharing penalty per other user plus a history penalty
@@ -33,7 +36,8 @@ Four phases (item/fluid nets; power is ``router.power``'s job)::
       |                   chosen route-aware (multi-goal A* over every free face cell, not the
       |                   first face in a tuple); terminals are then fixed for the whole
       |                   negotiation (a pipe MUST touch its dock cell, so docks are not
-      |                   tradeable and foreign docks are hard).
+      |                   tradeable and foreign docks are hard). Endpoints of one net on
+      |                   different machines may share a cell; two nets never do.
       v
       |  [3] route        every net independently: priced A* between its terminals; machine,
       |                   reserved, and foreign-terminal cells are hard, contested cells cost
@@ -277,7 +281,7 @@ def _negotiate(
             claimed.setdefault(terminal.machine_id, set()).add(
                 claim_key(terminal, machines[terminal.machine_id])
             )
-            state.owner[terminal.cell.as_tuple()] = (net.id, index)
+            state.owner.setdefault(terminal.cell.as_tuple(), []).append((net.id, index))
 
     active = [net for net in nets if net.id not in failures]
     all_terms: set[Cell] = set().union(*term_cells_by_net.values()) if term_cells_by_net else set()
@@ -388,13 +392,14 @@ _MAX_RESEAT_DEPTH = 3
 class _DockState:
     """The mutable docking bookkeeping shared by the greedy pass and the re-seat rescue.
 
-    ``owner`` is the inverse of the assignment - which net's which endpoint holds a given cell -
-    which is what lets a stranded net find out who to ask to move.
+    ``owner`` is the inverse of the assignment - which net's which endpoints hold a given cell -
+    which is what lets a stranded net find out who to ask to move. A list, because several
+    endpoints of one net may share a cell (#164).
     """
 
     docked: set[Cell]
     claimed: dict[str, set[Cell]]
-    owner: dict[Cell, tuple[str, int]]
+    owner: dict[Cell, list[tuple[str, int]]]
     terminals_by_net: dict[str, list[Terminal]]
     term_cells_by_net: dict[str, set[Cell]]
     nets_by_id: dict[str, Net]
@@ -459,10 +464,13 @@ def _make_room(
         port_id, placement, machine, hard, set(), region, state.claimed.get(machine_id, ())
     ):
         cell = terminal.cell.as_tuple()
-        held = state.owner.get(cell)
-        if held is None:
-            continue  # free already, or held by nothing this pass placed
-        if _reseat(held, cell, placement_by_machine, machines, hard, region, state, depth):
+        held = state.owner.get(cell, [])
+        # Empty: free already, or held by nothing this pass placed. More than one: shared by
+        # several endpoints of one net (#164), and moving one of them would leave the rest on the
+        # cell, so it could never be handed over - re-seating it would only put two nets on it.
+        if len(held) != 1:
+            continue
+        if _reseat(held[0], cell, placement_by_machine, machines, hard, region, state, depth):
             return True
     return False
 
@@ -537,7 +545,7 @@ def _reseat(
     state.docked.add(new_cell)
     state.claimed.setdefault(moved.machine_id, set()).add(claim_key(moved, machine))
     del state.owner[cell]
-    state.owner[new_cell] = (net_id, index)
+    state.owner[new_cell] = [(net_id, index)]  # ``docked`` excluded it, so nobody else holds it
     return True
 
 
@@ -573,6 +581,17 @@ def _dock_net(
 
     ``claimed`` are the casing cells each machine's already-placed hatches hold. This net adds its
     own as it goes, so two of its endpoints landing on one machine still take a cell each.
+
+    **Endpoints of this net may share a dock cell** when they are on different machines (#164): a
+    leg may end on a cell an earlier endpoint of the same net already docked on, which is one pipe
+    block wired to two machines. Three things keep that sound. Two endpoints of *one* machine still
+    cannot share, because ``mine`` holds each machine's :func:`_grid.claim_key` and for a single
+    block that IS the dock cell (the validator re-checks it, ``TERMINAL_FACE_CONTENTION``). Other
+    nets' docks stay out of reach through ``docked``, since a pipe delivers to any inventory wired
+    to it and nothing in the IR says two nets carry the same item. And a shared cell is only ever
+    reached by a laid leg: a leg's goals exclude its own start, so consecutive endpoints never
+    share and the net always spans two cells, and the first-free fallback below does not share at
+    all. A net collapsed onto one cell would lay no segment, which is not a route.
     """
     candidates: list[list[Terminal]] = []
     for endpoint in net.endpoints:
@@ -597,15 +616,15 @@ def _dock_net(
 
     blocked = hard | docked
     terminals: list[Terminal] = []
-    taken: set[Cell] = set()  # this net's own dock cells, so two of its ports don't co-locate
-    mine: dict[str, set[Cell]] = {}  # ...and its own casing cells, for two ports on one machine
+    taken: set[Cell] = set()  # this net's own dock cells, which only a laid leg may share
+    mine: dict[str, set[Cell]] = {}  # its own claim keys per machine, which nothing may share
     for leg, cand in enumerate(candidates[1:]):
         starts = (
             {t.cell.as_tuple() for t in candidates[0]}
             if not terminals
             else {terminals[-1].cell.as_tuple()}
         )
-        goals = {t.cell.as_tuple() for t in _free(cand, taken, mine, machines)} - starts
+        goals = {t.cell.as_tuple() for t in _free(cand, mine, machines)} - starts
         path = astar_multi(starts, goals, blocked, region) if goals else None
         if path is None:
             break  # unreachable from here on; the fallback below picks the remaining faces
@@ -614,7 +633,12 @@ def _dock_net(
         _keep(_at_cell(candidates[leg + 1], path[-1]), terminals, taken, mine, machines)
 
     for i in range(len(terminals), len(candidates)):
-        free = next(iter(_free(candidates[i], taken, mine, machines)), None)
+        # No leg reached this endpoint, so it may not share: first-fit onto one of this net's own
+        # cells could seat two consecutive endpoints on one cell, or the whole net on one.
+        unshared = (
+            t for t in _free(candidates[i], mine, machines) if t.cell.as_tuple() not in taken
+        )
+        free = next(unshared, None)
         if free is None:
             return _no_dock(net.id, net.endpoints[i].machine_id)
         _keep(free, terminals, taken, mine, machines)
@@ -623,16 +647,17 @@ def _dock_net(
 
 def _free(
     candidates: Sequence[Terminal],
-    taken: set[Cell],
     mine: dict[str, set[Cell]],
     machines: dict[str, Machine],
 ) -> list[Terminal]:
-    """``candidates`` minus the dock cells and the hatch cells this net already holds."""
+    """``candidates`` minus what this net already holds on the candidate's own machine.
+
+    Not minus this net's dock cells: another machine's endpoint of this net may share one (#164).
+    """
     return [
         t
         for t in candidates
-        if t.cell.as_tuple() not in taken
-        and claim_key(t, machines[t.machine_id]) not in mine.get(t.machine_id, frozenset())
+        if claim_key(t, machines[t.machine_id]) not in mine.get(t.machine_id, frozenset())
     ]
 
 

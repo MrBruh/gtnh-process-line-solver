@@ -181,7 +181,10 @@ faces can still carry I/O. Each non-ME net is satisfied by **exactly one** of: a
 or an `AutoConnection` (the source machine auto-ejecting straight into an adjacent target's
 input face - no pipe, no cover; `source_face` points source->target, `target_face` is the
 opposite, both non-front). A `Terminal` records where a *pipe* docks: the non-front `face`
-(covers ride on the machine face, never the pipe) and the adjacent `cell`. `Segment` uses
+(covers ride on the machine face, never the pipe) and the adjacent `cell`. Several terminals of
+one route may share a `cell` when they belong to different machines (one pipe block wired to
+several neighbours, #164); two terminals of one machine may not, and neither may two routes. That
+is documentation of what the schema always allowed, not a version bump. `Segment` uses
 `start`/`end` (`from` is a Python keyword). `status`/`infeasibility` are coupled: a `valid`
 result carries no infeasibility; `infeasible`/`partial_invalid` must carry one.
 

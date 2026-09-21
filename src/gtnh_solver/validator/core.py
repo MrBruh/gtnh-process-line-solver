@@ -19,7 +19,9 @@ What is checked now (needs only the IR):
   terminals - every net endpoint has a terminal, and every terminal pins one of the net's own
   endpoints exactly once (no foreign or duplicate terminals), on a usable (non-front) face adjacent
   to its machine, with that terminal cell on the route (the geometric + structural halves of
-  required-I/O-face reachability).
+  required-I/O-face reachability). Terminals of different machines may share a cell (one pipe
+  block wired to several neighbours), but two connections of one machine may not: on a multiblock
+  they would need one casing cell, on a single block one face.
   hatches - a multiblock does no I/O of its own, so every connection is a block: each recorded
   hatch sits on a body cell of its own machine, faces out, shares its casing cell with nothing, and
   agrees with its terminal; every connection the layout actually makes HAS such a hatch (a routed
@@ -107,6 +109,7 @@ def validate(problem: InputIR, layout: LayoutResult) -> ValidationReport:
     _check_power_feed(problem, layout, out)
     _check_hatch_cells(problem, out)
     _check_terminal_hatch_cells(problem, layout, out)
+    _check_terminal_faces(problem, layout, out)
     _check_hatches(problem, layout, out)
     _check_port_hatches(problem, layout, out)
     _check_upkeep_hatches(problem, layout, out)
@@ -530,7 +533,8 @@ def _check_terminal_hatch_cells(
     Permissive exactly where the dump is silent, per the rule ``Machine.hatch_slots`` documents and
     ``_check_hatch_cells`` already follows. A machine recording no slots is skipped altogether - it
     is a single block, or an unknown one, and a single-block GT machine genuinely takes input on
-    one face and output on another of the same block, so neither rule applies to it. A machine that
+    one face and output on another of the same block, so neither rule applies to it (two of its
+    connections on the *same* face are :func:`_check_terminal_faces`'s concern). A machine that
     records slots but names this kind on none of them is skipped for that kind only: a hatch adder
     built from a bare method reference exposes no filter, so the cell is recorded without the kind
     rather than as refusing it, and 61 of 185 controllers record no ``Energy`` cell at all.
@@ -568,6 +572,53 @@ def _check_terminal_hatch_cells(
                 )
             else:
                 claimed[(terminal.machine_id, cell)] = terminal.port_id
+
+
+def _check_terminal_faces(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
+    """Two connections of one slot-less machine may not dock on one cell.
+
+    The half of the per-machine contention rule :func:`_check_terminal_hatch_cells` leaves out. A
+    machine recording no ``hatch_slots`` is a single block (or one the dump knows nothing about),
+    so it has no hatches to contend over, and it rightly may take input on one face and output on
+    another. But a terminal is one cell outside one face, so two terminals of that machine on one
+    cell are two connections through one face of one block. GT settles the case that matters: a
+    basic machine ejects through one output side and by default refuses input on it
+    (``mAllowInputFromOutputSide``), so an input and an output sharing a face cannot both work, and
+    any other pair is one pipe connection claimed as two. Either way the layout promises a
+    connection the block does not have.
+
+    Keyed on ``(machine, dock cell)``, the same unit ``router._grid.claim_key`` uses for such a
+    machine, but re-derived here rather than imported (``docs/ARCHITECTURE.md`` #4: shared rule
+    data, independent checking logic). A machine WITH slots is ``_check_terminal_hatch_cells``'s
+    business: a cell outside a box touches at most one body cell, so two of its terminals on one
+    dock cell already contend for one casing cell there.
+
+    What stays legal is the point of the rule: terminals of **different** machines on one cell.
+    That is one pipe block wired to several neighbours, the manifold the maintainer's parallel-sand
+    build uses on 8 of its 12 pipes (#164). Until the router shared dock cells nothing reached this
+    rule; it is the gate that keeps that sharing from putting two of one machine's connections on
+    one face.
+    """
+    machines = {m.id: m for m in problem.machines}
+    claimed: dict[tuple[str, Cell], str] = {}  # (machine, dock cell) -> the port that holds it
+    for route in layout.routes:
+        for terminal in route.terminals:
+            machine = machines.get(terminal.machine_id)
+            if machine is None or machine.hatch_slots:
+                continue  # unknown is reported elsewhere; a multiblock contends over casing cells
+            cell = (terminal.cell.x, terminal.cell.y, terminal.cell.z)
+            owner = claimed.get((terminal.machine_id, cell))
+            if owner is None:
+                claimed[(terminal.machine_id, cell)] = terminal.port_id
+            elif owner != terminal.port_id:
+                out.append(
+                    Violation(
+                        ViolationCode.TERMINAL_FACE_CONTENTION,
+                        f"{owner!r} and {terminal.port_id!r} of {terminal.machine_id!r} both dock "
+                        f"on {cell}, one face of a single block; a face carries one connection",
+                        machine_id=terminal.machine_id,
+                    )
+                )
 
 
 def _check_hatches(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:

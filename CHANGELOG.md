@@ -7,6 +7,24 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Several terminals of one net may now share a pipe block, and the validator refuses two
+  connections of one single-block machine on one face (#164).** The maintainer's parallel-sand
+  build wires 20 item connections onto 12 pipe blocks, each block serving a producer and a consumer
+  of the same net; the router refused that outright, so on the same placement it could not route
+  at all. A leg may now end on a cell an earlier endpoint of its own net already docked on. Two
+  things stay forbidden: two nets on one block (a GT item pipe feeds any wired inventory, and
+  nothing in a plan says two nets carry the same item, so it would cross-feed), and two
+  connections of one machine on one cell.
+
+  The second had no gate. `terminal_hatch_contention` covers only machines with recorded hatch
+  slots, so two terminals of a single block on one face passed validation; the router just never
+  produced them. The new `terminal_face_contention` violation closes that in the same change that
+  makes it reachable. The build itself, decoded from the exported golden, is now a regression
+  test the validator must accept.
+
+  The solved layouts do not change yet: parallel-sand lays 40 item pipe cells before and after,
+  because the placer never offers a geometry that needs the sharing. This is the groundwork.
+
 - **The 3D preview answers "what is in this one" for pipes and buffers, not just "what machine is
   this".** Hovering a route cell now floats the resource that route carries, its commodity and its
   rate, so a bundle of crossing fluid pipes is readable instead of eight identical blue noodles;

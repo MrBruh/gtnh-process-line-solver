@@ -29,6 +29,14 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
 - A machine **auto-outputs to a single face**, carrying **either items or fluids, not both**.
   A machine emitting both an item and a fluid output uses auto-output for one and a
   cover-driven output on another non-front face (or ME) for the other.
+- **One face is one connection, but one pipe block can serve several machines.** A pipe block
+  wired to faces of several machines on the same net is a manifold, and a real build uses it
+  freely: the maintainer's parallel-sand build puts 20 item connections on 12 pipe blocks that way
+  (#164). Two connections of *one* machine through one face are not something a block has (its
+  output side refuses input by default, `mAllowInputFromOutputSide`), so the validator rejects
+  them (`terminal_face_contention`). And two **nets** never share a pipe block: a GT item pipe
+  delivers to any wired inventory that accepts the stack, and nothing in a plan says two nets
+  carry the same item, so a shared block would cross-feed them.
 - **Required-I/O-face reachability is a HARD constraint** - a blocked required output face
   means the line doesn't run. "Convenient access" is a soft preference.
 

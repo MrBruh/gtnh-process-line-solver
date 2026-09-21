@@ -465,6 +465,29 @@ def test_validator_rejects_two_connections_wanting_the_same_casing_cell() -> Non
     assert ViolationCode.TERMINAL_HATCH_CONTENTION in _codes(problem, layout)
 
 
+def test_two_terminals_on_one_dock_cell_of_a_multiblock_are_reported_once() -> None:
+    # The single-block face rule (TERMINAL_FACE_CONTENTION) and this casing-cell rule split the
+    # machines between them the way claim_key does. A dock cell outside a box touches one body cell
+    # only, so two terminals of a multiblock on one dock cell ARE two hatches on one casing cell:
+    # that is this rule's finding, and reporting it again as a face would be noise.
+    m = _multiblock(
+        "m",
+        [
+            Port(id="a", commodity=Commodity.FLUID, direction=IODirection.INPUT),
+            Port(id="b", commodity=Commodity.FLUID, direction=IODirection.INPUT),
+        ],
+        [_slot(0, 1, 1, "InputHatch")],
+    )
+    both = [_terminal("a", Facing.WEST, (1, 1, 3)), _terminal("b", Facing.WEST, (1, 1, 3))]
+    problem, layout = _layout(m, both, _ORIGIN)
+    (pipe,) = layout.routes
+    one_hop = [Segment(start=CellCoord(x=1, y=1, z=3), end=CellCoord(x=0, y=1, z=3), channel=0)]
+    layout = layout.model_copy(update={"routes": [pipe.model_copy(update={"segments": one_hop})]})
+    codes = _codes(problem, layout)
+    assert ViolationCode.TERMINAL_HATCH_CONTENTION in codes
+    assert ViolationCode.TERMINAL_FACE_CONTENTION not in codes
+
+
 # ------------------------------------------------------- #131: a free connection keeps its cells
 
 
