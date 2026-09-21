@@ -67,6 +67,25 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **A power net the pipes walled off from its machine now gets its cable laid first (#226).**
+  Power is routed after the pipes, with every pipe cell a wall, and `reserve_power_docks` keeps one
+  dock cell per power endpoint free of pipes: a free cell, but not a free way to it. A pipe could
+  detour around the reserved cell and seal it into a pocket of one, and the attempt failed with
+  "no free cell path to a dock face" on a placement where that power net routes fine by itself.
+  `examples/ev-nitrobenzene.json` failed every seed this way (`power:MV` to its second Distillation
+  Tower), and the nitrobenzene line hit it inside its attempt grids, where other attempts hid it.
+
+  When the power router cannot lay a net, `_assemble` now routes just those nets against the
+  machines and the pipes' dock cells, holds that trunk from the pipes, and lays the attempt again.
+  It keeps the second pass only if it is VALID or leaves strictly fewer nets unrouted, so no
+  attempt gets worse, and an attempt whose power routes never runs it. `route_power` takes
+  `nets=` to route a subset. The recovery does not help a machine walled in by other machines or
+  a run over the amperage cap; nothing about those is the pipes' doing.
+
+  ev-nitrobenzene with the 2.9 dump now solves VALID on seeds 0 to 7 (about 105 s each). The
+  shipped lines are unchanged: parallel-sand stays VALID on seeds 0, 3, 4, 6 and 7 with the same
+  footprints, nitrobenzene (2.8.4 dump) on all eight with the same footprints, and sand at seed 0.
+
 - **Exporting a partial layout now says, before writing it, that it is not a build (#214).**
   `--preview` and `--schematic` are written whatever the solve's status, which is right for
   debugging a line, but a `.schematic` loads into Schematica as a ghost to build from and carried

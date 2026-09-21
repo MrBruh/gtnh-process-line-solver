@@ -128,9 +128,16 @@ def reserve_power_docks(
     The cure is to take one cell per power endpoint out of the item router's reach before it
     starts. The reservation is a *guarantee of availability*, never a prescription: these cells
     are hard for pipes but ordinary free cells for :func:`route_power`, which still picks
-    whichever face yields the shortest cable. Held back per endpoint rather than per machine
-    because a sink is a **connection** - a draw spread over several energy hatches puts the same
-    machine on the net once per hatch, and two hatches are two casing cells.
+    whichever face yields the shortest cable. It guarantees a free cell, **not a way to reach it**:
+    a pipe may detour around a reserved cell and wall it into a pocket of one. The solver catches
+    that case after the fact by routing the failed power nets first and holding their whole trunk
+    from the pipes (``solver.core._assemble``, #226), rather than reserving a corridor up front
+    for every endpoint, which costs pipe room on the layouts that never needed it: measured, a
+    two-cell stub per endpoint lost parallel-sand a valid seed and did not fix the case it was for.
+
+    Held back per endpoint rather than per machine because a sink is a **connection** - a draw
+    spread over several energy hatches puts the same machine on the net once per hatch, and two
+    hatches are two casing cells.
 
     Accumulates, so no two endpoints hold the same cell (the ``docked`` argument) and no two
     hatches of one machine hold the same casing cell (:func:`_grid.claim_key`, which for a
@@ -177,6 +184,7 @@ def route_power(
     *,
     extra_obstacles: Collection[Cell] = (),
     claimed_cells: Mapping[str, Collection[Cell]] = MappingProxyType({}),
+    nets: Collection[str] | None = None,
 ) -> PowerRouteResult:
     """Route each per-tier power net of ``problem`` as a shared-amperage trunk over ``placements``.
 
@@ -201,11 +209,19 @@ def route_power(
     hatch compete for the same block - so an energy hatch must not be given a cell an input bus is
     standing on. ``extra_obstacles`` cannot express that: it names the cells *outside* the machine
     a pipe occupies, and one casing cell has up to five free faces.
+
+    ``nets`` limits the routing to those power net ids (every power net when ``None``). The solver's
+    power-first recovery uses it to lay just the nets a full pass could not, before any pipe is
+    down (``solver.core._assemble``, #226).
     """
     if problem.me_toggles.toggled(Commodity.POWER):
         return PowerRouteResult()  # power is on the ME network; nothing to route
 
-    power_nets = [net for net in problem.nets if net.commodity is Commodity.POWER]
+    power_nets = [
+        net
+        for net in problem.nets
+        if net.commodity is Commodity.POWER and (nets is None or net.id in nets)
+    ]
     routes, failures = _rip_up_reroute(
         power_nets,
         lambda order: _route_pass(problem, placements, order, extra_obstacles, claimed_cells),

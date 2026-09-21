@@ -167,8 +167,9 @@ def route(
 
     ``reserved`` are cells another router has been promised and this one may not spend -
     in practice the power docks held back by :func:`router.power.reserve_power_docks`,
-    because power routes after the pipes and cannot outbid a frozen dock (#76). They are
-    hard here in both senses: no pipe crosses one and no terminal docks on one.
+    because power routes after the pipes and cannot outbid a frozen dock (#76), and, when a
+    power net failed anyway, the whole trunk the solver's power-first recovery laid for it
+    (#226). They are hard here in both senses: no pipe crosses one and no terminal docks on one.
     """
     assignment = assign_auto_outputs(problem, placements)
     auto_connections = assignment.connections

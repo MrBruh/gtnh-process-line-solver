@@ -529,6 +529,24 @@ def test_a_starved_machine_names_its_power_net_as_the_failed_net() -> None:
     assert no_failures == ()
 
 
+def test_a_starved_power_net_does_not_take_the_power_first_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A starve names its power net as failed, but the cable WAS laid: the shortfall is distance,
+    # which re-placing fixes and re-routing cannot. So the power-first recovery (#226), which is
+    # for nets the router could not lay, must not spend a second routing on it.
+    problem, far, _near = _starving_power_line()
+
+    def no_recovery(*args: object, **kwargs: object) -> None:
+        raise AssertionError("the recovery ran on a power net that routed")
+
+    monkeypatch.setattr(solver_core, "_power_corridor", no_recovery)
+    layout, failed = solver_core._assemble(problem, far, 0)
+    assert failed == ("power:LV",)
+    assert layout.infeasibility is not None
+    assert layout.infeasibility.constraint == "power_supply"
+
+
 def test_the_loop_penalizes_a_starved_power_net_and_re_places(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

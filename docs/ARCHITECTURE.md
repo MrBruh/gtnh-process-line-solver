@@ -103,6 +103,14 @@ doc as intent and reconcile.
   placement-cost term, not a reversal of it - cable is judged where it is knowable, on a routed
   layout. *(Phase 2: the anytime **wall-clock** budget; today it runs a deterministic bounded grid
   keyed off the seed, not a timeout.)*
+  Within one attempt the order is fixed: hold one dock cell per power endpoint, lay the pipes,
+  lay power (through the repair pass), place hatches, validate. Power goes last, so every pipe
+  cell is a wall to it, and a held dock *cell* is not a held *path*: a pipe can detour around it
+  and seal it in. So when the power router cannot lay a net, the attempt gets a **power-first
+  recovery** (#226): those nets are routed alone against the machines and the pipes' dock cells,
+  their trunk is held from the pipes, and the attempt is laid again. The second pass is kept only
+  if it is VALID or fails strictly fewer nets, so it never makes an attempt worse, and an attempt
+  whose power routes never pays for it. It moves no machine, which is why `--fast` gets it too.
 - **system_io.py** - the single source of truth for the line's **boundary I/O** (what to feed in,
   what to collect) and the **power-feed spec** (EU/t plus amperage per voltage tier). Pure over
   the `InputIR` + `LayoutResult`; both the build guide and the previewer read it, so the two
