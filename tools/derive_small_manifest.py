@@ -52,6 +52,10 @@ from gtnh_solver.previewer.textures import HATCH_KIND_BY_CLASS, TextureManifest
 REPO = Path.cwd()
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 _FULL_MIN_BLOCKS = 100  # a real dump has ~1470 blocks; the small one has a few dozen
+#: Examples the committed manifest deliberately does NOT skin. ``ev-nitrobenzene.json`` is a real
+#: GTNH 2.9 line committed as an acceptance fixture (#204), not as a showcase: keeping blocks for it
+#: would pull its EV tier and its 2.9 machine names into the small committed manifest.
+_NOT_MANIFEST_SCOPED = frozenset({"ev-nitrobenzene.json"})
 
 
 def _norm(text: str) -> str:
@@ -75,11 +79,16 @@ def _find_full_manifest() -> Path:
 
 
 def _example_types_and_tiers() -> tuple[set[str], set[str]]:
-    """Normalized machine-type names and voltage tiers the shipped example lines reference."""
+    """Normalized machine-type names and voltage tiers the shipped example lines reference.
+
+    Every ``examples/*.json`` except those in ``_NOT_MANIFEST_SCOPED``.
+    """
     physical = load_physical_dataset()
     types: set[str] = set()
     tiers: set[str] = set()
     for example in sorted((REPO / "examples").glob("*.json")):
+        if example.name in _NOT_MANIFEST_SCOPED:
+            continue
         for machine in adapt_file(str(example), physical=physical).machines:
             types.add(_norm(machine.type))
             tiers.add(machine.voltage_tier)

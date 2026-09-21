@@ -8,12 +8,15 @@ route rule fails the run instead of keeping what it happens to find - that is th
 2.9 rename produced and this pins (#176).
 
 The rest of the tool is exercised by running it; this covers only the guard, because the guard is
-the part that has to hold when a *new* dataset arrives and nobody is watching.
+the part that has to hold when a *new* dataset arrives and nobody is watching - plus the one example
+the tool must skip, which is the same kind of quiet failure pointed the other way: a committed
+manifest that grew to cover a line it was never meant to (#204).
 """
 
 from __future__ import annotations
 
 import importlib.util
+import shutil
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -21,7 +24,8 @@ from typing import Any
 
 import pytest
 
-_TOOL = Path(__file__).resolve().parents[1] / "tools" / "derive_small_manifest.py"
+_REPO = Path(__file__).resolve().parents[1]
+_TOOL = _REPO / "tools" / "derive_small_manifest.py"
 
 
 def _tool() -> ModuleType:
@@ -112,3 +116,26 @@ def test_both_of_gts_spellings_are_accepted_for_the_same_block() -> None:
     kept = tool._route_keys(_dump(_AS_29), {"LV"})
     assert kept == tool._route_keys(_dump(_AS_284), {"LV"})
     assert len(kept) == len(_AS_29), "every gauge is kept, not only the ones a line routes today"
+
+
+def test_the_2_9_acceptance_fixture_stays_out_of_the_committed_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``ev-nitrobenzene.json`` is committed to test 2.9 work against, not to be skinned out of the
+    box (#204). Were the tool to prune for it, the next regeneration would quietly pull its EV tier
+    and its 2.9 machine names into the committed manifest.
+
+    Run against an ``examples/`` holding only the excluded plans, so the answer cannot lean on what
+    the other examples happen to use: skipped by name, they contribute nothing at all. A name that
+    no longer matches a committed file would make the exclusion a silent no-op, hence the check.
+    """
+    tool = _tool()
+    examples = tmp_path / "examples"
+    examples.mkdir()
+    for name in sorted(tool._NOT_MANIFEST_SCOPED):
+        source = _REPO / "examples" / name
+        assert source.is_file(), f"{name} is excluded by name but is not in examples/"
+        shutil.copyfile(source, examples / name)
+    monkeypatch.setattr(tool, "REPO", tmp_path)
+
+    assert tool._example_types_and_tiers() == (set(), set())

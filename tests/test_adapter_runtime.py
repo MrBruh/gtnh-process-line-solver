@@ -44,6 +44,8 @@ from gtnh_solver.adapter.core import (
 )
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+#: The fixtures that run at their recipe's own tier. ``ev-nitrobenzene.json`` is deliberately not
+#: one: most of its nodes run overclocked, so its figures are *meant* to move (#204).
 _FIXTURES = [
     _EXAMPLES / "gtnh-sand.json",
     _EXAMPLES / "gtnh-nitrobenzene.json",
