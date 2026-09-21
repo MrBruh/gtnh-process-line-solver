@@ -193,11 +193,13 @@ def test_the_real_2_9_line_maps_every_machine_and_net() -> None:
 
     The adapter's half only, with no dataset (so every multiblock is 1x1x1 here) and no solve, which
     keeps the default suite fast. 34 machines is the 14 process machines the counts expand
-    to, the plan's 17 storages and one power source per tier (EV, HV, MV); 31 nets is 25 fluid,
-    3 item and 3 power. The 12x parallel is reported, not modelled, so it has to warn.
+    to, the plan's 17 storages and one power source per tier (EV, HV, MV); 27 nets is 21 fluid,
+    3 item and 3 power. That is the plan's 28 edges less four: four pairs of edges meet at a
+    multiblock port, and each pair is one net (#213, ``test_adapter_shared_ports``). The 12x
+    parallel is reported, not modelled, so it has to warn.
     """
     plan = load_plan(_EV_NITROBENZENE)
     with pytest.warns(AdapterWarning, match=r"Dangote Distillus at 12x parallel"):
         ir = to_input_ir(plan)
     assert len(ir.machines) == 34
-    assert len(ir.nets) == 31
+    assert len(ir.nets) == 27

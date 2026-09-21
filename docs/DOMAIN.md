@@ -101,6 +101,15 @@ Two more bind the machine at **runtime**, where a structure that formed perfectl
   item-lock the hatch), so a deterministic build eventually has to emit that lock configuration.
   It does not today.
 
+**One port is one hatch, so it is one net** (#213). A plan draws an edge per consumer, so an output
+feeding two machines arrives as two edges out of one port. In game that port is one hatch with one
+pipe network behind it, and a hatch per consumer would not be the same thing: for an input it
+would work, but for an output GT fills the first hatch that can take the product (above) and the
+second consumer starves. So the adapter maps every set of edges that meets at a multiblock port to
+one net, transitively, and names it by the edges' ids joined with `+`. Such a net carries what its
+producers move, each counted once. A boundary storage's shared port stays one net per edge: a Super
+Chest or Tank has no hatch, and its covers can push through several faces.
+
 ## Fluids and items (pipes)
 
 - A fluid pipe line carries **one fluid type**; a pipe has a per-tick throughput cap by tier
