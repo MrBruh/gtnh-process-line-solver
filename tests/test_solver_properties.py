@@ -242,7 +242,6 @@ def _problems(draw: st.DrawFn) -> InputIR:
 @pytest.mark.parametrize("optimize", [True, False])
 @settings(
     max_examples=property_examples(200),
-    deadline=None,
     suppress_health_check=[HealthCheck.too_slow],
 )
 @given(problem=_problems(), seed=st.integers(min_value=0, max_value=3))
@@ -269,7 +268,6 @@ def test_solve_is_valid_or_explicitly_infeasible(
 
 @settings(
     max_examples=property_examples(50),
-    deadline=None,
     suppress_health_check=[HealthCheck.too_slow],
 )
 @given(problem=_problems(), seed=st.integers(min_value=0, max_value=3))
@@ -428,7 +426,7 @@ def _layouts(draw: st.DrawFn, problem: InputIR) -> LayoutResult:
     )
 
 
-@settings(max_examples=property_examples(300), deadline=None)
+@settings(max_examples=property_examples(300))
 @given(pair=_problems().flatmap(lambda p: st.tuples(st.just(p), _layouts(p))))
 def test_validate_reports_but_never_raises(pair: tuple[InputIR, LayoutResult]) -> None:
     """``validate`` answers for every schema-valid layout, however unrelated to the problem.

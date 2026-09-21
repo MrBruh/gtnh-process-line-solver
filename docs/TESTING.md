@@ -199,6 +199,16 @@ and 282s with `--cov`. Pass `--no-cov` while iterating; `COVERAGE_CORE=sysmon` d
 because `sys.monitoring` cannot measure branches before Python 3.14 and coverage silently falls
 back to its tracer.
 
+### Property tests have no per-example deadline
+
+`tests/conftest.py` loads a Hypothesis profile, `gtnh`, that sets `deadline=None` and nothing else,
+so a new `@given` test needs no `deadline=` of its own. Hypothesis's default is 200 ms of wall clock
+per example, and wall clock is what `-n auto` on a busy machine takes away: a test that is only
+waiting for a core, not slow, fails with `DeadlineExceeded`, or `Flaky` when the replay is quicker
+(#216). The profile is built on whichever built-in profile Hypothesis picked, so under `CI` its `ci`
+profile (already deadline-free, and derandomized) still applies in full. A test's own `@settings`
+wins for what it names, so the `property_examples()` budgets are unaffected.
+
 ## Commands
 
 ```bash

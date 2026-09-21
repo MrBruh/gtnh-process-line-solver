@@ -245,6 +245,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **A busy machine no longer fails a property test on wall clock (`tests/conftest.py`, #216).**
+  Hypothesis gives each generated example a 200 ms deadline by default, and 24 of the suite's 27
+  `@given` tests ran with it; only three solver properties had opted out, one by one. Under
+  `-n auto` on a machine doing other work, an example that is merely waiting for a core can run
+  past that and fail as `DeadlineExceeded`, or as `Flaky` when the replay is quicker. One of two
+  local runs of `main` on a busy 4-core box failed exactly so: `test_validator.py`'s
+  `test_a_bigger_pipe_never_turns_a_pass_into_a_refusal` took 294.85 ms on its first call and
+  2.85 ms on the replay. The conftest now loads one profile with `deadline=None` and nothing else,
+  and the three per-test opt-outs are gone.
+
+  The profile is built on whichever built-in profile Hypothesis picked, not on `default`, so CI
+  sees no change: with `CI` set Hypothesis already runs its `ci` profile, which has no deadline and
+  also derandomizes, and that stays in force. The `property_examples()` budgets are untouched,
+  because a test's own `@settings` still wins for what it names.
+
 - **`pytest` answers the same question on every machine: the suite pins the dataset it resolves
   (`tests/conftest.py`, #182).** `resolve_dataset_path` prefers the newest local `data/<version>/`
   dump and only falls back to the committed fixtures when none provides a sub-path. That is right
