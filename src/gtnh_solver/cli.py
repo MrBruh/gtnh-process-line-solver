@@ -20,6 +20,10 @@ explicit infeasibility (the reason is printed to stderr - from the solver, or fr
 for a plan that maps cleanly and states a line no layout satisfies), 2 when the export could not
 be loaded, 3 when the run hit a bug in this program (an exception no stage claimed). 1 and 2 are
 *answers* about the plan; 3 exists so a caller can tell an answer from a crash.
+
+``--preview`` and ``--schematic`` are written whatever the status, because a partial layout is what
+someone debugging a line needs to see; for a non-VALID one a warning comes first, naming what is
+unconnected and saying not to build it (#214).
 """
 
 from __future__ import annotations
@@ -358,6 +362,54 @@ def _warn_unmeasured_power_intake(problem: InputIR, layout: LayoutResult) -> Non
     )
 
 
+#: How many unconnected nets the incomplete-export warning names before it summarises the rest.
+_NAMED_NETS: Final = 3
+
+
+def _unconnected_nets(problem: InputIR, layout: LayoutResult) -> list[str]:
+    """The nets ``layout`` builds no connection for, in problem order.
+
+    A net is connected by a pipe ``Route`` or a free ``AutoConnection``; an ME-toggled commodity is
+    delivered by ME and needs neither, so it is never counted as missing.
+    """
+    connected = {r.net_id for r in layout.routes} | {a.net_id for a in layout.auto_connections}
+    return [
+        net.id
+        for net in problem.nets
+        if net.id not in connected and not problem.me_toggles.toggled(net.commodity)
+    ]
+
+
+def _warn_incomplete_export(problem: InputIR, layout: LayoutResult, artifacts: list[str]) -> None:
+    """Say, before writing them, that artifacts of a non-VALID layout describe no finished build.
+
+    The CLI writes ``--preview`` and ``--schematic`` whatever the status, which is deliberate: a
+    partial layout is exactly what someone debugging a line wants to look at (#214). But a
+    ``.schematic`` loads into Schematica as a ghost to build from, and nothing in it says that some
+    of its nets were never connected; the status was only printed at the very end of the run,
+    after the "wrote ..." lines, where it reads like a footnote. So this warns first, names what is
+    missing, and says not to build it. The exit code is unchanged: this is about the files, and
+    the verdict already has its code.
+    """
+    if layout.status is LayoutStatus.VALID or not artifacts:
+        return
+    unconnected = _unconnected_nets(problem, layout)
+    if unconnected:
+        shown = ", ".join(unconnected[:_NAMED_NETS])
+        if len(unconnected) > _NAMED_NETS:
+            shown += f" and {len(unconnected) - _NAMED_NETS} more"
+        missing = f"{len(unconnected)} of {len(problem.nets)} net(s) are unconnected ({shown})"
+    else:
+        missing = "every net is connected, but the layout fails validation"
+    reason = layout.infeasibility.constraint if layout.infeasibility is not None else "no reason"
+    print(
+        f"warning: the layout is {layout.status.value} ({reason}), so the "
+        f"{' and '.join(artifacts)} written below is INCOMPLETE: {missing}. Do not build it "
+        f"as-is; the full reason is at the end of this output.",
+        file=sys.stderr,
+    )
+
+
 def _report_infeasibility(status: LayoutStatus, detail: Infeasibility) -> int:
     """Print why no layout was produced, and return the exit code for it (always 1).
 
@@ -596,6 +648,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"wrote build guide to {args.output}", file=sys.stderr)
     elif not (args.preview or args.schematic):
         print(guide, end="")  # default to stdout, unless the user asked only for an artifact
+
+    _warn_incomplete_export(
+        problem,
+        layout,
+        [
+            flag
+            for flag, path in (("--preview", args.preview), ("--schematic", args.schematic))
+            if path
+        ],
+    )
 
     if args.preview:
         # Surface the previewer's texture-resolution summary (which machines got a real GT texture
