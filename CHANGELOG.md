@@ -114,11 +114,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with nothing on stderr. On a checkout with no local 2.9 dump, the solve fell back to the committed
   two-controller structure sample, so every other multiblock reserved a 1x1x1 footprint and the
   preview drew it as a lone controller that never forms. The adapter's pack-mismatch warning rightly
-  ignores a sample's nominal pack, so nothing said so. Now a warning names the plan's pack, lists the
-  machine types that found no structure, and gives the extractor run that makes the dump. It stays
-  quiet when the fallback is another pack's full dump (the mismatch warning covers that) or when
-  every machine type found its structure. The plan cannot say which of the listed types are
-  multiblocks, so on a fresh clone the shipped sand line names its Forge Hammer, which is harmless.
+  ignores a sample's nominal pack, so nothing said so. Now a warning names the plan's pack, the
+  machine types that may be multiblocks, and the missing `data/<pack>/multiblocks` folder the
+  extractor makes. A type is left out when it found its structure, or when it is known to be a
+  single block: the plan's handler says `kind: "single"` (arodoid exports), or the resolved texture
+  manifest records it as a basic or steam single-block machine class. A handler saying
+  `"multiblock"` always keeps it listed, and a type nothing identifies is listed rather than guessed
+  away. So on a fresh clone the shipped sand line stays quiet and the nitrobenzene line names its
+  four multiblocks. The warning also stays quiet when the fallback is another pack's full dump,
+  which the mismatch warning already covers.
 
   A missing texture manifest was logged at INFO, so a pinned 2.9 preview was all placeholder boxes
   with no reason given to a library caller. It is now a WARNING that names the file, and the
