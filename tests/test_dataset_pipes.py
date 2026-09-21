@@ -8,26 +8,34 @@ different in kind:
    ones the contract allows, and a tier nobody has a cable for says so rather than inventing one.
 2. **The choice names blocks that exist.** A table of material names is exactly the sort of thing
    that rots silently against a regenerated dataset, and a stand-in that resolves to nothing renders
-   as a flat bar with no error - so the committed manifest is asked directly, tier by tier.
+   as a flat bar with no error - so the committed manifest is asked directly, tier by tier, and a
+   locally staged dump too where there is one. The committed manifest alone cannot catch this: it
+   is frozen at the pack that generated it, so it kept agreeing with the policy through GT's 2.9
+   rename while every consumer of a 2.9 dump lost its cables (#176).
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from gtnh_solver.dataset import (
+    CABLE_DISPLAY_MATERIAL,
     CABLE_MATERIAL_BY_TIER,
     CABLE_THICKNESS_BLOCKS,
     CABLE_THICKNESSES,
     DEFAULT_PIPE_SIZE,
     DEFAULT_PIPE_THICKNESS_BLOCKS,
+    PIPE_DISPLAY_STEM,
     PIPE_MATERIAL,
     VOLTAGE_BY_TIER,
     UnknownTierError,
     cable_display_name,
+    list_versions,
+    manifest_names,
     pipe_display_name,
     route_material,
     tier_voltage,
@@ -45,6 +53,23 @@ def _pipes_by_name() -> dict[str, dict[str, object]]:
         for entry in raw["blocks"].values()
         if entry.get("kind") == "pipe" and entry.get("display_name")
     }
+
+
+def _newest_full_dump() -> dict[str, Any] | None:
+    """The newest locally staged full texture dump, or ``None`` on a clean clone.
+
+    "Full" by the same measure ``tools/derive_small_manifest.py`` uses - a real dump carries well
+    over a thousand blocks where the committed one carries a few dozen - so a pruned manifest that
+    happens to sit under ``data/<version>/`` is not mistaken for one.
+    """
+    for vdir in list_versions():
+        path = vdir / "textures" / "manifest.json"
+        if not path.is_file():
+            continue
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if raw.get("provenance", {}).get("coverage", {}).get("blocks", 0) >= 100:
+            return dict(raw)
+    return None
 
 
 # --------------------------------------------------------------------------------------------- 1
@@ -108,6 +133,42 @@ def test_dataset_names_match_gts_own_spelling() -> None:
     assert pipe_display_name("bronze", "large") == "gt_pipe_bronze_large"
 
 
+def test_every_material_the_policy_draws_has_a_localized_spelling() -> None:
+    """A material on the ladder but missing from the display table would resolve against a 2.8.4
+    dump and silently lose its cable against a 2.9 one, which is exactly the bug (#176). The tables
+    are pinned against each other because the shipped examples exercise only two tiers of either.
+    """
+    assert set(CABLE_DISPLAY_MATERIAL) == set(CABLE_MATERIAL_BY_TIER.values())
+    assert set(PIPE_DISPLAY_STEM) == set(PIPE_MATERIAL.values())
+
+
+def test_a_block_offers_both_of_gts_spellings_newest_first() -> None:
+    """The join key survives the rename. A 2.9 dump carries the localized name only and a 2.8.4
+    dump the unlocalized one only, so a lookup has to be handed both, newest first."""
+    assert manifest_names("cable.tin.02") == ("2x Tin Cable", "cable.tin.02")
+    assert manifest_names("cable.redalloy.01") == ("1x Red Alloy Cable", "cable.redalloy.01")
+    assert manifest_names("cable.niobiumtitanium.16") == (
+        "16x Niobium-Titanium Cable",
+        "cable.niobiumtitanium.16",
+    )
+    assert manifest_names("gt_pipe_bronze") == ("Bronze Fluid Pipe", "gt_pipe_bronze")
+    assert manifest_names("gt_pipe_tin") == ("Tin Item Pipe", "gt_pipe_tin")
+    assert manifest_names("gt_pipe_bronze_large") == (
+        "Large Bronze Fluid Pipe",
+        "gt_pipe_bronze_large",
+    )
+
+
+def test_a_name_the_policy_never_generated_gets_no_invented_alias() -> None:
+    """This maps between two spellings of a block the policy knows; it must not guess at one it has
+    never heard of. Deriving "1x Lead Cable" from an id is the plausible-confident-wrong failure the
+    whole stand-in lane guards against, so an unknown name comes back alone and the lookup misses.
+    """
+    assert manifest_names("cable.lead.01") == ("cable.lead.01",)
+    assert manifest_names("gt_pipe_steel") == ("gt_pipe_steel",)
+    assert manifest_names("Basic Forge Hammer") == ("Basic Forge Hammer",)
+
+
 # --------------------------------------------------------------------------------------------- 2
 
 
@@ -166,3 +227,35 @@ def test_both_pipe_stand_ins_exist_at_the_size_v1_draws() -> None:
         pipe = entry["pipe"]
         assert isinstance(pipe, dict)
         assert pipe["thickness"] == pytest.approx(DEFAULT_PIPE_THICKNESS_BLOCKS)
+
+
+def test_a_locally_staged_dump_names_every_cable_and_pipe_the_policy_draws() -> None:
+    """The same guard against whatever dataset is **staged**, which the committed one cannot give.
+
+    The committed manifest is example-scoped and frozen at the pack that generated it, so it can
+    only ever prove that pack's spelling; it shipped three tiers at 2.8.4 and would keep passing
+    through any number of renames after. A local ``data/<version>/`` dump is the newest pack anyone
+    here has extracted, and it is where GT's 2.9 rename actually broke the join (#176). A full dump
+    holds every cable and pipe GT has, so every name on the ladder must resolve under one spelling
+    or the other. Skipped on a clean clone, which has no dump to ask.
+    """
+    full = _newest_full_dump()
+    if full is None:
+        pytest.skip("no full local data/<version>/textures/manifest.json staged")
+    names = {
+        str(entry["display_name"])
+        for entry in full["blocks"].values()
+        if entry.get("kind") == "pipe" and entry.get("display_name")
+    }
+
+    wanted = [
+        cable_display_name(material, gauge)
+        for material in CABLE_MATERIAL_BY_TIER.values()
+        for gauge in CABLE_THICKNESS_BLOCKS
+    ]
+    wanted += [pipe_display_name(m, DEFAULT_PIPE_SIZE) for m in PIPE_MATERIAL.values()]
+    for canonical in wanted:
+        tried = manifest_names(canonical)
+        assert any(name in names for name in tried), (
+            f"the dump names no {canonical}; looked for {' or '.join(tried)}"
+        )

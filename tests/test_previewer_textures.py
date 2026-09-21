@@ -241,11 +241,30 @@ def _manifest_dict() -> dict[str, Any]:
                 },
             },
             # An ordinary isotropic cable: one look for an open end, one for a closed face, both
-            # under "all" because the shape comes from geometry rather than from the sprite.
+            # under "all" because the shape comes from geometry rather than from the sprite. Named
+            # the way a dump up to pack 2.8.4 names one - unlocalized.
             "gregtech:gt.blockmachines|1247": {
                 "kind": "pipe",
                 "display_name": "cable.tin.02",
                 "pipe": {"thickness": 0.375, "insulated": True, "voltage": 32},
+                "sides": {
+                    "all": {
+                        "open": [
+                            {"icon": WIRE, "rgba": [220, 220, 220, 0], "glow": False},
+                            {"icon": INSUL_SMALL, "rgba": [64, 64, 64, 0], "glow": False},
+                        ],
+                        "closed": [{"icon": INSUL_FULL, "rgba": [64, 64, 64, 0], "glow": False}],
+                    }
+                },
+            },
+            # The same kind of cable as a GT 2.9+ dump records one: under its LOCALIZED display
+            # name, not the unlocalized name a route publishes (#176). Both spellings sit in this
+            # fixture because both are real dumps, and a lookup has to join either without the
+            # scene knowing which kind of manifest it is talking to.
+            "gregtech:gt.blockmachines|1246": {
+                "kind": "pipe",
+                "display_name": "1x Tin Cable",
+                "pipe": {"thickness": 0.25, "insulated": True, "voltage": 32},
                 "sides": {
                     "all": {
                         "open": [
@@ -1325,6 +1344,35 @@ def test_route_cells_are_skinned_with_their_cable_sprites(dataset: tuple[Path, P
     assert scene["routes"][0]["cells"][1]["tex"] == tex
 
 
+def test_a_cable_a_29_dump_renamed_still_joins(dataset: tuple[Path, Path]) -> None:
+    """The regression #176 is about. A route publishes ``cable.tin.01`` whatever pack the dataset
+    came from; a GT 2.9+ dump files that block under "1x Tin Cable" and nothing else. Before the
+    lookup knew both spellings this resolved to nothing, and the whole line drew as flat bars with
+    only an INFO line to say so - while the ``.schematic`` exporter refused outright.
+    """
+    scene = _scene([])
+    scene["routes"] = [_route("cable.tin.01")]
+    summary = _texturized(scene, dataset)
+
+    assert summary.unresolved_route_blocks == ()
+    assert summary.route_cells_textured == 1
+    tex = scene["routes"][0]["cells"][0]["tex"]
+    assert tex is not None
+    assert set(tex) == {"open", "closed"}
+
+
+def test_the_lookup_resolves_the_block_not_a_lookalike(dataset: tuple[Path, Path]) -> None:
+    """Both spellings live in this manifest at different metas, so a lookup that fell back to
+    "some cable" rather than "this cable" would still look right. The gauges differ, which is what
+    makes the two tell apart: 1x is 0.25 blocks thick, 2x is 0.375.
+    """
+    manifest = TextureManifest(_manifest_dict())
+
+    assert manifest.pipe_block("cable.tin.01") == ("gregtech:gt.blockmachines", 1246)
+    assert manifest.pipe_block("cable.tin.02") == ("gregtech:gt.blockmachines", 1247)
+    assert manifest.pipe_block("cable.tin.04") is None, "no dump here names a 4x tin cable"
+
+
 def test_a_baked_cable_is_dark_insulation_with_a_bright_core(dataset: tuple[Path, Path]) -> None:
     """The end-to-end proof that the raw tint survives the pass: the closed face is uniformly dark
     and the open end carries the wire showing through the insulation's centre. If this ever inverts
@@ -1338,21 +1386,48 @@ def test_a_baked_cable_is_dark_insulation_with_a_bright_core(dataset: tuple[Path
 
 
 def test_an_unknown_route_block_keeps_its_flat_bar_and_is_reported(
-    dataset: tuple[Path, Path],
+    dataset: tuple[Path, Path], caplog: pytest.LogCaptureFixture
 ) -> None:
     """The degradation contract, and it differs from a machine's on purpose: a checkerboarded casing
     reads as "no sprite" beside the casings that have one, but a checkerboarded noodle threaded
     through a layout reads as damage. The flat coloured bar is a correct render, which is exactly
     why the gap has to be *reported* - nothing else would say the manifest is short (cf. #98).
+
+    Reported at WARNING, which is the level the gap deserves and not the one it had. A route with
+    no material at all keeps the same flat bar and is not a fault, so the two renders are identical
+    and only the log tells them apart; buried in an INFO line, a dump whose names had stopped
+    joining looked exactly like a line nobody had picked a cable for (#176).
     """
     scene = _scene([])
     scene["routes"] = [_route("cable.unobtainium.04")]
-    summary = _texturized(scene, dataset)
+    with caplog.at_level("WARNING", logger="gtnh_solver.previewer.textures"):
+        summary = _texturized(scene, dataset)
 
     assert scene["routes"][0]["cells"][0]["tex"] is None
     assert summary.route_cells_textured == 0
     assert summary.route_cells_flat == 1
     assert summary.unresolved_route_blocks == ("cable.unobtainium.04",)
+    warning = next(r for r in caplog.records if r.levelname == "WARNING")
+    assert "cable.unobtainium.04" in warning.getMessage()
+
+
+def test_a_route_that_named_no_block_at_all_says_nothing(
+    dataset: tuple[Path, Path], caplog: pytest.LogCaptureFixture
+) -> None:
+    """The other half of that contract: an *unspecified* route is not a gap, so it must stay quiet.
+
+    ``dataset/pipes.py`` answers ``None`` for a tier above UV, and a route carrying no material is
+    drawn as a flat bar on purpose. Were that warned about too, the warning above would stop
+    meaning anything and the fault it exists to surface would be back in the noise.
+    """
+    scene = _scene([])
+    scene["routes"] = [_route(None)]
+    with caplog.at_level("WARNING", logger="gtnh_solver.previewer.textures"):
+        summary = _texturized(scene, dataset)
+
+    assert summary.route_cells_flat == 1
+    assert summary.unresolved_route_blocks == ()
+    assert [r.getMessage() for r in caplog.records if r.levelname == "WARNING"] == []
 
 
 def test_a_non_isotropic_pipe_is_refused_not_painted_on_six_faces(

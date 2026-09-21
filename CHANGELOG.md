@@ -20,6 +20,33 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   prints them: an id a builder can paste into NEI beats a display name authored from memory.
   Hovering a plain machine is unchanged.
 
+### Fixed
+- **A cable or pipe now joins to its texture entry under either name GT has given it, so a 2.9
+  dataset keeps its cables (`dataset/pipes.py`).** Up to pack 2.8.4 the texture dump recorded one
+  under GT's unlocalized name (`cable.tin.02`, `gt_pipe_bronze`); GT5U 5.09.54.20 records the
+  localized display name instead (`2x Tin Cable`, `Bronze Fluid Pipe`). The policy still built the
+  old form, so against any 2.9 dump the join missed every cable and pipe at once.
+
+  `manifest_names` now answers with both spellings of one block, newest first, built from a table
+  of display names copied from a real 2.9 manifest rather than derived from the material id: no
+  rule turns `redalloy` into "Red Alloy" or `niobiumtitanium` into "Niobium-Titanium", and a name
+  invented from an id is the plausible-confident-wrong failure this lane exists to avoid. A
+  material the policy can draw but the table cannot spell is a test failure. The unlocalized form
+  stays what a layout publishes, because it is the locale-independent one.
+
+  One cause had produced three unlike symptoms. The `.schematic` exporter refused, correctly, and
+  now also names both spellings it looked for. The previewer drew flat bars behind an INFO line;
+  that report is a warning now, so a block a route asked for and did not get is no longer
+  indistinguishable from a route that named no block at all. And `tools/derive_small_manifest.py`
+  yielded the empty set in silence, which would have committed a manifest with no cables or pipes
+  in it whatsoever: it now resolves through the previewer's own lookup, as the hatch rule already
+  did, and fails the run naming what it could not find.
+
+  Two tests were pinned to the committed 2.8.4 manifest by accident rather than on purpose, so
+  they only ever proved the pack that generated it. The cable ladder is now also checked against a
+  locally staged dump where there is one, and `--inspect-schematic`'s "not in this manifest"
+  message is pinned to the committed manifest it is actually about.
+
 ### Changed
 - **A display name is no longer assumed unique across the multiblock dump, because in GTNH 2.9 it is
   not.** 2.9 shares 52 display names between two controllers each: GT migrated the GT++ machines into

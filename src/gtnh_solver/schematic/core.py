@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+from gtnh_solver.dataset.pipes import manifest_names
 from gtnh_solver.ir import Facing, InputIR, LayoutResult
 from gtnh_solver.previewer.scene import build_scene
 from gtnh_solver.previewer.textures import (
@@ -207,7 +208,10 @@ def _route_cell(
         )
     found = manifest.pipe_block(str(name))
     if found is None:
-        raise SchematicError(f"{name} is not in {manifest.origin()}; regenerate the dataset")
+        tried = " or ".join(manifest_names(str(name)))
+        raise SchematicError(
+            f"{name} is not in {manifest.origin()} (looked for {tried}); regenerate the dataset"
+        )
     block, meta = found
     base = manifest.te_base_type(block, meta)
     if base is None:
