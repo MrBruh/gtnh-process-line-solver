@@ -110,6 +110,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pack. Without the manifest the preview draws placeholder boxes and the export refuses; without the
   structures every multiblock reserves a 1x1x1 footprint.
 
+- **A plan drawn without its pack's data now says so (#207).** Two ways a 2.9 plan came out wrong
+  with nothing on stderr. On a checkout with no local 2.9 dump, the solve fell back to the committed
+  two-controller structure sample, so every other multiblock reserved a 1x1x1 footprint and the
+  preview drew it as a lone controller that never forms. The adapter's pack-mismatch warning rightly
+  ignores a sample's nominal pack, so nothing said so. Now a warning names the plan's pack, lists the
+  machine types that found no structure, and gives the extractor run that makes the dump. It stays
+  quiet when the fallback is another pack's full dump (the mismatch warning covers that) or when
+  every machine type found its structure. The plan cannot say which of the listed types are
+  multiblocks, so on a fresh clone the shipped sand line names its Forge Hammer, which is harmless.
+
+  A missing texture manifest was logged at INFO, so a pinned 2.9 preview was all placeholder boxes
+  with no reason given to a library caller. It is now a WARNING that names the file, and the
+  extractor run when the path is a `data/<version>/` one. No other pack's manifest stands in for
+  it: block ids move between packs, and a wrong sprite is worse than a placeholder box.
+
 - **`validate()` now refuses an item pipe too thin for the streams through it (#190).** It certified
   the maintainer's export of the parallel sand line, which then ran at a third of its rate in game
   because every item run was a plain tin pipe. The new `item_pipe_size_insufficient` violation

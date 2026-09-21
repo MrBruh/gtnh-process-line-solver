@@ -237,6 +237,50 @@ def _load_physical_or_warn(version: str | None = None) -> PhysicalDataset | None
     return physical
 
 
+def _warn_if_plan_pack_undumped(
+    plan: Plan, dataset_version: str | None, physical: PhysicalDataset | None, problem: InputIR
+) -> None:
+    """Say so when the plan's pack has no local dump and its machines fell to 1x1x1 (#207).
+
+    The fresh-clone hazard. :func:`_dataset_version_for` declines a pack no local dump provides, so
+    the solve falls back to the newest dump or the committed fixtures. Two of those fallbacks are
+    already reported, and this stays out of their way rather than say it twice: a **census** of
+    another pack draws the adapter's mismatch warning (``_check_dataset_version``), and a failed load
+    draws :func:`_load_physical_or_warn`'s. The quiet one is a **sample**: the committed fixtures
+    hold two controllers, the adapter rightly declines to judge a sample's nominal pack, and every
+    other multiblock in the plan reserves a 1x1x1 footprint - which the previewer then draws (via
+    ``TextureManifest.mte_block``) as a lone controller that never forms, and ``--schematic``
+    exports the same way. Nothing said so.
+
+    Only machine types that found no structure are named, and a plan whose every type found one
+    hears nothing, since it lost nothing. Which of the rest are multiblocks a plan cannot reliably
+    say (MrBruh's fork states no machine kind at all), so they are listed for the reader to tell a
+    Forge Hammer from a Distillation Tower, rather than guessed either way. That is also why the
+    shipped sand line names its Forge Hammer on a fresh clone: harmless, and true.
+    """
+    stated = plan_pack_version(plan)
+    if stated is None or dataset_version is not None:
+        return  # no pack stated, or its dump (or the user's pin) is what loaded
+    if physical is None or physical.meta.census:
+        return  # already reported: the failed load, or the adapter's pack mismatch
+    machine_types = {r.id: r.machine_type for r in plan.recipes}
+    planned = {machine_types[n.recipe_id] for n in plan.nodes if n.recipe_id in machine_types}
+    unsized = sorted(planned - {m.type for m in problem.machines if m.footprint.volume > 1})
+    if not unsized:
+        return
+    print(
+        f"warning: the plan was balanced against GTNH {stated}, which has no local dump, so the "
+        f"structures in use are a {physical.meta.controller_count}-controller sample and "
+        f"{len(unsized)} machine type(s) found none in it ({', '.join(unsized)}). Any of those "
+        f"that is a multiblock reserves a 1x1x1 footprint, and --preview and --schematic may show it "
+        f"as a lone controller that never forms. "
+        f"{resolve_dataset_path('multiblocks', version=stated)} is what is missing; "
+        f"{extractor_hint('multiblocks', stated)}, and its client texture pass makes the matching "
+        f"sprites",
+        file=sys.stderr,
+    )
+
+
 def _warn_unmeasured_power_intake(problem: InputIR, layout: LayoutResult) -> None:
     """Say how many machines the under-supply gate could not measure, if any.
 
@@ -477,6 +521,7 @@ def main(argv: list[str] | None = None) -> int:
     except _LOAD_ERRORS as exc:
         print(f"error: could not load {args.export!r}: {exc}", file=sys.stderr)
         return 2
+    _warn_if_plan_pack_undumped(plan, dataset_version, physical, problem)
 
     try:
         layout = solve(problem, seed=args.seed, optimize=not args.fast, objective=args.objective)

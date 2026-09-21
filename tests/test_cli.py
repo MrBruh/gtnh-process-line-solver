@@ -22,8 +22,8 @@ import pytest
 
 import gtnh_solver.cli as cli_module
 from gtnh_solver import __version__
-from gtnh_solver.adapter import Plan, PlanProducer, adapt_file, to_input_ir
-from gtnh_solver.cli import _load_physical_or_warn, main
+from gtnh_solver.adapter import Plan, PlanProducer, adapt_file, load_plan, to_input_ir
+from gtnh_solver.cli import _load_physical_or_warn, _warn_if_plan_pack_undumped, main
 from gtnh_solver.dataset import (
     DatasetError,
     DatasetMeta,
@@ -198,6 +198,126 @@ def test_cli_dataset_version_unknown_falls_back(
     code = main([_SAND, "--dataset-version", "does-not-exist"])
     assert code == 0
     assert "physical multiblock dataset unavailable" in capsys.readouterr().err
+
+
+# ------------------------------------------- a plan whose pack has no local dump (#207)
+
+
+def _undumped(path: str) -> tuple[Plan, PhysicalDataset, InputIR]:
+    """``path``'s plan adapted the way a fresh clone adapts it: against the committed sample."""
+    plan = load_plan(path)
+    physical = _load_physical_or_warn()
+    assert physical is not None
+    assert not physical.meta.census, "the suite is pinned to the committed two-machine sample"
+    return plan, physical, to_input_ir(plan, physical=physical)
+
+
+def _ebf_plan(tmp_path: Path) -> str:
+    """A one-node 2.8.4 plan whose only machine the committed sample holds."""
+    export = tmp_path / "ebf.json"
+    recipe = {
+        "id": "r",
+        "machineType": "Electric Blast Furnace",
+        "durationTicks": 10,
+        "eut": 120,
+        "outputs": [{"kind": "item", "id": "x", "amount": 1}],
+        "source": {"datasetVersionId": "stable-2.8.4"},
+    }
+    export.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "recipes": [recipe],
+                "nodes": [{"id": "n", "recipeId": "r", "overclockTier": "MV"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return str(export)
+
+
+def test_cli_warns_when_the_plans_pack_has_no_local_dump(
+    capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    """The fresh-clone case, through ``main``: nothing else on this path says a word about it.
+
+    Sand has no multiblock, and that is fine: the warning names what found no structure and lets
+    the reader see a Forge Hammer is a single block, rather than guessing which ones are.
+    """
+    assert main([_SAND]) == 0
+    err = capsys.readouterr().err
+    assert "warning: the plan was balanced against GTNH 2.8.4, which has no local dump" in err
+    assert "2-controller sample" in err
+    assert "(Forge Hammer)" in err
+    assert "1x1x1 footprint" in err
+    assert "lone controller" in err
+    assert str(dataset_roots.DEFAULT_DATA / "2.8.4" / "multiblocks") in err
+    assert "runServer -PdatasetOut=../../data/2.8.4 -PpackVersion=2.8.4" in err
+
+
+def test_the_undumped_pack_warning_names_every_machine_type_that_found_no_structure(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The line where it matters: each of these multiblocks reserves one cell, which is why the
+    # shipped nitrobenzene line is infeasible on a fresh clone (test_cli_solves_nitrobenzene).
+    plan, physical, problem = _undumped(_NITROBENZENE)
+    _warn_if_plan_pack_undumped(plan, None, physical, problem)
+    err = capsys.readouterr().err
+    assert (
+        "4 machine type(s) found none in it "
+        "(Chemical Plant, Coke Oven, Distillation Tower, Large Chemical Reactor)"
+    ) in err
+
+
+def test_the_undumped_pack_warning_is_quiet_when_the_plans_dump_loaded(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # A derived or pinned version means a dump of the plan's pack (or the user's pick) is in use.
+    plan, physical, problem = _undumped(_NITROBENZENE)
+    _warn_if_plan_pack_undumped(plan, "2.8.4", physical, problem)
+    assert capsys.readouterr().err == ""
+
+
+def test_the_undumped_pack_warning_leaves_a_census_to_the_adapter(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Another pack's census draws the adapter's mismatch warning; saying it twice teaches readers
+    # to skip both.
+    plan, _, problem = _undumped(_NITROBENZENE)
+    census = _empty_dataset()
+    assert census.meta.census, "DatasetMeta defaults census to True"
+    _warn_if_plan_pack_undumped(plan, None, census, problem)
+    assert capsys.readouterr().err == ""
+
+
+def test_the_undumped_pack_warning_leaves_a_failed_load_to_its_own_warning(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # _load_physical_or_warn already said "using 1x1x1 footprints" when it returned None.
+    plan, _, problem = _undumped(_NITROBENZENE)
+    _warn_if_plan_pack_undumped(plan, None, None, problem)
+    assert capsys.readouterr().err == ""
+
+
+def test_the_undumped_pack_warning_is_quiet_for_a_plan_stating_no_pack(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    plan, physical, problem = _undumped(_NITROBENZENE)
+    for recipe in plan.recipes:
+        recipe.source = None
+    _warn_if_plan_pack_undumped(plan, None, physical, problem)
+    assert capsys.readouterr().err == ""
+
+
+def test_the_undumped_pack_warning_is_quiet_when_the_sample_covers_the_plan(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Every machine type found its structure, so nothing fell to 1x1x1 and there is nothing to say.
+    plan, physical, problem = _undumped(_ebf_plan(tmp_path))
+    (furnace,) = [m for m in problem.machines if m.type == "Electric Blast Furnace"]
+    assert furnace.footprint.volume > 1, "the sample holds the EBF, so it keeps its real footprint"
+    _warn_if_plan_pack_undumped(plan, None, physical, problem)
+    assert capsys.readouterr().err == ""
 
 
 @cache
