@@ -408,7 +408,7 @@ def test_hint_positions_map_to_all_six_faces() -> None:
     # A hint centred on each face of a 3x3x3 box should mark every one of the six faces I/O-capable.
     doc = MultiblockDoc.model_validate(
         {
-            "schema": 1,
+            "schema": 2,
             "controller": {
                 "registry_name": "r",
                 "meta": 0,
@@ -441,7 +441,7 @@ def test_primary_variant_is_the_largest_built_form() -> None:
     # A small variant plus a bigger one; the footprint must come from the bigger (fully-built) one.
     doc = MultiblockDoc.model_validate(
         {
-            "schema": 1,
+            "schema": 2,
             "controller": {
                 "registry_name": "r",
                 "meta": 0,
@@ -470,7 +470,7 @@ def test_primary_variant_is_the_largest_built_form() -> None:
 def test_bbox_mismatch_raises_dataset_error() -> None:
     doc = MultiblockDoc.model_validate(
         {
-            "schema": 1,
+            "schema": 2,
             "controller": {
                 "registry_name": "r",
                 "meta": 0,
@@ -487,7 +487,7 @@ def test_bbox_mismatch_raises_dataset_error() -> None:
 
 def _dump_meta(count: int = 2) -> dict[str, object]:
     return {
-        "schema": 1,
+        "schema": 2,
         "pack_version": "test",
         "generated_at": "now",
         "extractor_sha": "0",
@@ -497,7 +497,7 @@ def _dump_meta(count: int = 2) -> dict[str, object]:
 
 def _doc(meta_id: int, display_name: str, registry: str = "r") -> dict[str, object]:
     return {
-        "schema": 1,
+        "schema": 2,
         "controller": {
             "registry_name": registry,
             "meta": meta_id,
