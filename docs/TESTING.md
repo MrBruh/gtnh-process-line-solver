@@ -115,8 +115,17 @@ So, to test against anything other than the committed data, **state it**, in ord
   someone has generated the list; everywhere else it is reported as skipped, with the command above
   as the reason. That is the same CI coverage the check had before the pin, when it read a staged
   dump directly. What the pin changes is only that the input is now stated (a named file with a
-  named skip) rather than whatever `data/` holds, so this one test is the one place the suite's
-  result still depends on the machine: whether that file exists.
+  named skip) rather than whatever `data/` holds, so this test and the acceptance module below are
+  the only places the suite's result still depends on the machine: whether those files exist.
+
+- **Read a whole local dump by explicit path, and skip without it,** when the property is "a real
+  plan draws as itself", which no filtered slice can answer. `tests/test_acceptance_2_9.py` (#208)
+  is the one such module: it adapts `examples/ev-nitrobenzene.json` against
+  `data/2.9.0-beta-2/multiblocks` and `.../textures/manifest.json`, named directly rather than
+  resolved, and checks that every machine expands to, and exports as, the controller its
+  `block_key` names. Each missing half skips with the extractor run that makes it. The same cost
+  applies: CI never runs it, so run the suite on a machine with the 2.9 dump staged before calling
+  2.9 preview or export work done.
 
 What no test may do is inherit whatever sits in `data/` on the machine running it: a green that
 depends on local disk state is not evidence about the code.
