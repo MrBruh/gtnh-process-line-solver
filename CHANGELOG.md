@@ -53,6 +53,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **Exporting a partial layout now says, before writing it, that it is not a build (#214).**
+  `--preview` and `--schematic` are written whatever the solve's status, which is right for
+  debugging a line, but a `.schematic` loads into Schematica as a ghost to build from and carried
+  no sign that some of its nets were never connected. The status was printed only at the end of
+  the run, after the "wrote ..." lines. A non-VALID layout now warns first, naming the status, the
+  unconnected nets (the first three, then a count) and "do not build it as-is". The files are still
+  written and the exit code is unchanged; a VALID layout, or a run that writes neither file, prints
+  nothing new.
+
 - **The edges that meet at one multiblock port are now one net, so its hatch and its terminal agree
   (#213).** A plan draws an edge per consumer, so a multiblock output feeding two machines was two
   nets docking two terminals on one port. The router put the port's hatch behind the first terminal

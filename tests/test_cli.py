@@ -37,7 +37,9 @@ from gtnh_solver.adapter import (
 from gtnh_solver.cli import (
     _load_physical_or_warn,
     _manifest_says_single_block,
+    _unconnected_nets,
     _warn_if_plan_pack_undumped,
+    _warn_incomplete_export,
     main,
 )
 from gtnh_solver.dataset import (
@@ -47,7 +49,7 @@ from gtnh_solver.dataset import (
     load_physical_dataset,
 )
 from gtnh_solver.dataset import roots as dataset_roots
-from gtnh_solver.ir import InputIR, LayoutResult, LayoutStatus
+from gtnh_solver.ir import Commodity, Infeasibility, InputIR, LayoutResult, LayoutStatus, METoggles
 from gtnh_solver.previewer.textures import TextureManifest
 from gtnh_solver.solver import solve
 from tests._helpers import hatched_dataset
@@ -896,3 +898,110 @@ def test_cli_falls_back_on_an_empty_dataset(
     monkeypatch.setattr(cli_module, "load_physical_dataset", lambda *a, **k: _empty_dataset())
     assert _load_physical_or_warn() is None
     assert "empty" in capsys.readouterr().err
+
+
+# ------------------------------------------------ an export of a layout that is not a build (#214)
+
+_INCOMPLETE = "INCOMPLETE"
+
+
+def _partial(layout: LayoutResult, *, drop_first_auto: bool = True) -> LayoutResult:
+    """``layout`` recast as a partial result, optionally missing its first auto-connection.
+
+    The sand line connects all its item nets by auto-output, so dropping one leaves exactly that net
+    unconnected: a real partial layout's shape, without paying for a solve that fails.
+    """
+    autos = layout.auto_connections[1:] if drop_first_auto else layout.auto_connections
+    return layout.model_copy(
+        update={
+            "status": LayoutStatus.PARTIAL_INVALID,
+            "auto_connections": autos,
+            "infeasibility": Infeasibility(
+                constraint="routing", detail="a net could not be routed"
+            ),
+        }
+    )
+
+
+@pytest.fixture
+def partial_solve(monkeypatch: pytest.MonkeyPatch, sand_layout: LayoutResult) -> str:
+    """Make the CLI's solve return a partial sand layout; the id of the net it leaves unconnected."""
+    monkeypatch.setattr(cli_module, "solve", lambda problem, **_: _partial(sand_layout))
+    return sand_layout.auto_connections[0].net_id
+
+
+def test_a_partial_layout_exported_as_a_schematic_warns_before_writing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], partial_solve: str
+) -> None:
+    target = tmp_path / "line.schematic"
+    code = main([_SAND, "--schematic", str(target)])
+    err = capsys.readouterr().err
+    assert code == 1, "the verdict keeps its own exit code"
+    assert target.is_file(), "the file is still written: a partial layout is worth looking at"
+    warning = next(line for line in err.splitlines() if _INCOMPLETE in line)
+    assert warning.startswith("warning: the layout is partial_invalid (routing)")
+    assert "--schematic" in warning
+    assert "--preview" not in warning
+    assert f"1 of 5 net(s) are unconnected ({partial_solve})" in warning
+    assert "Do not build it as-is" in warning
+    assert err.index(_INCOMPLETE) < err.index("wrote schematic"), "said before the file, not after"
+
+
+def test_a_partial_preview_warns_and_names_both_artifacts_when_both_are_asked_for(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], partial_solve: str
+) -> None:
+    main([_SAND, "--preview", str(tmp_path / "v.html"), "--schematic", str(tmp_path / "s.sch")])
+    err = capsys.readouterr().err
+    assert err.count(_INCOMPLETE) == 1, "one warning for the run, not one per file"
+    assert "the --preview and --schematic written below is INCOMPLETE" in err
+
+
+def test_a_valid_layout_exports_without_the_warning(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    assert main([_SAND, "--schematic", str(tmp_path / "line.schematic")]) == 0
+    assert _INCOMPLETE not in capsys.readouterr().err
+
+
+def test_a_partial_layout_with_no_artifact_asked_for_does_not_warn(
+    capsys: pytest.CaptureFixture[str], partial_solve: str
+) -> None:
+    # Nothing is written, so there is no file to mislead anyone; the verdict still prints.
+    assert main([_SAND]) == 1
+    err = capsys.readouterr().err
+    assert _INCOMPLETE not in err
+    assert "[partial_invalid] routing" in err
+
+
+def test_a_partial_layout_with_every_net_connected_says_it_fails_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    sand_layout: LayoutResult,
+) -> None:
+    partial = _partial(sand_layout, drop_first_auto=False)
+    monkeypatch.setattr(cli_module, "solve", lambda problem, **_: partial)
+    main([_SAND, "--schematic", str(tmp_path / "line.schematic")])
+    assert "every net is connected, but the layout fails validation" in capsys.readouterr().err
+
+
+def test_many_unconnected_nets_are_summarised(
+    sand_layout: LayoutResult, capsys: pytest.CaptureFixture[str]
+) -> None:
+    problem = adapt_file(_SAND)
+    stripped = sand_layout.model_copy(update={"routes": [], "auto_connections": []})
+    assert _unconnected_nets(problem, stripped) == [net.id for net in problem.nets]
+    many = problem.model_copy(update={"nets": problem.nets * 3})  # 15 ids, beyond the 3 named
+    _warn_incomplete_export(many, _partial(stripped), ["--schematic"])
+    err = capsys.readouterr().err
+    assert "15 of 15 net(s) are unconnected" in err
+    assert " and 12 more)" in err
+
+
+def test_an_me_toggled_net_is_not_counted_as_unconnected(sand_layout: LayoutResult) -> None:
+    problem = adapt_file(_SAND)
+    stripped = sand_layout.model_copy(update={"routes": [], "auto_connections": []})
+    toggled = problem.model_copy(update={"me_toggles": METoggles(items=True)})
+    remaining = _unconnected_nets(toggled, stripped)
+    assert remaining, "the power net is still physical"
+    assert all(net.commodity is not Commodity.ITEM for net in toggled.nets if net.id in remaining)
