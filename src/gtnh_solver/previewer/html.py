@@ -27,8 +27,10 @@ visible however the machines are packed), drawn for **single-block sources only*
 ejects from a hatch's own face, not from its bounding box, so there is no box face to mark (#153). A side panel lists the
 machine/route legend (materials footnoted as stand-ins where they are) plus the
 system's boundary inputs, outputs, and power (``scene.io``), with a per-tick / per-second rate
-toggle. The view frames the layout's *actual* extent (``scene.bounds``), not the solver's
-oversized search region.
+toggle; a flow whose commodity rides ME (``--me``) is marked "via ME" there and in a storage's
+hover tag, because no pipe and no ME block is drawn for it, and an unconnected chest otherwise
+reads as a missing pipe. The view frames the layout's *actual* extent (``scene.bounds``), not the
+solver's oversized search region.
 
 The scene JSON is *inlined*, not fetched, so there is no ``file://`` CORS problem. The page is
 assembled by replacing tokens (NOT an f-string / ``.format``) so the JS/CSS braces stay literal:
@@ -94,7 +96,7 @@ _STYLE = """
                border: 1px solid #333a44; border-radius: 6px; padding: 8px 10px; }
   #hud { top: 10px; left: 10px; }
   #hint { color: #8b94a0; margin-top: 4px; }
-  #standin { color: #8b94a0; }
+  #standin, #menote { color: #8b94a0; }
   #legend { top: 10px; right: 10px; max-height: 80vh; overflow: auto; }
   #controls { bottom: 10px; left: 10px; display: flex; gap: 12px; align-items: center; }
   #controls input[type=range] { width: 180px; }
@@ -619,6 +621,10 @@ function swatch(color) {
 function row(parent, ...parts) {
   parent.append(...parts, el('br'));   // strings here become text nodes, never markup
 }
+// The suffix for a flow whose commodity rides ME (scene.io, a storage's contents): see #menote.
+function viaMe(flow) {
+  return flow.me ? ' via ME' : '';
+}
 function renderLegend() {
   const panel = document.createDocumentFragment();
   row(panel, el('b', 'machines'));
@@ -650,15 +656,22 @@ function renderLegend() {
     const io = SCENE.io, sfx = perSecond ? '/s' : '/t';
     row(panel, el('b', 'system i/o'));
     for (const i of io.inputs)
-      row(panel, 'in: ' + i.resource + (i.rate != null ? ' (' + rateText(i.rate) + ' ' + i.unit + sfx + ')' : ''));
+      row(panel, 'in: ' + i.resource + (i.rate != null ? ' (' + rateText(i.rate) + ' ' + i.unit + sfx + ')' : '') + viaMe(i));
     for (const o of io.outputs)
-      row(panel, 'out: ' + o.resource + (o.rate != null ? ' (' + rateText(o.rate) + ' ' + o.unit + sfx + ')' : ''));
+      row(panel, 'out: ' + o.resource + (o.rate != null ? ' (' + rateText(o.rate) + ' ' + o.unit + sfx + ')' : '') + viaMe(o));
     // Power: total EU/t supplied plus the per-tier feed spec, the full tier voltage x amps to
     // supply (how a GT source is fed). The total is that feed (tier voltage x amps), so it matches
     // the breakdown, e.g. 'power: 96 EU/t (LV 32V x 3A)' where 96 = 32 x 3.
     const tiers = Object.keys(io.power.byTier);
     const feed = tiers.map((t) => t + ' ' + io.power.byTier[t].volts + 'V x ' + io.power.byTier[t].amps + 'A').join(', ');
-    row(panel, 'power: ' + rateText(io.power.total) + ' EU' + sfx + (tiers.length ? ' (' + feed + ')' : ''));
+    row(panel, 'power: ' + rateText(io.power.total) + ' EU' + sfx + (tiers.length ? ' (' + feed + ')' : '') + viaMe(io.power));
+    // A commodity left to ME (--me) is routed by nothing here and its ME interface is not placed
+    // yet, so say that once rather than let the missing pipes read as a broken layout.
+    if ([...io.inputs, ...io.outputs, io.power].some((f) => f.me)) {
+      const note = el('span', 'via ME: no ME interface is drawn; add it in game');
+      note.id = 'menote';
+      row(panel, note);
+    }
   }
   document.getElementById('legend').replaceChildren(panel);
 }
@@ -698,7 +711,7 @@ function machineHover(id) {
   // buffer the builder keeps stocked, 'out:' one a product collects in. A machine that holds
   // nothing adds no line at all, so its tag is the single name it has always been.
   return {
-    lines: () => [nameById[id], ...contentsById[id].map((c) => c.flow + ': ' + c.resource)],
+    lines: () => [nameById[id], ...contentsById[id].map((c) => c.flow + ': ' + c.resource + viaMe(c))],
     anchor: [c.x, c.y + s[1] / 2 + 0.15, c.z],
   };
 }

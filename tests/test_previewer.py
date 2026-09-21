@@ -25,6 +25,7 @@ from gtnh_solver.ir import (
     IODirection,
     LayoutResult,
     LayoutStatus,
+    METoggles,
     Port,
     Route,
     Segment,
@@ -37,10 +38,10 @@ from tests._helpers import at, consumer, machine, net, producer
 _SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
 
 
-def _sand_scene() -> dict[str, Any]:
+def _sand_scene(me_toggles: METoggles | None = None) -> dict[str, Any]:
     # The fast (constructive) solve: deterministic layout coordinates that the exact-cell
     # assertions below can rely on; scene building does not care which placer produced them.
-    ir = adapt_file(_SAND)
+    ir = adapt_file(_SAND, me_toggles=me_toggles)
     return build_scene(ir, solve(ir, optimize=False))
 
 
@@ -273,7 +274,7 @@ def test_scene_reports_system_io() -> None:
     assert io["inputs"][0]["rate"] == pytest.approx(0.1)
     assert io["inputs"][0]["unit"] == "items"  # stem only; the viewer appends /t or /s
     assert io["outputs"] == [
-        {"resource": "minecraft:sand", "rate": pytest.approx(0.1), "unit": "items"}
+        {"resource": "minecraft:sand", "rate": pytest.approx(0.1), "unit": "items", "me": False}
     ]
     # the power feed per tier: the FULL LV tier voltage (32, not the hammers' 16 EU/t draw) x the
     # amps to supply - what a GT source is fed. The hammers' fractional loads (~0.53 A each at
@@ -282,7 +283,38 @@ def test_scene_reports_system_io() -> None:
     assert io["power"] == {
         "total": pytest.approx(64),
         "byTier": {"LV": {"volts": 32, "amps": 2}},
+        "me": False,
     }
+
+
+def test_scene_says_a_flow_left_to_me_arrives_over_me() -> None:
+    """With items on ME (``--me items``) the sand line routes no item at all: no pipe, no
+    auto-output arrow, and no ME block drawn in their place yet (#222). Its two Super Chests would
+    then sit unconnected and read as a line that forgot its pipes, so every item flow at the
+    boundary, and what each chest holds, is flagged ``me`` for the panel and the hover to say so.
+    Power is still cabled, and says nothing of the sort.
+    """
+    scene = _sand_scene(METoggles(items=True))
+    assert [r["commodity"] for r in scene["routes"]] == ["power"]
+    assert scene["autoConnections"] == []
+    io = scene["io"]
+    assert [(f["resource"], f["me"]) for f in io["inputs"]] == [("minecraft:stone", True)]
+    assert [(f["resource"], f["me"]) for f in io["outputs"]] == [("minecraft:sand", True)]
+    assert io["power"]["me"] is False
+    held = [c for m in scene["machines"] for c in m["contents"]]
+    assert held
+    assert all(c["me"] for c in held)
+
+
+def test_scene_says_power_left_to_me_arrives_over_me() -> None:
+    # The other commodity on its own: no cable is laid, the feed spec is still stated (the ME side
+    # has to deliver it), and the item flows, still auto-output, are not flagged.
+    scene = _sand_scene(METoggles(power=True))
+    assert scene["routes"] == []
+    io = scene["io"]
+    assert io["power"]["me"] is True
+    assert io["power"]["byTier"] == {"LV": {"volts": 32, "amps": 2}}
+    assert not any(f["me"] for f in io["inputs"] + io["outputs"])
 
 
 def test_scene_storage_says_what_it_holds_and_which_way_that_flows() -> None:
@@ -322,7 +354,7 @@ def test_scene_storage_contents_skip_its_power_connection() -> None:
     problem = InputIR(bounding_region=CellBox(sx=4, sy=2, sz=4), machines=[tank])
     layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=[at("t", 0, 0, 0)])
     (placed,) = build_scene(problem, layout)["machines"]
-    assert placed["contents"] == [{"resource": "water", "flow": "out"}]
+    assert placed["contents"] == [{"resource": "water", "flow": "out", "me": False}]
 
 
 def test_the_nitrobenzene_super_tanks_are_individually_identifiable(

@@ -12,6 +12,7 @@ human-readable build guide out::
     gtnh-solve plan.json --seed 3                 # pick the solver seed
     gtnh-solve plan.json --fast                   # skip optimization (instant, constructive)
     gtnh-solve plan.json --objective volume       # what "compact" means: footprint|volume|balanced
+    gtnh-solve plan.json --me items --me fluids   # leave those to ME: no pipes laid for them
 
 It loads + adapts the export, solves (place -> auto-output -> item/fluid + power route ->
 self-validate), and renders ``build_guide`` (and, with ``--preview``, a self-contained three.js
@@ -58,7 +59,7 @@ from gtnh_solver.buildguide import build_guide
 from gtnh_solver.dataset import PhysicalDataset, list_versions, load_physical_dataset
 from gtnh_solver.dataset.coverage import format_report, measure
 from gtnh_solver.dataset.roots import extractor_hint, resolve_dataset_path
-from gtnh_solver.ir import Infeasibility, InputIR, LayoutResult, LayoutStatus
+from gtnh_solver.ir import Commodity, Infeasibility, InputIR, LayoutResult, LayoutStatus, METoggles
 from gtnh_solver.previewer import write_preview
 from gtnh_solver.previewer.jar import cached_jar
 from gtnh_solver.previewer.textures import TextureManifest
@@ -86,6 +87,9 @@ _DUMP_HALVES: Final = {
     "textures/manifest.json": "--preview draws placeholder boxes and --schematic cannot export",
 }
 
+#: The ``--me`` choices: ``METoggles``' own field names, so the flag and the contract cannot drift.
+_ME_COMMODITIES: Final = tuple(METoggles.model_fields)
+
 #: Exit code for an exception no stage claimed: a bug in this program, not a verdict about the
 #: plan. Distinct from 1 (an explicit infeasibility) and 2 (the export could not be loaded)
 #: because those two are *answers*, and a caller must be able to tell an answer from a crash.
@@ -107,6 +111,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--fast",
         action="store_true",
         help="skip placement optimization: a near-instant constructive layout (no SA/LNS)",
+    )
+    parser.add_argument(
+        "--me",
+        action="append",
+        choices=_ME_COMMODITIES,
+        metavar="COMMODITY",
+        help=(
+            "move COMMODITY over ME (AE2) instead of pipes and cables: one of "
+            f"{', '.join(_ME_COMMODITIES)}; repeat for more than one. Nothing is routed for it, "
+            "and no ME interface is placed or drawn yet, so the builder supplies that"
+        ),
     )
     parser.add_argument(
         "--objective",
@@ -171,6 +186,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="list the generated dataset versions available under data/, then exit",
     )
     return parser
+
+
+def _me_toggles(commodities: list[str] | None) -> METoggles:
+    """The ``METoggles`` that ``--me`` asked for: each named commodity on, the rest off.
+
+    ``None`` is argparse's answer when the flag was never given, and means every commodity is routed
+    physically, the contract's default. Naming one twice is the same as naming it once.
+    """
+    return METoggles.model_validate(dict.fromkeys(commodities or (), True))
+
+
+def _note_me_toggles(toggles: METoggles) -> None:
+    """Say which commodities were left to ME, and that nothing stands in for them in the build yet.
+
+    A toggled commodity is only skipped: the solver lays no pipe, cable or auto-output for its nets,
+    and nothing places the ME interface, bus or P2P tunnel that would carry it instead
+    (docs/DOMAIN.md, Phase 2). Without this the layout reads as a line that forgot its pipes, so the
+    run says so once, on stderr beside the other notes, and leaves the exit code alone.
+    """
+    left = [c.value for c in Commodity if toggles.toggled(c)]
+    if not left:
+        return
+    print(
+        f"note: {', '.join(left)} nets left to ME (--me) - nothing is routed for them, and no ME "
+        f"interface or endpoint is placed or drawn yet, so the builder must supply it",
+        file=sys.stderr,
+    )
 
 
 def _dataset_version_for(plan: Plan, pinned: str | None) -> str | None:
@@ -616,7 +658,9 @@ def main(argv: list[str] | None = None) -> int:
     physical = _load_physical_or_warn(dataset_version)  # real footprints; None -> 1x1x1
 
     try:
-        problem = to_input_ir(plan, physical=physical, producer=producer)
+        problem = to_input_ir(
+            plan, physical=physical, producer=producer, me_toggles=_me_toggles(args.me)
+        )
     except InfeasiblePlanError as exc:
         # Listed first because it IS an AdapterError (a ValueError): a plan that maps cleanly and
         # states an unbuildable line is an infeasibility (exit 1), not an unloadable export
@@ -627,6 +671,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: could not load {args.export!r}: {exc}", file=sys.stderr)
         return 2
     _warn_if_plan_pack_undumped(plan, dataset_version, physical, problem)
+    _note_me_toggles(problem.me_toggles)
 
     try:
         layout = solve(problem, seed=args.seed, optimize=not args.fast, objective=args.objective)

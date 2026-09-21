@@ -89,6 +89,7 @@ from gtnh_solver.ir import (
     IODirection,
     Machine,
     MachineFaceRef,
+    METoggles,
     Net,
     Port,
 )
@@ -135,14 +136,17 @@ def adapt_file(
     *,
     physical: PhysicalDataset | None = None,
     producer: PlanProducer | None = None,
+    me_toggles: METoggles | None = None,
 ) -> InputIR:
     """Load an exported plan file and map it to the solver's ``InputIR``.
 
     ``physical`` is an optional multiblock dataset (``dataset.load_physical_dataset``); when given,
     a node whose machine type it knows gets that machine's real footprint (see :func:`to_input_ir`).
     ``producer`` pins which gtnh-factory-flow fork exported the plan; ``None`` detects it.
+    ``me_toggles`` says which commodities ride ME instead of pipes and cables (see
+    :func:`to_input_ir`).
     """
-    return to_input_ir(load_plan(path), physical=physical, producer=producer)
+    return to_input_ir(load_plan(path), physical=physical, producer=producer, me_toggles=me_toggles)
 
 
 def _block_key_for(recipe: Recipe, resolved: ResolvedMachine | None) -> str | None:
@@ -241,6 +245,7 @@ def to_input_ir(
     *,
     physical: PhysicalDataset | None = None,
     producer: PlanProducer | None = None,
+    me_toggles: METoggles | None = None,
 ) -> InputIR:
     """Map a typed :class:`Plan` to an ``InputIR`` (referential integrity enforced on build).
 
@@ -254,6 +259,12 @@ def to_input_ir(
     it from the plan's structural markers (``producer.resolve_producer``), which is itself allowed to
     come back undetermined - the two meanings never collide, because a *parameter* of ``None`` asks
     for detection while a *detected* ``None`` disables producer-specific handling.
+
+    ``me_toggles`` names the commodities the line moves over ME (AE2) rather than over pipes and
+    cables. It is not something a plan states, so it comes from the caller (the CLI's ``--me``) and
+    is stamped on the ``InputIR`` unchanged; ``None`` keeps the default, every commodity routed
+    physically. The mapping itself ignores it: the nets, storages and power synthesis are the same
+    either way, and each downstream stage skips a toggled commodity itself (docs/DOMAIN.md).
 
     Raises :class:`~gtnh_solver.adapter.AdapterError` for a plan that does not map (a dangling
     reference, an unsupported kind), and :class:`~gtnh_solver.adapter.InfeasiblePlanError` for one
@@ -378,7 +389,12 @@ def to_input_ir(
     )
     _check_resolved_power(plan, nets)
     region = _bounding_region([m.footprint for m in machines])
-    return InputIR(bounding_region=region, machines=machines, nets=nets)
+    return InputIR(
+        bounding_region=region,
+        machines=machines,
+        nets=nets,
+        me_toggles=me_toggles if me_toggles is not None else METoggles(),
+    )
 
 
 def _synthesized_eut(recipe: Recipe, node: Node) -> float:
