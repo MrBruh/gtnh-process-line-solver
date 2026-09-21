@@ -12,6 +12,8 @@ anything new, unless the test is genuinely about solving.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 from functools import cache
 from pathlib import Path
 from typing import Any
@@ -28,6 +30,7 @@ from gtnh_solver.dataset import (
     PhysicalDataset,
     load_physical_dataset,
 )
+from gtnh_solver.dataset import roots as dataset_roots
 from gtnh_solver.ir import InputIR, LayoutResult, LayoutStatus
 from gtnh_solver.solver import solve
 from tests._helpers import hatched_dataset
@@ -477,6 +480,61 @@ def test_cli_unwritable_schematic_returns_2(
     err = capsys.readouterr().err
     assert "could not write" in err
     assert str(target) in err
+
+
+def _stage_pack(root: Path, version: str, *, mtime: float, typed: bool = True) -> None:
+    """A whole ``data/<version>/`` dump built from the committed data, dated ``mtime``.
+
+    ``typed=False`` empties the manifest's ``blocks``, so an export that consults it refuses every
+    block by name - which makes "which manifest did the export read" observable from the outside.
+    """
+    shutil.copytree(_FIXTURE_DATASET, root / version / "multiblocks")
+    raw = json.loads((_FIXTURE_DATASET.parent / "textures" / "manifest.json").read_text("utf-8"))
+    if not typed:
+        raw["blocks"] = {}
+    manifest = root / version / "textures" / "manifest.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps(raw), encoding="utf-8")
+    os.utime(root / version, (mtime, mtime))
+
+
+def test_cli_schematic_follows_the_plans_pack_like_the_preview(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    solve_calls: list[dict[str, object]],
+) -> None:
+    """#206: ``--schematic`` was handed ``--dataset-version`` as typed, not the derived version.
+
+    So unpinned, it resolved the manifest by modification time while ``--preview`` and the adapter
+    followed the plan's pack: on a machine holding a newer dump of another pack, one solve came out
+    as a preview of one pack and an export built from the other's block ids. Here the newer pack's
+    manifest types nothing, so reading it is an exit-2 refusal rather than a quiet mismatch.
+    """
+    data = tmp_path / "data"
+    _stage_pack(data, "2.8.4", mtime=1_000_000)  # the sand plan's own pack
+    _stage_pack(data, "9.9.9", mtime=2_000_000, typed=False)  # newer, and some other pack
+    monkeypatch.setattr(dataset_roots, "DEFAULT_DATA", data)
+
+    target = tmp_path / "line.schematic"
+    assert main([_SAND, "--schematic", str(target)]) == 0, capsys.readouterr().err
+    assert target.is_file()
+
+
+def test_cli_schematic_with_a_pinned_version_missing_its_manifest_exits_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    # A pinned version with no manifest used to escape write_schematic as FileNotFoundError and
+    # read "could not write line.schematic", blaming the one path that was fine (#206).
+    target = tmp_path / "line.schematic"
+    code = main([_SAND, "--dataset-version", "does-not-exist", "--schematic", str(target)])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "cannot export" in err
+    assert "could not write" not in err
+    assert str(Path("does-not-exist") / "textures" / "manifest.json") in err
+    assert "runClient" in err
+    assert not target.exists()
 
 
 @pytest.mark.parametrize(

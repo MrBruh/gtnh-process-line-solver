@@ -489,13 +489,29 @@ def test_an_explicit_pin_is_never_second_guessed(tmp_path: Path) -> None:
     assert _dataset_version_for(_plan(dataset_version="stable-2.8.4"), "9.9.9") == "9.9.9"
 
 
+def _stage_dump(root: Path, version: str, *, multiblocks: bool, manifest: bool) -> Path:
+    """A ``data/<version>/`` folder holding whichever halves of a dump are asked for.
+
+    Presence is all ``_dataset_version_for`` reads, so the halves are empty stand-ins.
+    """
+    folder = root / version
+    folder.mkdir(parents=True)
+    if multiblocks:
+        (folder / "multiblocks").mkdir()
+    if manifest:
+        (folder / "textures").mkdir()
+        (folder / "textures" / "manifest.json").write_text("{}", encoding="utf-8")
+    return folder
+
+
 def test_the_plan_pack_is_used_when_a_dump_provides_it(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    (tmp_path / "2.9.0-beta-2" / "multiblocks").mkdir(parents=True)
-    monkeypatch.setattr(cli_module, "list_versions", lambda: [tmp_path / "2.9.0-beta-2"])
+    folder = _stage_dump(tmp_path, "2.9.0-beta-2", multiblocks=True, manifest=True)
+    monkeypatch.setattr(cli_module, "list_versions", lambda: [folder])
     plan = _plan(dataset_version="local-2.9.0-beta-2")
     assert _dataset_version_for(plan, None) == "2.9.0-beta-2"
+    assert capsys.readouterr().err == "", "a whole dump is followed without comment"
 
 
 def test_an_unavailable_plan_pack_falls_back_rather_than_pinning_a_missing_folder(
@@ -503,20 +519,78 @@ def test_an_unavailable_plan_pack_falls_back_rather_than_pinning_a_missing_folde
 ) -> None:
     # Pinning it would lose every real footprint to the 1x1x1 default; falling back keeps
     # best-effort footprints, and the adapter's mismatch warning still says the packs differ.
-    (tmp_path / "2.8.4" / "multiblocks").mkdir(parents=True)
-    monkeypatch.setattr(cli_module, "list_versions", lambda: [tmp_path / "2.8.4"])
+    folder = _stage_dump(tmp_path, "2.8.4", multiblocks=True, manifest=True)
+    monkeypatch.setattr(cli_module, "list_versions", lambda: [folder])
     plan = _plan(dataset_version="local-2.9.0-beta-2")
     assert _dataset_version_for(plan, None) is None
 
 
-def test_a_version_folder_without_multiblocks_does_not_count(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_a_version_folder_holding_neither_half_does_not_count(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # A textures-only local run leaves the folder there with no multiblocks in it.
-    (tmp_path / "2.9.0-beta-2" / "textures").mkdir(parents=True)
-    monkeypatch.setattr(cli_module, "list_versions", lambda: [tmp_path / "2.9.0-beta-2"])
+    # An interrupted texture run can leave the folder, even its textures/ subfolder, with nothing
+    # usable in it: there is no half to follow, so it is the no-dump case, not a partial one.
+    folder = _stage_dump(tmp_path, "2.9.0-beta-2", multiblocks=False, manifest=False)
+    (folder / "textures").mkdir()
+    monkeypatch.setattr(cli_module, "list_versions", lambda: [folder])
     plan = _plan(dataset_version="local-2.9.0-beta-2")
     assert _dataset_version_for(plan, None) is None
+    assert capsys.readouterr().err == ""
+
+
+def test_a_structures_only_dump_is_followed_and_names_the_missing_manifest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#206: declining the folder would take the manifest from whichever pack is newest instead.
+
+    Resolution is per sub-path, so a 2.8.4 dump sitting next to this one would supply the sprites
+    and the ``.schematic`` ids for a 2.9 plan, and nothing would say so. Following the plan's pack
+    turns that into a visible gap, and the warning is what makes it visible.
+    """
+    folder = _stage_dump(tmp_path, "2.9.0-beta-2", multiblocks=True, manifest=False)
+    other = _stage_dump(tmp_path, "2.8.4", multiblocks=True, manifest=True)
+    monkeypatch.setattr(cli_module, "list_versions", lambda: [other, folder])  # 2.8.4 is newer
+    plan = _plan(dataset_version="local-2.9.0-beta-2")
+
+    assert _dataset_version_for(plan, None) == "2.9.0-beta-2"
+    err = capsys.readouterr().err
+    assert err.startswith("warning: ")
+    assert str(folder / "textures/manifest.json") in err, "the missing half is named by its path"
+    assert "placeholder boxes" in err
+    assert "--schematic cannot export" in err
+    assert "runClient" in err, "and the run that makes it"
+    assert "-PtextureOut=../../data/2.9.0-beta-2/textures" in err
+    assert "multiblocks" not in err, "the half that is present is not complained about"
+
+
+def test_a_textures_only_dump_is_followed_and_names_the_missing_structures(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The mirror case: another pack's structures are joined to the plan by display name, and names
+    # move between packs, so they are not borrowed either.
+    folder = _stage_dump(tmp_path, "2.9.0-beta-2", multiblocks=False, manifest=True)
+    other = _stage_dump(tmp_path, "2.8.4", multiblocks=True, manifest=True)
+    monkeypatch.setattr(cli_module, "list_versions", lambda: [other, folder])
+    plan = _plan(dataset_version="local-2.9.0-beta-2")
+
+    assert _dataset_version_for(plan, None) == "2.9.0-beta-2"
+    err = capsys.readouterr().err
+    assert str(folder / "multiblocks") in err
+    assert "1x1x1 footprint" in err
+    assert "runServer -PdatasetOut=../../data/2.9.0-beta-2" in err
+    assert "manifest.json" not in err
+
+
+def test_an_explicit_pin_is_not_warned_about_whatever_it_holds(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The pin is the user's own choice, and each consumer already fails visibly on a missing half
+    # (the multiblock load warns, the export refuses); a second warning here would only repeat them.
+    folder = _stage_dump(tmp_path, "2.9.0-beta-2", multiblocks=True, manifest=False)
+    monkeypatch.setattr(cli_module, "list_versions", lambda: [folder])
+    plan = _plan(dataset_version="local-2.9.0-beta-2")
+    assert _dataset_version_for(plan, "2.9.0-beta-2") == "2.9.0-beta-2"
+    assert capsys.readouterr().err == ""
 
 
 def test_no_stated_pack_means_the_default_resolution() -> None:

@@ -31,6 +31,7 @@ import re
 import warnings
 from datetime import datetime
 from pathlib import Path
+from typing import Final
 
 #: The repo ``data/`` directory. This file is ``src/gtnh_solver/dataset/roots.py``, so ``parents[3]``
 #: is the repo root; resolves in the editable/dev install the repo is used through.
@@ -56,6 +57,22 @@ _STAMP_WINDOW = 64 * 1024
 _STAMP = re.compile(rb'"generated_at"\s*:\s*"([^"]*)"')
 
 
+#: The extractor run that writes each generated sub-path, as ``(pass, command)`` with the command run
+#: from ``tools/gtnh-extractor/`` and ``{v}`` standing for the pack version. Both flags point straight
+#: at the version folder, so the run needs no copy step afterwards.
+_EXTRACTOR_RUNS: Final[dict[str, tuple[str, str]]] = {
+    "multiblocks": (
+        "structure dump",
+        "./gradlew runServer -PdatasetOut=../../data/{v} -PpackVersion={v}",
+    ),
+    "textures/manifest.json": (
+        "client texture pass",
+        "./gradlew runClient -PautoWorld=true -PtextureOut=../../data/{v}/textures "
+        "-PpackVersion={v}",
+    ),
+}
+
+
 class DatasetWarning(UserWarning):
     """A recoverable dataset-resolution finding: a local dump older than the committed data.
 
@@ -77,6 +94,23 @@ def list_versions(data_dir: str | Path | None = None) -> list[Path]:
         return []
     dirs = [d for d in base.iterdir() if d.is_dir() and d.name not in _RESERVED]
     return sorted(dirs, key=lambda d: d.stat().st_mtime, reverse=True)
+
+
+def extractor_hint(rel: str, version: str) -> str:
+    """How to produce ``data/<version>/<rel>``, for a message that reports it missing.
+
+    ``rel`` is ``"multiblocks"`` or ``"textures/manifest.json"``, the two halves of a dump, which
+    come from two different extractor runs; saying which run makes the missing half is the part a
+    reader cannot guess. The ``-PmodVersions`` pins are left to the README rather than spelled out:
+    they belong to the pack, and a manifest made without them silently draws placeholder boxes
+    (``tools/gtnh-extractor/README.md`` explains both).
+    """
+    what, command = _EXTRACTOR_RUNS[rel]
+    return (
+        f"the extractor's {what} writes it: from tools/gtnh-extractor/, "
+        f"{command.format(v=version)} plus that pack's -PmodVersions "
+        "(see tools/gtnh-extractor/README.md)"
+    )
 
 
 def generated_at(path: str | Path) -> datetime | None:

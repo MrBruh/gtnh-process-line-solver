@@ -49,7 +49,7 @@ from gtnh_solver.adapter import (
 from gtnh_solver.buildguide import build_guide
 from gtnh_solver.dataset import PhysicalDataset, list_versions, load_physical_dataset
 from gtnh_solver.dataset.coverage import format_report, measure
-from gtnh_solver.dataset.roots import resolve_dataset_path
+from gtnh_solver.dataset.roots import extractor_hint, resolve_dataset_path
 from gtnh_solver.ir import Infeasibility, InputIR, LayoutResult, LayoutStatus
 from gtnh_solver.previewer import write_preview
 from gtnh_solver.previewer.jar import cached_jar
@@ -70,6 +70,13 @@ _GT_BLOCK: Final = "gregtech:gt.blockmachines"
 #: contracts now refuse those values outright (``adapter.plan``, ``ir._base``); this stays as the
 #: net under any arithmetic they do not cover.
 _LOAD_ERRORS: Final = (OSError, ValueError, ArithmeticError, ValidationError)
+
+#: The two halves of a ``data/<version>/`` dump, which two separate extractor runs write, and what a
+#: run loses when it follows the plan's pack without one of them (see ``_dataset_version_for``).
+_DUMP_HALVES: Final = {
+    "multiblocks": "every multiblock reserves a 1x1x1 footprint",
+    "textures/manifest.json": "--preview draws placeholder boxes and --schematic cannot export",
+}
 
 #: Exit code for an exception no stage claimed: a bug in this program, not a verdict about the
 #: plan. Distinct from 1 (an explicit infeasibility) and 2 (the export could not be loaded)
@@ -170,15 +177,37 @@ def _dataset_version_for(plan: Plan, pinned: str | None) -> str | None:
     fixtures - best-effort footprints plus the adapter's mismatch warning, which beats pinning a
     folder that does not exist and losing every real footprint to the 1x1x1 default. An explicit
     ``pinned`` is never second-guessed this way: asking for a missing version should fail visibly.
+
+    **Half a dump still wins, and says which half is missing** (#206). A dump comes from two
+    extractor runs, ``multiblocks/`` and ``textures/manifest.json``, so a folder can hold either
+    alone. Declining it would not fall back as a whole: resolution is per sub-path, so the missing
+    half would come from whatever other pack is newest while the present half came from this one.
+    A 2.9 plan drawn and exported from a 2.8.4 manifest is exactly that - block ids and machine names
+    move between packs, so the sprites and the ``.schematic`` ids would be wrong with nothing said.
+    Following the plan's pack keeps the run on one pack and makes the gap visible instead: with no
+    manifest the preview draws placeholder boxes and ``--schematic`` refuses; with no multiblocks
+    every multiblock reserves a 1x1x1 footprint. Either way a warning on stderr names the missing
+    path and the extractor run that makes it.
     """
     if pinned is not None:
         return pinned
     stated = plan_pack_version(plan)
     if stated is None:
         return None
-    if any(v.name == stated and (v / "multiblocks").is_dir() for v in list_versions()):
-        return stated
-    return None
+    folder = next((v for v in list_versions() if v.name == stated), None)
+    if folder is None:
+        return None
+    missing = [rel for rel in _DUMP_HALVES if not (folder / rel).exists()]
+    if len(missing) == len(_DUMP_HALVES):
+        return None  # an empty folder provides nothing to follow
+    for rel in missing:
+        print(
+            f"warning: the plan's pack {stated} has no {folder / rel}, so {_DUMP_HALVES[rel]} "
+            f"(another pack's is not substituted: block ids and machine names move between "
+            f"packs); {extractor_hint(rel, stated)}",
+            file=sys.stderr,
+        )
+    return stated
 
 
 def _load_physical_or_warn(version: str | None = None) -> PhysicalDataset | None:
@@ -488,7 +517,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.schematic:
         try:
-            write_schematic(problem, layout, args.schematic, version=args.dataset_version)
+            write_schematic(problem, layout, args.schematic, version=dataset_version)
         except SchematicError as exc:
             # A block the dataset cannot type is refused rather than guessed: a .schematic that
             # rebuilds a cable as a machine looks buildable and is not (GitHub #96).
