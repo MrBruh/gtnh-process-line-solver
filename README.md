@@ -70,6 +70,7 @@ gtnh-solve plan.json --preview view.html  # ...or a double-clickable 3D preview 
 gtnh-solve plan.json --fast               # skip optimization: a near-instant constructive layout
 gtnh-solve plan.json --seed 3             # pick the solver seed (deterministic per seed)
 gtnh-solve plan.json --objective volume   # what "compact" means: footprint|volume|balanced
+gtnh-solve plan.json --me items           # leave items to ME (AE2): no pipes laid; repeatable
 gtnh-solve plan.json --dataset-version 2.8.4   # pin a locally generated data/<version>/ dump
 gtnh-solve --list-dataset-versions             # ...or see which ones you have
 ```

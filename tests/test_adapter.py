@@ -41,6 +41,7 @@ from gtnh_solver.ir import (
     IODirection,
     LayoutResult,
     LayoutStatus,
+    METoggles,
     Net,
     Port,
 )
@@ -141,6 +142,29 @@ def test_adapt_sand_end_to_end_places_and_validates() -> None:
     assert result.ok
     layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=list(result.placements))
     assert PLACEMENT_CODES.isdisjoint(validate(ir, layout).codes())
+
+
+def test_adapting_leaves_every_commodity_routed_physically_by_default() -> None:
+    # The contract's default, so a caller that never mentions ME gets the line it always got.
+    assert adapt_file(_SAND).me_toggles == METoggles()
+    assert to_input_ir(load_plan(_SAND), me_toggles=None).me_toggles == METoggles()
+
+
+def test_me_toggles_pass_through_to_the_input_ir() -> None:
+    # The field every downstream stage honours was unreachable: the adapter built InputIR without
+    # it, so nothing could turn ME on (#222). Both entry points hand it over unchanged.
+    toggles = METoggles(items=True, power=True)
+    assert to_input_ir(load_plan(_SAND), me_toggles=toggles).me_toggles == toggles
+    assert adapt_file(_SAND, me_toggles=toggles).me_toggles == toggles
+
+
+def test_me_toggles_change_nothing_else_the_mapping_produces() -> None:
+    # Leaving a commodity to ME is a routing decision, not a different line: the machines, the
+    # storages and the synthesized power are the same, and only the toggles differ. The stages
+    # downstream skip a toggled net themselves.
+    plain = adapt_file(_SAND)
+    on_me = adapt_file(_SAND, me_toggles=METoggles(items=True, fluids=True, power=True))
+    assert on_me.model_copy(update={"me_toggles": METoggles()}) == plain
 
 
 def test_throughput_is_positive_for_sand_material_nets() -> None:

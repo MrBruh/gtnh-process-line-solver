@@ -7,7 +7,8 @@ and buses built into each one's casing, what a boundary storage holds, routes as
 are built from - each cell with the sides that connect, its gauge and GT's real cross-section
 (``route_blocks``) - plus the resource each route carries at what rate, the raw
 segments and terminals behind them, auto-output links, the region, a legend, and the ``io`` boundary
-summary - inputs to load, outputs to collect, summed power). This
+summary - inputs to load, outputs to collect, summed power, each flagged ``me`` when its commodity
+rides ME, since nothing is drawn for it). This
 is a *previewer-internal* format - NOT the versioned contract - so the un-testable
 WebGL last mile stays a thin static template while the mapping here is pure and fully tested.
 """
@@ -25,6 +26,7 @@ from gtnh_solver.ir import (
     IODirection,
     LayoutResult,
     Machine,
+    METoggles,
     Route,
 )
 from gtnh_solver.ir.geometry import Cell, rotated_footprint
@@ -129,7 +131,7 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
             # What a boundary storage holds, so a hover can tell four identical Super Tanks apart
             # (GitHub #155). Empty for every other machine - a machine's ports are its recipe, not
             # its contents. Resource ids verbatim, exactly as the plan carries them.
-            "contents": _contents(machines[pl.machine_id]),
+            "contents": _contents(machines[pl.machine_id], problem.me_toggles),
             "color": color_for_type[machines[pl.machine_id].type],
             # The hatches and buses built into this machine's casing, each at the CELL it replaces
             # and facing the way it works. The texture pass swaps them in for the casing cubes
@@ -239,20 +241,34 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
         tier: {"volts": tier_voltage(tier), "amps": amps}
         for tier, amps in sysio.power_amps_by_tier.items()
     }
+    me = problem.me_toggles
     scene_io = {
         # ``rate`` is per-tick; ``unit`` is the stem (items/mB/EU) so the viewer can append /t or
-        # /s for its toggle.
+        # /s for its toggle. ``me`` says the commodity rides ME (``--me``): the solver routes
+        # nothing for it and no ME block is drawn yet, so the panel has to say how the flow gets
+        # there, or a chest with no pipe reads as a line that forgot one.
         "inputs": [
-            {"resource": f.resource, "rate": f.rate, "unit": RATE_STEM[f.commodity]}
+            {
+                "resource": f.resource,
+                "rate": f.rate,
+                "unit": RATE_STEM[f.commodity],
+                "me": me.toggled(f.commodity),
+            }
             for f in sysio.inputs
         ],
         "outputs": [
-            {"resource": f.resource, "rate": f.rate, "unit": RATE_STEM[f.commodity]}
+            {
+                "resource": f.resource,
+                "rate": f.rate,
+                "unit": RATE_STEM[f.commodity],
+                "me": me.toggled(f.commodity),
+            }
             for f in sysio.outputs
         ],
         "power": {
             "total": sum(d["volts"] * d["amps"] for d in power_by_tier.values()),
             "byTier": power_by_tier,
+            "me": me.toggled(Commodity.POWER),
         },
     }
 
@@ -340,8 +356,9 @@ def _content_bounds(
     return {"min": [v for v in lo if v is not None], "max": [v for v in hi if v is not None]}
 
 
-def _contents(machine: Machine) -> list[dict[str, str]]:
-    """What a boundary storage holds: each resource its ports carry, and which way it flows.
+def _contents(machine: Machine, me: METoggles) -> list[dict[str, Any]]:
+    """What a boundary storage holds: each resource its ports carry, which way it flows, and ``me``
+    when that commodity rides ME (the io panel's flag, so the hover says what the panel says).
 
     A Super Chest/Tank is a buffer for one resource, and the port it exposes is the only record of
     which - ``adapter.core`` encodes it into the port id (``"input:liquid_toluene"``) and
@@ -355,12 +372,13 @@ def _contents(machine: Machine) -> list[dict[str, str]]:
     """
     if not is_boundary_storage(machine.type):
         return []
-    seen: dict[tuple[str, str], dict[str, str]] = {}
+    seen: dict[tuple[str, str], dict[str, Any]] = {}
     for port in machine.faces.ports:
         if port.commodity is Commodity.POWER:  # a hatch, not something the buffer holds
             continue
-        entry = {"resource": port_resource(port), "flow": _STORAGE_FLOW[port.direction]}
-        seen.setdefault((entry["resource"], entry["flow"]), entry)
+        resource, flow = port_resource(port), _STORAGE_FLOW[port.direction]
+        entry = {"resource": resource, "flow": flow, "me": me.toggled(port.commodity)}
+        seen.setdefault((resource, flow), entry)
     return list(seen.values())
 
 

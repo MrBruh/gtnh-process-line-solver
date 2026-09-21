@@ -7,6 +7,20 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`gtnh-solve --me COMMODITY` leaves items, fluids or power to ME (AE2) instead of pipes and
+  cables (#222).** `InputIR.me_toggles` was honoured by placement, routing, repair and the validator
+  all along, but the adapter never set it and the CLI had no flag for it, so every line was solved
+  as if everything were piped. `--me` takes `items`, `fluids` or `power` and repeats for more than
+  one; `to_input_ir` and `adapt_file` take `me_toggles=` for a caller of the library. A toggled
+  commodity's nets get no pipe, cable or auto-output: `gtnh-solve examples/gtnh-sand.json --me items`
+  solves valid with only the power cable laid.
+
+  It does **not** place the ME side yet: no ME interface, bus or P2P tunnel is placed or drawn
+  (docs/DOMAIN.md, Phase 2), and the boundary Super Chests/Tanks and the synthesized power source
+  are placed as before. So the run says so in a `note:` on stderr, and the preview marks those
+  flows "via ME" in the system i/o panel and in a storage's hover tag, rather than leaving a chest
+  with no pipe to read as a line that forgot one.
+
 - **`examples/ev-nitrobenzene.json`, the first real GTNH 2.9 line in the repo (#204).** An
   arodoid-fork export of an EV nitrobenzene line: nine multiblock nodes that `machineCount` expands
   to 14 machines, a Dangote Distillus at 12x parallel, and shared multiblock ports. The only other

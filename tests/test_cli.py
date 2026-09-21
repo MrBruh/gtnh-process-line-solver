@@ -819,9 +819,10 @@ def test_cli_threads_the_dataset_into_the_adapter(
         *,
         physical: PhysicalDataset | None = None,
         producer: PlanProducer | None = None,
+        me_toggles: METoggles | None = None,
     ) -> InputIR:
         captured["physical"] = physical
-        return to_input_ir(plan, physical=physical, producer=producer)
+        return to_input_ir(plan, physical=physical, producer=producer, me_toggles=me_toggles)
 
     monkeypatch.setattr(cli_module, "to_input_ir", spy)
     assert main([_SAND]) == 0
