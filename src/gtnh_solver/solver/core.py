@@ -148,9 +148,10 @@ def solve(
                 infeasibility=placement.infeasibility,
             )
 
-        # Can every connection even get a cell of its own? Decided exactly, before routing:
-        # a crowded placement cannot route, and routing it only to watch an arbitrary net lose
-        # the race for the last free face costs an attempt and reports the wrong machine (#76).
+        # Can every machine dock every connection it carries? Checked before routing, naming a
+        # machine only on proof: a crowded placement cannot route, and routing it only to watch an
+        # arbitrary net lose the race for the last free face costs an attempt and reports the
+        # wrong machine (#76).
         crowded = crowded_machines(problem, placement.placements)
         if crowded:
             # Lean on the named machines, never on the search as a whole: the attempts are
@@ -191,9 +192,9 @@ def solve(
         return best_valid
     if best_partial is None:
         # Every attempt was turned away, so nothing was ever routed. Do NOT report the crowding as
-        # the verdict: this check is generous about multiblocks and about who may share a power
-        # cell, and a layout it doubts can still route. Lay the first one it rejected and let the
-        # routers say - they are the authority, and a real shortage still surfaces as their own
+        # the verdict: the gate is a model of the routers' docking rules, and it has been wrong
+        # about them before (#164). Lay the first placement it rejected and let the routers say -
+        # they are the authority, and a real shortage still surfaces as their own
         # face_reachability. The gate has then cost an attempt and changed nothing else.
         assert gated is not None  # the only path that skips every attempt sets both
         layout, _ = _assemble(problem, gated, seed, objective)
@@ -375,8 +376,8 @@ def _crowding_infeasibility(crowded: tuple[str, ...]) -> Infeasibility:
     more = f" (and {len(crowded) - 3} more)" if len(crowded) > 3 else ""
     return Infeasibility(
         constraint="face_crowding",
-        detail=f"{len(crowded)} machine(s) cannot host all their connections on distinct free "
-        f"cells at any placement this search reached: {listed}{more}",
+        detail=f"{len(crowded)} machine(s) cannot dock all their connections on the free cells "
+        f"around them at any placement this search reached: {listed}{more}",
         suggested_relaxation="enlarge the bounding region, or reduce connections per machine "
         "(fewer parallel machines on one net, or an ME/auto-output connection instead of a pipe)",
     )

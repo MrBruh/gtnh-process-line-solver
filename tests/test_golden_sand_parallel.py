@@ -52,6 +52,7 @@ from gtnh_solver.ir import (
     Terminal,
 )
 from gtnh_solver.ir.geometry import FACE_DELTAS, OPPOSITE_FACE, Cell
+from gtnh_solver.placement import crowded_machines
 from gtnh_solver.router import route
 from gtnh_solver.schematic import read_schematic
 from gtnh_solver.schematic.core import FORGE_DIRECTION
@@ -247,3 +248,26 @@ def test_the_router_can_route_the_proven_placement(
     routed = layout.model_copy(update={"routes": list(result.routes)})
     report = validate(items_only, routed)
     assert report.ok, str(report)
+
+
+def test_the_crowding_gate_does_not_turn_the_proven_placement_away(
+    proven_build: tuple[InputIR, LayoutResult],
+) -> None:
+    # ``crowded_machines`` is what the solver asks before it routes a placement, and a placement it
+    # names crowded is never routed at all. It used to demand a cell of its own for every pipe
+    # connection, which this build's shared pipe blocks break everywhere: 8 machines named in the
+    # build's own box, and 5 hammers plus the power source in the plan's region in the order the
+    # solver hands placements over (#164). A layout built and run in game must pass it in either
+    # region, and in any order - the verdict is about geometry, not about who was asked first.
+    problem, layout = proven_build
+    by_plan = {m.id: i for i, m in enumerate(problem.machines)}
+    orders = {
+        "as read": list(layout.placements),
+        "as planned": sorted(layout.placements, key=lambda p: by_plan[p.machine_id]),
+        "reversed": list(reversed(layout.placements)),
+    }
+    plan_region = adapt_file(_PLAN).bounding_region
+    for region in (problem.bounding_region, plan_region):
+        boxed = problem.model_copy(update={"bounding_region": region})
+        for name, placements in orders.items():
+            assert crowded_machines(boxed, placements) == (), (region, name)
