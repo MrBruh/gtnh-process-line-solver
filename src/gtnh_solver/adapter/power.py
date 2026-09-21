@@ -48,6 +48,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from gtnh_solver.dataset import (
+    DESIGN_RUN_BLOCKS,
     ENERGY_HATCH_AMPS,
     MAX_CABLE_THICKNESS,
     UnknownTierError,
@@ -61,6 +62,7 @@ from gtnh_solver.dataset import (
 from gtnh_solver.ir import (
     Commodity,
     FaceSpec,
+    Infeasibility,
     IODirection,
     Machine,
     MachineFaceRef,
@@ -69,7 +71,7 @@ from gtnh_solver.ir import (
 )
 from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 
-from ._errors import AdapterError
+from ._errors import AdapterError, InfeasiblePlanError
 
 #: Port ids the synthesis adds (kept distinct from the adapter's ``direction:resource`` ids).
 POWER_IN = "power:in"
@@ -177,6 +179,13 @@ def _power_ports(machine: Machine, *, single_block: bool = False) -> list[Port]:
     *census* dataset positively failed to find (see ``adapter/core``); everything else leaves
     ``max_amps`` unset, and the validator reports the connection as unmeasured rather than
     measuring it against a number GT never gives that machine (#114).
+
+    **A tier too low to survive the design run is an infeasibility, not a load failure.** ULV is
+    8 V against a 16-block design run at 1 EU/block, so :func:`energy_hatches_for` can size
+    nothing for it: raises :class:`~gtnh_solver.adapter.InfeasiblePlanError` naming the machine,
+    its tier and the run length. An off-ladder tier is the other case and stays a degrade (one
+    port, no verifiable count), because there the number is merely *unknown* here and the router
+    is the one that reports it (#112).
     """
     if machine.hatch_cells is None:
         return [
@@ -191,6 +200,25 @@ def _power_ports(machine: Machine, *, single_block: bool = False) -> list[Port]:
         count = energy_hatches_for(machine.eut, machine.voltage_tier)
     except UnknownTierError:
         count = 1  # off-ladder tier: unverifiable here, reported downstream (see _partition)
+    except UnpowerableError as exc:
+        # The tier does not survive the design run at all, so no hatch count covers the draw and
+        # there is nothing to degrade to: a hatch's 2 A ceiling is fixed, and the voltage that
+        # reaches it is already 0. That is an answer about the line, not about the file, so it
+        # leaves as an infeasibility (exit 1) rather than as a load failure (#112).
+        raise InfeasiblePlanError(
+            Infeasibility(
+                constraint="voltage_drop",
+                detail=(
+                    f"machine {machine.id!r} draws {machine.eut} EU/t at {machine.voltage_tier}, "
+                    f"a tier the adapter cannot size energy hatches for: {exc}. Hatches are "
+                    f"sized for a {DESIGN_RUN_BLOCKS}-block cable run (dataset.DESIGN_RUN_BLOCKS)"
+                ),
+                suggested_relaxation=(
+                    f"supply the machine at a higher voltage tier - {machine.voltage_tier} is "
+                    f"spent by {DESIGN_RUN_BLOCKS} blocks of cable, whatever its hatches"
+                ),
+            )
+        ) from exc
     share = machine.eut / count
     return [
         Port(
@@ -288,7 +316,9 @@ def synthesize_power(
     each voltage tier in use is split into groups a single cable run can carry
     (:func:`_partition_by_amperage`), and each group gains a source machine and a power net. Tiers
     are processed in sorted order so the output is deterministic. Raises
-    :class:`~gtnh_solver.adapter.core.AdapterError` only via id collision.
+    :class:`~gtnh_solver.adapter.AdapterError` on an id collision, and
+    :class:`~gtnh_solver.adapter.InfeasiblePlanError` for a machine whose tier cannot be sized for
+    at all (:func:`_power_ports`).
 
     ``single_block_ids`` names the machines *known* to be GT basic machines - the only ones whose
     own ``maxAmperesIn`` ceiling may be stated on their connection (:func:`_power_ports`). It is

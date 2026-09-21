@@ -17,6 +17,7 @@ from gtnh_solver.adapter import (
     AdapterError,
     AdapterWarning,
     Edge,
+    InfeasiblePlanError,
     Node,
     Plan,
     Recipe,
@@ -488,6 +489,39 @@ def test_a_machine_too_small_to_host_its_hatches_is_left_for_the_validator() -> 
     machine = ir.machines[0]
     assert len(machine.power_input_ports) == 2
     assert machine.hatch_cells == 1
+
+
+def test_a_tier_too_low_to_survive_the_design_run_is_an_infeasibility() -> None:
+    # ULV is 8 V and hatches are sized for a 16-block run at 1 EU/block of loss, so nothing at all
+    # arrives and no hatch count covers the draw. That is a verdict about the LINE, so it leaves as
+    # an InfeasiblePlanError the CLI reports as exit 1; it used to escape as a bare UnpowerableError
+    # and be reported as an export that could not be loaded (#112).
+    with pytest.raises(InfeasiblePlanError) as excinfo:
+        to_input_ir(_powered_plan(6.0, tier="ULV"), physical=hatched_dataset())
+    detail = excinfo.value.infeasibility
+    assert detail.constraint == "voltage_drop"
+    assert "'n0'" in detail.detail  # which machine
+    assert "ULV" in detail.detail  # and which tier: both are what the reader acts on
+    assert "16-block" in detail.detail  # the design run the hatch count is sized against
+    assert detail.suggested_relaxation is not None
+
+
+def test_an_unsizeable_tier_and_an_off_ladder_one_are_not_the_same_answer() -> None:
+    # The two exceptions energy_hatches_for raises mean opposite things, which is the distinction
+    # the old single catch lost. An off-ladder tier is merely UNKNOWN here - the tier may be real
+    # and the router is the one that can say - so the machine degrades to one connection and the
+    # plan still maps. Only a tier the ladder KNOWS cannot survive the run is decided here.
+    ir = to_input_ir(_powered_plan(6.0, tier="ZZZ"), physical=hatched_dataset())
+    assert _hatches(ir, "n0") == ["power:in"]
+
+
+def test_a_ulv_machine_with_no_structural_record_still_maps() -> None:
+    # Without a record there is no evidence the machine has hatches at all, so nothing is sized
+    # and there is nothing to refuse: the single connection stands, exactly as on any other tier.
+    # The infeasibility is about sizing hatches, not about ULV being an unusable tier.
+    ir = to_input_ir(_powered_plan(6.0, tier="ULV"))
+    assert _hatches(ir, "n0") == ["power:in"]
+    assert {n.id for n in _power_nets(ir)} == {"power:ULV"}
 
 
 def test_a_node_named_like_a_synthetic_source_is_rejected() -> None:

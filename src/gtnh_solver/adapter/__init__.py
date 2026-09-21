@@ -13,7 +13,7 @@ cross-checking it against the recipe-derived synthesis (mismatch -> ``AdapterWar
 
 from __future__ import annotations
 
-from ._errors import AdapterError, AdapterWarning
+from ._errors import AdapterError, AdapterWarning, InfeasiblePlanError
 from .core import adapt_file, load_plan, to_input_ir
 from .plan import (
     AppInfo,
@@ -51,6 +51,7 @@ __all__ = [
     "AdapterWarning",
     "AppInfo",
     "Edge",
+    "InfeasiblePlanError",
     "MachineBlock",
     "MachineConfigControl",
     "MachineConfigTier",
