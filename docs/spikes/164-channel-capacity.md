@@ -3,6 +3,25 @@
 **Status:** design only, nothing implemented. Read this before touching
 `src/gtnh_solver/validator/core.py`.
 
+**Status update (2026-09-21).** Edits 1 and 2 of section 5 have landed together:
+`router/core.py::_free` no longer filters a net's own dock cells (`mine` is kept), and the validator
+gained rule C as `TERMINAL_FACE_CONTENTION`. Cross-net sharing stays forbidden, as section 3
+recommends. `tests/test_golden_sand_parallel.py` pins the exported build, which passes the gate.
+The fixed-placement measurement (section 5, item 1) went from "no path" to all four item nets
+routed, in 20 cells rather than 12 because the dock chain is greedy. The full solve did not move:
+40 item pipe cells before and after, and identical on seeds 0 to 7. What still stands between the
+solver and the build is outside the item router's docking rule:
+
+- `placement/feasibility.py::crowded_machines`, which section 4 does not list. It is the exact
+  gate the solver runs before routing, and it matches every pipe port to a **distinct** dock cell.
+  On the exported build's placement it names 5 hammers crowded in the plan's own 24x4x24 region
+  (8 in the build's 3x3x4 box), so the solver would discard that placement without routing it.
+- `_face_shortfall`. Its demand half is a no-op on this line: every Forge Hammer's three ports
+  are on three different nets, so per-port and per-net demand are identical. Its contention half
+  scores the exported placement 0.00 in the plan's region (8.00 in the 3x3x4 box), so it is not
+  shown to be what blocks the search either.
+- R6 below: `reserve_power_docks` still takes a cell the cobblestone net needs on that placement.
+
 **Why a spike.** #164 changes the capacity rule in the validator, which `CLAUDE.md` calls the only
 *automated* correctness gate. A wrong capacity check does not fail loudly: it silently certifies
 layouts that cannot be built. So the rule gets reviewed before code.

@@ -106,6 +106,11 @@ class ViolationCode(str, Enum):
     TERMINAL_HATCH_CONTENTION = (
         "terminal_hatch_contention"  # two connections on one machine need the same block
     )
+    # the single-block half of the same rule: such a machine has no hatches to contend over, but a
+    # face does one thing, so two of its connections may not dock on one cell (#164)
+    TERMINAL_FACE_CONTENTION = (
+        "terminal_face_contention"  # two connections of one slot-less machine on one dock cell
+    )
 
 
 @dataclass(frozen=True)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
+from itertools import pairwise
 
 import pytest
 from hypothesis import given
@@ -471,6 +472,205 @@ def test_two_routes_sharing_a_cell_collide() -> None:
     )
     codes = validate(problem, layout).codes()
     assert ViolationCode.ROUTE_CELL_COLLISION in codes, codes
+
+
+# ------------------------------------------------ #164: several terminals on one dock cell
+
+
+def _shared_dock(*ports: tuple[str, str, Facing, tuple[int, int, int]]) -> list[Terminal]:
+    """``(machine, port, face, cell)`` rows as Terminals."""
+    return [
+        Terminal(machine_id=m, port_id=port, face=face, cell=_coord(*cell))
+        for m, port, face, cell in ports
+    ]
+
+
+def test_terminals_of_different_machines_may_share_a_dock_cell() -> None:
+    # One pipe block wired to two neighbours, the shape every pipe of the maintainer's parallel
+    # sand build has: a ejects into X=(1,0,0) and b takes from it, and the run carries on to c.
+    #
+    #   z=0   a  X  b
+    #   z=1   .  +  .
+    #   z=2   .  c  .
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[
+            _item_machine("a"),
+            _item_machine("b", direction=IODirection.INPUT, port="in"),
+            _item_machine("c", direction=IODirection.INPUT, port="in"),
+        ],
+        nets=[
+            Net(
+                id="n",
+                commodity=Commodity.ITEM,
+                fluid_or_item="x",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="a", port_id="out"),
+                    MachineFaceRef(machine_id="b", port_id="in"),
+                    MachineFaceRef(machine_id="c", port_id="in"),
+                ],
+            )
+        ],
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id="a", cell=_coord(0, 0, 0), orientation=Facing.NORTH),
+            Placement(machine_id="b", cell=_coord(2, 0, 0), orientation=Facing.NORTH),
+            Placement(machine_id="c", cell=_coord(1, 0, 2), orientation=Facing.SOUTH),
+        ],
+        routes=[
+            Route(
+                net_id="n",
+                commodity=Commodity.ITEM,
+                terminals=_shared_dock(
+                    ("a", "out", Facing.EAST, (1, 0, 0)),
+                    ("b", "in", Facing.WEST, (1, 0, 0)),
+                    ("c", "in", Facing.NORTH, (1, 0, 1)),
+                ),
+                segments=[Segment(start=_coord(1, 0, 0), end=_coord(1, 0, 1), channel=0)],
+            )
+        ],
+    )
+    report = validate(problem, layout)
+    assert report.ok, str(report)
+
+
+def test_two_connections_of_one_single_block_on_one_dock_cell_are_rejected() -> None:
+    # Both of m's inputs dock on (2,0,0), which is one face of one block. A face does one thing,
+    # and nothing but this rule forbids it: m records no hatch slots, so the casing-cell check
+    # skips it, and the two terminals are distinct endpoints of one net on one route.
+    two_inputs = Machine(
+        id="m",
+        type="gt.macerator",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[
+                Port(id="in_a", commodity=Commodity.ITEM, direction=IODirection.INPUT),
+                Port(id="in_b", commodity=Commodity.ITEM, direction=IODirection.INPUT),
+            ]
+        ),
+    )
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[_item_machine("src"), two_inputs],
+        nets=[
+            Net(
+                id="n",
+                commodity=Commodity.ITEM,
+                fluid_or_item="x",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="src", port_id="out"),
+                    MachineFaceRef(machine_id="m", port_id="in_a"),
+                    MachineFaceRef(machine_id="m", port_id="in_b"),
+                ],
+            )
+        ],
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id="src", cell=_coord(0, 0, 0), orientation=Facing.NORTH),
+            Placement(machine_id="m", cell=_coord(3, 0, 0), orientation=Facing.NORTH),
+        ],
+        routes=[
+            Route(
+                net_id="n",
+                commodity=Commodity.ITEM,
+                terminals=_shared_dock(
+                    ("src", "out", Facing.EAST, (1, 0, 0)),
+                    ("m", "in_a", Facing.WEST, (2, 0, 0)),
+                    ("m", "in_b", Facing.WEST, (2, 0, 0)),
+                ),
+                segments=[Segment(start=_coord(1, 0, 0), end=_coord(2, 0, 0), channel=0)],
+            )
+        ],
+    )
+    report = validate(problem, layout)
+    assert report.codes() == (ViolationCode.TERMINAL_FACE_CONTENTION,), str(report)
+    assert report.violations[0].machine_id == "m"
+
+
+def test_two_nets_on_one_dock_cell_are_still_a_collision() -> None:
+    # Sharing is within a net only. Here a (net n1) and b (net n2) are different machines on one
+    # pipe block X, so the face rule has nothing to say, but a GT pipe delivers to any inventory
+    # wired to it and the IR cannot tell whether n1 and n2 carry the same item: the block would
+    # cross-feed. Both routes must contain their own terminal cell, so it is a cell collision.
+    #
+    #   z=0   a  X  b      n1: a -> X -> (1,0,1) -> (0,0,1) -> c
+    #   z=1   +  +  +      n2: e -> (2,0,1) -> up and over, above b -> X -> b
+    #   z=2   c  .  e
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[
+            _item_machine("a"),
+            _item_machine("c", direction=IODirection.INPUT, port="in"),
+            _item_machine("e"),
+            _item_machine("b", direction=IODirection.INPUT, port="in"),
+        ],
+        nets=[
+            Net(
+                id="n1",
+                commodity=Commodity.ITEM,
+                fluid_or_item="x",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="a", port_id="out"),
+                    MachineFaceRef(machine_id="c", port_id="in"),
+                ],
+            ),
+            Net(
+                id="n2",
+                commodity=Commodity.ITEM,
+                fluid_or_item="y",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="e", port_id="out"),
+                    MachineFaceRef(machine_id="b", port_id="in"),
+                ],
+            ),
+        ],
+    )
+
+    def hops(*cells: tuple[int, int, int]) -> list[Segment]:
+        return [Segment(start=_coord(*a), end=_coord(*b), channel=0) for a, b in pairwise(cells)]
+
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id="a", cell=_coord(0, 0, 0), orientation=Facing.NORTH),
+            Placement(machine_id="b", cell=_coord(2, 0, 0), orientation=Facing.NORTH),
+            Placement(machine_id="c", cell=_coord(0, 0, 2), orientation=Facing.SOUTH),
+            Placement(machine_id="e", cell=_coord(2, 0, 2), orientation=Facing.SOUTH),
+        ],
+        routes=[
+            Route(
+                net_id="n1",
+                commodity=Commodity.ITEM,
+                terminals=_shared_dock(
+                    ("a", "out", Facing.EAST, (1, 0, 0)), ("c", "in", Facing.NORTH, (0, 0, 1))
+                ),
+                segments=hops((1, 0, 0), (1, 0, 1), (0, 0, 1)),
+            ),
+            Route(
+                net_id="n2",
+                commodity=Commodity.ITEM,
+                terminals=_shared_dock(
+                    ("e", "out", Facing.NORTH, (2, 0, 1)), ("b", "in", Facing.WEST, (1, 0, 0))
+                ),
+                segments=hops((2, 0, 1), (2, 1, 1), (2, 1, 0), (1, 1, 0), (1, 0, 0)),
+            ),
+        ],
+    )
+    report = validate(problem, layout)
+    assert report.codes() == (ViolationCode.ROUTE_CELL_COLLISION,), str(report)
+    assert "(1, 0, 0)" in report.violations[0].message
 
 
 # ----------------------------------------------------------- routed-net direction / commodity

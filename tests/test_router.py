@@ -567,10 +567,11 @@ def test_route_chains_a_multi_endpoint_net_leg_by_leg() -> None:
 
 
 def test_route_infeasible_when_both_endpoints_want_the_only_free_cell() -> None:
-    # A 3x1x1 corridor: the lone free cell (1,0,0) is the ONLY dock candidate of both machines,
-    # and two ports of one net may not co-locate. The chain cannot even start (its goal set is
-    # empty once the shared cell is excluded), so docking falls back to first-fit - which seats
-    # the first endpoint and leaves the second with nothing.
+    # A 3x1x1 corridor: the lone free cell (1,0,0) is the ONLY dock candidate of both machines.
+    # One pipe block wired to both would be a real build, but it lays no segment, and a route with
+    # none is not a route (ROUTE_DISCONTINUOUS). The chain cannot even start (a leg's goals exclude
+    # its own start), so docking falls back to first-fit, which never shares a cell (#164) - it
+    # seats the first endpoint and leaves the second with nothing.
     problem = _item_pair(CellBox(sx=3, sy=1, sz=1))
     result = route(problem, [at("a", 0, 0, 0), at("b", 2, 0, 0)])
 
@@ -578,6 +579,145 @@ def test_route_infeasible_when_both_endpoints_want_the_only_free_cell() -> None:
     assert result.infeasibility is not None
     assert result.infeasibility.constraint == "face_reachability"
     assert "'b'" in result.infeasibility.detail  # the endpoint left without a cell, not the first
+
+
+# ------------------------------------------ #164: several terminals of one net on one dock cell
+
+
+def _stage(mid: str, direction: IODirection, front: Facing) -> Machine:
+    """A single-block machine with one item port, ``out`` or ``in`` by ``direction``."""
+    port = "out" if direction is IODirection.OUTPUT else "in"
+    return machine(
+        mid, [Port(id=port, commodity=Commodity.ITEM, direction=direction)], orientation=front
+    )
+
+
+def _manifold() -> tuple[InputIR, list[Placement]]:
+    """Two producers feeding two consumers of ONE net, the cobblestone net of parallel-sand in small.
+
+    A 2x2x2 region, four machines and four free cells::
+
+        y=0   a0 P        y=1   U0 b0        P, Q sit beside the producers and under the consumers
+              a1 Q              U1 b1        U0, U1 sit over the producers and beside the consumers
+
+    P-Q and U0-U1 are two separate pairs, so no four free cells are connected: with one terminal
+    per cell this net cannot route at all. Two terminals per cell, one from each stage, is exactly
+    how the maintainer's build wires it.
+    """
+    machines = [
+        _stage("a0", IODirection.OUTPUT, Facing.WEST),
+        _stage("a1", IODirection.OUTPUT, Facing.WEST),
+        _stage("b0", IODirection.INPUT, Facing.EAST),
+        _stage("b1", IODirection.INPUT, Facing.EAST),
+    ]
+    manifold = Net(
+        id="n",
+        commodity=Commodity.ITEM,
+        fluid_or_item="x",
+        throughput=1.0,
+        endpoints=[
+            MachineFaceRef(machine_id="a0", port_id="out"),
+            MachineFaceRef(machine_id="a1", port_id="out"),
+            MachineFaceRef(machine_id="b0", port_id="in"),
+            MachineFaceRef(machine_id="b1", port_id="in"),
+        ],
+    )
+    placements = [
+        at("a0", 0, 0, 0, orientation=Facing.WEST),
+        at("a1", 0, 0, 1, orientation=Facing.WEST),
+        at("b0", 1, 1, 0, orientation=Facing.EAST),
+        at("b1", 1, 1, 1, orientation=Facing.EAST),
+    ]
+    problem = InputIR(bounding_region=CellBox(sx=2, sy=2, sz=2), machines=machines, nets=[manifold])
+    return problem, placements
+
+
+def test_terminals_of_one_net_share_a_dock_cell() -> None:
+    problem, placements = _manifold()
+    result = route(problem, placements)
+
+    assert result.ok, result.infeasibility
+    (laid,) = result.routes
+    by_cell: dict[tuple[int, int, int], list[str]] = {}
+    for terminal in laid.terminals:
+        by_cell.setdefault(terminal.cell.as_tuple(), []).append(terminal.machine_id)
+    # Four terminals on two pipe blocks, each block wired to one producer and one consumer.
+    assert len(laid.terminals) == 4
+    assert len(by_cell) == 2
+    assert all(len(set(owners)) == 2 for owners in by_cell.values()), by_cell
+    layout = LayoutResult(
+        status=LayoutStatus.VALID, seed=0, placements=placements, routes=list(result.routes)
+    )
+    assert validate(problem, layout).ok, str(validate(problem, layout))
+
+
+def test_two_nets_still_never_share_a_dock_cell() -> None:
+    # The relaxation is within ONE net. X=(1,0,0) is the only dock cell of both a (net n1) and b
+    # (net n2), and a pipe delivers to any inventory wired to it whatever the plan meant it to
+    # carry, so letting n2 dock there would feed n1's items into b. n2 must fail, naming b.
+    #
+    #   z=0   a  X  b      a, b front SOUTH: X is all either has left
+    #   z=1   .  .  .
+    #   z=2   c  .  e      c consumes n1, e produces n2
+    a = _stage("a", IODirection.OUTPUT, Facing.SOUTH)
+    b = _stage("b", IODirection.INPUT, Facing.SOUTH)
+    c = _stage("c", IODirection.INPUT, Facing.WEST)
+    e = _stage("e", IODirection.OUTPUT, Facing.EAST)
+    problem = InputIR(
+        bounding_region=CellBox(sx=3, sy=1, sz=3),
+        machines=[a, b, c, e],
+        nets=[net("n1", "a", "c"), net("n2", "e", "b")],
+    )
+    placements = [
+        at("a", 0, 0, 0, orientation=Facing.SOUTH),
+        at("b", 2, 0, 0, orientation=Facing.SOUTH),
+        at("c", 0, 0, 2, orientation=Facing.WEST),
+        at("e", 2, 0, 2, orientation=Facing.EAST),
+    ]
+    result = route(problem, placements)
+
+    assert not result.ok
+    assert result.failed_nets == ("n2",)
+    assert result.infeasibility is not None
+    assert result.infeasibility.constraint == "face_reachability"
+    assert "'b'" in result.infeasibility.detail
+    (n1,) = result.routes
+    assert (1, 0, 0) in n1.cells()  # n1 kept X; nothing of n2 was laid on it
+
+
+def test_a_shared_dock_cell_is_never_handed_to_another_net() -> None:
+    # The re-seat rescue frees a cell a stranded net needs by moving whoever holds it. A cell two
+    # endpoints of one net share cannot be freed that way: moving one leaves the other on it, so
+    # handing it over would put two nets on one pipe block.
+    #
+    # The manifold above, one layer taller. Net n docks on U0 and U1 (asserted below, since the
+    # test means nothing otherwise), and c's only dock cell is U0: its front is SOUTH, d sits
+    # EAST, and every other face is off the region. U0's holders a0 and b0 could each move to P,
+    # so a rescue that re-seated one of them would "succeed" and give U0 to net m.
+    problem, placements = _manifold()
+    c = _stage("c", IODirection.OUTPUT, Facing.SOUTH)
+    d = _stage("d", IODirection.INPUT, Facing.WEST)  # fronting c, so no free auto-output
+    problem = problem.model_copy(
+        update={
+            "bounding_region": CellBox(sx=2, sy=3, sz=2),
+            "machines": [*problem.machines, c, d],
+            "nets": [*problem.nets, net("m", "c", "d")],
+        }
+    )
+    placements = [
+        *placements,
+        at("c", 0, 2, 0, orientation=Facing.SOUTH),
+        at("d", 1, 2, 0, orientation=Facing.WEST),
+    ]
+    result = route(problem, placements)
+
+    manifold = next((r for r in result.routes if r.net_id == "n"), None)
+    assert manifold is not None, f"the manifold lost its cell to net m: {result.failed_nets}"
+    assert {t.cell.as_tuple() for t in manifold.terminals} == {(0, 1, 0), (0, 1, 1)}
+    assert result.failed_nets == ("m",)
+    assert result.infeasibility is not None
+    assert result.infeasibility.constraint == "face_reachability"
+    assert "'c'" in result.infeasibility.detail
 
 
 def test_route_skips_me_toggled_commodity() -> None:
