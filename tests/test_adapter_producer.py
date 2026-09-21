@@ -48,8 +48,10 @@ from gtnh_solver.ir import InputIR, LayoutResult
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 _SAND = _EXAMPLES / "gtnh-sand.json"
 _NITROBENZENE = _EXAMPLES / "gtnh-nitrobenzene.json"
-#: The only committed arodoid-fork export: no ``resolved`` block, ``machineHandlers`` present.
+#: The committed arodoid-fork exports: no ``resolved`` block, ``machineHandlers`` present. The sand
+#: line is a 9-hammer toy; ``ev-nitrobenzene`` is a real 2.9 line (multiblocks, #204).
 _PARALLEL_SAND = _EXAMPLES / "gtnh-parallel-sand.json"
+_EV_NITROBENZENE = _EXAMPLES / "ev-nitrobenzene.json"
 
 
 def _plan(
@@ -112,10 +114,11 @@ def test_committed_mrbruh_fixtures_detect_as_mrbruh(path: Path) -> None:
     assert detect_producer(load_plan(path)) is PlanProducer.MRBRUH_V2
 
 
-def test_committed_arodoid_fixture_detects_despite_schema_version_1() -> None:
+@pytest.mark.parametrize("path", [_PARALLEL_SAND, _EV_NITROBENZENE], ids=lambda p: p.name)
+def test_committed_arodoid_fixture_detects_despite_schema_version_1(path: Path) -> None:
     # The whole hazard in one assertion: this plan says schemaVersion 1, exactly as an old MrBruh
     # plan would, and is told apart only by carrying machineHandlers.
-    plan = load_plan(_PARALLEL_SAND)
+    plan = load_plan(path)
     assert plan.schema_version == 1
     assert plan.resolved is None
     assert detect_producer(plan) is PlanProducer.ARODOID_V1
@@ -403,7 +406,12 @@ def test_plan_pack_version_ignores_recipes_that_state_nothing() -> None:
 
 @pytest.mark.parametrize(
     ("path", "expected"),
-    [(_SAND, "2.8.4"), (_NITROBENZENE, "2.8.4"), (_PARALLEL_SAND, "2.9.0-beta-2")],
+    [
+        (_SAND, "2.8.4"),
+        (_NITROBENZENE, "2.8.4"),
+        (_PARALLEL_SAND, "2.9.0-beta-2"),
+        (_EV_NITROBENZENE, "2.9.0-beta-2"),
+    ],
 )
 def test_plan_pack_version_on_the_committed_fixtures(path: Path, expected: str) -> None:
     assert plan_pack_version(load_plan(path)) == expected

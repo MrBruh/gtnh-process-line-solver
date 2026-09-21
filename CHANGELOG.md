@@ -7,6 +7,20 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`examples/ev-nitrobenzene.json`, the first real GTNH 2.9 line in the repo (#204).** An
+  arodoid-fork export of an EV nitrobenzene line: nine multiblock nodes that `machineCount` expands
+  to 14 machines, a Dangote Distillus at 12x parallel, and shared multiblock ports. The only other
+  arodoid fixture, `gtnh-parallel-sand.json`, is nine Forge Hammers, so nothing committed exercised a
+  real 2.9 line before. It is the acceptance fixture for the 2.9 preview and export work
+  (#205 to #208) and ships byte-identical to the export, about 1.1 MB: `check-added-large-files`
+  exempts this one file by name, and `tools/derive_small_manifest.py` skips it so the committed
+  texture manifest does not grow to cover its EV tier and 2.9 machines.
+
+  The default suite only adapts it, never solves it: it detects as the arodoid producer at pack
+  `2.9.0-beta-2`, maps to 34 machines and 31 nets with no dataset, and reports the Dangote's
+  unmodelled 12x parallel. On a fresh clone its multiblocks are 1x1x1, because the committed dump is
+  a two-machine sample rather than a census; `examples/README.md` says why a plan this large is in.
+
 - **Several terminals of one net may now share a pipe block, and the validator refuses two
   connections of one single-block machine on one face (#164).** The maintainer's parallel-sand
   build wires 20 item connections onto 12 pipe blocks, each block serving a producer and a consumer

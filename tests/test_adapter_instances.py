@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from gtnh_solver.adapter import (
+    AdapterWarning,
     Edge,
     Node,
     Plan,
@@ -33,7 +34,9 @@ from gtnh_solver.adapter import (
 from gtnh_solver.adapter.core import _instance_ids
 from gtnh_solver.ir import Commodity, InputIR, Net
 
-_PARALLEL_SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-parallel-sand.json"
+_EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+_PARALLEL_SAND = _EXAMPLES / "gtnh-parallel-sand.json"
+_EV_NITROBENZENE = _EXAMPLES / "ev-nitrobenzene.json"
 
 
 def _plan(count: int, *, resolved_eut: float | None = None, with_sink: bool = True) -> Plan:
@@ -182,3 +185,19 @@ def test_the_committed_parallel_fixture_expands_and_wires() -> None:
         e.machine_id for n in ir.nets if n.commodity is not Commodity.POWER for e in n.endpoints
     }
     assert set(forge_hammers) <= material
+
+
+def test_the_real_2_9_line_maps_every_machine_and_net() -> None:
+    """``ev-nitrobenzene.json`` is the one real GTNH 2.9 line committed (#204): nine nodes, all
+    multiblocks, four of them at ``machineCount`` 2 or 3, and a Dangote Distillus at 12x parallel.
+
+    The adapter's half only, with no dataset (so every multiblock is 1x1x1 here) and no solve, which
+    keeps the default suite fast. 34 machines is the 14 process machines the counts expand
+    to, the plan's 17 storages and one power source per tier (EV, HV, MV); 31 nets is 25 fluid,
+    3 item and 3 power. The 12x parallel is reported, not modelled, so it has to warn.
+    """
+    plan = load_plan(_EV_NITROBENZENE)
+    with pytest.warns(AdapterWarning, match=r"Dangote Distillus at 12x parallel"):
+        ir = to_input_ir(plan)
+    assert len(ir.machines) == 34
+    assert len(ir.nets) == 31

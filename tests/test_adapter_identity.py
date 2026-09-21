@@ -42,6 +42,10 @@ from gtnh_solver.dataset import (
 from gtnh_solver.ir import CellBox, Facing
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+#: ``ev-nitrobenzene.json`` is deliberately absent (#204). Against the committed two-machine sample
+#: none of its machines resolves by either route, so it would pass vacuously; against a real 2.9
+#: census the ladder is *meant* to change its joins: the controller name "Dangote Distillus" wins
+#: over the recipe map's "Distillation Tower".
 _FIXTURES = [
     _EXAMPLES / "gtnh-sand.json",
     _EXAMPLES / "gtnh-nitrobenzene.json",

@@ -20,7 +20,10 @@ repos:
         # Extractor-generated datasets under data/ (e.g. the ~6 MB schema-2 texture
         # manifest) are intentionally committed and exceed the 500 KB default; scope the
         # guard to everything else rather than a repo-wide maxkb bump.
-        exclude: ^data/
+        # examples/ev-nitrobenzene.json (~1.1 MB) is the one real GTNH 2.9 line, kept whole as
+        # the acceptance fixture for 2.9 preview/export work (#204); exempt that file by name
+        # so any other large plan dropped into examples/ is still caught.
+        exclude: ^(data/|examples/ev-nitrobenzene\.json$)
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Must match the ruff pin in constraints-dev.txt, so the hook and a manual `ruff format .`
