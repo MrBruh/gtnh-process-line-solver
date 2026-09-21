@@ -31,6 +31,25 @@ class PipeFamily(str, Enum):
     ITEM_PIPE = "item_pipe"
 
 
+class PipeSize(str, Enum):
+    """How big a fluid or item pipe is: GT's size ladder, smallest first.
+
+    Both pipe families share it (GT builds each material in all five sizes, ``OrePrefixes.pipeTiny``
+    through ``pipeHuge``), and a bigger size moves more per tick. A cable has no size: its gauge is
+    amperage, carried per segment by ``Route.thickness_per_segment``. GT's quadruple and nonuple
+    fluid pipes are deliberately absent - they carry four or nine fluids at once, which makes them a
+    different transport (docs/DOMAIN.md, "Fluids and items"), not a bigger pipe.
+
+    Declaration order IS the ladder: iterate the enum to walk it from tiny to huge.
+    """
+
+    TINY = "tiny"
+    SMALL = "small"
+    NORMAL = "normal"
+    LARGE = "large"
+    HUGE = "huge"
+
+
 class IODirection(str, Enum):
     """Direction of a machine port or a pinned external I/O point."""
 

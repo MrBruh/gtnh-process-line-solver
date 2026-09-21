@@ -31,6 +31,8 @@ from gtnh_solver.dataset import (
     DEFAULT_PIPE_THICKNESS_BLOCKS,
     PIPE_DISPLAY_STEM,
     PIPE_MATERIAL,
+    PIPE_THICKNESS_BLOCKS,
+    ROUTED_PIPE_SIZES,
     VOLTAGE_BY_TIER,
     UnknownTierError,
     cable_display_name,
@@ -40,7 +42,7 @@ from gtnh_solver.dataset import (
     route_material,
     tier_voltage,
 )
-from gtnh_solver.ir import Commodity, PipeFamily
+from gtnh_solver.ir import Commodity, PipeFamily, PipeSize
 
 _COMMITTED_MANIFEST = Path(__file__).resolve().parents[1] / "data" / "textures" / "manifest.json"
 
@@ -93,17 +95,27 @@ def test_power_route_gets_its_tier_cable() -> None:
     assert material.stand_in
 
 
-def test_item_and_fluid_routes_get_their_pipe_and_no_tier() -> None:
+def test_item_and_fluid_routes_get_their_pipe_at_the_size_asked_and_no_tier() -> None:
     for commodity, family in (
         (Commodity.ITEM, PipeFamily.ITEM_PIPE),
         (Commodity.FLUID, PipeFamily.FLUID_PIPE),
     ):
-        material = route_material(commodity)
+        material = route_material(commodity, size=PipeSize.LARGE)
         assert material is not None
         assert material.family is family
         assert material.material == PIPE_MATERIAL[commodity]
+        assert material.size is PipeSize.LARGE
         assert material.tier is None
         assert material.stand_in
+
+
+def test_a_pipe_with_no_size_raises_and_a_cable_with_one_does_too() -> None:
+    """Neither mistake may default. A pipe that fell back to the normal size is what starved the
+    parallel sand line (#165); a size on a cable is a gauge the contract keeps elsewhere."""
+    with pytest.raises(ValueError, match="needs a size"):
+        route_material(Commodity.ITEM)
+    with pytest.raises(ValueError, match="cable has no size"):
+        route_material(Commodity.POWER, "LV", size=PipeSize.NORMAL)
 
 
 def test_above_uv_there_is_no_cable_to_stand_in_for() -> None:
@@ -131,6 +143,10 @@ def test_dataset_names_match_gts_own_spelling() -> None:
     # The normal size is the bare name; only the others take a suffix.
     assert pipe_display_name("bronze") == "gt_pipe_bronze"
     assert pipe_display_name("bronze", "large") == "gt_pipe_bronze_large"
+    assert pipe_display_name("tin", PipeSize.HUGE) == "gt_pipe_tin_huge"  # the value, not the repr
+    assert pipe_display_name("tin", PipeSize.NORMAL) == "gt_pipe_tin"
+    with pytest.raises(ValueError, match="quadruple"):  # a size GT does not build names no block
+        pipe_display_name("tin", "quadruple")
 
 
 def test_every_material_the_policy_draws_has_a_localized_spelling() -> None:
@@ -157,6 +173,19 @@ def test_a_block_offers_both_of_gts_spellings_newest_first() -> None:
         "Large Bronze Fluid Pipe",
         "gt_pipe_bronze_large",
     )
+
+
+def test_the_item_pipe_sizes_the_router_lays_carry_the_names_a_real_dump_uses() -> None:
+    """Both spellings of every size the router can lay an item pipe at (#165), each copied from a
+    real dump rather than derived from the other: the localized names from the 2.9.0-beta-2
+    extraction (GT5U 5.09.54.20, which also renders them from ``en_US.lang`` lines 178-182) and the
+    unlocalized ones from the 2.8.4 extraction. A plausible name built from the 2.8.4 id is the
+    trap #186 fixed, so the expected strings here are literals, never formatted."""
+    assert manifest_names("gt_pipe_tin") == ("Tin Item Pipe", "gt_pipe_tin")
+    assert manifest_names("gt_pipe_tin_large") == ("Large Tin Item Pipe", "gt_pipe_tin_large")
+    assert manifest_names("gt_pipe_tin_huge") == ("Huge Tin Item Pipe", "gt_pipe_tin_huge")
+    routed = [pipe_display_name("tin", size) for size in ROUTED_PIPE_SIZES[Commodity.ITEM]]
+    assert routed == ["gt_pipe_tin", "gt_pipe_tin_large", "gt_pipe_tin_huge"]
 
 
 def test_a_name_the_policy_never_generated_gets_no_invented_alias() -> None:
@@ -215,18 +244,27 @@ def test_the_committed_manifest_ships_the_examples_own_cables() -> None:
         assert name in pipes, f"the examples use {tier}; {name} must ship"
 
 
-def test_both_pipe_stand_ins_exist_at_the_size_v1_draws() -> None:
+def test_both_pipe_stand_ins_exist_at_every_size_the_router_lays() -> None:
+    """Every size, not only today's: the exporter refuses a pipe the manifest lacks and the
+    previewer draws it as a flat bar, and the item sizes a line needs move with its endpoints."""
     pipes = _pipes_by_name()
     if not any(name.startswith("gt_pipe_") for name in pipes):
         pytest.skip("no pipes in the committed manifest (fixture-only checkout)")
 
-    for commodity in (Commodity.ITEM, Commodity.FLUID):
-        name = pipe_display_name(PIPE_MATERIAL[commodity], DEFAULT_PIPE_SIZE)
-        entry = pipes.get(name)
-        assert entry is not None, f"{commodity.value} stands in for {name}, which is not present"
-        pipe = entry["pipe"]
-        assert isinstance(pipe, dict)
-        assert pipe["thickness"] == pytest.approx(DEFAULT_PIPE_THICKNESS_BLOCKS)
+    assert PIPE_THICKNESS_BLOCKS[PipeFamily.ITEM_PIPE][DEFAULT_PIPE_SIZE] == pytest.approx(
+        DEFAULT_PIPE_THICKNESS_BLOCKS
+    )
+    for commodity, family in (
+        (Commodity.ITEM, PipeFamily.ITEM_PIPE),
+        (Commodity.FLUID, PipeFamily.FLUID_PIPE),
+    ):
+        for size in ROUTED_PIPE_SIZES[commodity]:
+            name = pipe_display_name(PIPE_MATERIAL[commodity], size)
+            entry = pipes.get(name)
+            assert entry is not None, f"{commodity.value} lays {name}, which is not present"
+            pipe = entry["pipe"]
+            assert isinstance(pipe, dict)
+            assert pipe["thickness"] == pytest.approx(PIPE_THICKNESS_BLOCKS[family][size])
 
 
 def test_a_locally_staged_dump_names_every_cable_and_pipe_the_policy_draws() -> None:
@@ -253,7 +291,11 @@ def test_a_locally_staged_dump_names_every_cable_and_pipe_the_policy_draws() -> 
         for material in CABLE_MATERIAL_BY_TIER.values()
         for gauge in CABLE_THICKNESS_BLOCKS
     ]
-    wanted += [pipe_display_name(m, DEFAULT_PIPE_SIZE) for m in PIPE_MATERIAL.values()]
+    wanted += [
+        pipe_display_name(material, size)
+        for commodity, material in PIPE_MATERIAL.items()
+        for size in ROUTED_PIPE_SIZES[commodity]
+    ]
     for canonical in wanted:
         tried = manifest_names(canonical)
         assert any(name in names for name in tried), (

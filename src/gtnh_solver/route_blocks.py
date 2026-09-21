@@ -45,11 +45,13 @@ from dataclasses import dataclass
 
 from gtnh_solver.dataset import (
     CABLE_THICKNESS_BLOCKS,
+    DEFAULT_PIPE_SIZE,
     DEFAULT_PIPE_THICKNESS_BLOCKS,
+    PIPE_THICKNESS_BLOCKS,
     cable_display_name,
     pipe_display_name,
 )
-from gtnh_solver.ir import Commodity, LayoutResult, Route, RouteMaterial
+from gtnh_solver.ir import Commodity, LayoutResult, PipeSize, Route, RouteMaterial
 from gtnh_solver.ir.geometry import FACE_DELTAS, FACE_OFFSETS, Cell
 
 
@@ -108,8 +110,8 @@ class RouteCell:
     #: a terminal cell - the machine face it docks against. What the previewer grows arms toward.
     dirs: frozenset[Cell]
 
-    #: The cable gauge (1/2/4/8/12/16), by rule 1 above. Always 1 for item and fluid routes, which
-    #: v1 does not size.
+    #: The cable gauge (1/2/4/8/12/16), by rule 1 above. Always 1 for item and fluid routes: a pipe's
+    #: gauge is one size for the whole run, carried on ``RouteMaterial.size`` and so on ``block``.
     thickness: int
 
     #: The block's rendered thickness in blocks, GT's own ladder (docs/DOMAIN.md), for the
@@ -160,7 +162,7 @@ def route_cells(route: Route) -> list[RouteCell]:
     out = []
     for cell in sorted(dirs):
         connections = frozenset(dirs[cell])
-        blocks_thick = _thickness_blocks(route.commodity, thickness[cell])
+        blocks_thick = _thickness_blocks(route.commodity, thickness[cell], route.material)
         out.append(
             RouteCell(
                 cell=cell,
@@ -210,7 +212,7 @@ def route_boxes(cell: Cell, dirs: frozenset[Cell], thickness_blocks: float) -> t
     length = 0.5 - half
     if length <= 0:
         # A pipe at least a block thick already fills its cell; GT renders it as a full cube and
-        # there is no arm left to draw (docs/DOMAIN.md). Nothing in v1's ladders reaches this.
+        # there is no arm left to draw (docs/DOMAIN.md). A huge item pipe is exactly this.
         return (core,)
     boxes = [core]
     offset = half + length / 2  # from the cell centre to the arm's own centre
@@ -282,6 +284,10 @@ def route_block(commodity: Commodity, thickness: int, material: RouteMaterial | 
     and what a trunk with no single tier still says - so the block keeps the gauge (real) and drops
     only the material, reading as ``"2x power cable"``: the wording the build guide used before any
     of this, which is the point.
+
+    A pipe names its size the way GT does, as a word in front ("huge tin item pipe"), and the
+    normal size bare ("tin item pipe"), so the label and the block id beside it
+    (``gt_pipe_tin_huge``) say the same thing. The size is a gauge, and gauges are real.
     """
     if material is None:
         gauge = f"{thickness}x " if commodity is Commodity.POWER else ""
@@ -292,9 +298,11 @@ def route_block(commodity: Commodity, thickness: int, material: RouteMaterial | 
             dataset_name=cable_display_name(material.material, thickness),
             stand_in=material.stand_in,
         )
+    size = _pipe_size(material)
+    word = "" if size is DEFAULT_PIPE_SIZE else f"{size.value} "
     return RouteBlock(
-        label=f"{material.material} {commodity.value} pipe",
-        dataset_name=pipe_display_name(material.material),
+        label=f"{word}{material.material} {commodity.value} pipe",
+        dataset_name=pipe_display_name(material.material, size),
         stand_in=material.stand_in,
     )
 
@@ -307,7 +315,24 @@ _GENERIC: dict[Commodity, str] = {
 }
 
 
-def _thickness_blocks(commodity: Commodity, thickness: int) -> float:
-    if commodity is not Commodity.POWER:
-        return DEFAULT_PIPE_THICKNESS_BLOCKS
-    return CABLE_THICKNESS_BLOCKS[thickness]
+def _thickness_blocks(
+    commodity: Commodity, thickness: int, material: RouteMaterial | None
+) -> float:
+    if commodity is Commodity.POWER:
+        return CABLE_THICKNESS_BLOCKS[thickness]
+    if material is None:
+        return DEFAULT_PIPE_THICKNESS_BLOCKS  # an unspecified pipe keeps the flat middle size
+    return PIPE_THICKNESS_BLOCKS[material.family][_pipe_size(material)]
+
+
+def _pipe_size(material: RouteMaterial) -> PipeSize:
+    """A pipe material's size, which a ``Route`` guarantees is there (LayoutResult v2).
+
+    Only a ``RouteMaterial`` handed in without ever joining a ``Route`` can lack one, and guessing
+    "normal" for it would be the silent fallback the contract bump exists to end.
+    """
+    if material.size is None:
+        raise ValueError(
+            f"{material.material} {material.family.value} has no size (LayoutResult v2)"
+        )
+    return material.size

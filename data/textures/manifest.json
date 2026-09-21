@@ -11,9 +11,9 @@
     "extractor_sha": "unknown",
     "note": "SMALL committed manifest: only the blocks the shipped example lines and the two multiblock fixtures need - plus every hatch kind at the tiers those lines use, the cables and pipes those tiers route, and the block that stands in for a synthesized power source, none of which matches a machine name - so `gtnh-solve --preview examples/*.json` skins out of the box. The full dump is local and version-namespaced (data/<version>/textures/manifest.json), never committed. Regenerate with tools/derive_small_manifest.py.",
     "coverage": {
-      "blocks": 73,
+      "blocks": 75,
       "mte": 47,
-      "icons": 127,
+      "icons": 129,
       "gaps": 0
     },
     "extractor_checks": {
@@ -8231,6 +8231,84 @@
         "restrictive": false
       }
     },
+    "gregtech:gt.blockmachines|5592": {
+      "kind": "pipe",
+      "display_name": "gt_pipe_tin_large",
+      "te_base_type": 7,
+      "source_class": "gregtech.api.metatileentity.implementations.MTEItemPipe",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:materialicons/DULL/pipeSide",
+              "rgba": [
+                220,
+                220,
+                220,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/DULL/pipeLarge",
+              "rgba": [
+                220,
+                220,
+                220,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 0.75,
+        "insulated": false,
+        "restrictive": false
+      }
+    },
+    "gregtech:gt.blockmachines|5593": {
+      "kind": "pipe",
+      "display_name": "gt_pipe_tin_huge",
+      "te_base_type": 7,
+      "source_class": "gregtech.api.metatileentity.implementations.MTEItemPipe",
+      "sides": {
+        "all": {
+          "closed": [
+            {
+              "icon": "gregtech:materialicons/DULL/pipeSide",
+              "rgba": [
+                220,
+                220,
+                220,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "open": [
+            {
+              "icon": "gregtech:materialicons/DULL/pipeHuge",
+              "rgba": [
+                220,
+                220,
+                220,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      },
+      "pipe": {
+        "thickness": 1.0,
+        "insulated": false,
+        "restrictive": false
+      }
+    },
     "gregtech:gt.blockmachines|61": {
       "kind": "mte",
       "display_name": "Output Hatch (LV)",
@@ -13415,6 +13493,8 @@
     "gregtech:iconsets/OVERLAY_TOP_STEAM_HAMMER_ACTIVE": "assets/gregtech/textures/blocks/iconsets/OVERLAY_TOP_STEAM_HAMMER_ACTIVE.png",
     "gregtech:iconsets/OVERLAY_TOP_STEAM_HAMMER_ACTIVE_GLOW": "assets/gregtech/textures/blocks/iconsets/OVERLAY_TOP_STEAM_HAMMER_ACTIVE_GLOW.png",
     "gregtech:iconsets/OVERLAY_TOP_STEAM_HAMMER_GLOW": "assets/gregtech/textures/blocks/iconsets/OVERLAY_TOP_STEAM_HAMMER_GLOW.png",
+    "gregtech:materialicons/DULL/pipeHuge": "assets/gregtech/textures/blocks/materialicons/DULL/pipeHuge.png",
+    "gregtech:materialicons/DULL/pipeLarge": "assets/gregtech/textures/blocks/materialicons/DULL/pipeLarge.png",
     "gregtech:materialicons/DULL/pipeMedium": "assets/gregtech/textures/blocks/materialicons/DULL/pipeMedium.png",
     "gregtech:materialicons/DULL/pipeSide": "assets/gregtech/textures/blocks/materialicons/DULL/pipeSide.png",
     "gregtech:materialicons/DULL/wire": "assets/gregtech/textures/blocks/materialicons/DULL/wire.png",

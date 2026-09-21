@@ -32,8 +32,9 @@ the validator re-derives against it independently (docs/ARCHITECTURE.md decision
 
 from __future__ import annotations
 
-from gtnh_solver.ir import Commodity, PipeFamily, RouteMaterial
+from gtnh_solver.ir import Commodity, PipeFamily, PipeSize, RouteMaterial
 
+from .pipe_capacity import item_pipe_insertions
 from .voltage import VOLTAGE_BY_TIER, UnknownTierError
 
 #: Voltage tier -> the insulated cable material a route at that tier is drawn as. GT's unlocalized
@@ -73,9 +74,11 @@ CABLE_DISPLAY_MATERIAL: dict[str, str] = {
     "naquadahalloy": "Naquadah Alloy",
 }
 
-#: The pipe material each commodity is drawn as. One per family in v1, because nothing yet models
-#: pipe throughput: a route is not sized, so a size ladder would be a distinction without a
-#: difference. Both are the first pipe of their kind a player builds.
+#: The pipe material each commodity is drawn as. One per family: a run that needs to move more is
+#: given a bigger *size* of the same material (``RouteMaterial.size``), never a different material,
+#: because choosing materials is a policy this module does not make yet. Both are the first pipe of
+#: their kind a player builds, which also makes them the slowest, so a size chosen for them is never
+#: short for a better material at the same size.
 PIPE_MATERIAL: dict[Commodity, str] = {
     Commodity.FLUID: "bronze",
     Commodity.ITEM: "tin",
@@ -103,25 +106,58 @@ CABLE_THICKNESS_BLOCKS: dict[int, float] = {
     16: 0.875,
 }
 
-#: The pipe size v1 draws, and its thickness in blocks. GT's ladder runs tiny/small/normal/large/huge
-#: (and quadruple/nonuple for fluids, which render as full cubes), but sizing a pipe means modelling
-#: throughput, which is Phase 2 - so v1 draws the middle of the ladder and says nothing it cannot
-#: back up. Verified identical for both families at this size.
-DEFAULT_PIPE_SIZE = "normal"
-DEFAULT_PIPE_THICKNESS_BLOCKS = 0.5
+#: The middle of GT's size ladder, and the size a pipe is laid at when nothing sizes it. Item pipes
+#: are sized from what the run carries (``dataset/pipe_capacity.py``, #165); fluid pipes are not
+#: yet, so every fluid route is this size. That is safe on the shipped lines, whose busiest fluid
+#: net moves 31.25 mB/t against the 120 mB/t GT gives a normal bronze pipe
+#: (``LoaderMetaPipeEntities.registerFluidPipes``, ``baseCapacity(120)``), but it is not a rule.
+DEFAULT_PIPE_SIZE = PipeSize.NORMAL
 
-#: That ladder -> the word a 2.9+ display name puts in front of the material. The normal size is
-#: bare in both spellings, which is why its word is empty rather than absent. Quadruple and nonuple
-#: exist for fluids only, so the pair built for an item pipe names no real block; it is a candidate
-#: that simply never matches, and v1 asks for neither.
-_PIPE_SIZE_WORD: dict[str, str] = {
-    "tiny": "Tiny ",
-    "small": "Small ",
-    DEFAULT_PIPE_SIZE: "",
-    "large": "Large ",
-    "huge": "Huge ",
-    "quadruple": "Quadruple ",
-    "nonuple": "Nonuple ",
+#: Pipe size -> its thickness in blocks, per family, from GT's own constructors (docs/DOMAIN.md):
+#: ``ItemPipeBuilder`` and ``FluidPipeBuilder`` in ``LoaderMetaPipeEntities``. The families agree up
+#: to large and part at huge, where an item pipe is a full cube and a fluid pipe is not.
+PIPE_THICKNESS_BLOCKS: dict[PipeFamily, dict[PipeSize, float]] = {
+    PipeFamily.ITEM_PIPE: {
+        PipeSize.TINY: 0.25,
+        PipeSize.SMALL: 0.375,
+        PipeSize.NORMAL: 0.5,
+        PipeSize.LARGE: 0.75,
+        PipeSize.HUGE: 1.0,
+    },
+    PipeFamily.FLUID_PIPE: {
+        PipeSize.TINY: 0.25,
+        PipeSize.SMALL: 0.375,
+        PipeSize.NORMAL: 0.5,
+        PipeSize.LARGE: 0.75,
+        PipeSize.HUGE: 0.875,
+    },
+}
+
+#: The normal size's thickness, identical for both families: what a route with no material, and so
+#: no size, is drawn at.
+DEFAULT_PIPE_THICKNESS_BLOCKS = PIPE_THICKNESS_BLOCKS[PipeFamily.ITEM_PIPE][DEFAULT_PIPE_SIZE]
+
+#: Every size a route of each commodity can be laid at, smallest first - what the committed texture
+#: manifest must carry for a preview or an export to resolve every pipe the router emits. Derived,
+#: not listed: an item run is sized to whatever the capacity rule picks, and that rule never picks a
+#: size that cannot serve even one endpoint (tiny and small make fewer than one insertion per
+#: service interval), so the set follows the rule if its figures ever move.
+ROUTED_PIPE_SIZES: dict[Commodity, tuple[PipeSize, ...]] = {
+    Commodity.ITEM: tuple(size for size in PipeSize if item_pipe_insertions(size) >= 1),
+    Commodity.FLUID: (DEFAULT_PIPE_SIZE,),
+}
+
+#: Pipe size -> the word a 2.9+ display name puts in front of the material. The normal size is bare
+#: in both spellings, which is why its word is empty rather than absent. Checked against a real
+#: 2.9.0-beta-2 dump (GT5U 5.09.54.20), which names the tin item pipes "Tin Item Pipe", "Large Tin
+#: Item Pipe" and "Huge Tin Item Pipe", and against the same tag's ``en_US.lang`` (lines 178-182,
+#: ``gt.oreprefix.large_material_item_pipe=Large %s Item Pipe`` and its siblings).
+_PIPE_SIZE_WORD: dict[PipeSize, str] = {
+    PipeSize.TINY: "Tiny ",
+    PipeSize.SMALL: "Small ",
+    PipeSize.NORMAL: "",
+    PipeSize.LARGE: "Large ",
+    PipeSize.HUGE: "Huge ",
 }
 
 #: Which transport family carries each commodity (the same mapping ``Route`` validates against).
@@ -142,14 +178,19 @@ def cable_display_name(material: str, gauge: int) -> str:
     return f"cable.{material}.{gauge:02d}"
 
 
-def pipe_display_name(material: str, size: str = DEFAULT_PIPE_SIZE) -> str:
+def pipe_display_name(material: str, size: PipeSize | str = DEFAULT_PIPE_SIZE) -> str:
     """The canonical name for one fluid or item pipe, e.g. ``gt_pipe_bronze``.
 
     The normal size is the bare name - GT suffixes only the others (``gt_pipe_bronze_large``), which
     is why the default has no suffix rather than an explicit one. Same two-names caveat as
-    :func:`cable_display_name`: :func:`manifest_names` is what a lookup joins on.
+    :func:`cable_display_name`: :func:`manifest_names` is what a lookup joins on. ``size`` is read
+    through :class:`PipeSize`, so a misspelt size raises instead of naming a block nobody built.
     """
-    return f"gt_pipe_{material}" if size == DEFAULT_PIPE_SIZE else f"gt_pipe_{material}_{size}"
+    size = PipeSize(size)
+    # Format the value, never the member: how an enum member formats differs across Pythons.
+    return (
+        f"gt_pipe_{material}" if size is DEFAULT_PIPE_SIZE else f"gt_pipe_{material}_{size.value}"
+    )
 
 
 #: Canonical name -> the localized name a 2.9+ dump records the same block under. Built from the
@@ -188,18 +229,32 @@ def manifest_names(canonical: str) -> tuple[str, ...]:
     return (localized, canonical) if localized is not None else (canonical,)
 
 
-def route_material(commodity: Commodity, tier: str | None = None) -> RouteMaterial | None:
+def route_material(
+    commodity: Commodity, tier: str | None = None, *, size: PipeSize | None = None
+) -> RouteMaterial | None:
     """The stand-in a route of this commodity is drawn as, or ``None`` when none is known.
 
     ``None`` is a real answer, not a failure: a tier above UV has no insulated cable to be
     representative of, and a route with no material renders exactly as it did before this existed -
     an honest flat bar. An *unknown* tier is different and raises, because a typo must not
     degrade silently into "no material".
+
+    A pipe needs its ``size`` and a cable must not be given one; either mistake raises rather than
+    defaulting. The size is the caller's decision (the router sizes it from what the run carries),
+    and a pipe that quietly fell back to the normal size is the failure LayoutResult v2 exists to
+    end (#165).
     """
     if commodity is not Commodity.POWER:
+        if size is None:
+            raise ValueError(f"a {commodity.value} pipe needs a size; the caller chooses it")
         return RouteMaterial(
-            family=_FAMILY_FOR[commodity], material=PIPE_MATERIAL[commodity], stand_in=True
+            family=_FAMILY_FOR[commodity],
+            material=PIPE_MATERIAL[commodity],
+            size=size,
+            stand_in=True,
         )
+    if size is not None:
+        raise ValueError("a cable has no size; its gauge is the route's thickness_per_segment")
     if tier is None:
         return None  # the caller could not agree on one tier for this trunk; say nothing
     if tier not in VOLTAGE_BY_TIER:

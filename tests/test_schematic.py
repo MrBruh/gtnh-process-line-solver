@@ -30,6 +30,8 @@ from gtnh_solver.ir import (
     InputIR,
     LayoutResult,
     LayoutStatus,
+    PipeFamily,
+    PipeSize,
     Route,
     RouteMaterial,
     Segment,
@@ -348,6 +350,35 @@ def test_a_route_material_the_manifest_lacks_is_refused_by_name() -> None:
     layout = LayoutResult(status=LayoutStatus.VALID, seed=0, routes=[route])
     with pytest.raises(SchematicError, match="unobtainium"):
         build_schematic(problem, layout, manifest=_manifest())
+
+
+def test_each_item_pipe_size_lowers_to_its_own_gt_block() -> None:
+    """The exporter builds the size the router chose, not the plain pipe (#165).
+
+    GT registers tin's item pipes at consecutive mIDs, normal 5591, large 5592, huge 5593
+    (``LoaderMetaPipeEntities``: startId 5589, tiny and small first), and the maintainer's working
+    parallel sand build carries exactly the large and huge ones. One route per size, so a wrong
+    lowering cannot hide behind another route's block.
+    """
+
+    def coord(x: int, y: int, z: int) -> CellCoord:
+        return CellCoord(x=x, y=y, z=z)
+
+    routes = [
+        Route(
+            net_id=f"n-{size.value}",
+            commodity=Commodity.ITEM,
+            segments=[Segment(start=coord(0, 0, z), end=coord(1, 0, z), channel=0)],
+            material=RouteMaterial(family=PipeFamily.ITEM_PIPE, material="tin", size=size),
+        )
+        for z, size in enumerate((PipeSize.NORMAL, PipeSize.LARGE, PipeSize.HUGE))
+    ]
+    problem = InputIR(bounding_region=CellBox(sx=4, sy=2, sz=4))
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, routes=routes)
+    root = build_schematic(problem, layout, manifest=_manifest())
+    by_row = {int(t["z"]): int(t["mID"]) for t in root["TileEntities"]}
+    assert by_row == {0: 5591, 1: 5592, 2: 5593}
+    assert {str(t["id"]) for t in root["TileEntities"]} == {"BaseMetaPipeEntity"}
 
 
 def test_write_schematic_writes_a_gzipped_file_and_makes_its_parent(tmp_path: Path) -> None:

@@ -26,12 +26,14 @@ from gtnh_solver.ir import (
     MachineFaceRef,
     METoggles,
     Net,
+    PipeSize,
     Placement,
     Port,
     Route,
 )
 from gtnh_solver.placement import place
 from gtnh_solver.router import route, route_power
+from gtnh_solver.router.core import _pipe_size
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
 from tests._helpers import at, machine, net
@@ -787,3 +789,96 @@ def test_route_skips_power_commodity() -> None:
     result = route(problem, [at("a", 1, 0, 1), at("b", 3, 0, 1)])
     assert result.ok
     assert result.routes == ()  # the power net is left for the power router
+
+
+# ------------------------------------------------------------------------ pipe size (#165)
+
+
+def _fan(
+    sources: int,
+    sinks: int,
+    *,
+    source_rate: float | None,
+    sink_rate: float | None,
+    commodity: Commodity = Commodity.ITEM,
+    throughput: float = 0.3,
+) -> tuple[Net, dict[str, Machine]]:
+    """A net from ``sources`` machines into ``sinks`` machines, each port at the given rate."""
+    machines: dict[str, Machine] = {}
+    endpoints: list[MachineFaceRef] = []
+    for kind, count, direction, rate in (
+        ("src", sources, IODirection.OUTPUT, source_rate),
+        ("dst", sinks, IODirection.INPUT, sink_rate),
+    ):
+        for i in range(count):
+            mid = f"{kind}{i}"
+            port = Port(id="p", commodity=commodity, direction=direction, rate=rate)
+            machines[mid] = machine(mid, [port])
+            endpoints.append(MachineFaceRef(machine_id=mid, port_id="p"))
+    fan = Net(
+        id="n", commodity=commodity, fluid_or_item="x", throughput=throughput, endpoints=endpoints
+    )
+    return fan, machines
+
+
+@pytest.mark.parametrize(
+    ("sources", "sinks", "size"),
+    [
+        (1, 1, PipeSize.NORMAL),  # one endpoint each side: the plain pipe, as every line had
+        (1, 2, PipeSize.LARGE),
+        (1, 3, PipeSize.HUGE),  # the stone run: one chest into three hammers
+        (3, 1, PipeSize.HUGE),  # the sand run: three hammers into one chest
+        (3, 3, PipeSize.HUGE),  # the stages between: every stream can meet at one point
+    ],
+)
+def test_an_item_pipe_is_sized_by_its_crowded_side(
+    sources: int, sinks: int, size: PipeSize
+) -> None:
+    """The parallel sand line's four runs, each at 0.3 items/t split evenly. GT spends one
+    insertion per inventory reached and a normal tin pipe makes one per 40 ticks, which in game fed
+    one hammer of three; so every endpoint on the crowded side costs an insertion per interval."""
+    fan, machines = _fan(sources, sinks, source_rate=0.3 / sources, sink_rate=0.3 / sinks)
+    assert _pipe_size(fan, machines) is size
+
+
+def test_an_endpoint_moving_more_than_a_stack_per_interval_needs_a_second_insertion() -> None:
+    """One insertion carries one stack at most, so a fast 1-to-1 run outgrows the plain pipe."""
+    fan, machines = _fan(1, 1, source_rate=2.0, sink_rate=2.0, throughput=2.0)
+    assert _pipe_size(fan, machines) is PipeSize.LARGE
+
+
+def test_an_unrated_port_takes_an_even_share_of_the_net() -> None:
+    fan, machines = _fan(1, 2, source_rate=None, sink_rate=None, throughput=4.0)
+    # Each sink's 2 items/t is past a stack per interval: 2 insertions apiece, 4 in all.
+    assert _pipe_size(fan, machines) is PipeSize.HUGE
+
+
+def test_a_demand_past_the_largest_pipe_is_laid_at_the_largest() -> None:
+    """Nothing thicker exists in the stand-in material. The validator, not the router, is the gate
+    that refuses a run too thin for its net (#190)."""
+    fan, machines = _fan(1, 6, source_rate=0.6, sink_rate=0.1, throughput=0.6)
+    assert _pipe_size(fan, machines) is PipeSize.HUGE
+
+
+def test_an_endpoint_the_router_cannot_resolve_is_not_counted() -> None:
+    fan, machines = _fan(1, 3, source_rate=0.3, sink_rate=0.1)
+    del machines["dst2"]  # its machine is gone
+    machines["dst1"] = machine("dst1", [])  # and this one no longer has the port
+    assert _pipe_size(fan, machines) is PipeSize.NORMAL
+
+
+def test_a_fluid_pipe_is_not_sized_yet() -> None:
+    fan, machines = _fan(
+        1, 3, source_rate=300.0, sink_rate=100.0, commodity=Commodity.FLUID, throughput=300.0
+    )
+    assert _pipe_size(fan, machines) is PipeSize.NORMAL
+
+
+def test_a_routed_item_pipe_publishes_its_size() -> None:
+    """End to end through ``route``: the size reaches the contract, not just the helper."""
+    problem = _item_pair(CellBox(sx=8, sy=4, sz=8))
+    result = route(problem, [at("a", 1, 0, 1), at("b", 5, 0, 1)])
+    assert result.ok
+    (piped,) = result.routes
+    assert piped.material is not None
+    assert piped.material.size is PipeSize.NORMAL
