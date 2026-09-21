@@ -52,8 +52,10 @@ during the Assignment - v1's only contact with actual GT behavior.
 - **solver** - the place→route→retry loop converges or gives up with a report; anytime budget
   returns best-valid-so-far.
 - **validator** - geometric + rule checks; partial-invalid layouts reported, never passed.
-- **cli** - parse an export, solve, print the build guide (and, with `--preview`, write the 3D
-  preview HTML), honor `--fast` / `--seed` / `--objective`, surface infeasibility via exit code.
+- **cli** - parse an export, solve, print the layout as JSON that round-trips through
+  `LayoutResult` (valid and infeasible runs alike, and nothing on stdout but that JSON, whatever
+  the run warns about), or with `--preview` / `--schematic` write the artifact and keep stdout
+  empty; honor `--fast` / `--seed` / `--objective`, surface infeasibility via exit code.
 
 ## Edge cases that must have tests
 

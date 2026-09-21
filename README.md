@@ -5,9 +5,10 @@
 > **Status: Phase 1 shipped end to end; Phase 2 quality work is landing.** A real
 > gtnh-factory-flow export goes all the way to a validated, buildable layout: adapter, physical
 > dataset, annealed placement, per-commodity routing, shared-amperage power, hatch placement, the
-> independent validator, a 3D previewer and a build guide. Machines place at their real multiblock
-> footprints, every routed connection lands on a casing cell as the GT hatch it would actually be,
-> and the previewer draws each block with its in-game texture.
+> independent validator, a 3D previewer and a Schematica `.schematic` export, with the layout itself
+> printed as JSON for scripts. Machines place at their real multiblock footprints, every routed
+> connection lands on a casing cell as the GT hatch it would actually be, and the previewer draws
+> each block with its in-game texture.
 >
 > **The generated dataset is deliberately local-only.** The Java extractor
 > (`tools/gtnh-extractor/`) regenerates the multiblock dump and the texture manifest on demand into
@@ -49,11 +50,11 @@ with the shared-amperage power net and the per-tick system I/O the line consumes
                                      takes a casing cell and a facing)
                                                  ▼
                                            validator (independent checks)
-                                          ┌──────┴──────┐
-                                          ▼             ▼
-                                     previewer      build guide
-                                  (three.js, real    (BoM, layers)
-                                   GT textures)
+                                 ┌───────────────┼───────────────┐
+                                 ▼               ▼               ▼
+                             previewer       .schematic     layout JSON
+                          (three.js, real   (Schematica     (stdout: the
+                            GT textures)       ghost)      LayoutResult)
 ```
 
 ## Quickstart
@@ -64,9 +65,10 @@ Needs **Python 3.10+** (`pyproject.toml` sets `requires-python = ">=3.10"`; an o
 ```bash
 python -m venv .venv && . .venv/bin/activate   # Windows: py -3.12 -m venv .venv; .venv\Scripts\activate
 pip install -e ".[dev]"
-gtnh-solve examples/gtnh-sand.json        # solve a gtnh-factory-flow export, print the build guide
-gtnh-solve plan.json -o guide.txt         # ...or write the guide to a file
+gtnh-solve examples/gtnh-sand.json        # solve an exported plan, print the layout as JSON
+gtnh-solve plan.json > layout.json        # ...which is how it goes to a file
 gtnh-solve plan.json --preview view.html  # ...or a double-clickable 3D preview (three.js)
+gtnh-solve plan.json --schematic line.schematic   # ...or a Schematica build ghost (1.7.10)
 gtnh-solve plan.json --fast               # skip optimization: a near-instant constructive layout
 gtnh-solve plan.json --seed 3             # pick the solver seed (deterministic per seed)
 gtnh-solve plan.json --objective volume   # what "compact" means: footprint|volume|balanced
@@ -77,11 +79,16 @@ gtnh-solve --list-dataset-versions             # ...or see which ones you have
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md#setup) for the full dev setup (hooks, tests, lint).
 
+With neither `--preview` nor `--schematic`, stdout is the solved layout as JSON: the
+`LayoutResult` contract ([`docs/IR.md`](docs/IR.md)) and nothing else, so it pipes straight into
+`jq` or `python -m json.tool`. Every warning and note goes to stderr. With either flag, stdout
+stays empty and the file is the answer.
+
 Exit code: 0 when the layout is fully valid, 1 when the solver can only return an explicit
-infeasibility (the reason prints to stderr), 2 when the export can't be loaded, 3 when the run
-hit a bug in `gtnh-solve` itself (the traceback prints, and it's worth an issue). The `--preview`
-three.js viewer is built; a congestion heatmap, multi-seed compare, and offline (vendored)
-three.js are Phase 2 (see the roadmap).
+infeasibility (the JSON still prints, carrying `status` and `infeasibility`, and the reason prints
+to stderr), 2 when the export can't be loaded, 3 when the run hit a bug in `gtnh-solve` itself (the
+traceback prints, and it's worth an issue). The `--preview` three.js viewer is built; a congestion
+heatmap, multi-seed compare, and offline (vendored) three.js are Phase 2 (see the roadmap).
 
 ## Documentation
 

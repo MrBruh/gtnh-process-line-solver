@@ -1,7 +1,9 @@
 """Tests for the ``gtnh-solve`` CLI - the one real Phase 1 entry point.
 
 Drives ``main`` with argv lists and asserts the exit code (0 valid / 1 infeasible / 2 load
-error) plus what lands on stdout/stderr, against the real fixtures.
+error / 3 internal error) plus what lands on stdout/stderr, against the real fixtures. With no
+artifact flag stdout is the ``LayoutResult`` contract as JSON and nothing else, so a test reads it
+back through :func:`_published` rather than looking for text in it.
 
 Only the two end-to-end tests (sand and nitrobenzene) solve for real. Everything else here is
 about flag plumbing or the 0/1/2 contract, so it takes the ``solve_calls`` fixture: one cached
@@ -16,13 +18,14 @@ import os
 import shutil
 from functools import cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
 import gtnh_solver.cli as cli_module
 from gtnh_solver import __version__
 from gtnh_solver.adapter import (
+    AdapterWarning,
     MachineHandler,
     Node,
     Plan,
@@ -49,7 +52,15 @@ from gtnh_solver.dataset import (
     load_physical_dataset,
 )
 from gtnh_solver.dataset import roots as dataset_roots
-from gtnh_solver.ir import Commodity, Infeasibility, InputIR, LayoutResult, LayoutStatus, METoggles
+from gtnh_solver.ir import (
+    LAYOUT_RESULT_VERSION,
+    Commodity,
+    Infeasibility,
+    InputIR,
+    LayoutResult,
+    LayoutStatus,
+    METoggles,
+)
 from gtnh_solver.previewer.textures import TextureManifest
 from gtnh_solver.solver import solve
 from tests._helpers import hatched_dataset
@@ -67,8 +78,8 @@ _FIXTURE_DATASET = Path(__file__).resolve().parents[1] / "data" / "multiblocks"
 def sand_layout() -> LayoutResult:
     """One genuine annealed solve of the sand example, computed once for the whole session.
 
-    A flag test only needs *a* real, valid layout to render a guide or a preview from; re-solving
-    a real line per test is what made this file the slowest in the suite.
+    A flag test only needs *a* real, valid layout to publish or preview; re-solving a real line
+    per test is what made this file the slowest in the suite.
     """
     layout = solve(adapt_file(_SAND, physical=_load_physical_or_warn()))
     assert layout.status is LayoutStatus.VALID  # a stand-in for a real solve must itself be real
@@ -94,25 +105,34 @@ def solve_calls(
     return calls
 
 
-def test_cli_solves_sand_and_prints_guide(capsys: pytest.CaptureFixture[str]) -> None:
+def _published(out: str) -> LayoutResult:
+    """Read stdout back as the contract, asserting it is that JSON and nothing else.
+
+    ``model_validate_json`` refuses anything but one JSON document, so a stray line of prose on
+    stdout (a warning printed to the wrong stream) fails here rather than slipping through. The
+    second half is the round trip: the parsed model dumps back to exactly the JSON that was
+    printed, so nothing the CLI wrote was dropped or reinterpreted on the way in. And it is ASCII,
+    which is what keeps it intact through a console or a redirect of any encoding.
+    """
+    layout = LayoutResult.model_validate_json(out)
+    assert json.loads(out) == layout.model_dump(mode="json")
+    assert out.isascii()
+    return layout
+
+
+def test_cli_solves_sand_and_prints_the_layout_as_json(capsys: pytest.CaptureFixture[str]) -> None:
+    # The real end-to-end run, and the one the default output exists for: a VALID layout, printed
+    # as the contract a script can consume (docs/IR.md), that reads back through the contract.
     code = main([_SAND])
-    out = capsys.readouterr().out
-    assert code == 0
-    assert "# Build guide" in out
-    assert "Forge Hammer" in out
-    assert "## Power" in out  # the synthesized power network shows up in the guide
-
-
-def test_cli_writes_to_output_file(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
-) -> None:
-    target = tmp_path / "guide.txt"
-    code = main([_SAND, "-o", str(target)])
-    assert code == 0
-    assert "# Build guide" in target.read_text(encoding="utf-8")
     captured = capsys.readouterr()
-    assert captured.out == ""  # the guide went to the file, not stdout
-    assert str(target) in captured.err  # a confirmation went to stderr
+    assert code == 0
+    layout = _published(captured.out)
+    assert layout.status is LayoutStatus.VALID
+    assert layout.infeasibility is None
+    assert layout.version == LAYOUT_RESULT_VERSION  # published, not changed: the schema is as-is
+    assert len(layout.placements) >= 3  # the three hammers, at least
+    # the synthesized power network is part of the published layout, not only of a rendering
+    assert any(r.commodity is Commodity.POWER for r in layout.routes)
 
 
 def test_cli_seed_is_accepted(
@@ -121,7 +141,7 @@ def test_cli_seed_is_accepted(
     # exit 0 alone would still pass if --seed were parsed and then dropped, so pin the value the
     # CLI actually handed the solver
     assert main([_SAND, "--seed", "3"]) == 0
-    assert "# Build guide" in capsys.readouterr().out
+    _published(capsys.readouterr().out)
     assert solve_calls[-1]["seed"] == 3
 
 
@@ -133,7 +153,7 @@ def test_cli_fast_flag_skips_optimization(
     # lane's test_fast_mode_uses_constructive_placement).
     code = main([_SAND, "--fast"])
     assert code == 0
-    assert "# Build guide" in capsys.readouterr().out
+    _published(capsys.readouterr().out)
     assert solve_calls[-1]["optimize"] is False
 
 
@@ -143,7 +163,7 @@ def test_cli_objective_flag_is_accepted(
     # --objective selects what the optimizer treats as compact, so it only means anything on the
     # optimizing path: assert the choice arrives there, rather than that argparse swallowed it.
     assert main([_SAND, "--objective", "volume"]) == 0
-    assert "# Build guide" in capsys.readouterr().out
+    _published(capsys.readouterr().out)
     assert solve_calls[-1]["objective"] == "volume"
     assert solve_calls[-1]["optimize"] is True
 
@@ -171,19 +191,54 @@ def test_cli_preview_writes_self_contained_html(
     assert html.startswith("<!doctype html>")
     assert "const SCENE = " in html
     captured = capsys.readouterr()
-    assert captured.out == ""  # --preview alone suppresses the stdout guide dump
+    assert captured.out == ""  # --preview makes the page the answer; no layout JSON on stdout
     assert "wrote preview" in captured.err
 
 
-def test_cli_guide_and_preview_together(
-    tmp_path: Path, solve_calls: list[dict[str, object]]
+@pytest.mark.parametrize(
+    "flags",
+    [("--preview",), ("--schematic",), ("--preview", "--schematic")],
+    ids=["preview", "schematic", "both"],
+)
+def test_cli_an_artifact_flag_keeps_stdout_empty(
+    flags: tuple[str, ...],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    solve_calls: list[dict[str, object]],
 ) -> None:
-    guide_file = tmp_path / "guide.txt"
-    preview_file = tmp_path / "view.html"
-    code = main([_SAND, "-o", str(guide_file), "--preview", str(preview_file)])
-    assert code == 0
-    assert "# Build guide" in guide_file.read_text(encoding="utf-8")
-    assert "<!doctype html>" in preview_file.read_text(encoding="utf-8")
+    # Either artifact, or both, is the answer the run was asked for, so stdout stays quiet the way
+    # it did for the text guide: the layout JSON is the default only when nothing else was asked.
+    names = {"--preview": "view.html", "--schematic": "line.schematic"}
+    argv = [_SAND]
+    for flag in flags:
+        argv += [flag, str(tmp_path / names[flag])]
+    assert main(argv) == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    for flag in flags:
+        assert (tmp_path / names[flag]).stat().st_size > 0
+        assert f"wrote {flag.lstrip('-')} to" in captured.err  # the confirmations are on stderr
+
+
+@pytest.mark.parametrize("flag", ["-o", "--output"])
+def test_cli_the_retired_output_flag_is_a_usage_error(
+    flag: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    solve_calls: list[dict[str, object]],
+) -> None:
+    # -o wrote the text build guide, which is gone (#203). It is not kept or repurposed for the
+    # JSON, which goes to a file with `> layout.json`: an argparse usage error at parse time,
+    # before any solving, so an old script fails loudly instead of quietly writing something new.
+    target = tmp_path / "guide.txt"
+    with pytest.raises(SystemExit) as exc:
+        main([_SAND, flag, str(target)])
+    assert exc.value.code == 2  # argparse's own usage-error code
+    captured = capsys.readouterr()
+    assert f"unrecognized arguments: {flag}" in captured.err
+    assert captured.out == ""
+    assert not target.exists()
+    assert not solve_calls
 
 
 def test_cli_list_dataset_versions(
@@ -428,9 +483,12 @@ def test_cli_solves_nitrobenzene(capsys: pytest.CaptureFixture[str]) -> None:
     """
     code = main([_NITROBENZENE])
     captured = capsys.readouterr()
-    assert "# Build guide" in captured.out  # the guide is emitted either way
+    layout = _published(captured.out)  # the layout is published either way
     assert not _line_resolves_multiblocks(), "the suite is pinned to the committed fixtures"
     assert code == 1
+    assert layout.status is not LayoutStatus.VALID
+    assert layout.infeasibility is not None
+    assert f"[{layout.status.value}] {layout.infeasibility.constraint}:" in captured.err
     # And the run says why, which it did not before #207: the plan's pack has no dump here.
     assert f"{_UNDUMPED} 2.8.4" in captured.err
 
@@ -458,9 +516,33 @@ def test_cli_partial_invalid_returns_1(tmp_path: Path, capsys: pytest.CaptureFix
         encoding="utf-8",
     )
     code = main([str(export)])
-    err = capsys.readouterr().err
+    captured = capsys.readouterr()
     assert code == 1
-    assert "partial_invalid" in err
+    assert "partial_invalid" in captured.err
+    # An infeasible run still publishes its layout: the JSON carries the same verdict the stderr
+    # line states, so a script reads it from stdout and a person reads it on stderr.
+    layout = _published(captured.out)
+    assert layout.status is LayoutStatus.PARTIAL_INVALID
+    assert layout.infeasibility is not None
+    assert layout.infeasibility.constraint == "voltage_tier"
+    assert f"[partial_invalid] voltage_tier: {layout.infeasibility.detail}" in captured.err
+
+
+#: A one-node ULV plan: it parses and maps, but 8 V does not survive the run the adapter sizes
+#: energy hatches for, so the adapter itself declares it infeasible (see the test below).
+_ULV_PLAN: Final = {
+    "schemaVersion": 1,
+    "recipes": [
+        {
+            "id": "r",
+            "machineType": "M",
+            "durationTicks": 10,
+            "eut": 6,
+            "outputs": [{"kind": "item", "id": "x", "amount": 1}],
+        }
+    ],
+    "nodes": [{"id": "n", "recipeId": "r", "overclockTier": "ULV"}],
+}
 
 
 def test_cli_a_tier_too_low_to_power_returns_1(
@@ -476,32 +558,43 @@ def test_cli_a_tier_too_low_to_power_returns_1(
     # to be (#112). A structural record is what makes the sizing happen at all, so the dataset is
     # pinned rather than inherited from whichever dump the machine holds.
     export = tmp_path / "ulv.json"
-    export.write_text(
-        json.dumps(
-            {
-                "schemaVersion": 1,
-                "recipes": [
-                    {
-                        "id": "r",
-                        "machineType": "M",
-                        "durationTicks": 10,
-                        "eut": 6,
-                        "outputs": [{"kind": "item", "id": "x", "amount": 1}],
-                    }
-                ],
-                "nodes": [{"id": "n", "recipeId": "r", "overclockTier": "ULV"}],
-            }
-        ),
-        encoding="utf-8",
-    )
+    export.write_text(json.dumps(_ULV_PLAN), encoding="utf-8")
     monkeypatch.setattr(cli_module, "_load_physical_or_warn", lambda *_, **__: hatched_dataset())
-    code = main([str(export)])
-    err = capsys.readouterr().err
+    code = main([str(export), "--seed", "7"])
+    captured = capsys.readouterr()
+    err = captured.err
     assert code == 1
     assert "[infeasible] voltage_drop:" in err
     assert "ULV" in err
     assert "try: " in err  # the relaxation, the same line a solver infeasibility prints
     assert not solve_calls  # the verdict is the adapter's; nothing was solved to reach it
+    # stdout reads the same whichever stage said no: the layout the solver returns when nothing
+    # fits (the verdict and the seed, nothing placed), carrying the adapter's own infeasibility.
+    layout = _published(captured.out)
+    assert layout.status is LayoutStatus.INFEASIBLE
+    assert layout.infeasibility is not None
+    assert layout.infeasibility.constraint == "voltage_drop"
+    assert f"[infeasible] voltage_drop: {layout.infeasibility.detail}" in err
+    assert (layout.seed, layout.placements, layout.routes) == (7, [], [])
+
+
+def test_cli_an_adapter_infeasibility_with_an_artifact_flag_keeps_stdout_empty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    solve_calls: list[dict[str, object]],
+) -> None:
+    # The artifact rule holds on the adapter's early exit too: asked for a preview, the run
+    # publishes no JSON, and with no layout to draw one from it reports the verdict and exits 1.
+    export = tmp_path / "ulv.json"
+    export.write_text(json.dumps(_ULV_PLAN), encoding="utf-8")
+    monkeypatch.setattr(cli_module, "_load_physical_or_warn", lambda *_, **__: hatched_dataset())
+    target = tmp_path / "view.html"
+    assert main([str(export), "--preview", str(target)]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "[infeasible] voltage_drop:" in captured.err
+    assert not target.exists()
 
 
 def test_cli_missing_export_arg_returns_2(
@@ -509,7 +602,9 @@ def test_cli_missing_export_arg_returns_2(
 ) -> None:
     code = main([])
     assert code == 2
-    assert "required" in capsys.readouterr().err
+    captured = capsys.readouterr()
+    assert "required" in captured.err
+    assert captured.out == ""  # no layout, so nothing to publish: stdout is JSON or nothing
     assert not solve_calls  # the exit-2 paths bail early; they must not solve first
 
 
@@ -518,7 +613,9 @@ def test_cli_file_not_found_returns_2(
 ) -> None:
     code = main(["does-not-exist.json"])
     assert code == 2
-    assert "could not load" in capsys.readouterr().err
+    captured = capsys.readouterr()
+    assert "could not load" in captured.err
+    assert captured.out == ""
     assert not solve_calls
 
 
@@ -621,10 +718,49 @@ def test_cli_an_unexpected_exception_is_an_internal_error_not_an_infeasibility(
 
     monkeypatch.setattr(cli_module, "solve", exploding_solve)
     code = main([_SAND])
-    err = capsys.readouterr().err
+    captured = capsys.readouterr()
+    err = captured.err
     assert code == cli_module.INTERNAL_ERROR_EXIT == 3
     assert "internal error: RuntimeError: boom" in err
     assert "Traceback" in err  # the useful half of an internal error
+    assert captured.out == ""  # a crash publishes no layout, and no half of one
+
+
+def _exploding_json(layout: LayoutResult) -> str:
+    raise RuntimeError("serialize")
+
+
+def test_cli_a_layout_that_will_not_serialize_is_an_internal_error(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    solve_calls: list[dict[str, object]],
+) -> None:
+    # Publishing the layout is part of the guarded stretch: every layout the solver returns is a
+    # valid contract, so one that cannot be dumped is a bug here, not a verdict about the plan.
+    monkeypatch.setattr(cli_module, "_layout_json", _exploding_json)
+    code = main([_SAND])
+    captured = capsys.readouterr()
+    assert code == cli_module.INTERNAL_ERROR_EXIT
+    assert "internal error: RuntimeError: serialize" in captured.err
+    assert captured.out == ""
+
+
+def test_cli_an_adapter_verdict_that_will_not_serialize_is_an_internal_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    solve_calls: list[dict[str, object]],
+) -> None:
+    # The same guard on the adapter's early exit, which publishes a layout of its own.
+    export = tmp_path / "ulv.json"
+    export.write_text(json.dumps(_ULV_PLAN), encoding="utf-8")
+    monkeypatch.setattr(cli_module, "_load_physical_or_warn", lambda *_, **__: hatched_dataset())
+    monkeypatch.setattr(cli_module, "_layout_json", _exploding_json)
+    code = main([str(export)])
+    captured = capsys.readouterr()
+    assert code == cli_module.INTERNAL_ERROR_EXIT
+    assert "internal error: RuntimeError: serialize" in captured.err
+    assert captured.out == ""
 
 
 def test_cli_a_preview_that_is_not_a_write_failure_is_an_internal_error(
@@ -664,23 +800,11 @@ def test_cli_a_schematic_that_is_not_a_write_failure_is_an_internal_error(
     assert "internal error: ValueError: byte must be in range(0, 256)" in err
 
 
-def test_cli_unwritable_output_returns_2(
+def test_cli_unwritable_preview_returns_2(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
 ) -> None:
     # an unwritable output path (OSError) is reported and exits 2 per the documented 0/1/2
     # contract, not dumped as a raw traceback (GitHub #39)
-    target = _under_a_file(tmp_path, "guide.txt")
-    code = main([_SAND, "-o", str(target)])
-    assert code == 2
-    err = capsys.readouterr().err
-    assert "could not write" in err
-    assert str(target) in err
-
-
-def test_cli_unwritable_preview_returns_2(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
-) -> None:
-    # same guard on the --preview write path
     target = _under_a_file(tmp_path, "view.html")
     code = main([_SAND, "--preview", str(target)])
     assert code == 2
@@ -757,8 +881,7 @@ def test_cli_schematic_with_a_pinned_version_missing_its_manifest_exits_2(
 
 
 @pytest.mark.parametrize(
-    ("flag", "name"),
-    [("-o", "guide.txt"), ("--preview", "view.html"), ("--schematic", "line.schematic")],
+    ("flag", "name"), [("--preview", "view.html"), ("--schematic", "line.schematic")]
 )
 def test_cli_creates_the_directory_an_output_sits_in(
     flag: str,
@@ -771,8 +894,8 @@ def test_cli_creates_the_directory_an_output_sits_in(
     # creates, so this case could never arise in them. It is the documented workflow's case,
     # though: out/ is gitignored, so on a fresh clone `--preview out/sand.html` failed on its
     # first run, after the whole solve and texture bake (#150). Two levels deep, because one
-    # missing level would not prove the parents=True half. All three flags, because "put it
-    # here" has to mean the same thing for each of them.
+    # missing level would not prove the parents=True half. Both flags, because "put it here" has
+    # to mean the same thing for each of them.
     target = tmp_path / "out" / "nested" / name
     code = main([_SAND, flag, str(target)])
     assert code == 0
@@ -892,7 +1015,29 @@ def test_the_unmeasured_note_is_advisory_and_does_not_change_the_exit_code(
     assert main([_SAND]) == 0
     out, err = capsys.readouterr()
     assert "note:" in err
-    assert "note:" not in out  # the build guide on stdout stays pipeable
+    _published(out)  # the layout JSON on stdout stays pipeable
+
+
+def test_cli_warnings_leave_stdout_pure_json(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    # Three kinds of advisory at once, against one parse of stdout: the CLI's own warning (a
+    # dataset version with no dump), its coverage note (unmeasured power intake, which a run with
+    # no dataset always makes), and an adapter warning (a resolved EU/t that disagrees with the
+    # recipe). `gtnh-solve plan.json | python -m json.tool` has to survive all of them, so each
+    # lands on stderr, or in Python's warning channel (stderr outside pytest), and none on stdout.
+    plan = _sand_plan()
+    plan["resolved"]["machines"][0]["totalEut"] *= 3  # the adapter trusts it, and says so
+    export = tmp_path / "noisy.json"
+    export.write_text(json.dumps(plan), encoding="utf-8")
+    with pytest.warns(AdapterWarning) as warned:
+        code = main([str(export), "--dataset-version", "does-not-exist"])
+    assert code == 0
+    assert any("resolved EU/t" in str(w.message) for w in warned)
+    out, err = capsys.readouterr()
+    assert "warning: physical multiblock dataset unavailable" in err
+    assert "note: power intake unmeasured" in err
+    _published(out)
 
 
 def test_cli_falls_back_when_dataset_load_fails(

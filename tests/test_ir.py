@@ -586,10 +586,11 @@ def test_valid_layout_has_no_infeasibility() -> None:
 
 @pytest.mark.parametrize("version", [LAYOUT_RESULT_VERSION - 1, LAYOUT_RESULT_VERSION + 1])
 def test_layout_result_rejects_a_payload_from_another_contract_version(version: int) -> None:
-    # The output schema is a first-class contract with its own consumers (previewer, build guide,
-    # the planned .schematic export), so it gets the same guard as the input - and needs it for the
-    # same reason: LayoutResult v1 added `hatches`, a bump precisely because a consumer that
-    # ignores a field can describe a structure that will not form, with nothing raising.
+    # The output schema is a first-class contract with its own consumers (previewer, the
+    # .schematic export, and any script reading the CLI's JSON), so it gets the same guard as the
+    # input - and needs it for the same reason: LayoutResult v1 added `hatches`, a bump precisely
+    # because a consumer that ignores a field can describe a structure that will not form, with
+    # nothing raising.
     payload = _valid_layout().model_dump()
     payload["version"] = version
     with pytest.raises(ValidationError, match=f"contract version {version}"):

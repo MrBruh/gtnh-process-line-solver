@@ -113,8 +113,8 @@ def test_without_me_the_problem_keeps_every_commodity_physical(
 def test_a_toggle_prints_the_note_once_on_stderr_only(
     capsys: pytest.CaptureFixture[str], solved_problems: list[InputIR]
 ) -> None:
-    # Advisory, like the other notes: the exit code is the layout's, and stdout (the build guide
-    # today) stays free of it so it can still be piped.
+    # Advisory, like the other notes: the exit code is the layout's, and stdout (the layout's
+    # JSON, #203) stays free of it so it still parses when piped.
     assert main([_SAND, "--me", "items"]) == 0
     out, err = capsys.readouterr()
     assert err.splitlines().count(_ITEMS_NOTE) == 1

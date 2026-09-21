@@ -35,11 +35,11 @@ pass (#114).
 A machine that needs one hatch keeps the single-port id (``power:in``); one that needs several
 suffixes them (``power:in#1``, ``power:in#2``, ...). Likewise a tier that fits on one run keeps
 the single-source ids (``power-source:MV`` / ``power:MV``) and one that has to split suffixes them
-(``power-source:MV#1``, ``power:MV#2``, ...), so the common case reads unchanged in the build guide
-and previewer.
+(``power-source:MV#1``, ``power:MV#2``, ...), so the common case reads unchanged in the layout and
+the previewer.
 
-**How each source is itself powered is left to the builder** - the build guide says so; the layout
-marks where an external source must feed in. Source *position* optimization (packing groups by
+**How each source is itself powered is left to the builder**; the layout marks where an external
+source must feed in. Source *position* optimization (packing groups by
 proximity rather than by load alone) is still Phase 2.
 """
 

@@ -1,4 +1,4 @@
-"""The route -> blocks derivation the build guide counts and the previewer draws.
+"""The route -> blocks derivation the previewer draws and a bill of materials counts.
 
 This code was JavaScript in the viewer template until now, which is why it is worth being precise
 about what is being tested. Two of the three things it does are just bookkeeping; one is a build
@@ -10,7 +10,7 @@ instruction:
    This is the build instruction: as a coloured bar it was harmless smoothing, as a real block it
    tells a player which cable to place, and under-sizing is what burns. The sand line's cell
    ``(2,0,1)`` really does carry a 1x and a 2x segment, so it pins the rule on a real artifact.
-3. **The block** - the name and label. The stand-in flag has to survive to the guide, and the
+3. **The block** - the name and label. The stand-in flag has to survive to the tally, and the
    dataset name has to actually *join* to a manifest entry, so a real solve is checked against the
    committed manifest rather than the names being asserted against the table that produced them.
 """
@@ -224,8 +224,9 @@ def test_a_normal_pipe_names_its_family_bare() -> None:
 def test_a_sized_pipe_names_its_size_in_the_label_and_the_block(
     size: PipeSize, label: str, dataset_name: str
 ) -> None:
-    """The build guide prints both, and the exporter lowers the id to an mID (#165): a label that
-    said "tin item pipe" beside ``gt_pipe_tin_huge`` would have the builder place the wrong one."""
+    """A bill of materials shows both, and the exporter lowers the id to an mID (#165): a label
+    that said "tin item pipe" beside ``gt_pipe_tin_huge`` would have the builder place the wrong
+    one."""
     pipe = RouteMaterial(family=PipeFamily.ITEM_PIPE, material="tin", size=size)
     block = route_block(Commodity.ITEM, 1, pipe)
     assert (block.label, block.dataset_name) == (label, dataset_name)
@@ -271,7 +272,7 @@ def test_a_huge_item_pipe_is_a_full_cube_with_no_arms() -> None:
 
 def test_an_unspecified_route_keeps_its_gauge_and_the_old_wording() -> None:
     """``None`` is what every route said before ``material`` existed and what a mixed-tier trunk
-    still says, so it degrades to the guide's previous label rather than to a blank."""
+    still says, so it degrades to the generic label a route always had rather than to a blank."""
     power = route_block(Commodity.POWER, 4, None)
     assert (power.label, power.dataset_name, power.stand_in) == ("4x power cable", None, False)
     fluid = route_block(Commodity.FLUID, 1, None)
@@ -326,7 +327,7 @@ def test_a_real_solves_blocks_all_resolve_in_the_committed_manifest() -> None:
     assert blocks, "the sand line routes power; its cables must appear"
     for block in blocks:
         assert block.stand_in, (
-            "every v1 material is representative; the guide must be able to say so"
+            "every v1 material is representative; a bill of materials must be able to say so"
         )
         assert block.dataset_name in names, f"{block.label} resolves to nothing"
 

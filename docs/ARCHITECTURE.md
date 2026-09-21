@@ -4,8 +4,9 @@ Source of truth for how `gtnh_solver` is built. If code disagrees with this doc,
 doc as intent and reconcile.
 
 > **Build status.** This doc records the *design intent* - the nine engineering-review decisions
-> (#1 to #9) plus #10, decided since. Phase 1 has shipped a crude but end-to-end version of the
-> whole pipeline; a few refinements below are **Phase 2 (not yet built)** and are flagged inline.
+> (#1 to #9) plus #10 to #12, decided since. Phase 1 has shipped a crude but end-to-end version of
+> the whole pipeline; a few refinements below are **Phase 2 (not yet built)** and are flagged
+> inline.
 > What is implemented today is the `Added` list in [`../CHANGELOG.md`](../CHANGELOG.md); the
 > phased plan is in [`ROADMAP.md`](ROADMAP.md).
 
@@ -43,15 +44,19 @@ doc as intent and reconcile.
           │ OUTPUT IR  │────────►│ Previewer  │  three.js
           │ (layout    │         └────────────┘
           │  schema,   │────────►┌────────────┐
-          │  versioned)│         │ Build guide│  BoM, per-layer coords
-          └────────────┘         └────────────┘
-   (v1.1+: .schematic export, round-trip import, theoretical-min-volume mode, Pareto)
+          │  versioned)│         │ .schematic │  Schematica build ghost (1.7.10)
+          │            │         └────────────┘
+          │            │────────►┌────────────┐
+          │            │         │ JSON stdout│  the contract itself, when no
+          └────────────┘         └────────────┘  artifact is asked for (decision 12)
+   (v1.1+: round-trip import, theoretical-min-volume mode, Pareto)
 ```
 
 ## Components
 
 - **ir/** - two versioned contracts: the **input IR** (problem) and the **output layout
-  schema** (solution, consumed by previewer + build guide + later export). See [`IR.md`](IR.md).
+  schema** (solution, consumed by the previewer and the `.schematic` export, and published as JSON
+  on stdout by the CLI). See [`IR.md`](IR.md).
 - **adapter/** - parses gtnh-factory-flow's exported plan JSON (the *upstream* exporter
   Zod-validates it; recipes are embedded) into the IR with **Pydantic** models
   (`adapter/plan.py`). No vendoring. On a schema-v2 export it trusts the `resolved` throughput
@@ -113,23 +118,25 @@ doc as intent and reconcile.
   whose power routes never pays for it. It moves no machine, which is why `--fast` gets it too.
 - **system_io.py** - the single source of truth for the line's **boundary I/O** (what to feed in,
   what to collect) and the **power-feed spec** (EU/t plus amperage per voltage tier). Pure over
-  the `InputIR` + `LayoutResult`; both the build guide and the previewer read it, so the two
-  render surfaces cannot drift on what crosses the line's edge.
+  the `InputIR` + `LayoutResult`; the previewer renders it rather than deriving its own, so no
+  render surface can drift on what crosses the line's edge.
 - **route_blocks.py** - the same trade for the line's *routing*: a `Route` is a list of hops, a
   build is a list of blocks, and this resolves one into the other - the per-cell connection mask,
   the gauge (a cell incident to two takes the **thicker**, docs/DOMAIN.md), and the cable/pipe it is
-  drawn as. The build guide counts those blocks and the previewer draws them. The mask used to be
-  JavaScript inside the viewer template, where the one rule in it that is a real build instruction
-  was pinned by nothing.
+  drawn as. The previewer draws those blocks, and `route_block_counts` tallies them into what a
+  bill of materials counts (the previewer's, #202). The mask used to be JavaScript inside the
+  viewer template, where the one rule in it that is a real build instruction was pinned by nothing.
 - **validator/** - independent geometric + rule checks (shares rule *data* with the router,
   not its *logic*). The only automated correctness gate.
-- **buildguide/**, **previewer/**, **cli.py** - outputs and entry point. The previewer skins each
-  block with its extracted GT sprite; a face that resolves none renders Minecraft's magenta/black
-  missing-texture checkerboard, **not** a neutral grey, because so many GT casings are plain grey
-  that a gap was indistinguishable from a correct render (`previewer/html.py`, `_MISSING`). The
-  emitted page treats **plan text as untrusted**: it never builds markup from it (the legend is DOM
-  text nodes), the inlined JSON is `</`-escaped, and the page ships a hash-based CSP - a shared plan
-  is the expected input, not a contrived one.
+- **previewer/**, **schematic/**, **cli.py** - outputs and entry point. `--preview` writes the
+  three.js page, `--schematic` the Schematica ghost; asked for neither, the CLI prints the output
+  IR itself as JSON on stdout (decision 12). The previewer skins each block with its extracted GT
+  sprite; a face that resolves none renders Minecraft's magenta/black missing-texture
+  checkerboard, **not** a neutral grey, because so many GT casings are plain grey that a gap was
+  indistinguishable from a correct render (`previewer/html.py`, `_MISSING`). The emitted page
+  treats **plan text as untrusted**: it never builds markup from it (the legend is DOM text
+  nodes), the inlined JSON is `</`-escaped, and the page ships a hash-based CSP - a shared plan is
+  the expected input, not a contrived one.
 
 ## Engineering decisions (from the review)
 
@@ -235,6 +242,19 @@ doc as intent and reconcile.
     `Violation` - `report.ok` is `not violations` and the solver downgrades on any of them, so
     "not measured" travelling as one would fail every fixtures-only layout. See
     [`DOMAIN.md`](DOMAIN.md).
+
+12. **The output IR is the default output; there is no text build guide** (maintainer decision,
+    #203, 2026-09-21). `gtnh-solve plan.json` with neither `--preview` nor `--schematic` prints
+    the `LayoutResult` as JSON on stdout, infeasible runs included (it carries `status` and
+    `infeasibility`); with either artifact flag stdout stays empty and the artifact is the answer.
+    stdout carries that JSON and **nothing else**, so every warning, note and log line goes to
+    stderr and the output always parses. The exit codes keep their meaning. The text guide this
+    replaces (a bill of materials, placement table, connections and per-layer ASCII maps) had been
+    paused since 2026-07-01 and was removed rather than frozen: the `.schematic` ghost and the
+    preview now say everything it did, better, and it still cost upkeep on every change that
+    touched a layout. Its bill of materials is the one part nothing else replaced yet, and moves to
+    the previewer (#202). The schema is not changed by this, only published, so
+    `LAYOUT_RESULT_VERSION` stays where it is; see [`IR.md`](IR.md).
 
 ## Spatial model
 

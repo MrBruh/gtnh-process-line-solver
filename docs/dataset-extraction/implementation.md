@@ -209,8 +209,8 @@ planning next steps:
 - **No hatch-assignment stage.** The dump records hint *slots* (which the loader turns into face
   capabilities, `io_faces`) and, per hatch slot, the `HatchElement` kinds it accepts (which the
   loader reduces to an output-layer count per variant). But nothing chooses a concrete hatch (input
-  vs output, item vs fluid, tier) or emits it as a placeable block. A build guide cannot yet say
-  "put an LV input hatch here."
+  vs output, item vs fluid, tier) or emits it as a placeable block. No output can yet say "put an
+  LV input hatch here."
 - **Doc-less multiblocks stay placeholders.** A multiblock whose structure failed extraction, or one
   absent from the dataset in use (a fresh clone renders from the committed fixtures, which carry two
   multiblocks), correctly refuses to collapse to a single cube; it renders as its reserved-footprint

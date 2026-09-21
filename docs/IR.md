@@ -150,8 +150,27 @@ against `hatch_cells`).
 
 ## Output layout schema - the solution
 
-What the solver produces; consumed by previewer, build guide, and (later) export. A
-first-class versioned contract, not a previewer-internal format.
+What the solver produces; consumed by the previewer and the `.schematic` export, and **published
+by the CLI** (below). A first-class versioned contract, not a previewer-internal format.
+
+**Published on stdout.** `gtnh-solve plan.json` with neither `--preview` nor `--schematic` prints
+the `LayoutResult` as one JSON document on stdout, and nothing else: every warning, note and log
+line goes to stderr, so the output always parses (`gtnh-solve plan.json | python -m json.tool`,
+or `> layout.json` for a file). With either artifact flag stdout stays empty. The document is:
+
+- the model's **field names** exactly as in the schema below (the contract declares no aliases);
+- **every field**, defaults included, so `version` is always stated and a valid layout carries an
+  explicit `"infeasibility": null`;
+- indented by two spaces, with non-ASCII escaped (`\uXXXX`), so it survives a console or a
+  redirect of any encoding;
+- readable back with `LayoutResult.model_validate_json`, which is what the CLI's tests pin.
+
+It is printed on **infeasible runs too** (exit 1), since it carries `status` and `infeasibility`;
+the reason is also printed to stderr as before. When the adapter refuses the plan before any solve
+(a line no layout can satisfy, #112), the document is the same shape the solver returns when the
+machines do not fit at all: that `status` and `infeasibility`, the `seed`, and nothing placed.
+Exit codes 2 (unloadable export) and 3 (internal error) print nothing on stdout. A consumer should
+check `version` before reading further: the versioning rules below are what it can rely on.
 
 ```
 LayoutResult

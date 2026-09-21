@@ -4,7 +4,8 @@
 
 A working solver: one re-runnable annealed solution, 2.5D **buildable-compact** objective,
 all three commodities single-channel + per-commodity ME toggle, single-block **and**
-bounding-box multiblocks, the previewer and the build guide, the validator + tests. Free-form
+bounding-box multiblocks, the previewer and a build guide (a text one at first, retired on
+2026-09-21 for the `.schematic` export; see below), the validator + tests. Free-form
 routing with the realizability invariant; shared-amperage power. Target ~30-50 machines with
 an anytime time budget.
 
@@ -39,8 +40,19 @@ a machine's connections and the does-enough-power-actually-arrive check (lane E)
 **textures in the previewer** (sprite resolution now covers every block the two shipped example
 lines place; a third-party tail is still unresolved, see
 [`dataset-extraction/texture-resolution.md`](dataset-extraction/texture-resolution.md)) alongside
-the `system_io` boundary summary feeding both render surfaces (lane F). The full `Added`/`Changed`
+the `system_io` boundary summary the previewer renders (lane F). The full `Added`/`Changed`
 list is in [`../CHANGELOG.md`](../CHANGELOG.md).
+
+**Retired: the text build guide (2026-09-21, #203).** The Phase 1 text guide (a bill of
+materials, placement table, connections and per-layer ASCII maps, which `gtnh-solve` printed by
+default) is removed, together with `-o/--output`, which existed only to write it. It had been
+paused since 2026-07-01 and still cost upkeep on every change that touched a layout. It went
+because the Schematica `.schematic` export (#96, #161, #162) and the 3D preview now cover
+everything it said, better: the ghost is the layer-by-layer build, and the preview shows the
+placements, the connections (with hover), the system inputs and outputs, and the power. The one
+part nothing replaced, the **bill of materials**, moves to the preview (#202). Asked for neither
+artifact, `gtnh-solve` now prints the `LayoutResult` itself as JSON on stdout
+([`IR.md`](IR.md)), so a script consumes the layout directly.
 
 ### Phase 1 - thin end-to-end slice (prove the path)
 
@@ -60,6 +72,7 @@ silently invalid.
    Power: sum the load on the produced path/tree, size at each machine's delivered voltage (cable
    loss over distance, flat 1 EU/block), and size-or-reject; no optimization yet.
 6. **previewer + build guide (minimal)** - emit the `LayoutResult` so it is visible/buildable.
+   (The text guide this step built was retired in Phase 2; see "Retired" above.)
 7. **validator** - certify it (done; it gates Phase 1's output).
 8. **the Assignment (in-game)** - can a human build this line from the output, and does it run?
    This also spot-checks the starter dataset's tiers/face-rules/throughputs against reality.
@@ -116,7 +129,7 @@ greenfield.)
 | C | placement -> SA/LNS + routing-aware cost | Phase 1 placement |
 | D | router -> rip-up/reroute + shared-amperage power optimization | Phase 1 router |
 | E | validator rule-half (tier caps, amperage, face reachability) | dataset + router |
-| F | previewer / build guide polish | Phase 1 previewer |
+| F | previewer polish (the text build guide is retired, see above) | Phase 1 previewer |
 
 **Merge C + D before the solver loop** (both feed it - coordinate the placement<->router
 interface). Then the CLI ties it together.
@@ -129,7 +142,9 @@ interface). Then the CLI ties it together.
   with a congestion heatmap. (v1 covers seed comparison by re-run + preview.)
 - **Round-trip `.schematic` import (Approach C)** - bootstraps the dataset from real builds,
   yields a harvested validation corpus + a compactness benchmark.
-- **Paste-ready `.schematic` export** - gated on the Assignment's fidelity result.
+- **Paste-ready `.schematic` export** - gated on the Assignment's fidelity result. *Shipped
+  ahead of this list: `--schematic` writes a Schematica ghost that loads in game (#96, #161), and
+  `--inspect-schematic` reads one back (#162).*
 - **GT++ quad/nonuple multi-fluid pipes** - channel-packing within a single block.
 - **EnderIO conduits** - early/mid-game item transport backend.
 - **CP-SAT placement backend** - optional exact solver for small sub-blocks.

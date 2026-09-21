@@ -7,10 +7,10 @@ power. Nothing in this solver has ever chosen between them - the router sizes a 
 be looked up; it is a choice, and this module is where it is made once, in the open.
 
 **It is a stand-in and says so.** Every :class:`RouteMaterial` built here carries ``stand_in=True``,
-which the build guide prints, the previewer's legend footnotes, and a ``.schematic`` exporter (#96)
-must refuse to lower into a real block. A cable rendered in Tin when the build needs Aluminium is
-plausible, confident and wrong, which docs/dataset-extraction/texture-resolution.md names as the one
-failure nothing downstream can detect. Counts, gauges and thicknesses are real; only the material is
+which the previewer's legend footnotes and a ``.schematic`` exporter (#96) must refuse to lower
+into a real block. A cable rendered in Tin when the build needs Aluminium is plausible, confident
+and wrong, which docs/dataset-extraction/texture-resolution.md names as the one failure nothing
+downstream can detect. Counts, gauges and thicknesses are real; only the material is
 representative.
 
 The ladder below is the community-standard one - the material a player actually builds at each
@@ -23,8 +23,8 @@ texture dump recorded GT's *unlocalized* name (``cable.tin.02``, ``gt_pipe_bronz
 Pipe``), and the old join silently missed every one of them (#176). :func:`manifest_names` gives
 both spellings of one block, newest first, so a lookup resolves against either dump and neither
 dataset dates the other. The unlocalized form stays the name a layout *publishes*: it is the
-locale-independent one, and it is what the build guide, the previewer scene and the schematic
-goldens already carry.
+locale-independent one, and it is what the previewer scene and the schematic goldens already
+carry.
 
 Sibling of :mod:`gtnh_solver.dataset.voltage`: shared rule data, so the router chooses from it and
 the validator re-derives against it independently (docs/ARCHITECTURE.md decision 4).

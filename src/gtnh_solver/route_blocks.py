@@ -2,15 +2,15 @@
 
 A ``Route`` is a list of hops; a *build* is a list of blocks. Turning one into the other means
 answering four questions per cell - which sides connect, which gauge the cable is, which block that
-is, and what shape it occupies - and both first-party consumers need them:
+is, and what shape it occupies. The **previewer** draws the answer (a cross with one arm per
+connected side, at GT's real thickness), and :func:`route_block_counts` tallies it into the count a
+bill of materials is made of ("12 x 2x tin cable"). The text build guide printed that tally until
+it was retired (#203); the previewer's bill of materials (#202) is to read the same one.
 
-- the **build guide** counts them ("12 x 2x tin cable"), and
-- the **previewer** draws them (a cross with one arm per connected side, at GT's real thickness).
-
-Deriving that twice would let the two surfaces disagree about what the same layout is made of, which
-is the failure ``system_io`` exists to prevent for the line's boundary; this is the same shape for
-its routing, so it lives beside it as a pure function of the contract, and the renderers only
-format the answer.
+Deriving that per surface would let two of them disagree about what the same layout is made of,
+which is the failure ``system_io`` exists to prevent for the line's boundary; this is the same
+shape for its routing, so it lives beside it as a pure function of the contract, and a renderer
+only formats the answer.
 
 It also *moves* the derivation. Until now the per-cell connection mask lived in the viewer template
 (``previewer/html.py``) as a JavaScript ``Map`` keyed ``"x,y,z"`` - the un-CI-testable last mile, so
@@ -31,7 +31,7 @@ the instant those faces carried textures. :func:`route_boxes` builds the shape h
    physically meets it, and under-sizing is what burns.
 2. *The material is a labelled stand-in, never a build spec.* GT gives a voltage tier many cables;
    ``dataset/pipes.py`` picks the representative one and every block built here carries
-   :attr:`RouteBlock.stand_in` so the guide can say so. Counts and gauges are real.
+   :attr:`RouteBlock.stand_in` so a bill of materials can say so. Counts and gauges are real.
 
 Connections are **player state** in GT (a pipe never auto-connects; the player wires each side with
 a wire cutter or soldering iron), so this derives them from the route rather than pretending to read
@@ -63,7 +63,8 @@ class RouteBlock:
     tally key, and it has to stay meaningful for a route that published no material at all.
     """
 
-    #: What to call it in a build guide, e.g. ``"2x tin cable"``, ``"bronze fluid pipe"``.
+    #: What to call it in a bill of materials or a legend, e.g. ``"2x tin cable"``,
+    #: ``"bronze fluid pipe"``.
     #:
     #: The material is GT's *unlocalized* spelling, uncapitalised, because that is the string the
     #: dataset actually carries. Rendering ``niobiumtitanium`` as the "Niobium-Titanium" a player
@@ -282,7 +283,7 @@ def route_block(commodity: Commodity, thickness: int, material: RouteMaterial | 
 
     ``material is None`` is not an error - it is what every route said before the field existed,
     and what a trunk with no single tier still says - so the block keeps the gauge (real) and drops
-    only the material, reading as ``"2x power cable"``: the wording the build guide used before any
+    only the material, reading as ``"2x power cable"``: the generic wording a route had before any
     of this, which is the point.
 
     A pipe names its size the way GT does, as a word in front ("huge tin item pipe"), and the
@@ -307,7 +308,7 @@ def route_block(commodity: Commodity, thickness: int, material: RouteMaterial | 
     )
 
 
-#: What to call a route whose material is unspecified. The wording the build guide has always used.
+#: What to call a route whose material is unspecified: the generic wording a route always had.
 _GENERIC: dict[Commodity, str] = {
     Commodity.ITEM: "item pipe",
     Commodity.FLUID: "fluid pipe",

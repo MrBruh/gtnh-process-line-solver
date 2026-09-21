@@ -1,10 +1,10 @@
 """cli - the ``gtnh-solve`` entry point.
 
-Wires the Phase 1 pipeline into one command: a gtnh-factory-flow exported plan JSON in, a
-human-readable build guide out::
+Wires the Phase 1 pipeline into one command: a gtnh-factory-flow exported plan JSON in, the
+solved layout out::
 
-    gtnh-solve examples/gtnh-sand.json            # print the build guide to stdout
-    gtnh-solve plan.json -o guide.txt             # ...or write it to a file
+    gtnh-solve examples/gtnh-sand.json            # print the LayoutResult contract as JSON
+    gtnh-solve plan.json > layout.json            # ...which is how it goes to a file
     gtnh-solve plan.json --preview view.html      # write a double-clickable 3D preview
     gtnh-solve plan.json --schematic line.schematic  # write a Schematica build ghost
     gtnh-solve --inspect-schematic line.schematic # ...and read one back: blocks + machines
@@ -15,12 +15,20 @@ human-readable build guide out::
     gtnh-solve plan.json --me items --me fluids   # leave those to ME: no pipes laid for them
 
 It loads + adapts the export, solves (place -> auto-output -> item/fluid + power route ->
-self-validate), and renders ``build_guide`` (and, with ``--preview``, a self-contained three.js
-viewer). Exit code: 0 when the layout is fully VALID, 1 when the run could only return an
-explicit infeasibility (the reason is printed to stderr - from the solver, or from the adapter
-for a plan that maps cleanly and states a line no layout satisfies), 2 when the export could not
-be loaded, 3 when the run hit a bug in this program (an exception no stage claimed). 1 and 2 are
-*answers* about the plan; 3 exists so a caller can tell an answer from a crash.
+self-validate), and writes what was asked for: a self-contained three.js viewer with
+``--preview``, a Schematica ghost with ``--schematic``. Asked for neither, it prints the
+``LayoutResult`` itself (docs/IR.md) on stdout, the machine-readable answer a script consumes.
+**stdout carries that JSON and nothing else**: every warning, note and log line goes to stderr, so
+``gtnh-solve plan.json | python -m json.tool`` always parses. With an artifact flag stdout stays
+empty, and the artifact is the answer.
+
+Exit code: 0 when the layout is fully VALID, 1 when the run could only return an explicit
+infeasibility (the reason is printed to stderr - from the solver, or from the adapter for a plan
+that maps cleanly and states a line no layout satisfies), 2 when the export could not be loaded, 3
+when the run hit a bug in this program (an exception no stage claimed). 1 and 2 are *answers*
+about the plan; 3 exists so a caller can tell an answer from a crash. An infeasible run still
+prints its ``LayoutResult``, whose ``status`` and ``infeasibility`` say what the stderr line says;
+exit 2 and exit 3 print nothing on stdout, because there is no layout to print.
 
 ``--preview`` and ``--schematic`` are written whatever the status, because a partial layout is what
 someone debugging a line needs to see; for a non-VALID one a warning comes first, naming what is
@@ -55,7 +63,6 @@ from gtnh_solver.adapter import (
     to_input_ir,
 )
 from gtnh_solver.adapter.core import _effective_handler
-from gtnh_solver.buildguide import build_guide
 from gtnh_solver.dataset import PhysicalDataset, list_versions, load_physical_dataset
 from gtnh_solver.dataset.coverage import format_report, measure
 from gtnh_solver.dataset.roots import extractor_hint, resolve_dataset_path
@@ -101,7 +108,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="gtnh-solve",
         description=(
             "Physical place-and-route solver for GregTech: New Horizons - turns a "
-            "gtnh-factory-flow exported plan into a buildable layout and a text build guide."
+            "gtnh-factory-flow exported plan into a buildable layout. With no --preview or "
+            "--schematic, prints the layout (the LayoutResult contract) as JSON on stdout."
         ),
     )
     parser.add_argument("--version", action="version", version=f"gtnh-solve {__version__}")
@@ -132,9 +140,6 @@ def build_parser() -> argparse.ArgumentParser:
             "stacks tall), minimum enclosing box (volume - stays flat/cubic), or both (balanced); "
             "ignored with --fast"
         ),
-    )
-    parser.add_argument(
-        "-o", "--output", metavar="FILE", help="write the build guide to FILE instead of stdout"
     )
     parser.add_argument(
         "--preview",
@@ -389,8 +394,8 @@ def _warn_unmeasured_power_intake(problem: InputIR, layout: LayoutResult) -> Non
     is a single block), and with no local dump neither applies. That silence used to be
     indistinguishable from "checked and fine", which is the complaint #114 was filed about - so a
     run says plainly how much of its power intake went unchecked. On stderr, like the dataset
-    warnings, so piping the build guide is unaffected; it is a coverage note, not a defect, and it
-    does not touch the exit code.
+    warnings, so the layout JSON on stdout stays parseable; it is a coverage note, not a defect, and
+    it does not touch the exit code.
     """
     unmeasured = validate(problem, layout).unverified_power_intake
     if not unmeasured:
@@ -452,6 +457,25 @@ def _warn_incomplete_export(problem: InputIR, layout: LayoutResult, artifacts: l
     )
 
 
+def _layout_json(layout: LayoutResult) -> str:
+    """``layout`` as the CLI publishes it on stdout: the ``LayoutResult`` contract, as JSON.
+
+    Field names, because the contract declares no aliases and docs/IR.md documents those names;
+    every field, defaults included, so ``version`` and a null ``infeasibility`` are stated rather
+    than left for a reader to know were omitted. Indented by two, like the JSON ``tools/`` writes.
+    It reads back with ``LayoutResult.model_validate_json``.
+
+    **ASCII-escaped**, which is why this goes through ``json.dumps`` rather than
+    ``model_dump_json``. stdout is a console or a redirect whose encoding this program does not
+    choose (cp1252 on a Windows pipe), and a plan's machine and resource names are free text: a
+    raw non-ASCII name can fail to encode on the way out, or land in ``> layout.json`` as bytes a
+    UTF-8 reader then decodes as something else, where a JSON escape reads back as the same string
+    in every parser. pydantic 2.0, the floor this package declares, has no ``ensure_ascii`` switch
+    on ``model_dump_json``.
+    """
+    return json.dumps(layout.model_dump(mode="json"), indent=2)
+
+
 def _report_infeasibility(status: LayoutStatus, detail: Infeasibility) -> int:
     """Print why no layout was produced, and return the exit code for it (always 1).
 
@@ -469,7 +493,7 @@ def _report_infeasibility(status: LayoutStatus, detail: Infeasibility) -> int:
 def _internal_error(exc: BaseException) -> int:
     """Report an exception the pipeline did not expect, and return the exit code for it.
 
-    The stretch after the export is loaded - solve, guide, preview - has no per-stage error
+    The stretch after the export is loaded - solve, serialize, preview - has no per-stage error
     contract: every failure mode it *knows* about is returned as an ``Infeasibility``, so anything
     raised there is a bug. It still must not reach the shell as a bare traceback with whatever
     exit code the interpreter chose (1, the code that means "an explicit infeasibility"), which is
@@ -657,6 +681,10 @@ def main(argv: list[str] | None = None) -> int:
     dataset_version = _dataset_version_for(plan, args.dataset_version)
     physical = _load_physical_or_warn(dataset_version)  # real footprints; None -> 1x1x1
 
+    # Asked for no artifact, the answer is the layout itself, as JSON on stdout. An artifact flag
+    # makes the artifact the answer and keeps stdout empty.
+    publish = not (args.preview or args.schematic)
+
     try:
         problem = to_input_ir(
             plan, physical=physical, producer=producer, me_toggles=_me_toggles(args.me)
@@ -665,7 +693,18 @@ def main(argv: list[str] | None = None) -> int:
         # Listed first because it IS an AdapterError (a ValueError): a plan that maps cleanly and
         # states an unbuildable line is an infeasibility (exit 1), not an unloadable export
         # (exit 2). Reported in the same shape as the solver's own, since the user cannot act on
-        # "which stage noticed" and the reason reads the same either way (#112).
+        # "which stage noticed" and the reason reads the same either way (#112). That holds on
+        # stdout as well: the layout published is the one the solver itself returns when the
+        # machines do not fit at all (the verdict and the seed, nothing placed), so a script
+        # reading stdout gets one shape whichever stage said no.
+        if publish:
+            try:
+                unbuilt = LayoutResult(
+                    status=LayoutStatus.INFEASIBLE, seed=args.seed, infeasibility=exc.infeasibility
+                )
+                print(_layout_json(unbuilt))
+            except Exception as err:  # the last-resort guard; see _internal_error
+                return _internal_error(err)
         return _report_infeasibility(LayoutStatus.INFEASIBLE, exc.infeasibility)
     except _LOAD_ERRORS as exc:
         print(f"error: could not load {args.export!r}: {exc}", file=sys.stderr)
@@ -676,23 +715,17 @@ def main(argv: list[str] | None = None) -> int:
     try:
         layout = solve(problem, seed=args.seed, optimize=not args.fast, objective=args.objective)
         _warn_unmeasured_power_intake(problem, layout)
-        guide = build_guide(problem, layout)
+        # Serialized inside the guard: a layout the contract cannot dump is a bug in this program,
+        # not a verdict about the plan.
+        payload = _layout_json(layout) if publish else None
     except Exception as exc:  # the last-resort guard; see _internal_error
         return _internal_error(exc)
 
-    if args.output:
-        try:
-            # Make the directory it sits in, as --preview and --schematic do: an explicit output
-            # path reads as "put it here", and this write comes after the whole solve (#150).
-            target = Path(args.output)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(guide, encoding="utf-8")
-        except OSError as exc:
-            print(f"error: could not write {args.output}: {exc}", file=sys.stderr)
-            return 2
-        print(f"wrote build guide to {args.output}", file=sys.stderr)
-    elif not (args.preview or args.schematic):
-        print(guide, end="")  # default to stdout, unless the user asked only for an artifact
+    if payload is not None:
+        # Printed on an infeasible run too, ahead of the report below: the JSON carries `status`
+        # and `infeasibility`, so a script reads the verdict from stdout while a person reads the
+        # same reason on stderr.
+        print(payload)
 
     _warn_incomplete_export(
         problem,
@@ -707,7 +740,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.preview:
         # Surface the previewer's texture-resolution summary (which machines got a real GT texture
         # vs a placeholder box, and the jar fetch) on stderr - a per-user info log, added only for
-        # the preview path so the normal build-guide run stays quiet.
+        # the preview path so the plain JSON run stays quiet.
         _enable_previewer_logging()
         try:
             # The same resolved version the footprints came from, so the textures cannot be drawn

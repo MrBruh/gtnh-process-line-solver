@@ -237,9 +237,9 @@ def solved_sand(_sand_session: tuple[InputIR, LayoutResult]) -> tuple[InputIR, L
     genuine ``solve`` - the fixture runs the real thing - so a consumer asserting on the layout
     is asserting on real solver output. What a consumer may *not* do is assert on the act of
     solving: a determinism test needs two independent solves to compare and must call ``solve``
-    itself. ``test_cli`` has cached its own sand solve since the guide tests landed, with the
-    note that re-solving a real line per test made it the slowest file in the suite; this is
-    that fixture lifted to the whole suite.
+    itself. ``test_cli`` has long cached its own sand solve, with the note that re-solving a
+    real line per test made it the slowest file in the suite; this is that fixture lifted to the
+    whole suite.
 
     The copy is not paranoia about a specific test: ``InputIR`` and ``LayoutResult`` are
     ``StrictModel``, so they are mutable, and a session-scoped object that one test edits is a

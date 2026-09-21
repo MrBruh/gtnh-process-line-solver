@@ -1,6 +1,6 @@
-"""Tests for the shared boundary/power derivation (``system_io``) the guide and previewer share.
+"""Tests for the boundary/power derivation (``system_io``) the previewer renders.
 
-Mostly against the real sand line (the artifact both surfaces render), plus a hand-built case for
+Mostly against the real sand line (the artifact the previewer renders), plus a hand-built case for
 the fallbacks: a boundary storage with no sourcing net (no rate) and a dangling output whose
 resource is recovered from an unprefixed port id.
 """

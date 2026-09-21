@@ -355,8 +355,8 @@ This is the cost side, stated plainly.
      **cross-net capacity stays at 1 for items and fluids** until the IR carries a resource key.
      Fluids are worse, not better: `docs/DOMAIN.md:98` is one fluid type per line, and
      `docs/DOMAIN.md:47-50` notes a pipe merely touching a fluid input hatch can drain it;
-   - or model the filter cover a merged run would need, which means the build guide and the
-     export emit it and the hatch/face budget pays for it. That is a much larger change and it is
+   - or model the filter cover a merged run would need, which means the export emits it and
+     the hatch/face budget pays for it. That is a much larger change and it is
      not what the reference build does.
 
 2. **A cell holding a pipe and a cable (without rule B).** Covered above.
@@ -409,8 +409,6 @@ This is the cost side, stated plainly.
 - `validator/core.py::_check_upkeep_hatches` (`:833`) - see section 3 item 4.
 - `router/_grid.py::claim_key` (`:68-82`) - already the right per-machine contention unit for both
   the multiblock and the single-block case. Do not touch it.
-- `buildguide/core.py:332-336` builds an ASCII slice with `setdefault`, so a shared cell shows the
-  first net's character. Cosmetic, and the text guide is on hold.
 
 ---
 

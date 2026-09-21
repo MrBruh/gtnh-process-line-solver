@@ -202,7 +202,7 @@ def route_power(
     failed-net set repeats (a genuine infeasibility, not a tier-ordering accident). This keeps the
     solver's feedback loop from getting a false infeasibility on power that it would not get on
     pipes. When routing genuinely stalls, ALL still-failing nets are reported (#40), not just the
-    first. (The buildguide half of #40 - branching-trunk rendering - is parked; not touched here.)
+    first.
 
     ``claimed_cells`` are the **casing** cells per machine that the item/fluid pipes already spent
     on their own hatches. A machine's hatch cells are one shared pool - an input bus and an energy
@@ -451,7 +451,7 @@ def _route_trunk(
         return sized
     segments, thickness = sized
     # The tier this trunk serves, which is otherwise dropped here and never reaches the previewer or
-    # the build guide: a route records its cells and its gauges but has never said what those gauges
+    # the exporter: a route records its cells and its gauges but has never said what those gauges
     # are rated for. Sinks that disagree get no material at all rather than an arbitrary one - a
     # mixed-tier trunk has no single representative cable, and saying nothing is the honest answer
     # (`route_material` and docs/DOMAIN.md, "Cables and pipes").

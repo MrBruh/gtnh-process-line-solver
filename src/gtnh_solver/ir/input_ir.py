@@ -41,9 +41,9 @@ class Port(StrictModel):
     commodity: Commodity
     direction: IODirection
     #: Reserved: a per-port cover override (conveyor for items, pump/regulator for fluids). Not
-    #: yet produced or consumed - covers are currently derived from commodity at render time
-    #: (buildguide ``_COVER``); this stays ``None`` until a dataset sets the specific cover a port
-    #: needs (e.g. a regulator vs a plain pump).
+    #: yet produced or consumed. The text build guide derived a cover from the commodity at render
+    #: time until it was retired (#203), and no surface names one since; this stays ``None`` until
+    #: a dataset sets the specific cover a port needs (e.g. a regulator vs a plain pump).
     cover: str | None = None
     #: Throughput through this port - items/t, mB/t, or (since IR v3) **EU/t for a power port**.
     #: ``None`` when unknown. The adapter fills it from the recipe; it surfaces boundary I/O rates

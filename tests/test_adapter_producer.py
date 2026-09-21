@@ -285,7 +285,8 @@ def stub_solve(monkeypatch: pytest.MonkeyPatch, solved_sand: tuple[InputIR, Layo
     """Swap the CLI's solver for the session-cached sand layout.
 
     These tests are about flag plumbing, not solving, and the cached layout is a real one. Only
-    usable where the export under test *is* sand, since the guide is rendered against the pair.
+    usable where the export under test *is* sand, since the CLI validates the layout against the
+    problem (the unmeasured-intake note) and a mismatched pair would be checked as one.
     """
     _, layout = solved_sand
 

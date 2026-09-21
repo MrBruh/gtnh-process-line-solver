@@ -25,7 +25,9 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
   routable.
 - The **other five faces** can each be input OR output of items or fluids. Routing a specific
   commodity onto a face may require a **cover** (conveyor for items, pump/regulator for
-  fluids); a cover occupies that face and is recorded for the build guide/export.
+  fluids); a cover occupies that face. The layout records the face each pipe docks on (the
+  route's terminal); the cover follows from the commodity and the port's direction, and no output
+  names it yet.
 - A machine **auto-outputs to a single face**, carrying **either items or fluids, not both**.
   A machine emitting both an item and a fluid output uses auto-output for one and a
   cover-driven output on another non-front face (or ME) for the other.
@@ -310,8 +312,8 @@ where load **sums** along shared segments (Steiner-tree-like):
 ## Cables and pipes as blocks
 
 The sections above say how much flows and how thick the cable must be. This one says **which block
-that is** and what it looks like - what the previewer draws and what the build guide counts. All of
-it is read from the GT source and confirmed against an extractor run of pack 2.8.4.
+that is** and what it looks like - what the previewer draws and what a bill of materials counts.
+All of it is read from the GT source and confirmed against an extractor run of pack 2.8.4.
 
 **A route is drawn as a tier-representative STAND-IN, never as a build spec.** GT gives one voltage
 tier many cable materials - at LV alone tin, lead, cobalt, zinc, soldering alloy and redstone alloy
@@ -319,8 +321,8 @@ all carry 32 V, differing in amperage and loss, not in what they can power. The 
 by **gauge** (summed amperage) and never by material, and no dataset names one, so "the LV cable" is
 a choice rather than a fact. `dataset/pipes.py` makes that choice once - the community-standard
 ladder, the material a player actually builds at each tier - and every `RouteMaterial` it produces
-carries `stand_in=True`. The build guide prints it, the previewer's legend footnotes it, and a
-`.schematic` exporter must refuse to lower it into a real block. Counts, gauges and thicknesses are
+carries `stand_in=True`. The previewer's legend footnotes it, and a `.schematic` exporter must
+refuse to lower it into a real block. Counts, gauges and thicknesses are
 real; only the material is representative. A cable rendered in Tin when the build needs Aluminium is
 plausible, confident and wrong - the failure `docs/dataset-extraction/texture-resolution.md` calls
 unrecoverable.
