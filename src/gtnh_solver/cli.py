@@ -392,7 +392,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.output:
         try:
-            Path(args.output).write_text(guide, encoding="utf-8")
+            # Make the directory it sits in, as --preview and --schematic do: an explicit output
+            # path reads as "put it here", and this write comes after the whole solve (#150).
+            target = Path(args.output)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(guide, encoding="utf-8")
         except OSError as exc:
             print(f"error: could not write {args.output}: {exc}", file=sys.stderr)
             return 2

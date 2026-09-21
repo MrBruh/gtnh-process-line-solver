@@ -588,3 +588,15 @@ def test_write_preview_writes_an_html_file(
     out = write_preview(ir, layout, tmp_path / "view.html")
     assert out.exists()
     assert "gtnh-solve preview" in out.read_text(encoding="utf-8")
+
+
+def test_write_preview_makes_its_parent(
+    tmp_path: Path, solved_sand: tuple[InputIR, LayoutResult]
+) -> None:
+    # As write_schematic already did. The write is the preview's last step, after the scene is
+    # built and every texture baked, so a missing out/ used to discard all of that with a raw
+    # FileNotFoundError (#150). Two levels, so a single mkdir without parents=True would fail.
+    ir, layout = solved_sand
+    out = write_preview(ir, layout, tmp_path / "out" / "nested" / "view.html", textures=False)
+    assert out.is_file()
+    assert "gtnh-solve preview" in out.read_text(encoding="utf-8")

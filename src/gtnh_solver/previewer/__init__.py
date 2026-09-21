@@ -56,6 +56,11 @@ def write_preview(
     generated ``data/<version>/`` dataset; the default resolves the newest local one, else the
     committed fixtures. The jar is fetched at the version the resolved manifest was extracted
     against, so its icons match.
+
+    The directory ``path`` sits in is created if it is missing, as
+    :func:`~gtnh_solver.schematic.write_schematic` already did. The write is the last step, after
+    the scene and every texture are built, so a missing ``out/`` used to throw that work away
+    with a raw ``FileNotFoundError`` (#150).
     """
     scene = build_scene(problem, layout)
     if textures:
@@ -69,5 +74,6 @@ def write_preview(
             _log.warning("texture pass skipped, using placeholder boxes: %s", exc)
             scene.setdefault("textures", {})
     out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(render_html(scene), encoding="utf-8")
     return out
