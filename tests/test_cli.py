@@ -199,37 +199,36 @@ def test_cli_dataset_version_unknown_falls_back(
 
 @cache
 def _line_resolves_multiblocks() -> bool:
-    """Whether the resolved dataset actually knows the nitrobenzene line's machines.
+    """Whether the dataset the CLI resolves knows the nitrobenzene line's machines.
 
-    Generated dumps are local and version-namespaced by policy, so a checkout has only the two
-    committed fixtures (Electric Blast Furnace, Vacuum Freezer) and every machine on this line
-    falls back to the 1x1x1 default. That decides the outcome below, so the test reads it instead
-    of assuming the author's machine.
+    Generated dumps are local and version-namespaced by policy, and the suite pins resolution to
+    the committed data (``conftest._pinned_dataset_root``), which is two fixtures (Electric Blast
+    Furnace, Vacuum Freezer) that this line uses neither of. So every machine on it falls back to
+    the 1x1x1 default, and this reads that off the CLI's own load path rather than asserting it
+    from the outside.
     """
     ir = adapt_file(_NITROBENZENE, physical=_load_physical_or_warn())
     return any(m.footprint.volume > 1 for m in ir.machines)
 
 
 def test_cli_solves_nitrobenzene(capsys: pytest.CaptureFixture[str]) -> None:
-    """End to end on the multiblock line, asserting what the available dataset actually allows.
+    """End to end on the multiblock line, asserting what the pinned dataset actually allows.
 
-    With the real structure dump this is VALID, and the multi-hatch power model is what makes it
-    so: the Coke Oven draws far more than one energy hatch can take, and before that model the MV
-    net was rejected outright. With fixtures alone every machine is a 1x1x1 block, the HV
-    Distillation Tower needs 7 connections against 5 usable faces, and the honest answer is an
-    explicit face-reachability infeasibility.
+    With fixtures alone every machine is a 1x1x1 block, the HV Distillation Tower needs 7
+    connections against 5 usable faces, and the honest answer is an explicit face-reachability
+    infeasibility. With the real structure dump the same line is VALID instead, and the multi-hatch
+    power model is what makes it so: the Coke Oven draws far more than one energy hatch can take,
+    and before that model the MV net was rejected outright.
 
-    Both are asserted rather than folded into a disjunction, because each is a real property of
-    its own configuration. This test read the fixtures case until the energy-hatch model landed
-    and replaced it with an unconditional exit 0 - true on a machine carrying the full dump, and
-    the reason CI has been red since that work was first pushed.
+    Which of the two this asserts used to depend on the machine it ran on. It does not any more
+    (#182): the pin puts every run in the fixtures configuration, so the configuration is asserted
+    first and the outcome unconditionally after it. The full-dump outcome is a real property of a
+    configuration the suite no longer resolves, and would need that dump staged to be tested.
     """
     code = main([_NITROBENZENE])
     assert "# Build guide" in capsys.readouterr().out  # the guide is emitted either way
-    if _line_resolves_multiblocks():
-        assert code == 0
-    else:
-        assert code == 1
+    assert not _line_resolves_multiblocks(), "the suite is pinned to the committed fixtures"
+    assert code == 1
 
 
 def test_cli_partial_invalid_returns_1(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

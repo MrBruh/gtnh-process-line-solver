@@ -186,10 +186,39 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
   Two tests were pinned to the committed 2.8.4 manifest by accident rather than on purpose, so
   they only ever proved the pack that generated it. The cable ladder is now also checked against a
-  locally staged dump where there is one, and `--inspect-schematic`'s "not in this manifest"
-  message is pinned to the committed manifest it is actually about.
+  real 2.9 dump's cable and pipe names on a machine that has generated them locally (since #182;
+  CI has no dump and skips it), and `--inspect-schematic`'s "not in this manifest" message is
+  pinned to the committed manifest it is actually about.
 
 ### Changed
+- **`pytest` answers the same question on every machine: the suite pins the dataset it resolves
+  (`tests/conftest.py`, #182).** `resolve_dataset_path` prefers the newest local `data/<version>/`
+  dump and only falls back to the committed fixtures when none provides a sub-path. That is right
+  for the CLI, where "the version you most recently generated wins" is the documented convenience
+  and `--dataset-version` is the escape hatch, but under `pytest` it made the result depend on local
+  disk: the same tree ran 954 passed / 7 skipped with no dump, and 955 passed / 6 skipped at twice
+  the wall clock with a 2.9 dump staged. CI is always a clean clone, so a break that only appears
+  at the newer pack could never fail it, which is how #176 stayed invisible.
+
+  A session fixture now copies the committed sub-paths into a temp root and points
+  `dataset.roots.DEFAULT_DATA` at it, so every unpinned resolution (CLI, previewer, schematic
+  exporter, `load_physical_dataset()`) lands on the committed data by the resolver's own logic
+  rather than through a stubbed function. A test that wants anything else states it: an explicit
+  `data_dir`, a dump staged under `tmp_path`, or, for a property only a real dump can show, a
+  fixture generated locally from one. With and without a 2.9 dump staged the suite now gives the
+  same passed and skipped counts, with identical per-file coverage under a fixed hypothesis seed.
+  `test_dataset_roots.py` still drives the real mtime preference directly, on temp trees.
+
+  The one check that was about the newer pack on purpose (every cable and pipe the policy draws
+  resolves against a real 2.9 dump) used to read whatever dump was staged in `data/`. It now reads
+  `tests/fixtures/local/manifest_pipe_names_2.9.json`, every pipe-kind display name in a real 2.9
+  manifest, which the new `tools/derive_pipe_names.py` writes from a staged dump by filtering on
+  `kind` with no solver code taking part. That list is dumper output, and nothing a dumper produced
+  is committed, so `tests/fixtures/local/` is gitignored as a whole directory and a file derived
+  from a dump cannot be committed there by accident. Where the list is absent the check skips,
+  naming the command that generates it. **CI never has it, so CI does not run the 2.9 check**,
+  exactly as before this change; it runs only on a machine where someone has generated the list.
+
 - **A display name is no longer assumed unique across the multiblock dump, because in GTNH 2.9 it is
   not.** 2.9 shares 52 display names between two controllers each: GT migrated the GT++ machines into
   `gregtech.*` and kept every original registered as `...Legacy`, so "Industrial Centrifuge" is both

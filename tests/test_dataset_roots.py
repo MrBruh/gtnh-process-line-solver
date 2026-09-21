@@ -218,3 +218,34 @@ def test_an_explicit_pin_is_taken_at_its_word(tmp_path: Path) -> None:
         warnings.simplefilter("error", DatasetWarning)
         got = resolve_dataset_path("textures/manifest.json", version="2.8.4", data_dir=tmp_path)
     assert got == tmp_path / "2.8.4" / "textures" / "manifest.json"
+
+
+# ------------------------------------------------------------ the suite's own pin (#182)
+#
+# Everything above drives resolution on a temp tree, which is what keeps the real mtime preference
+# covered directly. These two assert the other half: that an UNPINNED resolution, the kind every
+# other test file inherits, answers with the committed data and not with whatever dump sits in
+# data/ on this machine.
+
+_COMMITTED_DATA = Path(__file__).resolve().parents[1] / "data"
+
+
+def test_an_unpinned_resolution_sees_no_local_version() -> None:
+    assert list_versions() == [], (
+        "the suite must resolve the committed data; see conftest._pinned_dataset_root"
+    )
+
+
+def test_an_unpinned_resolution_answers_with_the_whole_committed_dataset() -> None:
+    # The pin is a copy, so it is worth proving the copy is complete rather than merely present:
+    # a half-copied multiblocks dir would quietly become "this machine has fewer machines".
+    multiblocks = resolve_dataset_path("multiblocks")
+    assert multiblocks.is_dir()
+    assert {p.name for p in multiblocks.glob("*.json")} == {
+        p.name for p in (_COMMITTED_DATA / "multiblocks").glob("*.json")
+    }
+    manifest = resolve_dataset_path("textures/manifest.json")
+    assert manifest.is_file()
+    assert (
+        manifest.stat().st_size == (_COMMITTED_DATA / "textures" / "manifest.json").stat().st_size
+    )

@@ -63,31 +63,66 @@ during the Assignment - v1's only contact with actual GT behavior.
 - A machine whose distinct I/O commodities exceed its five usable faces → flagged.
 - Empty / single-machine line; the largest line the solver is expected to handle.
 
-## CI sees a smaller dataset than you do
+## The suite sees the same dataset CI does, because it is pinned
 
-**Assert on the dataset the run actually resolved, never on the one your machine has.** Generated
-dumps are local and version-namespaced (`data/<version>/`, gitignored); a fresh checkout and every
-CI job carry only the committed fixtures, which are two multiblocks (Electric Blast Furnace, Vacuum
-Freezer) and an example-scoped texture manifest. `resolve_dataset_path` silently falls back to
-those, so a test written against a full local dump passes for its author and fails in CI.
+**A test asserts against a stated dataset, never against the one your machine happens to hold.**
+Generated dumps are local and version-namespaced (`data/<version>/`, gitignored); a fresh checkout
+and every CI job carry only the committed data, which is two multiblocks (Electric Blast Furnace,
+Vacuum Freezer) and an example-scoped texture manifest. In the CLI `resolve_dataset_path` prefers
+the newest local dump and falls back to those, which is the documented convenience there
+(`--dataset-version` is its escape hatch) - but under `pytest` it made the suite ask a different
+question on every machine.
 
-This is not hypothetical: `test_cli_solves_nitrobenzene` asserted `exit 0` for weeks. With real
-footprints the line solves valid; with fixtures alone every machine falls back to 1x1x1, and its HV
-Distillation Tower needs 7 connections against the 5 usable faces a single block has, so the honest
-answer is exit 1 with a `face_reachability` infeasibility. Nothing caught it because the branch was
-not pushed until long after it was written.
+`tests/conftest.py::_pinned_dataset_root` removes that variable (#182): a session fixture copies the
+committed sub-paths into a temp root and points `dataset.roots.DEFAULT_DATA` at it, so no version
+folder exists to prefer and every unpinned resolution - CLI, previewer, schematic exporter,
+`load_physical_dataset()` - lands on the committed data. Measured before the pin, same tree, one
+variable: 954 passed / 7 skipped with no local dump, 955 passed / 6 skipped and twice the wall clock
+with a 2.9 dump staged. CI, always a clean clone, only ever saw the first, which is how #176 (a
+break that only appears at the newer pack) stayed invisible.
 
-Three ways out, in order of preference:
+That the committed data is *small* still matters, and this is not hypothetical:
+`test_cli_solves_nitrobenzene` asserted `exit 0` for weeks. With real footprints the line solves
+valid; with fixtures alone every machine falls back to 1x1x1, and its HV Distillation Tower needs 7
+connections against the 5 usable faces a single block has, so the honest answer is exit 1 with a
+`face_reachability` infeasibility. Nothing caught it because the branch was not pushed until long
+after it was written.
 
-- **Pass the fixture directory explicitly** (`load_physical_dataset(_DATA_DIR)`), so the test asserts
-  one known configuration and means the same thing everywhere. Most dataset tests do this.
-- **Branch on what resolved**, when both configurations are real properties worth pinning - see
-  `tests/test_cli.py::_line_resolves_multiblocks`. Prefer this to a `0 or 1` disjunction, which
-  passes in every configuration and therefore asserts nothing.
-- **Skip** when the full dump is absent, if the property genuinely cannot be expressed on fixtures.
+So, to test against anything other than the committed data, **state it**, in order of preference:
+
+- **Pass the directory explicitly** (`load_physical_dataset(_DATA_DIR)`), so the test asserts one
+  known configuration and means the same thing everywhere. Most dataset tests do this.
+- **Stage the dataset the test is about** and point at it: write files under `tmp_path` and
+  monkeypatch `DEFAULT_DATA` there (`tests/test_schematic.py`), or pass `data_dir=` directly
+  (`tests/test_dataset_roots.py`, which is where `resolve_dataset_path`'s own newest-first mtime
+  behaviour keeps its coverage).
+- **Generate a local fixture from a dump, and skip without it,** when the property is about a pack
+  only a real dump can speak for. Nothing a dumper produced is committed, not even a filtered slice
+  of it, so such a fixture lives in `tests/fixtures/local/`, which is gitignored as a whole
+  directory. The one there today is the 2.9 cable/pipe name list behind the rename guard in
+  `tests/test_dataset_pipes.py` (#176). With a 2.9 dump staged under `data/<version>/`:
+
+  ```sh
+  python tools/derive_pipe_names.py data/<version>/textures/manifest.json
+  ```
+
+  That filters the manifest's `blocks` on `kind == "pipe"` and takes each `display_name`, with no
+  solver code involved, and writes `tests/fixtures/local/manifest_pipe_names_2.9.json`. It refuses
+  a pruned manifest, since a list taken from one would agree with the stand-in policy by
+  construction.
+
+  **The cost is real: CI has no dump, so CI never runs this check.** It runs only on a machine where
+  someone has generated the list; everywhere else it is reported as skipped, with the command above
+  as the reason. That is the same CI coverage the check had before the pin, when it read a staged
+  dump directly. What the pin changes is only that the input is now stated (a named file with a
+  named skip) rather than whatever `data/` holds, so this one test is the one place the suite's
+  result still depends on the machine: whether that file exists.
+
+What no test may do is inherit whatever sits in `data/` on the machine running it: a green that
+depends on local disk state is not evidence about the code.
 
 The same applies to the texture manifest: the committed one is scoped to the example lines' machines
-and has no hatch, cable or pipe entries at all.
+and has no hatch entries at all.
 
 ## Not auto-testable (manual / in-game)
 
