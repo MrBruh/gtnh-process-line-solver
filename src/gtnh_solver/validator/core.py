@@ -47,27 +47,39 @@ What is checked now (needs only the IR):
   an off-ladder (unknown) tier cannot be verified and is reported as such. A power source's front face
   is its reserved external-feed face and must lie flush on the region boundary (power enters
   from outside the structure; the front-face rule already keeps internal cables off it).
+  item throughput - every item pipe block makes at least as many insertions per service interval
+  as the deliveries GT charges it for (``_check_item_pipe_throughput``): the route's streams are
+  re-derived from its own geometry by GT's nearest-first rule, each charged to the blocks GT's
+  transfer loop charges, on the validator's OWN arithmetic (it shares only the rule DATA in
+  ``dataset/pipe_capacity.py``, never the router's run-wide sizing, which would refuse a build
+  proven to work in game).
 
 What is deferred to the dataset lane (rule data not available yet) - TODO:
-  throughput/tier caps, one-fluid-per-line, and the dataset-specific half of face rules (which
-  faces a given machine type may use, covers). These need the physical-rules dataset; the checks
-  above are the floor they build on.
+  fluid pipe throughput (no fluid capacity data yet, and GT moves fluid by a different mechanism),
+  tier caps, one-fluid-per-line, and the dataset-specific half of face rules (which faces a given
+  machine type may use, covers). These need the physical-rules dataset; the checks above are the
+  floor they build on.
 """
 
 from __future__ import annotations
 
 import math
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from gtnh_solver.dataset import (
     CABLE_LOSS_PER_BLOCK,
     CABLE_MATERIAL_BY_TIER,
     CABLE_THICKNESSES,
+    ITEM_PIPE_CAPACITY,
+    ITEMS_PER_INSERTION,
     PIPE_MATERIAL,
+    STREAM_SERVICE_TICKS,
     UnknownTierError,
     tier_voltage,
 )
+from gtnh_solver.dataset.pipe_capacity import _EPS as _INSERTION_EPSILON
 from gtnh_solver.dataset.voltage import _AMP_EPSILON
 from gtnh_solver.ir import (
     AutoConnection,
@@ -79,6 +91,8 @@ from gtnh_solver.ir import (
     Net,
     PipeFamily,
     Placement,
+    Port,
+    Route,
     Segment,
 )
 from gtnh_solver.ir.nets import placement_index, port_direction_map
@@ -115,6 +129,7 @@ def validate(problem: InputIR, layout: LayoutResult) -> ValidationReport:
     _check_upkeep_hatches(problem, layout, out)
     _check_route_capacity(problem, layout, out)
     _check_route_materials(problem, layout, out)
+    _check_item_pipe_throughput(problem, layout, out)
     _check_pinned(problem, layout, out)
     return ValidationReport(tuple(out), unverified_power_intake=unverified_intake)
 
@@ -139,8 +154,9 @@ def _check_route_materials(problem: InputIR, layout: LayoutResult, out: list[Vio
         if material is None:
             continue
         if material.family is not PipeFamily.CABLE:
-            # A pipe carries no tier (the contract enforces that), and v1 models no throughput, so
-            # there is nothing about it the layout could contradict.
+            # A pipe carries no tier (the contract enforces that), so its material is all there is
+            # to check here. Whether its size can carry its net is a question of where the net's
+            # streams run, which _check_item_pipe_throughput answers per block.
             if material.material != PIPE_MATERIAL.get(route.commodity):
                 out.append(
                     Violation(
@@ -180,6 +196,210 @@ def _check_route_materials(problem: InputIR, layout: LayoutResult, out: list[Vio
                     f"({expected!r})",
                 )
             )
+
+
+@dataclass(frozen=True)
+class _ItemStream:
+    """One producer-to-consumer flow on an item route, and the pipe blocks that pay for it."""
+
+    rate: float  # items/t
+    charged: frozenset[Cell]  # every block GT charges one insertion for each of its deliveries
+
+
+def _check_item_pipe_throughput(
+    problem: InputIR, layout: LayoutResult, out: list[Violation]
+) -> None:
+    """Each item pipe block must make as many insertions as GT charges it for (#190).
+
+    GT counts an item pipe's capacity in *insertions* per window, each landing at most one stack
+    in one inventory (``dataset/pipe_capacity.py``). Which blocks pay for an insertion is read off
+    the transfer loop in ``MTEItemPipe.onPostTick`` (GT5-Unofficial 5.09.51.482, lines 210-224;
+    5.09.54.20 runs the same loop), not assumed. Items enter at the block beside their producer,
+    and that block, the *sender*, scans the run nearest first (``scanPipes``, sorted by summed step
+    size) and walks the order::
+
+        for each block T, nearest first:              charged = charged + [T]
+            while T pushes a stack into an inventory beside it:
+                every block in charged pays one insertion            (lines 221-223)
+
+    So a delivery charges every block the scan reached no later than its target: the blocks between
+    the two, and also any other block no farther from the sender, which is how a block beside a
+    sender pays for a delivery that went the other way. A route carries one size and GT fixes the
+    step per size, so "no farther" is a hop count. Blocks exactly as far as the target are ordered
+    by a HashMap keyed on the pipes' identity hashes, which can change from one session to the next,
+    so they count as charged: a build that works only when that tie breaks its way does not reliably
+    work.
+
+    Where the deliveries go is GT's nearest-first rule in steady state. A sender tops up the nearest
+    consumer with room, and what that one cannot take goes on to the next (``sendItemStack`` fails,
+    nothing is charged, the loop moves on). So producers are matched to consumers nearest pair
+    first, each consumer taking only its share of the net, and each matched pair is a **stream**
+    (:func:`_item_streams`). A stream needs one insertion per :data:`STREAM_SERVICE_TICKS`, which is
+    the in-game calibration rather than a GT figure (see ``dataset/pipe_capacity.py``), plus one per
+    further stack it moves in that time. A block's demand is the sum over the streams it pays for.
+    On the maintainer's parallel sand build, whose geometry and wiring are known::
+
+        stone run: the chest and hammer 3 dock on s, hammer 2 on b, hammer 1 on c
+            s ----- b ----- c      streams charged per 40 ticks:  s 3   b 2   c 1
+            normal tin makes 1 per 40 ticks: refused at s and b.  huge makes 4: accepted
+
+        cobblestone run: each block sits between a stage 1 producer and the consumer above it
+            p ----- q ----- r      streams charged per 40 ticks:  1 each
+            large tin makes 2: accepted (the size the working build used)
+
+    **Not the router's rule, by design** (docs/ARCHITECTURE.md decision 4). The router sizes a whole
+    run for the point where all of its streams could meet (``router/core.py``, ``_pipe_size``). That
+    is safe for laying pipe and wrong as a refusal threshold: it asks for huge on the cobblestone
+    run, where the maintainer's working build has large. This shares only the rule DATA with it
+    (``ITEM_PIPE_CAPACITY``, ``STREAM_SERVICE_TICKS``, ``ITEMS_PER_INSERTION`` and the rounding
+    slack) and never calls ``endpoint_insertions``, ``item_pipe_insertions`` or
+    ``item_pipe_size_for``, so a bug in those is caught here rather than agreed with.
+
+    What it deliberately does not judge:
+
+    - **A route with no material.** ``None`` is the IR's "unspecified pipe" (docs/IR.md) and states
+      no size, so there is no capacity to hold its streams against. Nor can it put a wrong size in
+      front of a builder: every route the router emits carries a size (LayoutResult v2 requires one
+      on every pipe material), and the ``.schematic`` exporter refuses to lower a route with no
+      material at all.
+    - **A material other than the stand-in.** ``_check_route_materials`` already refuses it, and
+      the rule data holds the stand-in's (tin's) capacities only.
+    - **Fluid routes.** GT moves fluid another way: ``MTEFluidPipe.distributeFluid`` splits a volume
+      per tick across every accepting neighbour, the next pipe block included, and counts no
+      insertions. There is no fluid capacity data to check against yet (``dataset/pipes.py`` lays
+      every fluid pipe normal).
+    """
+    nets = {n.id: n for n in problem.nets}
+    ports = {(m.id, p.id): p for m in problem.machines for p in m.faces.ports}
+    for r in layout.routes:
+        material = r.material
+        if r.commodity is not Commodity.ITEM or material is None or material.size is None:
+            continue
+        if material.material != PIPE_MATERIAL[Commodity.ITEM]:
+            continue  # ROUTE_MATERIAL_UNKNOWN already refuses it, and its capacity is not rule data
+        net = nets.get(r.net_id)
+        if net is None:
+            continue  # UNKNOWN_NET already reported by _check_routes
+        size = material.size
+        slots, window = ITEM_PIPE_CAPACITY[size]
+        capacity = slots * STREAM_SERVICE_TICKS / window  # insertions per service interval
+
+        demand: dict[Cell, int] = defaultdict(int)
+        paying: dict[Cell, list[_ItemStream]] = defaultdict(list)
+        for stream in _item_streams(r, net, ports):
+            # The validator's OWN rounding, not dataset.endpoint_insertions: one insertion at least,
+            # since a consumer that is never reached never runs, and one per further stack moved.
+            stacks = stream.rate * STREAM_SERVICE_TICKS / ITEMS_PER_INSERTION
+            need = max(1, math.ceil(stacks - _INSERTION_EPSILON))
+            for cell in stream.charged:
+                demand[cell] += need
+                paying[cell].append(stream)
+
+        for cell in sorted(demand):
+            if demand[cell] <= capacity:
+                continue
+            streams = paying[cell]
+            count = len(streams)
+            out.append(
+                Violation(
+                    ViolationCode.ITEM_PIPE_SIZE_INSUFFICIENT,
+                    f"item route for net {r.net_id!r} block {cell} carries {count} "
+                    f"stream{'' if count == 1 else 's'} of {net.fluid_or_item} "
+                    f"({sum(s.rate for s in streams):g} items/t) needing {demand[cell]} "
+                    f"insertions per {STREAM_SERVICE_TICKS} ticks, but its {size.value} "
+                    f"{material.material} pipe makes only {capacity:g}",
+                )
+            )
+
+
+def _item_streams(
+    route: Route, net: Net, ports: Mapping[tuple[str, str], Port]
+) -> list[_ItemStream]:
+    """``route``'s streams: its producers matched to its consumers, nearest pair first.
+
+    The steady state of GT's nearest-first delivery (:func:`_check_item_pipe_throughput`): the
+    closest producer-consumer pair is served first, as much as that consumer takes, and what is left
+    goes on to the next closest. Distance is hops along the route's own segments, since GT pipes
+    join only where they are wired. Pairs at equal distance are taken in terminal order, a
+    deterministic stand-in for an order GT does not fix either.
+
+    Terminals that are foreign, duplicated or off the route are left out; ``_check_terminals``
+    reports each of those. A net with no producer or no consumer on the route moves nothing here.
+    """
+    adjacency = _route_adjacency(route.segments)
+    endpoints = {(e.machine_id, e.port_id) for e in net.endpoints}
+    seen: set[tuple[str, str]] = set()
+    senders: list[tuple[Cell, float | None]] = []
+    targets: list[tuple[Cell, float | None]] = []
+    for t in route.terminals:
+        key = (t.machine_id, t.port_id)
+        port = ports.get(key)
+        cell = t.cell.as_tuple()
+        if port is None or key not in endpoints or key in seen or cell not in adjacency:
+            continue
+        seen.add(key)
+        side = senders if port.direction is IODirection.OUTPUT else targets
+        side.append((cell, port.rate))
+    if not senders or not targets:
+        return []
+
+    supply, supplied = _endpoint_shares([rate for _, rate in senders], net.throughput)
+    wanted, consumed = _endpoint_shares([rate for _, rate in targets], net.throughput)
+    flow = max(supplied, consumed)  # items/t the whole net moves
+    hops = {cell: _hops_from(adjacency, cell) for cell, _ in senders}
+    pairs = sorted(
+        (hops[s][k], i, j)
+        for i, (s, _) in enumerate(senders)
+        for j, (k, _) in enumerate(targets)
+        if k in hops[s]
+    )
+    streams: list[_ItemStream] = []
+    for reach, i, j in pairs:
+        share = min(supply[i], wanted[j])
+        if share <= _INSERTION_EPSILON:
+            continue  # one of the two is already served; float dust is not a stream
+        supply[i] -= share
+        wanted[j] -= share
+        charged = frozenset(c for c, h in hops[senders[i][0]].items() if h <= reach)
+        streams.append(_ItemStream(share * flow, charged))
+    return streams
+
+
+def _endpoint_shares(rates: list[float | None], throughput: float) -> tuple[list[float], float]:
+    """Each endpoint's fraction of its side of an item net, and the side's total items/t.
+
+    A port with no recorded rate takes an even share of the net's ``throughput``, which is what the
+    adapter writes for a node of identical machines. A side whose rates add up to nothing is split
+    evenly, so each of its endpoints is still served once.
+    """
+    items = [throughput / len(rates) if rate is None else rate for rate in rates]
+    total = sum(items)
+    if total <= _INSERTION_EPSILON:
+        return [1 / len(items)] * len(items), total
+    return [x / total for x in items], total
+
+
+def _route_adjacency(segments: list[Segment]) -> dict[Cell, set[Cell]]:
+    """Each cell of a route and the cells its segments join it to."""
+    adjacency: dict[Cell, set[Cell]] = {}
+    for seg in segments:
+        a, b = seg.start.as_tuple(), seg.end.as_tuple()
+        adjacency.setdefault(a, set()).add(b)
+        adjacency.setdefault(b, set()).add(a)
+    return adjacency
+
+
+def _hops_from(adjacency: Mapping[Cell, set[Cell]], start: Cell) -> dict[Cell, int]:
+    """Hops from ``start`` to every cell of the route it reaches, breadth first."""
+    hops = {start: 0}
+    queue = deque([start])
+    while queue:
+        cell = queue.popleft()
+        for nxt in adjacency[cell]:
+            if nxt not in hops:
+                hops[nxt] = hops[cell] + 1
+                queue.append(nxt)
+    return hops
 
 
 def _check_power_feed(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:

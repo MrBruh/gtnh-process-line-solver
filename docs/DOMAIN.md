@@ -158,12 +158,47 @@ Consequences worth knowing:
 - **Past huge tin there is nothing bigger in the stand-in material.** A run needing more is laid
   huge; the answer is a faster material (brass, electrum, platinum make 2x, 4x, 8x tin's
   insertions), which the stand-in policy does not choose yet. Whether a laid size is enough is the
-  validator's question, not the router's (#190).
+  validator's question, not the router's, and it answers it per block (below).
 - **Sizes are sized against tin, GT's slowest item pipe**, so a builder who swaps in a better
   material at the same size is never short.
 - **Fluid pipes are not sized yet** and are laid at the normal size. A fluid pipe's capacity is a
   plain mB/t figure (a normal bronze pipe takes 120), and the shipped lines' busiest fluid net
   moves 31.25 mB/t, so nothing shipped is short, but it is not yet a rule.
+
+### What the validator checks: the streams through each block (#190)
+
+The router's per-run bound is safe for laying pipe and wrong as a refusal threshold: it would refuse
+the maintainer's working build, which has large pipes where that bound asks for huge. So the
+validator reads what each pipe block is actually charged for, from the same transfer loop
+(`MTEItemPipe.onPostTick`, lines 210-224 at the pinned tag) and on its own arithmetic:
+
+- **A delivery charges every block its sender's scan reached no later than the target.** The sender
+  is the block the producer pushed into. It scans the run nearest first, adds each block it passes
+  to a list, and every successful insertion charges everything on that list. So a delivery pays at
+  the sender, at the target and at every block between them, and also at any other block no farther
+  from the sender. Blocks exactly as far as the target are ordered by a `HashMap` keyed on the pipes'
+  identity hashes, which can change between sessions, so the validator counts them as charged: a
+  build that works only when that order breaks its way does not reliably work.
+- **Deliveries go nearest first, and onward only when a consumer is full.** An insertion a consumer
+  cannot take fails, charges nothing, and the sender tries the next block. In steady state that
+  matches producers to consumers nearest pair first, each consumer taking only its share of the
+  net. Each matched pair is a **stream**, needing one insertion per 40 ticks plus one per further
+  stack it moves.
+- **A block's demand is the sum over the streams it pays for**, against its size's insertions per 40
+  ticks. A saturated block drops out of every scan and stops the scan passing through it
+  (`IMetaTileEntityItemPipe.Util.scanPipes`, lines 57-58), which is how the far consumers starve.
+
+On the parallel sand build the stone chest docks on the end block of its run, so stone for the two
+far hammers crosses that block: 3 streams, huge. The sand run is the mirror image. The cobblestone
+and gravel runs pair each producer with the consumer beside it, 1 stream a block, which the large
+pipes that were built carry with room to spare (a normal pipe would too, by the same calibration,
+though only large has been built). The plain-pipe export is refused on its stone and sand runs and
+the working build is accepted.
+
+The check covers **items only**: GT moves fluid as a volume per tick split across every accepting
+neighbour (`MTEFluidPipe.distributeFluid`), not by insertions, and there is no fluid capacity data
+yet. A route with no material states no size, so it is not judged; the router always publishes one
+and the `.schematic` exporter refuses a route without one.
 
 ## Power (shared-amperage net)
 

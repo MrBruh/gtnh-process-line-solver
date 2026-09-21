@@ -97,9 +97,10 @@ is demonstrably valid-but-bad (too large, unroutable, ugly). This is the recorde
   rather than machines and one machine's intake spreads over as many runs as the cap needs. Still
   open: **source placement** driven by loss (a nearer source instead of thickening a too-lossy
   run), **per-material cable loss** in place of the flat 1 EU/block, and voltage upgrades.
-- **validator (rule half)** - throughput/tier caps, one-fluid-per-line, and the
+- **validator (rule half)** - fluid throughput, tier caps, one-fluid-per-line, and the
   dataset-specific half of face rules, once the physical dataset is real. (The summed-amperage
-  and voltage-drop power checks already shipped, independent of the dataset.)
+  and voltage-drop power checks already shipped, independent of the dataset, and so has item pipe
+  throughput per block, #190.)
 - **tests** - the on-disk golden corpus + broader hypothesis property tests.
 
 #### Parallel lanes (Phase 2 - after the thin slice proves the path)

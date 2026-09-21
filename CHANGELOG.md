@@ -39,6 +39,22 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **`validate()` now refuses an item pipe too thin for the streams through it (#190).** It certified
+  the maintainer's export of the parallel sand line, which then ran at a third of its rate in game
+  because every item run was a plain tin pipe. The new `item_pipe_size_insufficient` violation
+  names the net, the pipe block, its size, the insertions it makes per 40 ticks and the streams it
+  has to carry. That export is now refused on its stone and sand runs, and the maintainer's working
+  build (huge to and from the chests, large between the hammer stages) passes.
+
+  The check is per block, not per run. GT delivers to the nearest consumer with room and charges
+  each delivery to every pipe block its sender's scan reached no later than the target
+  (`MTEItemPipe.onPostTick`), so the validator matches producers to consumers nearest pair first
+  and sums, block by block, the streams each one pays for. It shares only the rule data with the
+  router, whose own rule sizes a whole run for the point where all its streams could meet: used as
+  the threshold, that would have refused the working build's large pipes. Every shipped line solves
+  to the same layout as before and validates as before. A route with no material is not judged (it
+  states no size, and neither the router nor the exporter produces one), and fluid pipes are not
+  covered: GT moves fluid by a different mechanism, and there is no fluid capacity data yet.
 - **An item pipe is now laid at the size its run needs, not always the normal one (#165).** The
   maintainer built our own export of the parallel sand line in game: power ran all nine hammers,
   but every item run was a plain tin pipe and only one stone hammer in three was ever fed, so the
