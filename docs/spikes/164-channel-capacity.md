@@ -122,6 +122,12 @@ routes all four item nets.
 
 3. And then `placement/search.py`. `_face_shortfall` (`:557`) charges one free adjacent cell per
    port (`:615`) and treats a cell two machines could both reach as hostable by only one (`:625`).
+   **Correction (2026-09-20).** The 10.00 below is computed from the golden file's machine
+   facings, and Schematica does not capture those faithfully from GT:NH, so it is not a
+   measurement. Re-measured with uniform facings, the reference and our own layout both score
+   0.00. The argument that this term is wrong for terminal sharing stands on its own; the number
+   does not. See the caveat in `tests/golden/schematic/README.md`.
+
    On the maintainer's own hand build it reads **10.00**, weighted `_W_FACES = 8.0` (`:104`) to
    **80.00**; on our sprawled 220-cell answer it reads **0.00**. The placement cost actively
    forbids the reference geometry, and that weight was tuned by measurement (`:96-103`), so it is
