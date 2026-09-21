@@ -109,6 +109,62 @@ Two more bind the machine at **runtime**, where a structure that formed perfectl
   planned backends: GT++ quadruple (4-channel) and nonuple (9-channel) fluid pipes (turn
   per-cell fluid routing into channel-packing), and EnderIO conduits for early/mid-game.
 
+### An item pipe's capacity is insertions, not items (#165)
+
+Proven in game the expensive way: the maintainer built our export of the parallel sand line with
+plain tin pipes, and only **one of three** stone hammers was ever fed. By item count that pipe
+should have carried the line five times over. The unit was wrong, and GT's source says why
+(`MTEItemPipe`, at the tag the pack pins):
+
+- **A pipe counts insertions.** Every successful `sendItemStack` increments its transfer counter
+  by one whatever it moved, and the pipe stops once the counter reaches its slot count, until the
+  window resets every `mTickTime` ticks. The tooltip calls these "Stacks".
+- **One insertion is one stack into one inventory**, at most 64 items
+  (`insertItemStackIntoTileEntity` calls `moveMultipleItemStacks(..., 1)`).
+- **The nearest inventory is tried first** (`scanPipes`, sorted by routing distance). A working
+  machine always has room for a few more items, so the nearest one takes an insertion every window
+  it is offered one, and a pipe with too few insertions feeds the near machines and starves the far
+  ones. That is the one-hammer-in-three.
+- **A pipe block refuses a new stack until it is empty** (`allowPutStack`), so each source that
+  feeds a run fills its own block, and that block needs an insertion to drain it.
+
+GT builds every item pipe from its huge size's slot count `H` (`ItemPipeBuilder`; tin has
+`H = 2`), and for tin that gives, per size:
+
+| size | mID | insertions per window | per 40 ticks |
+|---|---|---|---|
+| tiny | 5589 | 1 per 160 ticks | 0.25 |
+| small | 5590 | 1 per 80 ticks | 0.5 |
+| normal | 5591 | 1 per 40 ticks | 1 |
+| large | 5592 | 1 per 20 ticks | 2 |
+| huge | 5593 | 2 per 20 ticks | 4 |
+
+**What GT does not settle** is how often an endpoint must be served for its machine never to run
+dry, which depends on covers, recipe times and buffers a plan does not carry. The solver takes it
+from the one measurement there is: the plain pipe (1 per 40 ticks) fed one hammer and not two, so
+**each endpoint needs one insertion per 40 ticks**, plus one more for each further stack it moves in
+that time. A run's demand is the larger of its two sides, summed over their endpoints: all the
+sinks it tops up, or all the source blocks it drains. The router lays the smallest size that meets
+it, for the run as a whole (`router/core.py`, `_pipe_size`; the figures are
+`dataset/pipe_capacity.py`).
+
+Consequences worth knowing:
+
+- **Sized per run, not per segment**, unlike a cable. Where GT's nearest-first routing sends items
+  depends on buffers the layout does not model, so the run takes the size of the point where every
+  stream on its crowded side can meet. A run whose producers and consumers pair off along it (the
+  maintainer's hand build, one producer and one consumer per pipe block) needs less, and may be
+  over-sized by one step. Over-sizing never starves anything.
+- **Past huge tin there is nothing bigger in the stand-in material.** A run needing more is laid
+  huge; the answer is a faster material (brass, electrum, platinum make 2x, 4x, 8x tin's
+  insertions), which the stand-in policy does not choose yet. Whether a laid size is enough is the
+  validator's question, not the router's (#190).
+- **Sizes are sized against tin, GT's slowest item pipe**, so a builder who swaps in a better
+  material at the same size is never short.
+- **Fluid pipes are not sized yet** and are laid at the normal size. A fluid pipe's capacity is a
+  plain mB/t figure (a normal bronze pipe takes 120), and the shipped lines' busiest fluid net
+  moves 31.25 mB/t, so nothing shipped is short, but it is not yet a rule.
+
 ## Power (shared-amperage net)
 
 Power is **not** a disjoint per-pipe flow. Multiple machines pull amperage down a shared

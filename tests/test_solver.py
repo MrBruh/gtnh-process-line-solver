@@ -27,6 +27,7 @@ from gtnh_solver.ir import (
     Machine,
     MachineFaceRef,
     Net,
+    PipeSize,
     Placement,
     Port,
     Route,
@@ -129,6 +130,13 @@ def test_solve_the_parallel_line_reaches_a_valid_layout() -> None:
     layout = solve(ir)
     assert layout.status is LayoutStatus.VALID, layout.infeasibility
     assert validate(ir, layout).ok
+
+    # And every item run is laid big enough to reach all three machines of its stage (#165). The
+    # maintainer built this line with plain tin pipes and only one stone hammer in three was fed.
+    item_routes = [r for r in layout.routes if r.commodity is Commodity.ITEM]
+    assert len(item_routes) == 4
+    assert all(r.material is not None for r in item_routes)
+    assert {r.material.size for r in item_routes if r.material} == {PipeSize.HUGE}
 
 
 # The optimized path's determinism is proven over generated problems by

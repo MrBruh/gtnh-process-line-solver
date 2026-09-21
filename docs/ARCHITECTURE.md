@@ -80,8 +80,11 @@ doc as intent and reconcile.
   (priced A*, PathFinder-style; power trunks keep failed-first rip-up/reroute); ME-toggle
   skipping; the shared-amperage power primitive. It owns the **auto-output vs pipe** decision (`router/auto.py`,
   `assign_auto_outputs`): adjacent 1-source-1-sink item/fluid nets take GT's free auto-output,
-  only the rest are piped. *(Phase 2, lane D: the margin→channels-per-edge cap + cell→block
-  realizability, and power optimization beyond size-or-reject.)*
+  only the rest are piped. Each item pipe it lays is **sized** from what the run carries, in GT's
+  own unit: insertions per window, one per endpoint on the run's crowded side
+  (`dataset/pipe_capacity.py`, docs/DOMAIN.md; #165). *(Phase 2, lane D: the
+  margin→channels-per-edge cap + cell→block realizability, and power optimization beyond
+  size-or-reject.)*
 - **solver/** - orchestrates the place↔route feedback loop (built: a bounded **multi-start grid**
   - SA weight modes x seeds - that fully routes + validates every attempt and keeps the best
   VALID layout by a quality ranking, penalizing the nets a pass leaves unrouted - and the power

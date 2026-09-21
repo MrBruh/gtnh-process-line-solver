@@ -13,14 +13,17 @@ from __future__ import annotations
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from ._base import StrictModel, check_contract_version
-from .enums import Commodity, Facing, LayoutStatus, PipeFamily
+from .enums import Commodity, Facing, LayoutStatus, PipeFamily, PipeSize
 from .geometry import Cell, CellCoord
 
 #: Bump on any breaking change to the output contract; record it in ``ir/__init__.py``.
 #: v1 added ``LayoutResult.hatches``. Additive, and yet a bump: a consumer that ignores it
 #: renders a build for a machine with no maintenance hatch and no muffler, which will not run.
 #: Omitting a required block is breaking even though nothing raises.
-LAYOUT_RESULT_VERSION = 1
+#: v2 added ``RouteMaterial.size``, a bump for the same reason: a consumer that ignores it builds
+#: every pipe at the normal size, and a normal tin pipe starved two of three parallel machines in
+#: game (#165).
+LAYOUT_RESULT_VERSION = 2
 
 #: Allowed GT cable thicknesses, smallest first (1x/2x/4x/8x/12x/16x; docs/DOMAIN.md). The single
 #: source: this contract enforces membership on every power route, and ``dataset`` re-exports the
@@ -109,11 +112,20 @@ class RouteMaterial(StrictModel):
 
     ``material`` is GT's unlocalized name (``"tin"``, ``"niobiumtitanium"``), which is stable across
     locales and is what the texture manifest keys on. See docs/DOMAIN.md, "Cables and pipes".
+
+    ``size`` is a pipe's gauge and, like a cable's thickness, it is **real**, not a stand-in: GT
+    counts an item pipe's capacity in insertions per window and that count grows with the size, so
+    a run built one size too small starves the machines furthest along it (#165). Required on a
+    pipe and invalid on a cable, the mirror of ``tier``: a cable's gauge is amperage, carried per
+    segment by ``Route.thickness_per_segment``. It is sized against the stand-in material, and the
+    stand-in is the weakest of its family (tin is GT's slowest item pipe), so a builder who swaps in
+    a better material at the same size is never short. Added in LayoutResult v2.
     """
 
     family: PipeFamily
     material: str = Field(min_length=1)
     tier: str | None = None  # cables only: the voltage tier this gauge ladder is rated for
+    size: PipeSize | None = None  # pipes only: the gauge, tiny..huge
     stand_in: bool = True
 
 
@@ -173,6 +185,10 @@ class Route(StrictModel):
             # producer that filled the field in by rote rather than because it knew something.
             if (self.material.tier is None) is (self.material.family is PipeFamily.CABLE):
                 raise ValueError("material.tier is required on cables and invalid on pipes")
+            # The mirror image: a pipe with no size is the silent "normal" every v1 route built,
+            # which is the failure v2 exists to end, so a producer has to say which size it chose.
+            if (self.material.size is None) is (self.material.family is not PipeFamily.CABLE):
+                raise ValueError("material.size is required on pipes and invalid on cables")
             if not self.material.stand_in:
                 raise ValueError("v1 route materials are stand-ins; stand_in must be True")
         return self

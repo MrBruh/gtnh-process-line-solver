@@ -26,7 +26,7 @@ purpose (docs/ROADMAP.md): one channel per cell; the per-edge multi-channel cap 
 docking, priced A*) live in ``_grid`` so this router and ``router.power`` route over one grid
 model.
 
-Four phases (item/fluid nets; power is ``router.power``'s job)::
+Five phases (item/fluid nets; power is ``router.power``'s job)::
 
     nets
       |  [1] auto-assign  router.auto: adjacent 1-source-1-sink nets take GT's free auto-output
@@ -43,10 +43,14 @@ Four phases (item/fluid nets; power is ``router.power``'s job)::
       |                   reserved, and foreign-terminal cells are hard, contested cells cost
       |                   base + present-sharing + history.
       v
-    [4] negotiate         any cell shared by 2+ nets? raise its price (history grows every round
-                          it stays contested) and re-route every net; repeat until collision-free
-                          or the round budget exhausts - then keep a maximal collision-free
-                          subset and report the rest as genuine congestion.
+      |  [4] negotiate    any cell shared by 2+ nets? raise its price (history grows every round
+      |                   it stays contested) and re-route every net; repeat until collision-free
+      |                   or the round budget exhausts - then keep a maximal collision-free
+      |                   subset and report the rest as genuine congestion.
+      v
+    [5] size              each routed item pipe takes the smallest gauge whose GT insertion rate
+                          reaches every endpoint on its crowded side (``_pipe_size``, #165);
+                          fluid pipes stay at the normal size.
 
 Returns the auto-connections plus the routes, or an explicit ``Infeasibility`` naming the net
 that could not dock, route, or win a contested cell - never raises for the expected case,
@@ -62,16 +66,24 @@ from dataclasses import dataclass
 from itertools import pairwise
 from types import MappingProxyType
 
-from gtnh_solver.dataset import route_material
+from gtnh_solver.dataset import (
+    DEFAULT_PIPE_SIZE,
+    ROUTED_PIPE_SIZES,
+    endpoint_insertions,
+    item_pipe_size_for,
+    route_material,
+)
 from gtnh_solver.ir import (
     AutoConnection,
     CellBox,
     Commodity,
     Infeasibility,
     InputIR,
+    IODirection,
     Machine,
     MachineFaceRef,
     Net,
+    PipeSize,
     Placement,
     Route,
     Segment,
@@ -371,14 +383,60 @@ def _negotiate(
             commodity=net.commodity,
             terminals=terminals_by_net[net.id],
             segments=segments_by_net[net.id],
-            # A pipe's material carries no tier - v1 models no throughput, so every item or fluid
-            # route is the one representative pipe of its family (docs/DOMAIN.md).
-            material=route_material(net.commodity),
+            # One representative material per family (docs/DOMAIN.md), at the size the run needs:
+            # a pipe carries no tier, but it does carry a gauge, and too thin a one starves (#165).
+            material=route_material(net.commodity, size=_pipe_size(net, machines)),
         )
         for net in nets
         if net.id in routed_ids
     ]
     return routes, failures
+
+
+def _pipe_size(net: Net, machines: Mapping[str, Machine]) -> PipeSize:
+    """The size ``net``'s pipe is laid at, chosen from what the run has to carry (#165).
+
+    GT counts an item pipe's capacity in *insertions*, each landing one stack in one inventory, and
+    tries the nearest inventory first (``dataset/pipe_capacity.py``). So a run must reach every
+    endpoint on its crowded side within each service interval, and the nearest one always has room
+    for a few more: a pipe that cannot make that many insertions feeds the near machines and starves
+    the far ones, which is exactly the one-hammer-in-three the maintainer saw in game. Both sides
+    count. Its sinks each need topping up; its sources each fill a pipe block that GT refuses to
+    refill until it is empty (``MTEItemPipe.allowPutStack``), so each needs an insertion to drain it.
+    The demand is the larger side's sum of :func:`~gtnh_solver.dataset.endpoint_insertions`, which
+    is where the rate enters: an endpoint moving more than a stack per interval needs a second.
+
+    Sized per net rather than per segment, unlike a cable. A cable's load sums along a known tree;
+    where GT's nearest-first routing sends items depends on buffers the layout does not model, so
+    the whole run takes the size of its busiest possible point, which is where every stream on the
+    crowded side meets. That can over-size a run whose endpoints pair off along it, which is the
+    safe direction: a bigger pipe never starves anything.
+
+    Fluid routes are not sized yet and keep the normal size (``dataset/pipes.py``). A demand beyond
+    the largest size of the stand-in material is laid at that largest size: nothing thicker exists,
+    choosing a faster material is not a policy this solver makes, and the validator is the gate
+    that must refuse a run too thin for its net (#190).
+    """
+    if net.commodity is not Commodity.ITEM:
+        return DEFAULT_PIPE_SIZE
+    sides: dict[IODirection, list[float | None]] = {IODirection.OUTPUT: [], IODirection.INPUT: []}
+    for endpoint in net.endpoints:
+        machine = machines.get(endpoint.machine_id)
+        port = (
+            next((p for p in machine.faces.ports if p.id == endpoint.port_id), None)
+            if machine is not None
+            else None
+        )
+        if port is not None:
+            sides[port.direction].append(port.rate)
+    demand = 0
+    for rates in sides.values():
+        # A port with no recorded rate takes an even share of the net's throughput, which is what
+        # the adapter would have written for a node of identical machines.
+        share = net.throughput / max(len(rates), 1)
+        demand = max(demand, sum(endpoint_insertions(share if r is None else r) for r in rates))
+    size = item_pipe_size_for(max(demand, 1))  # a routed net always has an endpoint to reach
+    return size if size is not None else ROUTED_PIPE_SIZES[Commodity.ITEM][-1]
 
 
 #: How many docks deep the re-seat search will look to free a contested cell. Depth 1 already

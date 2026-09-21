@@ -39,8 +39,8 @@ from gtnh_solver.adapter import adapt_file
 from gtnh_solver.dataset import (
     CABLE_MATERIAL_BY_TIER,
     CABLE_THICKNESSES,
-    DEFAULT_PIPE_SIZE,
     PIPE_MATERIAL,
+    ROUTED_PIPE_SIZES,
     cable_display_name,
     list_versions,
     load_physical_dataset,
@@ -118,6 +118,8 @@ def _route_keys(full: dict[str, Any], tiers: set[str]) -> set[str]:
     route today: cable thickness follows summed amperage, so re-solving a line at a different seed
     can move a segment between gauges, and a preview that silently lost its cable at 8x would be a
     puzzling bug rather than an obvious one. Six entries per tier is a rounding error in the file.
+    Pipes follow the same rule for the same reason: every size the router can lay a pipe at
+    (``ROUTED_PIPE_SIZES``, #165), not only the ones today's examples happen to need.
 
     **A wanted name that resolves to nothing stops the run.** This used to keep what it found and
     drop the rest, which against a dump whose spelling had moved on wrote a committed manifest with
@@ -132,7 +134,9 @@ def _route_keys(full: dict[str, Any], tiers: set[str]) -> set[str]:
         for gauge in CABLE_THICKNESSES
     }
     wanted |= {
-        pipe_display_name(material, DEFAULT_PIPE_SIZE) for material in PIPE_MATERIAL.values()
+        pipe_display_name(material, size)
+        for commodity, material in PIPE_MATERIAL.items()
+        for size in ROUTED_PIPE_SIZES[commodity]
     }
     keys: set[str] = set()
     missing: list[str] = []

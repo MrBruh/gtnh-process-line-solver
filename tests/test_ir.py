@@ -32,6 +32,7 @@ from gtnh_solver.ir import (
     Net,
     PinnedIO,
     PipeFamily,
+    PipeSize,
     Placement,
     Port,
     Route,
@@ -494,14 +495,20 @@ def test_route_material_is_optional_and_absent_means_unspecified() -> None:
     assert Route(net_id="i", commodity=Commodity.ITEM).material is None
 
 
+def _pipe(family: PipeFamily = PipeFamily.ITEM_PIPE, **over: object) -> RouteMaterial:
+    kwargs: dict[str, object] = {"family": family, "material": "tin", "size": PipeSize.NORMAL}
+    kwargs.update(over)
+    return RouteMaterial(**kwargs)
+
+
 def test_route_material_family_must_match_its_commodity() -> None:
     assert _power(_cable()).material == _cable()
-    item = RouteMaterial(family=PipeFamily.ITEM_PIPE, material="tin")
+    item = _pipe()
     assert Route(net_id="i", commodity=Commodity.ITEM, material=item).material is item
-    fluid = RouteMaterial(family=PipeFamily.FLUID_PIPE, material="bronze")
+    fluid = _pipe(PipeFamily.FLUID_PIPE, material="bronze")
     assert Route(net_id="f", commodity=Commodity.FLUID, material=fluid).material is fluid
     with pytest.raises(ValidationError):  # an item pipe cannot carry power
-        _power(RouteMaterial(family=PipeFamily.ITEM_PIPE, material="tin"))
+        _power(_pipe())
     with pytest.raises(ValidationError):  # nor a cable items
         Route(net_id="i", commodity=Commodity.ITEM, material=_cable())
 
@@ -511,12 +518,35 @@ def test_route_material_tier_is_a_cable_fact_only() -> None:
     filling the field in by rote rather than because it knew something."""
     with pytest.raises(ValidationError):
         _power(_cable(tier=None))
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="tier"):
+        Route(net_id="i", commodity=Commodity.ITEM, material=_pipe(tier="LV"))
+
+
+def test_route_material_size_is_a_pipe_fact_only() -> None:
+    """The mirror of ``tier`` (LayoutResult v2, #165). A pipe with no size is the silent "normal"
+    every v1 route built, which starved two machines of three in game, so a producer must name one;
+    a cable's gauge is its per-segment thickness, so a size on one is filled in by rote."""
+    with pytest.raises(ValidationError, match="size is required on pipes"):
+        Route(net_id="i", commodity=Commodity.ITEM, material=_pipe(size=None))
+    with pytest.raises(ValidationError, match="size is required on pipes"):
         Route(
-            net_id="i",
-            commodity=Commodity.ITEM,
-            material=RouteMaterial(family=PipeFamily.ITEM_PIPE, material="tin", tier="LV"),
+            net_id="f",
+            commodity=Commodity.FLUID,
+            material=_pipe(PipeFamily.FLUID_PIPE, material="bronze", size=None),
         )
+    with pytest.raises(ValidationError, match="invalid on cables"):
+        _power(_cable(size=PipeSize.NORMAL))
+    with pytest.raises(ValidationError):  # the ladder is closed: no size GT does not build
+        _pipe(size="quadruple")
+
+
+def test_route_material_size_round_trips_as_its_plain_name() -> None:
+    route = Route(net_id="i", commodity=Commodity.ITEM, material=_pipe(size=PipeSize.HUGE))
+    assert '"size":"huge"' in route.model_dump_json()
+    again = Route.model_validate_json(route.model_dump_json())
+    assert again.material is not None
+    assert again.material.size is PipeSize.HUGE
+    assert again == route
 
 
 def test_route_material_must_admit_it_is_a_stand_in() -> None:

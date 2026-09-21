@@ -77,6 +77,7 @@ from gtnh_solver.ir import (
     Net,
     PinnedIO,
     PipeFamily,
+    PipeSize,
     PlacedHatch,
     Placement,
     Port,
@@ -316,6 +317,8 @@ def _materials(commodity: Commodity) -> st.SearchStrategy[RouteMaterial | None]:
         # validator has to *report*, and reporting is the thing under test.
         material=st.sampled_from(("tin", "polyethylene", "steel", "invented")),
         tier=st.sampled_from(_TIERS) if family is PipeFamily.CABLE else st.none(),
+        # A pipe must name its size (LayoutResult v2) and a cable must not; any size is legal.
+        size=st.none() if family is PipeFamily.CABLE else st.sampled_from(list(PipeSize)),
     )
 
 

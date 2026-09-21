@@ -34,6 +34,7 @@ from gtnh_solver.ir import (
     LayoutResult,
     LayoutStatus,
     PipeFamily,
+    PipeSize,
     Route,
     RouteMaterial,
     Segment,
@@ -201,15 +202,71 @@ def test_a_cable_names_its_gauge_and_its_manifest_entry() -> None:
     )
 
 
-def test_a_pipe_names_its_family_and_carries_no_gauge() -> None:
+def test_a_normal_pipe_names_its_family_bare() -> None:
     for commodity, family, material in (
         (Commodity.FLUID, PipeFamily.FLUID_PIPE, "bronze"),
         (Commodity.ITEM, PipeFamily.ITEM_PIPE, "tin"),
     ):
-        block = route_block(commodity, 1, RouteMaterial(family=family, material=material))
+        pipe = RouteMaterial(family=family, material=material, size=PipeSize.NORMAL)
+        block = route_block(commodity, 1, pipe)
         assert block.label == f"{material} {commodity.value} pipe"
         assert block.dataset_name == f"gt_pipe_{material}"
         assert block.stand_in
+
+
+@pytest.mark.parametrize(
+    ("size", "label", "dataset_name"),
+    [
+        (PipeSize.LARGE, "large tin item pipe", "gt_pipe_tin_large"),
+        (PipeSize.HUGE, "huge tin item pipe", "gt_pipe_tin_huge"),
+    ],
+)
+def test_a_sized_pipe_names_its_size_in_the_label_and_the_block(
+    size: PipeSize, label: str, dataset_name: str
+) -> None:
+    """The build guide prints both, and the exporter lowers the id to an mID (#165): a label that
+    said "tin item pipe" beside ``gt_pipe_tin_huge`` would have the builder place the wrong one."""
+    pipe = RouteMaterial(family=PipeFamily.ITEM_PIPE, material="tin", size=size)
+    block = route_block(Commodity.ITEM, 1, pipe)
+    assert (block.label, block.dataset_name) == (label, dataset_name)
+
+
+def test_a_pipe_material_with_no_size_is_refused_rather_than_drawn_normal() -> None:
+    """Only a material that never joined a ``Route`` can lack a size; guessing "normal" for it is
+    the silent fallback LayoutResult v2 exists to end."""
+    with pytest.raises(ValueError, match="has no size"):
+        route_block(Commodity.ITEM, 1, RouteMaterial(family=PipeFamily.ITEM_PIPE, material="tin"))
+
+
+@pytest.mark.parametrize(
+    ("family", "commodity", "size", "blocks"),
+    [
+        (PipeFamily.ITEM_PIPE, Commodity.ITEM, PipeSize.NORMAL, 0.5),
+        (PipeFamily.ITEM_PIPE, Commodity.ITEM, PipeSize.LARGE, 0.75),
+        (PipeFamily.ITEM_PIPE, Commodity.ITEM, PipeSize.HUGE, 1.0),
+        (PipeFamily.FLUID_PIPE, Commodity.FLUID, PipeSize.HUGE, 0.875),
+    ],
+)
+def test_a_pipe_is_drawn_at_its_own_sizes_thickness(
+    family: PipeFamily, commodity: Commodity, size: PipeSize, blocks: float
+) -> None:
+    """GT's constructors, per family: the two agree up to large and part at huge, where an item
+    pipe fills its block and a fluid pipe does not (docs/DOMAIN.md)."""
+    hop = [Segment(start=CellCoord(x=0, y=0, z=0), end=CellCoord(x=1, y=0, z=0), channel=0)]
+    material = RouteMaterial(family=family, material="tin", size=size)
+    route = Route(net_id="n", commodity=commodity, segments=hop, material=material)
+    cells = route_cells(route)
+    assert cells
+    assert all(rc.thickness_blocks == pytest.approx(blocks) for rc in cells)
+
+
+def test_a_huge_item_pipe_is_a_full_cube_with_no_arms() -> None:
+    """At a full block thick there is no room left for an arm, so GT draws the cell as one cube;
+    a corner cell must not grow arms that stick out of its own block."""
+    cell = (0, 0, 0)
+    boxes = route_boxes(cell, frozenset({(1, 0, 0), (0, 1, 0)}), 1.0)
+    assert len(boxes) == 1
+    assert boxes[0].size == (1.0, 1.0, 1.0)
 
 
 def test_an_unspecified_route_keeps_its_gauge_and_the_old_wording() -> None:

@@ -48,11 +48,23 @@ def _pipe(display_name: str) -> dict[str, Any]:
     return {"kind": "pipe", "display_name": display_name}
 
 
-#: The six cable gauges plus both pipes, as a dump spells them at each pack. An LV line wants
-#: every one of these, so either dict is a *complete* answer and neither is a partial one.
+#: The six cable gauges plus every pipe size the router lays, as a dump spells them at each pack.
+#: An LV line wants every one of these, so either list is a *complete* answer and neither is a
+#: partial one. The large and huge tin pipes joined when the router began sizing item runs (#165);
+#: both spellings are copied from real extractions, the 2.9 ones from the 2.9.0-beta-2 dump.
 _GAUGES = (1, 2, 4, 8, 12, 16)
-_AS_284 = [f"cable.tin.{gauge:02d}" for gauge in _GAUGES] + ["gt_pipe_bronze", "gt_pipe_tin"]
-_AS_29 = [f"{gauge}x Tin Cable" for gauge in _GAUGES] + ["Bronze Fluid Pipe", "Tin Item Pipe"]
+_AS_284 = [f"cable.tin.{gauge:02d}" for gauge in _GAUGES] + [
+    "gt_pipe_bronze",
+    "gt_pipe_tin",
+    "gt_pipe_tin_large",
+    "gt_pipe_tin_huge",
+]
+_AS_29 = [f"{gauge}x Tin Cable" for gauge in _GAUGES] + [
+    "Bronze Fluid Pipe",
+    "Tin Item Pipe",
+    "Large Tin Item Pipe",
+    "Huge Tin Item Pipe",
+]
 
 
 def _dump(names: list[str]) -> dict[str, Any]:
@@ -76,6 +88,19 @@ def test_a_cable_the_dump_does_not_name_stops_the_run() -> None:
     assert "cable.tin.01" in message, "the run must name what it could not find"
     assert "1x Tin Cable" in message, "and both spellings it looked for"
     assert "cable.tin.02" not in message, "only the missing one; the rest resolved"
+
+
+def test_a_pipe_size_the_router_lays_but_the_dump_lacks_stops_the_run() -> None:
+    """The same guard for a size: a committed manifest without the huge pipe would pass every
+    eyeball check and then refuse to export the parallel sand line (#165)."""
+    tool = _tool()
+
+    with pytest.raises(SystemExit) as raised:
+        tool._route_keys(_dump([n for n in _AS_284 if n != "gt_pipe_tin_huge"]), {"LV"})
+
+    message = str(raised.value)
+    assert "gt_pipe_tin_huge" in message
+    assert "Huge Tin Item Pipe" in message
 
 
 def test_both_of_gts_spellings_are_accepted_for_the_same_block() -> None:

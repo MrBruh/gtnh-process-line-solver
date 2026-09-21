@@ -31,7 +31,7 @@ solver solves:
 |---|---|---|
 | bounding box | 3x3x4 = 36 cells | 11x4x5 = 220 cells |
 | solid blocks | 27 | 75 |
-| item pipes | 12 (6 huge, 6 large) | 40 (all plain `gt_pipe_tin`) |
+| item pipes | 12 (6 huge, 6 large) | 40 (all `gt_pipe_tin_huge` since #165; all plain `gt_pipe_tin` before) |
 | cables | 3 (2x `cable.tin.08`, 1x `cable.tin.12`) | 23 (3x 1x, 18x 2x, 2x 4x) |
 | machines | 9 hammers, 2 chests, 1 source | the same |
 
