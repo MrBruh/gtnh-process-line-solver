@@ -1,10 +1,11 @@
 """Session-wide test setup: what the suite resolves, and how much of the machine it takes.
 
-Three things live here. **The dataset pin** (``_pinned_dataset_root``) fixes the one input that
+Four things live here. **The dataset pin** (``_pinned_dataset_root``) fixes the one input that
 otherwise varies per machine, so ``pytest`` answers the same question everywhere. **The shipped
 example solves** (``solved_sand``, ``solved_nitrobenzene``) are run once per session and handed out
 as private copies. **The two resource dials** below bound how much of the box a run holds; they
-change nothing about *what* is tested.
+change nothing about *what* is tested. **The hypothesis profile** (``HYPOTHESIS_PROFILE``, at the
+bottom) keeps a contended box from failing a property test on wall clock alone.
 
 ``pyproject.toml`` runs the suite under ``-n auto`` because it is CPU-bound and every test is
 independent (see the ``addopts`` comment). ``auto`` means *every* core, so a local ``pytest`` pins
@@ -36,6 +37,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from hypothesis import settings
 
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.dataset import roots
@@ -259,3 +261,33 @@ def solved_nitrobenzene(
     """
     ir, layout = _nitrobenzene_session
     return ir.model_copy(deep=True), layout.model_copy(deep=True)
+
+
+# --------------------------------------------------------------- the hypothesis profile
+
+HYPOTHESIS_PROFILE = "gtnh"
+"""The settings profile every property test runs under: Hypothesis's own pick, minus the deadline.
+
+Hypothesis fails an example that runs past 200 ms, with ``DeadlineExceeded``, or with ``Flaky``
+when the replay comes in under it. That budget is wall clock, and wall clock is exactly what
+``-n auto`` on a busy machine takes away: an example that slows down because every core is taken
+measures the box, not the code (#216). Three solver properties had opted out one by one; the other
+24 ``@given`` tests kept the default.
+
+**Built on whichever built-in profile Hypothesis loaded, not on ``default``.** With ``CI`` set,
+Hypothesis loads its ``ci`` profile, which already has no deadline and also derandomizes, drops the
+example database and prints reproduction blobs. A profile built on ``default`` would silently take
+those away from CI; built this way it changes nothing there, and locally only the deadline.
+
+It sets no ``max_examples``, so the ``property_examples()`` budgets are untouched: whatever a test's
+own ``@settings`` names wins, and the profile only fills in what the test leaves unset. It loads at
+import because a ``settings`` object copies the active profile when it is created, which is when
+its decorator runs, and pytest imports this module before any test module.
+"""
+
+settings.register_profile(
+    HYPOTHESIS_PROFILE,
+    settings.get_profile(settings.get_current_profile_name()),
+    deadline=None,
+)
+settings.load_profile(HYPOTHESIS_PROFILE)

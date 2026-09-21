@@ -3,7 +3,8 @@
 These hold a promise about the *machine*, not the code under test: a local ``pytest`` must leave
 the box usable. That promise is invisible to every other test here and easy to break by accident
 (the Windows priority call fails silently when its ``argtypes`` are dropped - that bug is exactly
-what ``test_lower_priority_actually_lowers_it`` would have caught), so it gets its own file.
+what ``test_lower_priority_actually_lowers_it`` would have caught), so it gets its own file. The
+hypothesis profile is the other side of the same promise: a busy box must not fail the suite either.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import os
 import sys
 
 import pytest
+from hypothesis import settings
 
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.ir import CellCoord, InputIR, LayoutResult, LayoutStatus
@@ -20,6 +22,7 @@ from ._helpers import property_examples
 from .conftest import (
     _DEFAULT_CPU_FRACTION,
     _SAND,
+    HYPOTHESIS_PROFILE,
     _cpu_fraction,
     _env_flag,
     _lower_priority,
@@ -196,6 +199,26 @@ def test_property_examples_honors_the_override_or_falls_back(
 ) -> None:
     monkeypatch.setenv("GTNH_TEST_HYPOTHESIS_FRACTION", raw)
     assert property_examples(200) == expected
+
+
+# ------------------------------------------------------------- the hypothesis profile
+
+
+def test_property_tests_run_without_a_deadline() -> None:
+    """A contended machine must not fail a property test on wall clock alone (#216).
+
+    Checked twice. The registered profile, because under ``CI`` Hypothesis's own ``ci`` profile is
+    deadline-free too, so only this catches the profile going missing there. The *active* settings,
+    because a profile that is registered but never loaded, or loaded over, changes nothing. Not the
+    profile's name: ``--hypothesis-verbosity`` legitimately loads a renamed child of it.
+    """
+    assert settings.get_profile(HYPOTHESIS_PROFILE).deadline is None
+    assert settings().deadline is None
+    # A test's own @settings keeps what it names and inherits the rest from the profile, so the
+    # property_examples() budgets survive and the deadline still goes.
+    per_test = settings(max_examples=property_examples(300))
+    assert per_test.max_examples == property_examples(300)
+    assert per_test.deadline is None
 
 
 # ------------------------------------------------------- the shared shipped-line fixtures
