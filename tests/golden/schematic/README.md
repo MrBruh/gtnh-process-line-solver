@@ -76,11 +76,15 @@ Built in game by the maintainer, it established:
 
 The throughput failure is the useful part. It is why this file is kept even though the build it
 describes does not fully work: it is the reference that #165 (choosing a gauge) and #190 (the
-validator refusing a pipe too thin for its net) are measured against. `validate()` certified it, so
-it is also the concrete case of the validator passing a layout that fails in game.
+validator refusing a pipe too thin for its net) are measured against. `validate()` certified it at
+the time, which made it the concrete case of the validator passing a layout that fails in game.
+Since #190 it is refused, on the five pipe blocks of the stone and sand runs that carry more streams
+than a plain pipe's one insertion per 40 ticks, and `tests/test_golden_sand_parallel.py` pins that.
 
 The Schematica copy stays because it is the only record of the gauges that **do** work: huge on the
-two runs to and from a chest, large on the two between hammer stages.
+two runs to and from a chest, large on the two between hammer stages. Its twelve pipes sit on
+exactly the export's twelve cells, so the same test reads those gauges from it block by block onto
+the export's wiring, and pins that the validator accepts the result.
 
 ## What they establish
 

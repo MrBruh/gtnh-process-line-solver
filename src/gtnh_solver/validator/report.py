@@ -81,6 +81,10 @@ class ViolationCode(str, Enum):
     ROUTE_MATERIAL_UNKNOWN = (
         "route_material_unknown"  # a material outside the sanctioned stand-in policy - invented
     )
+    # item throughput (independent re-check of GT's insertion count per pipe block, #190)
+    ITEM_PIPE_SIZE_INSUFFICIENT = (
+        "item_pipe_size_insufficient"  # a pipe block makes fewer insertions than its streams need
+    )
     # placed hatches (LayoutResult v1): the record must describe a hatch that could actually exist
     HATCH_NOT_ON_MACHINE = "hatch_not_on_machine"  # its cell is not a body cell of its machine
     HATCH_FACES_INWARD = "hatch_faces_inward"  # it faces its own structure, so it moves nothing

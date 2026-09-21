@@ -9,11 +9,13 @@ still reported invalid (``report.ok is False``) - the validator's verdict is ind
 from __future__ import annotations
 
 import math
+import re
+from collections import Counter
 from collections.abc import Callable
 from itertools import pairwise
 
 import pytest
-from hypothesis import given
+from hypothesis import assume, given
 from hypothesis import strategies as st
 
 from gtnh_solver.adapter import Node, Plan, Recipe, adapt_file, to_input_ir
@@ -36,6 +38,7 @@ from gtnh_solver.ir import (
     Net,
     PinnedIO,
     PipeFamily,
+    PipeSize,
     PlacedHatch,
     Placement,
     Port,
@@ -2495,3 +2498,360 @@ def test_several_mufflers_are_not_a_violation() -> None:
     demanding exactly one here would reject structures GT requires."""
     problem, layout = _upkeep_only("Muffler")
     assert _codes(problem, _with_upkeep(layout, "Muffler", 3)) == set()
+
+
+# ------------------------------------------------------------------------------------------------
+# Item pipe throughput: a pipe block must make the insertions GT charges it for (#190)
+# ------------------------------------------------------------------------------------------------
+#
+# Each case is one net on a straight run of pipe blocks along x at (x, 1, 1). A dock is a machine
+# wired to one block: under it, over it, then either side, so one block can hold a producer and a
+# consumer the way the maintainer's parallel sand build pairs its stages.
+
+#: Per dock slot: the machine's offset from its block, the face it docks with, and its front.
+_DOCK_SLOTS: list[tuple[tuple[int, int, int], Facing, Facing]] = [
+    ((0, -1, 0), Facing.UP, Facing.NORTH),
+    ((0, 1, 0), Facing.DOWN, Facing.NORTH),
+    ((0, 0, -1), Facing.SOUTH, Facing.NORTH),
+    ((0, 0, 1), Facing.NORTH, Facing.SOUTH),
+]
+
+_Dock = tuple[int, IODirection, float | None]  # (block, direction, items/t)
+_OUT, _IN = IODirection.OUTPUT, IODirection.INPUT
+
+
+def _pipe_run(
+    size: PipeSize | None,
+    *docks: _Dock,
+    length: int = 3,
+    throughput: float | None = None,
+    commodity: Commodity = Commodity.ITEM,
+    material: str | None = None,
+) -> tuple[InputIR, LayoutResult]:
+    """One net on a run of ``length`` blocks, each dock a machine with one port on one block.
+
+    ``size=None`` publishes the route with no material. ``throughput`` defaults to what the
+    producers' rates add up to, ``material`` to the sanctioned stand-in for ``commodity``.
+    """
+    machines, placements, terminals, endpoints = [], [], [], []
+    used: Counter[int] = Counter()
+    for i, (block, direction, rate) in enumerate(docks):
+        (dx, dy, dz), face, front = _DOCK_SLOTS[used[block]]
+        used[block] += 1
+        mid, port = f"m{i}", "out" if direction is _OUT else "in"
+        machines.append(
+            Machine(
+                id=mid,
+                type="gt.forgehammer",
+                voltage_tier="LV",
+                orientation_options=[front],
+                faces=FaceSpec(
+                    ports=[Port(id=port, commodity=commodity, direction=direction, rate=rate)]
+                ),
+            )
+        )
+        placements.append(_place(mid, block + dx, 1 + dy, 1 + dz, front))
+        terminals.append(
+            Terminal(machine_id=mid, port_id=port, face=face, cell=_coord(block, 1, 1))
+        )
+        endpoints.append(MachineFaceRef(machine_id=mid, port_id=port))
+    if throughput is None:
+        throughput = sum(rate or 0.0 for _, direction, rate in docks if direction is _OUT)
+    problem = InputIR(
+        bounding_region=CellBox(sx=length, sy=3, sz=3),
+        machines=machines,
+        nets=[
+            Net(
+                id="n",
+                commodity=commodity,
+                fluid_or_item="minecraft:stone",
+                throughput=throughput,
+                endpoints=endpoints,
+            )
+        ],
+    )
+    family = PipeFamily.ITEM_PIPE if commodity is Commodity.ITEM else PipeFamily.FLUID_PIPE
+    stand_in = "tin" if commodity is Commodity.ITEM else "bronze"
+    route = Route(
+        net_id="n",
+        commodity=commodity,
+        terminals=terminals,
+        segments=[
+            Segment(start=_coord(x, 1, 1), end=_coord(x + 1, 1, 1), channel=0)
+            for x in range(length - 1)
+        ],
+        material=(
+            None
+            if size is None
+            else RouteMaterial(family=family, material=material or stand_in, size=size)
+        ),
+    )
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route])
+    return problem, layout
+
+
+def _place(mid: str, x: int, y: int, z: int, orientation: Facing) -> Placement:
+    return Placement(machine_id=mid, cell=_coord(x, y, z), orientation=orientation)
+
+
+def _refused(problem: InputIR, layout: LayoutResult) -> dict[int, str]:
+    """Block ``x`` -> the message, for every block refused as too thin for its streams."""
+    refused = {}
+    for v in validate(problem, layout).violations:
+        if v.code is ViolationCode.ITEM_PIPE_SIZE_INSUFFICIENT:
+            found = re.search(r" block \((\d+), 1, 1\) carries ", v.message)
+            assert found, v.message
+            refused[int(found.group(1))] = v.message
+    return refused
+
+
+#: The stone run of the parallel sand build in miniature: the chest and the nearest consumer dock
+#: on block 2, the other consumers on blocks 1 and 0. Block 2 pays for 3 streams, block 1 for 2.
+_ONE_TO_THREE: tuple[_Dock, ...] = ((2, _OUT, 0.3), (2, _IN, 0.1), (1, _IN, 0.1), (0, _IN, 0.1))
+
+#: The stage-to-stage runs in miniature: each block pairs a producer with the consumer beside it.
+_PAIRED: tuple[_Dock, ...] = tuple(
+    dock for block in range(3) for dock in ((block, _OUT, 0.1), (block, _IN, 0.1))
+)
+
+
+@pytest.mark.parametrize(
+    ("size", "refused"),
+    [
+        (PipeSize.TINY, {0, 1, 2}),  # 1 insertion per 160 ticks: 0.25 per 40
+        (PipeSize.SMALL, {0, 1, 2}),  # 0.5 per 40
+        (PipeSize.NORMAL, {1, 2}),  # 1 per 40: enough for the far block's one stream
+        (PipeSize.LARGE, {2}),  # 2 per 40
+        (PipeSize.HUGE, set()),  # 4 per 40
+    ],
+)
+def test_a_senders_block_pays_for_every_consumer_it_serves_past_it(
+    size: PipeSize, refused: set[int]
+) -> None:
+    """GT delivers nearest first, and each delivery charges every block between the sender and the
+    consumer (``MTEItemPipe.onPostTick``). So a block must carry the streams through IT, 3, 2 and 1
+    here, not the run's endpoint count, and each size is refused exactly where that exceeds what it
+    makes per 40 ticks."""
+    problem, layout = _pipe_run(size, *_ONE_TO_THREE)
+    assert set(_refused(problem, layout)) == refused
+    assert set(validate(problem, layout).codes()) <= {ViolationCode.ITEM_PIPE_SIZE_INSUFFICIENT}
+
+
+def test_the_refusal_names_the_net_block_size_capacity_and_what_flows() -> None:
+    problem, layout = _pipe_run(PipeSize.NORMAL, *_ONE_TO_THREE)
+    refused = _refused(problem, layout)
+    assert refused[2] == (
+        "item route for net 'n' block (2, 1, 1) carries 3 streams of minecraft:stone "
+        "(0.3 items/t) needing 3 insertions per 40 ticks, but its normal tin pipe makes only 1"
+    )
+    assert refused[1].startswith(
+        "item route for net 'n' block (1, 1, 1) carries 2 streams of minecraft:stone (0.2 items/t)"
+    )
+
+
+@pytest.mark.parametrize(
+    ("size", "refused"),
+    [(PipeSize.SMALL, {0, 1, 2}), (PipeSize.NORMAL, set()), (PipeSize.LARGE, set())],
+)
+def test_paired_producers_and_consumers_charge_only_their_own_block(
+    size: PipeSize, refused: set[int]
+) -> None:
+    """Every delivery starts and ends on one block, so the run carries one stream a block however
+    many endpoints it has: a normal pipe makes that. Sizing for the run's endpoint count (three a
+    side, which needs huge) would refuse the large pipes the maintainer's working build used."""
+    problem, layout = _pipe_run(size, *_PAIRED)
+    assert set(_refused(problem, layout)) == refused
+
+
+def test_a_block_beside_a_sender_pays_for_a_delivery_that_went_the_other_way() -> None:
+    """GT charges a delivery to every block the sender's scan reached first, not only the blocks
+    between the two, and it orders blocks as far as the target by identity hash (so either way,
+    from one session to the next). Block 1's producer delivers to block 2, and block 0 is as near
+    it as block 2: block 0 pays for that as well as for its own pair, which a reading of "the blocks
+    in between" would miss."""
+    docks = ((0, _OUT, 0.1), (0, _IN, 0.1), (1, _OUT, 0.1), (2, _IN, 0.1))
+    problem, layout = _pipe_run(PipeSize.NORMAL, *docks)
+    refused = _refused(problem, layout)
+    assert set(refused) == {0}
+    assert "block (0, 1, 1) carries 2 streams" in refused[0]
+    problem, layout = _pipe_run(PipeSize.LARGE, *docks)
+    assert validate(problem, layout).ok
+
+
+@pytest.mark.parametrize(
+    ("rate", "size", "refused"),
+    [
+        (1.6, PipeSize.NORMAL, False),  # one full stack per 40 ticks: exactly one insertion
+        (1.7, PipeSize.NORMAL, True),  # a little over a stack needs a second insertion
+        (1.7, PipeSize.LARGE, False),
+        (3.3, PipeSize.LARGE, True),  # over two stacks needs a third
+        (3.3, PipeSize.HUGE, False),
+    ],
+)
+def test_a_stream_moving_more_than_a_stack_per_service_interval_needs_another_insertion(
+    rate: float, size: PipeSize, refused: bool
+) -> None:
+    # One insertion moves one stack at most (MTEItemPipe.insertItemStackIntoTileEntity), so one
+    # fast stream is a demand of its own on every block it crosses.
+    problem, layout = _pipe_run(size, (0, _OUT, rate), (2, _IN, rate))
+    assert set(_refused(problem, layout)) == ({0, 1, 2} if refused else set())
+
+
+def test_a_port_with_no_recorded_rate_takes_an_even_share_of_the_net() -> None:
+    # 4 items/t over two consumers is 2 each, 80 items per 40 ticks: two insertions a stream.
+    # Blocks 0 and 1 carry both streams (4), block 2 the far one only (2).
+    docks = ((0, _OUT, None), (1, _IN, None), (2, _IN, None))
+    problem, layout = _pipe_run(PipeSize.LARGE, *docks, throughput=4.0)
+    assert set(_refused(problem, layout)) == {0, 1}
+    problem, layout = _pipe_run(PipeSize.HUGE, *docks, throughput=4.0)
+    assert validate(problem, layout).ok
+
+
+def test_a_side_that_records_no_flow_still_serves_each_consumer_once() -> None:
+    # A consumer that is never reached never runs, however little it moves: rates that add up to
+    # nothing are split evenly rather than read as nothing to deliver.
+    docks = ((0, _OUT, 0.0), (1, _IN, 0.0), (2, _IN, 0.0))
+    problem, layout = _pipe_run(PipeSize.NORMAL, *docks, throughput=0.0)
+    assert set(_refused(problem, layout)) == {0, 1}
+
+
+def _off_route(problem: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    # Block 2's pair docks somewhere off the route, so only blocks 0 and 1 have streams to charge.
+    (r,) = layout.routes
+    moved = [
+        t.model_copy(update={"cell": _coord(2, 2, 2)}) if t.machine_id in {"m4", "m5"} else t
+        for t in r.terminals
+    ]
+    return problem, layout.model_copy(
+        update={"routes": [r.model_copy(update={"terminals": moved})]}
+    )
+
+
+def _duplicate(problem: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    # A second terminal for block 0's consumer, at the far end: counted, it would be a stream.
+    (r,) = layout.routes
+    extra = r.terminals[1].model_copy(update={"cell": _coord(2, 1, 1)})
+    routes = [r.model_copy(update={"terminals": [*r.terminals, extra]})]
+    return problem, layout.model_copy(update={"routes": routes})
+
+
+def _unknown_port(problem: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    (r,) = layout.routes
+    extra = r.terminals[1].model_copy(update={"port_id": "nowhere", "cell": _coord(2, 1, 1)})
+    routes = [r.model_copy(update={"terminals": [*r.terminals, extra]})]
+    return problem, layout.model_copy(update={"routes": routes})
+
+
+def _foreign(problem: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    # A real consumer the net does not name, wired onto block 2 anyway.
+    stray = _item_machine("stray", direction=_IN, port="in")
+    (r,) = layout.routes
+    extra = Terminal(machine_id="stray", port_id="in", face=Facing.NORTH, cell=_coord(2, 1, 1))
+    return (
+        problem.model_copy(update={"machines": [*problem.machines, stray]}),
+        layout.model_copy(
+            update={
+                "placements": [*layout.placements, _place("stray", 2, 1, 2, Facing.SOUTH)],
+                "routes": [r.model_copy(update={"terminals": [*r.terminals, extra]})],
+            }
+        ),
+    )
+
+
+@pytest.mark.parametrize("mutate", [_off_route, _duplicate, _unknown_port, _foreign])
+def test_a_terminal_that_is_not_a_net_endpoint_on_the_route_carries_nothing(
+    mutate: Mutator,
+) -> None:
+    """Such a terminal is the terminal checks' to report, and it is not a stream: counted, it
+    would crowd the paired run, one stream a block on a normal pipe, into a refusal."""
+    problem, layout = mutate(*_pipe_run(PipeSize.NORMAL, *_PAIRED))
+    report = validate(problem, layout)
+    assert not report.ok  # the terminal checks object
+    assert ViolationCode.ITEM_PIPE_SIZE_INSUFFICIENT not in report.codes(), str(report)
+
+
+def test_a_consumer_the_route_does_not_reach_is_not_served_through_it() -> None:
+    # The run is cut between blocks 1 and 2, so block 0's producer cannot reach block 3's consumer.
+    # The break is ROUTE_DISCONTINUOUS's to report; the size check charges only what can flow.
+    docks = ((0, _OUT, 0.1), (1, _IN, 0.05), (3, _IN, 0.05))
+    problem, layout = _pipe_run(PipeSize.NORMAL, *docks, length=4)
+    (r,) = layout.routes
+    cut = [s for s in r.segments if s.start.x != 1]
+    layout = layout.model_copy(update={"routes": [r.model_copy(update={"segments": cut})]})
+    report = validate(problem, layout)
+    assert ViolationCode.ROUTE_DISCONTINUOUS in report.codes()
+    assert ViolationCode.ITEM_PIPE_SIZE_INSUFFICIENT not in report.codes(), str(report)
+
+
+@pytest.mark.parametrize(
+    ("build", "left_to"),
+    [
+        # No material states no size, so there is nothing to hold the streams against. The router
+        # always publishes one, and the exporter refuses to lower a route without one.
+        (lambda: _pipe_run(None, *_ONE_TO_THREE), set()),
+        # A material outside the stand-in policy is the material check's to refuse, and the rule
+        # data holds no capacity for it.
+        (
+            lambda: _pipe_run(PipeSize.NORMAL, *_ONE_TO_THREE, material="brass"),
+            {ViolationCode.ROUTE_MATERIAL_UNKNOWN},
+        ),
+        # GT moves fluid as a volume per tick split across every neighbour, not by insertions.
+        (lambda: _pipe_run(PipeSize.NORMAL, *_ONE_TO_THREE, commodity=Commodity.FLUID), set()),
+        # A producer with no consumer on its route delivers nowhere, which is its own violation.
+        (
+            lambda: _pipe_run(PipeSize.TINY, (0, _OUT, 0.1), (2, _OUT, 0.1)),
+            {ViolationCode.ROUTE_NET_NO_CONSUMER},
+        ),
+    ],
+)
+def test_what_the_size_check_leaves_to_others(
+    build: Callable[[], tuple[InputIR, LayoutResult]], left_to: set[ViolationCode]
+) -> None:
+    problem, layout = build()
+    assert set(validate(problem, layout).codes()) == left_to
+
+
+def test_a_route_for_an_unknown_net_is_not_sized() -> None:
+    problem, layout = _pipe_run(PipeSize.TINY, *_ONE_TO_THREE)
+    (r,) = layout.routes
+    ghost = layout.model_copy(update={"routes": [r.model_copy(update={"net_id": "ghost"})]})
+    codes = validate(problem, ghost).codes()
+    assert ViolationCode.UNKNOWN_NET in codes
+    assert ViolationCode.ITEM_PIPE_SIZE_INSUFFICIENT not in codes
+
+
+@given(rates=st.lists(st.floats(min_value=0.01, max_value=1.6), min_size=2, max_size=8))
+def test_any_run_of_paired_blocks_is_carried_by_a_normal_pipe(rates: list[float]) -> None:
+    """However long the run and whatever each pair moves, up to a stack per 40 ticks, a block that
+    pairs its producer with its consumer carries one stream, and a normal pipe makes one insertion
+    per 40 ticks. The router's whole-run rule asks for huge on any run of three pairs or more."""
+    paired = [dock for b, rate in enumerate(rates) for dock in ((b, _OUT, rate), (b, _IN, rate))]
+    problem, layout = _pipe_run(PipeSize.NORMAL, *paired, length=len(rates))
+    report = validate(problem, layout)
+    assert report.ok, str(report)
+
+
+@given(
+    length=st.integers(min_value=2, max_value=5),
+    docks=st.lists(
+        st.tuples(
+            st.integers(min_value=0, max_value=4),
+            st.sampled_from([_OUT, _IN]),
+            st.one_of(st.none(), st.floats(min_value=0.0, max_value=5.0)),
+        ),
+        min_size=2,
+        max_size=8,
+    ),
+)
+def test_a_bigger_pipe_never_turns_a_pass_into_a_refusal(length: int, docks: list[_Dock]) -> None:
+    """Capacity grows with size and the demand does not depend on it, so walking up the ladder can
+    only clear refusals. It also fuzzes the stream matching over any mix of producers, consumers
+    and rates, recorded or not."""
+    on_run = [(block % length, direction, rate) for block, direction, rate in docks]
+    assume(max(Counter(block for block, _, _ in on_run).values()) <= len(_DOCK_SLOTS))
+    carried = False
+    for size in PipeSize:  # declaration order is the ladder, smallest first
+        problem, layout = _pipe_run(size, *on_run, length=length, throughput=1.0)
+        refused = _refused(problem, layout)
+        assert not (carried and refused), f"{size.value} refused what a smaller size carried"
+        carried = carried or not refused

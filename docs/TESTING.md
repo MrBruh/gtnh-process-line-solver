@@ -12,11 +12,13 @@ correctness. The strategy works around this with three layers:
    separately-written checking *logic*, so it can catch router bugs (a shared code path
    couldn't). Present today: geometric + structural validity (no overlaps, within bounds,
    pinned I/O honored, unit-step contiguous routes, single-channel capacity, terminal /
-   required-I/O-face reachability, ME-toggled commodities excluded from routing) and the
+   required-I/O-face reachability, ME-toggled commodities excluded from routing), the
    shared-amperage **power** rules (summed amperage <= cable thickness, single-source cable
-   tree, voltage-drop over distance). Deferred to the dataset lane: throughput/tier caps,
-   one-fluid-per-line, the dataset-specific half of face rules, and ME-endpoint *placement*
-   (a toggled commodity is only skipped today, not yet endpoint-placed).
+   tree, voltage-drop over distance), and **item pipe throughput** (each pipe block makes the
+   insertions the streams through it need, #190; its golden cases are the maintainer's
+   parallel-sand export, refused, and his working build, accepted). Deferred to the dataset lane:
+   fluid throughput, tier caps, one-fluid-per-line, the dataset-specific half of face rules, and
+   ME-endpoint *placement* (a toggled commodity is only skipped today, not yet endpoint-placed).
 
 2. **Property tests (hypothesis).** The safety net against the worst failure class. For any
    generated input graph, the solver must return **a valid layout OR an explicit
