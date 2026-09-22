@@ -67,6 +67,18 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **The crowding gate no longer turns away placements whose connections share a pipe block
+  (#164).** `crowded_machines` gave every pipe port a dock cell of its own, so it could not see
+  that terminals of different machines on one net may share one (#194). It named 6 machines
+  crowded on the maintainer's build proven in game, which the validator passes, so the solver
+  discarded exactly the placements #164 wants. For each machine it now seats that machine's own
+  connections together with one stand-in per other net among its neighbours, each able to take any
+  cell that net could use there; a view that cannot be seated proves the machine cannot be hosted.
+  It names the proven build 0 times, still catches the #76 solid row, and no longer depends on the
+  order placements are handed over. It was held back until the router could route what it admits
+  (see the next entry); the two land together, and parallel-sand goes from 11 of 16 valid seeds to
+  16 of 16.
+
 - **The router negotiates dock cells and power together with the paths, so tight placements route
   and the maintainer's parallel-sand placement comes out exactly as he built it (#164).** The old
   router chose every net's dock cells greedily, net by net, before it negotiated any path, and

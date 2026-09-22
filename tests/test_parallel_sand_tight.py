@@ -20,6 +20,7 @@ import pytest
 
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.ir import CellCoord, Facing, InputIR, LayoutStatus, Placement
+from gtnh_solver.placement import crowded_machines
 from gtnh_solver.solver.core import _assemble
 from gtnh_solver.validator import validate
 
@@ -53,6 +54,8 @@ def test_the_fixture_is_the_whole_failure_set() -> None:
     "case", _CASES, ids=[f"seed{c['solve_seed']}-attempt{c['attempt_seed']}" for c in _CASES]
 )
 def test_a_tight_placement_routes_valid(problem: InputIR, case: dict[str, Any]) -> None:
+    # The crowding gate admits it (that is how solve() came to route it), and the router lays it.
+    assert crowded_machines(problem, list(_placements(case))) == ()
     layout, failed = _assemble(problem, _placements(case), case["attempt_seed"])
     assert layout.status is LayoutStatus.VALID, layout.infeasibility
     assert failed == ()
