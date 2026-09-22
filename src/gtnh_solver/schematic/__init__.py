@@ -7,12 +7,13 @@ decoding a file back, and :mod:`.nbt` for the binary format.
 
 from __future__ import annotations
 
-from .core import SchematicError, build_schematic, write_schematic
+from .core import SchematicError, SchematicWarning, build_schematic, write_schematic
 from .read import Schematic, TileEntity, read_schematic
 
 __all__ = [
     "Schematic",
     "SchematicError",
+    "SchematicWarning",
     "TileEntity",
     "build_schematic",
     "read_schematic",

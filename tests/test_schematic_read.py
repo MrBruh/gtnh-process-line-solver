@@ -277,3 +277,37 @@ def test_cli_inspect_reports_an_unreadable_file_as_exit_2(
 
     assert main(["--inspect-schematic", str(broken)]) == 2
     assert "could not read" in capsys.readouterr().err
+
+
+# ------------------------------------------------------------------ GT frame boxes (#212)
+
+_FRAMES = "gregtech:gt.blockframes"
+#: GT material ids (``MaterialsIDMap``): what the maintainer placed, and what the file kept.
+_STEEL, _BLACK_STEEL = 305, 334
+
+
+@pytest.mark.parametrize("name", ["28-sfb", "29-sfb"])
+def test_schematica_keeps_only_the_low_nibble_of_a_frames_material(name: str) -> None:
+    """The maintainer's own saves, one per pack: a Steel frame, a Black Steel frame, a covered Steel.
+
+    A 2.9 frame's world metadata is its material id, and ``Data`` holds four bits, so this is what
+    Schematica does with the rest: it drops them. 305 comes back 1 and 334 comes back 14 (material
+    1 is Hydrogen, 14 Fluorine), with no other tag holding the high bits. The material survives only
+    in a frame with a tile entity, as ``mID = 4096 + material``; that is the shape the exporter
+    writes for every frame (``schematic.core._frame_cell``).
+    """
+    schematic = read_schematic(_GOLDEN / f"{name}.schematic")
+
+    assert schematic.size == (3, 1, 1)
+    assert [schematic.block_at(x, 0, 0) for x in range(3)] == [
+        (_FRAMES, _STEEL & 0xF),
+        (_FRAMES, _BLACK_STEEL & 0xF),
+        (_FRAMES, _STEEL & 0xF),  # the covered one: its "has a tile entity" bit is gone too
+    ]
+    assert schematic.tile_at(0, 0, 0) is None, "a plain frame keeps no trace of its material"
+    assert schematic.tile_at(1, 0, 0) is None
+    covered = schematic.tile_at(2, 0, 0)
+    assert covered is not None
+    assert covered.id == "BaseMetaPipeEntity"
+    assert covered.mid == 4096 + _STEEL
+    assert covered.raw["gt.covers"], "the cover is why this frame has a tile entity at all"

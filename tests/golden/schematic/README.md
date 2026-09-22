@@ -15,6 +15,7 @@ question: what a file Schematica accepts actually contains.
 | `nitrobenzene-reference.schematic` | reference only | A hand-built example of one way to arrange the blocks. **Not solver output**, and not the layout the solver produces. Kept because it is the only sample containing multiblock casings, a controller and hatches. Never assert our output against it cell for cell. |
 | `sand-parallel-reference.schematic` | reference only | The maintainer's own build of `examples/gtnh-parallel-sand.json`, saved from the instance: the same 9 Forge Hammers, 2 Super Chests and power source the solver places, in a 3x3x4 box. **Not solver output**, and well beyond what the solver can currently express. It is the quality target for that line, and the evidence behind the routing limits it is filed under. Never assert our output against it cell for cell. |
 | `sand-parallel-exported.schematic` | **proven in game, in part** | The same build as `sand-parallel-reference.schematic`, written by **our own exporter** rather than by Schematica, and built in game by the maintainer. It carries the wiring and facings the Schematica copy loses. Proven for geometry, wiring, facings and power; **not** for item throughput, which it gets wrong (see below). |
+| `28-sfb.schematic`, `29-sfb.schematic` | **golden, format only** | The maintainer's saves from a 2.8.4 and a 2.9 instance of three frame boxes in a row along +X: a plain Steel frame, a plain Black Steel frame, and a Steel frame with a cover. They settle how Schematica stores a frame, whose world metadata is a material id rather than a nibble (see below). |
 
 None of these is a byte-for-byte expectation for our exporter. All were built by hand in
 game, so they will differ from a solved layout in placement, and the nitrobenzene one also
@@ -112,3 +113,27 @@ the export's wiring, and pins that the validator accepts the result.
 
 Three mIDs in the nitrobenzene reference (1115, 1116, 1117) resolve to nothing in the
 manifest; see #96 for that gap.
+
+## What the frame saves (`28-sfb`, `29-sfb`) establish
+
+In GT 5.09.54 a frame box (`gregtech:gt.blockframes`) stores its **material id** as its world
+metadata (`BlockFrameBox.MATERIAL_MASK`, 0xFFF; Steel is 305, Black Steel 334), plus `MTE_BIT`
+(0x1000) once it has a tile entity. A `.schematic` has four bits of `Data` per cell. Decoded with
+`read_schematic`, both saves say the same thing (#212):
+
+| cell | placed | `Data` | tile entity |
+|---|---|---|---|
+| x=0 | plain Steel frame (305) | 1 | none |
+| x=1 | plain Black Steel frame (334) | 14 | none |
+| x=2 | Steel frame with a cover | 1 | `BaseMetaPipeEntity`, `mID` 4401 = 4096 + 305, with the cover |
+
+So Schematica keeps the **low nibble** of the material and nothing else, and the material survives
+only in a frame that has a tile entity. It cannot survive a paste either: GT creates a frame's tile
+entity only when `MTE_BIT` is in the metadata (`BlockFrameBox.hasTileEntity`), and the nibble cannot
+carry it, so a pasted frame becomes material 1 or 14 (Hydrogen, Fluorine). The exporter therefore
+writes every frame in the covered-frame shape, so the file at least records each frame's material,
+and warns that a paste will get it wrong (`schematic.core._frame_cell`, `SchematicWarning`).
+
+The two saves differ only in what each instance assigns: the block's numeric id (2433 against 3027 in
+`SchematicaMapping`), GT's `nbtVersion` stamp (5.09.51.476 against 5.09.54.133), the cover's encoded
+id, and a zero `mRedstone` tag present only in the 2.8.4 one.
