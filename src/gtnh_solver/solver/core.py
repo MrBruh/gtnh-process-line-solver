@@ -3,10 +3,10 @@
 One *attempt* assembles a layout (docs/ROADMAP.md):
   1. place the machines (simulated annealing over a routing-aware cost, seeded from the
      constructive first-fit solution - so connected machines cluster for auto-output);
-  2. route the item/fluid nets (router.route): the **router** decides from the final geometry
-     which nets GT's free **auto-output** connection covers (router.auto) and lays pipes only
-     for the rest;
-  3. route the synthesized power nets as shared-amperage cable trunks (router.power) - through
+  2. route the nets (router.route): the **router** decides from the final geometry which nets
+     GT's free **auto-output** connection covers (router.auto) and negotiates every other net
+     together - the pipes, and each power net as a reserved tree so the pipes leave its cable room;
+  3. lay the synthesized power nets as shared-amperage cable trunks (router.power) - through
      the **repair pass** (solver.repair), which first relocates each power source onto the
      cheapest cable a real routing can find for it, since the placement cost cannot see cable;
   4. assemble the LayoutResult (or surface the placement/routing/power infeasibility);
@@ -14,29 +14,23 @@ One *attempt* assembles a layout (docs/ROADMAP.md):
      VALID result to ``partial_invalid`` if it proves any violation. The validator's logic is
      written independently of the placer/router precisely to catch their bugs, so running it on
      our own output is what makes the "never returns a silently-invalid layout" promise true
-     end to end (docs/ARCHITECTURE.md #4) - not just an internal `place.ok && route.ok`;
-  6. if a **power net could not be laid**, the **power-first recovery**: power routes last, so
-     the pipes can wall in the very dock cell ``reserve_power_docks`` kept free for it (#226).
-     Route just the failed power nets, before any pipe, then lay the whole attempt again with
-     those trunk cells held from the pipes, and keep whichever of the two passes is better.
+     end to end (docs/ARCHITECTURE.md #4) - not just an internal `place.ok && route.ok`.
 
 One attempt, as ``_assemble`` runs it::
 
     placements
-      |  reserve_power_docks   one free dock cell per power endpoint, hard for pipes
-      |  route                 auto-output, then item/fluid pipes
-      |  power                 repair_power_sources (optimize) or route_power (fast)
-      |  place_hatches         a hatch per connection, plus maintenance and muffler
-      |  validate              VALID, or downgraded to partial_invalid
+      |  route          auto-output, then every other net negotiated together - pipes, plus a
+      |                 reserved tree per power net so the pipes leave its cable room (#164)
+      |  power          repair_power_sources (optimize) or route_power (fast): the real cable
+      |  place_hatches  a hatch per connection, plus maintenance and muffler
+      |  validate       VALID, or downgraded to partial_invalid
       v
-    pass 1 --- VALID, or every power net laid? ---> done
-      |
-      |  a power net failed: route_power(those nets only) against machine bodies + pipe docks
-      |    no trunk even then (walled in by machines, over-amped) ---> done, pass 1 stands
-      v
-    pass 2 = the same five steps, with that trunk reserved alongside the power docks
-      |
-      +--> pass 2 if it is VALID or fails strictly fewer nets, else pass 1
+    the layout, and the nets it names as failed (the feedback loop's signal)
+
+There is no second pass. Power used to route after the pipes with one dock cell held per energy
+port, and a pipe could wall that cell into a pocket, so a failed power net got a power-first
+recovery pass (#226). The power nets now take part in the pipes' negotiation, which leaves their
+cable room, and the recovery never rescued an attempt after that (#164), so it is gone.
 
 ``solve`` wraps that in the **place<->route feedback loop** (docs/ARCHITECTURE.md #1, #6), which
 is also where layout *quality* is judged: cheap placement-time proxies cannot see dock faces or
@@ -61,9 +55,6 @@ the "optimize or not" choice the planned unified site exposes to the builder.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
-from dataclasses import dataclass
-
 from gtnh_solver.ir import (
     Commodity,
     Infeasibility,
@@ -74,7 +65,6 @@ from gtnh_solver.ir import (
     Placement,
     Route,
 )
-from gtnh_solver.ir.geometry import Cell
 from gtnh_solver.placement import (
     Objective,
     crowded_machines,
@@ -84,7 +74,6 @@ from gtnh_solver.placement import (
 from gtnh_solver.router import (
     claims_by_machine,
     place_hatches,
-    reserve_power_docks,
     route,
     route_power,
 )
@@ -291,66 +280,10 @@ def _assemble(
     power source to take in its draw is a *placement* defect, not a bug - every cable is correctly
     thick and only the distance is wrong - so its power net is named as a failed net and the loop
     re-places it nearer, which is precisely the fix the constraint wants.
-
-    **A power net the router could not lay gets one more try, power first (#226).** Power routes
-    after the pipes and every pipe cell is a wall to it, and ``reserve_power_docks`` keeps a dock
-    *cell* free, not a *path* to it: a pipe can detour around the reserved cell and seal it into a
-    pocket of one, on a placement where the same power net routes fine on its own. So the failed
-    nets are laid alone first (:func:`_power_corridor`), and the attempt is laid again with that
-    trunk held from the pipes. The second pass is kept only if it is VALID or fails strictly fewer
-    nets, so the recovery can never make an attempt worse; and it runs only when a power net
-    failed, so a layout whose power routes pays nothing for it. It is a routing-order fix and
-    moves no machine, which is why the fast path gets it too.
     """
-    first = _lay(problem, placements, seed, objective, repair=repair)
-    if first.layout.status is LayoutStatus.VALID or not first.power_failed:
-        return first.layout, first.failed
-    corridor = _power_corridor(problem, placements, first)
-    if corridor is None:
-        return first.layout, first.failed  # no trunk even with the pipes out of the way
-    second = _lay(problem, placements, seed, objective, repair=repair, held=corridor)
-    if second.layout.status is LayoutStatus.VALID or len(second.failed) < len(first.failed):
-        return second.layout, second.failed
-    return first.layout, first.failed
-
-
-@dataclass(frozen=True)
-class _Pass:
-    """One pass of :func:`_lay`: its layout and failed nets, plus what the recovery reads off it."""
-
-    layout: LayoutResult
-    #: Every net the pass names as failed: unrouted pipes and cables, or starved power nets.
-    failed: tuple[str, ...]
-    #: The power nets the power router itself could not lay: the recovery's trigger.
-    power_failed: tuple[str, ...]
-    #: The pipes this pass laid; the recovery keeps its trunk off their dock cells.
-    item_routes: tuple[Route, ...]
-    #: Casing cells each machine's pipes and free connections already hold (``claim_key``).
-    claims: Mapping[str, Collection[Cell]]
-
-
-def _lay(
-    problem: InputIR,
-    placements: tuple[Placement, ...],
-    seed: int,
-    objective: Objective,
-    *,
-    repair: bool,
-    held: Collection[Cell] = (),
-) -> _Pass:
-    """One pass of :func:`_assemble`: route, place hatches, validate.
-
-    ``held`` are cells the pipes must leave alone on top of the power docks: the trunk the
-    power-first recovery laid, so the pipes cannot wall it in a second time. Empty on the first
-    pass.
-    """
-    # Hold one usable face per power endpoint back BEFORE the pipes are laid. Power routes
-    # last, against every pipe cell as a hard obstacle, and the item router freezes its docks
-    # up front - so without this a machine can end up with no face left for an energy hatch
-    # on a placement `route_power` handles fine in isolation (#76). These cells are hard for
-    # pipes only; the power router below still sees them free and picks its own faces.
-    reserved = reserve_power_docks(problem, placements) | set(held)
-    routing = route(problem, placements, reserved=reserved)  # auto-output, then item/fluid
+    # Auto-output, then every other net negotiated together: the pipes, and a tree per power net
+    # that keeps them off the space its cable needs (router.core, #164).
+    routing = route(problem, placements)
     autos = list(routing.auto_connections)
     # Power cables route around the item/fluid pipes already laid, so no cell carries two routes
     # (the crude single-channel capacity the validator enforces). docs/ARCHITECTURE.md #7 - and
@@ -388,15 +321,6 @@ def _lay(
     routes = [*routing.routes, *power.routes]
     metrics = _layout_metrics(problem, placement_list, routes)  # footprint/layers for every result
 
-    def finish(layout: LayoutResult, failed: tuple[str, ...]) -> _Pass:
-        return _Pass(
-            layout=layout,
-            failed=failed,
-            power_failed=power.failed_nets,
-            item_routes=routing.routes,
-            claims=claims,
-        )
-
     # Which casing cell each connection turns into a hatch, plus the maintenance hatch and muffler
     # that belong to no net. Last, because a muffler needs empty air in front of it and only a
     # finished routing knows which cells are still empty.
@@ -416,7 +340,7 @@ def _lay(
             hatches=list(plan.hatches),
             metrics=metrics,
         )
-        return finish(layout, (*routing.failed_nets, *power.failed_nets))
+        return layout, (*routing.failed_nets, *power.failed_nets)
 
     layout = LayoutResult(
         status=LayoutStatus.VALID,
@@ -447,45 +371,13 @@ def _lay(
         )
         # A starved machine is steerable: hand back the power nets it sits on so the loop
         # penalizes them and the next placement pulls it toward its source.
-        return finish(
-            downgraded,
-            tuple(
-                n.id
-                for n in problem.nets
-                if n.commodity is Commodity.POWER
-                and not {e.machine_id for e in n.endpoints}.isdisjoint(starved)
-            ),
+        return downgraded, tuple(
+            n.id
+            for n in problem.nets
+            if n.commodity is Commodity.POWER
+            and not {e.machine_id for e in n.endpoints}.isdisjoint(starved)
         )
-    return finish(layout, ())
-
-
-def _power_corridor(
-    problem: InputIR, placements: tuple[Placement, ...], attempt: _Pass
-) -> set[Cell] | None:
-    """The cable cells ``attempt``'s failed power nets take when they are laid before any pipe.
-
-    Routed against the machine bodies and the pipes' **dock** cells only, not their paths: a pipe
-    has to touch its dock and the item router fixes docks before it routes, so a trunk across one
-    would only trade this failure for a pipe that cannot dock. The paths are free to move, and
-    holding these cells is what moves them. The casing cells the pipes' hatches hold stay claimed
-    for the same reason (an energy hatch cannot share a block with a bus).
-
-    ``None`` when those nets do not route even so - a machine walled in by other machines, or a
-    run over the amperage cap - which the pipes did not cause, so there is nothing to hold. The
-    placements are the ones the attempt started from: the repair pass relocates a source only on a
-    routing that succeeded, so a pass whose power failed hands them back unchanged.
-    """
-    docks = {t.cell.as_tuple() for r in attempt.item_routes for t in r.terminals}
-    alone = route_power(
-        problem,
-        placements,
-        extra_obstacles=docks,
-        claimed_cells=attempt.claims,
-        nets=attempt.power_failed,
-    )
-    if not alone.ok:
-        return None
-    return {cell for r in alone.routes for cell in r.cells()}
+    return layout, ()
 
 
 def _crowding_infeasibility(crowded: tuple[str, ...]) -> Infeasibility:

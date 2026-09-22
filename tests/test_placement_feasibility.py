@@ -21,8 +21,7 @@ from gtnh_solver.ir import (
     Port,
 )
 from gtnh_solver.placement import crowded_machines
-from gtnh_solver.router.power import reserve_power_docks
-from tests._helpers import at, consumer, machine, net, power_source, producer
+from tests._helpers import at, consumer, machine, net, producer
 
 
 def _power_net(nid: str, source: str, *sinks: str) -> Net:
@@ -171,28 +170,3 @@ def test_a_placement_naming_an_unknown_machine_is_skipped() -> None:
     )
     ghost = Placement.model_validate(at("m0", 1, 0, 1).model_dump() | {"machine_id": "ghost"})
     assert crowded_machines(problem, [at("m0", 0, 0, 0), ghost]) == ()
-
-
-def test_reserve_power_docks_holds_one_distinct_cell_per_endpoint() -> None:
-    # One cell per power endpoint, never two endpoints on the same cell: the reservation is what
-    # stops the item router from taking the last face a machine had left for its energy hatch.
-    problem = InputIR(
-        bounding_region=CellBox(sx=6, sy=2, sz=2),
-        machines=[power_source("src"), _powered("a"), _powered("b")],
-        nets=[_power_net("p", "src", "a", "b")],
-    )
-    placements = [at("src", 0, 0, 0), at("a", 2, 0, 0), at("b", 4, 0, 0)]
-    reserved = reserve_power_docks(problem, placements)
-    # src's power:out plus one power:in each: three endpoints, three distinct cells.
-    assert len(reserved) == 3
-
-
-def test_reserve_power_docks_holds_nothing_when_power_rides_me() -> None:
-    # No cable means no dock to protect, and holding cells back would only crowd the pipes.
-    problem = InputIR(
-        bounding_region=CellBox(sx=6, sy=2, sz=2),
-        machines=[power_source("src"), _powered("a")],
-        nets=[_power_net("p", "src", "a")],
-        me_toggles=METoggles(power=True),
-    )
-    assert reserve_power_docks(problem, [at("src", 0, 0, 0), at("a", 2, 0, 0)]) == set()

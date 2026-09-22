@@ -1,8 +1,8 @@
 """Shared cell-grid primitives for the routers (generic + power).
 
-Obstacle building, terminal docking on a usable (non-front) machine face, and A* between cells
-all live here so ``router.core`` (item/fluid) and ``router.power`` route over the *same* grid
-model with one implementation. The conventions (front face = placement orientation carries no
+Obstacle building, terminal docking on a usable (non-front) machine face, and the multi-goal A*
+the power router grows its trunk with all live here, so ``router.core`` (with ``router.steiner``)
+and ``router.power`` route over the *same* grid model and docking rules. The conventions (front face = placement orientation carries no
 I/O; machine + reserved cells are obstacles; the validator independently re-checks every
 terminal) are unchanged from the original crude router.
 """
@@ -188,50 +188,11 @@ def dock_candidates(
 
     Returning *all* the options is what lets both routers choose a face from where the route has
     to go rather than from a tuple ordering: the power router docks on whichever face yields the
-    shortest cable, and the item/fluid router chains its endpoints with multi-goal A*
-    (``core._dock_net``). ``claimed`` are the casing cells this machine's other hatches already
+    shortest cable, and the negotiating router grows each net's tree to whichever candidate serves
+    the most endpoints for the least cost (``steiner.route_tree``). ``claimed`` are the casing cells this machine's other hatches already
     hold. Deterministic order: ``FACE_ORDER``, then ascending host cell.
     """
     return list(_dock_faces(port_id, placement, machine, obstacles, docked, region, claimed))
-
-
-def astar(
-    start: Cell,
-    goal: Cell,
-    obstacles: set[Cell],
-    region: CellBox,
-    cell_cost: Mapping[Cell, float] | None = None,
-) -> list[Cell] | None:
-    """Cheapest in-bounds, obstacle-free cell path from ``start`` to ``goal``.
-
-    Each hop costs 1 plus the entered cell's ``cell_cost`` (0 where absent), so with no
-    ``cell_cost`` this is the plain shortest path. The negotiated-congestion router prices
-    contested cells through it: a priced cell is *discouraged*, never blocked - only
-    ``obstacles`` are hard. Manhattan distance stays an admissible heuristic because every
-    extra cost is non-negative on top of the unit base.
-    """
-    prices: Mapping[Cell, float] = cell_cost if cell_cost is not None else {}
-    heap: list[tuple[float, float, Cell]] = [(float(manhattan(start, goal)), 0.0, start)]
-    came_from: dict[Cell, Cell] = {}
-    best: dict[Cell, float] = {start: 0.0}
-    visited: set[Cell] = set()
-    while heap:
-        _, g, cur = heapq.heappop(heap)
-        if cur == goal:
-            return _reconstruct(came_from, cur)
-        if cur in visited:
-            continue
-        visited.add(cur)
-        for dx, dy, dz in NEIGHBORS:
-            nxt = (cur[0] + dx, cur[1] + dy, cur[2] + dz)
-            if not in_region(nxt, region) or nxt in obstacles:
-                continue
-            ng = g + 1 + prices.get(nxt, 0.0)
-            if ng < best.get(nxt, _UNREACHABLE):
-                best[nxt] = ng
-                came_from[nxt] = cur
-                heapq.heappush(heap, (ng + manhattan(nxt, goal), ng, nxt))
-    return None
 
 
 def astar_multi(
@@ -242,7 +203,7 @@ def astar_multi(
     Multi-source, multi-goal A* (the heuristic is the Manhattan distance to the nearest goal). The
     power router uses it to dock a cable on whichever usable face gives the shortest run: ``goals``
     are all of a machine's free non-front dock cells, so routing - not a fixed face order - picks
-    the terminal. Like :func:`astar`, ``starts`` are seeded at cost 0 even if they lie in
+    the terminal. ``starts`` are seeded at cost 0 even if they lie in
     ``obstacles`` (a leg begins on the previous leg's end cell, already part of the laid trunk).
     Returns the path (``path[0] in starts``, ``path[-1] in goals``), or ``None`` if none is
     reachable. ``goals`` must be non-empty and disjoint from ``starts`` (a zero-length trunk is not

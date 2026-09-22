@@ -1,29 +1,24 @@
 """router - per-commodity routing on the cell grid.
 
-Phase 1 ships a crude A* router (:func:`route`, in ``core``). The router owns the
-**auto-output vs pipe** decision: from the final placements + orientations it first assigns
-GT's free auto-output connections (:func:`assign_auto_outputs`, in ``auto`` - adjacent
-1-source-1-sink item/fluid nets, one auto-output per machine, never power/ME) and pipes only
-the nets left uncovered. For each piped net: resolve a Terminal per net
-endpoint on a usable (non-front) machine face, then A* between terminals avoiding machine and
-reserved cells. Routing is **capacity-aware** - each laid route's cells become obstacles for the
-routes after it, across both item/fluid and power, so no cell carries two routes (the crude
-single-channel cap, one route per cell, which the validator independently enforces). Because that
-makes routing order-dependent, the item/fluid router does **rip-up/reroute** - retrying with the
-failed nets first - so a bad net order is not mistaken for a real infeasibility. Crude: one
-channel per cell, item/fluid only (docs/ROADMAP.md).
+The item/fluid router is :func:`route` (in ``core``). It owns the **auto-output vs pipe**
+decision: from the final placements + orientations it first assigns GT's free auto-output
+connections (:func:`assign_auto_outputs`, in ``auto`` - adjacent 1-source-1-sink item/fluid nets,
+one auto-output per machine, never power/ME) and routes only the nets left uncovered. Those nets,
+**power included**, are routed together by negotiated congestion (PathFinder, GitHub #7): each net
+is a group Steiner tree whose dock cells are chosen by the same search that lays its path
+(``steiner``), contested cells are priced up round by round, and no cell ends up carrying two nets
+(the single-channel cap the validator independently enforces). Several terminals of one net may
+share a cell, which is how one pipe block serves several machines (#164).
 
-Power is its own router (:func:`route_power`, in ``power``): each per-tier power net becomes a
-shared-amperage trunk whose segment thickness is sized to the summed amperage (docs/DOMAIN.md,
-docs/ARCHITECTURE.md #8). The solver passes the item/fluid cells as ``extra_obstacles`` so cables
-route around pipes. Both routers share the ``_grid`` primitives.
+Power is laid by its own router (:func:`route_power`, in ``power``): each per-tier power net becomes
+a shared-amperage trunk whose segment thickness is sized to the summed amperage (docs/DOMAIN.md,
+docs/ARCHITECTURE.md #8), in the space the negotiated pipes left for it. The solver passes the
+item/fluid cells as ``extra_obstacles`` so cables route around pipes. Both routers share the
+``_grid`` primitives.
 
-Phase 2 lifts the single-channel cap to the full channels-per-edge cap (a routing margin hosting
-several parallel channels) + cell->block realizability, replaces the crude failed-first
-rip-up/reroute with negotiated-congestion routing (GitHub #7), adds ME endpoint placement, and the
-shared-amperage power *optimization* (multi-source / split / upgrade) beyond Phase 1's
-size-or-reject (docs/ARCHITECTURE.md #6/#7/#8). The validator independently certifies routes
-either way.
+Still ahead (docs/ROADMAP.md): the per-edge multi-channel cap, cell->block realizability, ME
+endpoint placement, and shared-amperage power *optimization* (multi-source / split / upgrade)
+beyond size-or-reject. The validator independently certifies routes either way.
 """
 
 from __future__ import annotations
@@ -32,7 +27,7 @@ from ._grid import claims_by_machine
 from .auto import AutoAssignment, assign_auto_outputs, auto_output_possible
 from .core import RouteResult, route
 from .hatches import HatchPlan, place_hatches
-from .power import PowerRouteResult, reserve_power_docks, route_power
+from .power import PowerRouteResult, route_power
 
 __all__ = [
     "AutoAssignment",
@@ -43,7 +38,6 @@ __all__ = [
     "auto_output_possible",
     "claims_by_machine",
     "place_hatches",
-    "reserve_power_docks",
     "route",
     "route_power",
 ]

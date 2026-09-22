@@ -1,9 +1,11 @@
-"""The power-first recovery: a power dock the pipes walled in gets its cable laid first (#226).
+"""A power dock the pipes used to wall in routes in a single pass (#226, #164).
 
-Power routes last, against every pipe cell as a wall. ``reserve_power_docks`` keeps one dock cell
-per power endpoint free of pipes, but a free cell is not a reachable one: a pipe can detour around
-it and seal it into a pocket of one. ``solver.core._assemble`` answers that by laying the failed
-power nets alone, holding their trunk from the pipes, and laying the attempt again.
+Power used to route after the pipes with one dock cell held per energy port
+(``reserve_power_docks``), and a held cell is not a held path: a pipe could detour around it and seal
+it into a pocket of one. #226 answered that with a power-first recovery pass. The router now
+negotiates each power net as a tree alongside the pipes, so the pipes leave its cable room in the
+first place, and the recovery (which never rescued an attempt once that landed) is gone. These
+tests keep the placement that recovery was built for, and pin that it now routes VALID in one pass.
 
 The repro was reduced by delta-debugging from ``examples/ev-nitrobenzene.json`` against the 2.9
 dump. There, every ``solve`` seed from 0 to 7 returned the same placement (the only attempt the
@@ -13,26 +15,24 @@ a 7x4x8 region. The towers are built by hand from ``MTEDistillationTower``'s str
 base layer, ``lll`` layers above), with the hatch kinds the dump records for those cells, so no
 dumper output is involved.
 
-What goes wrong without the recovery, in order:
+What went wrong under the old router, in order:
 
-1. ``reserve_power_docks`` holds one dock cell per power endpoint. For tower #2 that is the cell
+1. ``reserve_power_docks`` held one dock cell per power endpoint. For tower #2 that was the cell
    south of its bottom ring, since its energy-capable cells are all on the bottom layer, whose
    down faces point out of the region.
-2. The water net docks every tower's input hatch on that same bottom ring, and its pipe runs
-   around the ring at ``y=0``. It routes *around* the reserved cell, so the cell stays free, but
-   the pipe encloses it on every side the region and the tower leave open.
-3. Power routes last with every pipe cell as a hard obstacle, and finds the free dock cell
+2. The water net docks every tower's input hatch on that same bottom ring, and its pipe ran
+   around the ring at ``y=0``. It routed *around* the reserved cell, so the cell stayed free, but
+   the pipe enclosed it on every side the region and the tower leave open.
+3. Power routed last with every pipe cell as a hard obstacle, and found the free dock cell
    unreachable: ``no free cell path to a dock face``.
 
 The layer cells are deliberately left as the dump records them. In game they also take an energy
 hatch (the ``l`` element chains ``addEnergyInputToMachineList`` as a bare adder, which the
-extractor cannot see), and allowing that would make this layout route even without the recovery.
-That is a separate data fix (#227) and would not touch this test, which is about routing order.
+extractor cannot see), and allowing that would make this layout easier to route. That is a separate
+data fix (#227) and would not touch this test, which is about routing order.
 """
 
 from __future__ import annotations
-
-import dataclasses
 
 import pytest
 
@@ -228,35 +228,12 @@ def test_power_alone_routes_on_the_repro_placement() -> None:
     assert route_power(problem, placements).ok
 
 
-def test_without_the_recovery_the_water_pipe_walls_the_dock_in() -> None:
-    # Pins the failure the recovery exists for, so the test below provably goes through it: a
-    # single pass routes every pipe and then cannot reach tower #2's reserved dock.
-    problem, placements = _problem()
-    first = solver_core._lay(problem, placements, 0, "footprint", repair=True)
-    assert first.layout.status is LayoutStatus.PARTIAL_INVALID
-    assert first.power_failed == ("power:MV",)
-    assert first.layout.infeasibility is not None
-    assert "no free cell path to a dock face of 'dt#2'" in first.layout.infeasibility.detail
-
-
-@pytest.mark.parametrize("repair", [True, False], ids=["optimize", "fast"])
-def test_the_recovery_lays_a_walled_in_power_dock(repair: bool) -> None:
-    problem, placements = _problem()
-    layout, failed = solver_core._assemble(problem, placements, 0, repair=repair)
-    assert layout.status is LayoutStatus.VALID, layout.infeasibility
-    assert failed == ()
-    assert validate(problem, layout).ok  # the independent gate agrees, not just the routers
-
-
-def test_a_layout_whose_power_routes_never_takes_the_recovery_path(
+def test_the_pipes_leave_the_walled_in_dock_its_cable_in_one_routing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # The recovery costs a second full routing, so a layout that does not need it must not pay:
-    # the same towers and pipes, powered from a source whose trunk the pipes do not cut off.
+    # The failure #226 was filed for, now absent: the water pipe routes around the room the cable
+    # needs because the power net is negotiated with it, so one routing lays everything.
     problem, placements = _problem()
-    unpowered = problem.model_copy(
-        update={"nets": [n for n in problem.nets if n.commodity is not Commodity.POWER]}
-    )
     calls = {"route": 0}
     real_route = route
 
@@ -264,59 +241,28 @@ def test_a_layout_whose_power_routes_never_takes_the_recovery_path(
         calls["route"] += 1
         return real_route(*args, **kwargs)  # type: ignore[arg-type]
 
-    def no_recovery(*args: object, **kwargs: object) -> None:
-        raise AssertionError("the recovery ran on a layout whose power routed")
-
     monkeypatch.setattr(solver_core, "route", counting_route)
-    monkeypatch.setattr(solver_core, "_power_corridor", no_recovery)
-    layout, failed = solver_core._assemble(unpowered, placements, 0)
+    layout, failed = solver_core._assemble(problem, placements, 0)
     assert layout.status is LayoutStatus.VALID, layout.infeasibility
     assert failed == ()
-    assert calls["route"] == 1  # one pass, no second routing
+    assert calls["route"] == 1
 
 
-def test_a_recovery_that_cannot_help_returns_the_first_pass_unchanged(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # A sink boxed in by machines has no dock with or without pipes, so laying its net first finds
-    # nothing to hold, and the attempt comes back exactly as the single pass left it.
-    problem, placements = _walled_in()
-    tried: list[object] = []
-    real_corridor = solver_core._power_corridor
-
-    def spy(*args: object, **kwargs: object) -> object:
-        tried.append(result := real_corridor(*args, **kwargs))  # type: ignore[arg-type]
-        return result
-
-    monkeypatch.setattr(solver_core, "_power_corridor", spy)
-    layout, failed = solver_core._assemble(problem, placements, 0)
-    first = solver_core._lay(problem, placements, 0, "footprint", repair=True)
-    assert tried == [None]  # the recovery was asked, and had nothing to hold
-    assert first.power_failed == ("power:LV",)
-    assert (layout, failed) == (first.layout, first.failed)
-
-
-@pytest.mark.parametrize(
-    "second_failed",
-    [("power:MV", "water"), ("water",)],
-    ids=["more-failures", "as-many-failures"],
-)
-def test_the_second_pass_is_kept_only_when_it_is_better(
-    monkeypatch: pytest.MonkeyPatch, second_failed: tuple[str, ...]
-) -> None:
-    # The invariant that makes the recovery safe to run: an attempt can never come out worse. A
-    # second pass that fails more nets, or as many, is discarded for the first, whatever it did.
+@pytest.mark.parametrize("repair", [True, False], ids=["optimize", "fast"])
+def test_the_walled_in_dock_routes_valid(repair: bool) -> None:
     problem, placements = _problem()
-    real_lay = solver_core._lay
+    layout, failed = solver_core._assemble(problem, placements, 0, repair=repair)
+    assert layout.status is LayoutStatus.VALID, layout.infeasibility
+    assert failed == ()
+    assert validate(problem, layout).ok  # the independent gate agrees, not just the routers
 
-    def rigged(*args: object, held: object = (), **kwargs: object) -> object:
-        done = real_lay(*args, **kwargs)  # type: ignore[arg-type]
-        if not held:
-            return done
-        marked = done.layout.model_copy(update={"seed": 99})  # tells the two passes apart
-        return dataclasses.replace(done, layout=marked, failed=second_failed)
 
-    monkeypatch.setattr(solver_core, "_lay", rigged)
+def test_a_sink_walled_in_by_machines_is_reported_not_routed() -> None:
+    # A sink boxed in by machines has no dock with or without pipes: an explicit infeasibility
+    # naming its power net, never a cable laid somewhere it cannot connect.
+    problem, placements = _walled_in()
     layout, failed = solver_core._assemble(problem, placements, 0)
-    assert layout.seed == 0  # the first pass, not the rigged second one
-    assert failed == ("power:MV",)
+    assert layout.status is LayoutStatus.PARTIAL_INVALID
+    assert failed == ("power:LV",)
+    assert layout.infeasibility is not None
+    assert layout.infeasibility.constraint == "face_reachability"

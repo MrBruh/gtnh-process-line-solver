@@ -2,10 +2,10 @@
 
 ``tests/golden/schematic/sand-parallel-exported.schematic`` is the one golden whose wiring and
 facings are real (the Schematica copy's are not; see that directory's README). It was built in game
-and runs on 3 cable blocks and 12 pipe blocks, where the solver lays 23 and 40. Its pipes do what
-the router could not before #164: several terminals of ONE net on one pipe block, 20 item
-terminals on 12 cells. This module turns the file back into a ``LayoutResult`` and pins what the
-validator makes of it::
+and runs on 3 cable blocks and 12 pipe blocks. Its pipes do what the router could not before #164:
+several terminals of ONE net on one pipe block, 20 item terminals on 12 cells. This module turns the
+file back into a ``LayoutResult``, pins what the validator makes of it, and pins that the solver,
+handed the build's placement, lays those same 12 pipe blocks and 3 cable blocks::
 
     .schematic --read_schematic--> machines (mID, mFacing)   pipes/cables (mID, mConnections)
                                         |                              |
@@ -65,6 +65,7 @@ from gtnh_solver.router import route
 from gtnh_solver.schematic import read_schematic
 from gtnh_solver.schematic.core import FORGE_DIRECTION
 from gtnh_solver.schematic.read import TileEntity
+from gtnh_solver.solver.core import _assemble
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
 
@@ -391,10 +392,8 @@ def test_the_router_can_route_the_proven_placement(
 ) -> None:
     # Before #164 the router could not route this placement at all: it reported "no free cell
     # path" for the cobblestone net. Letting terminals of one net share a cell routes every item
-    # net, and the result passes the same gate. This pins the item router alone, so power is put on
-    # ME: the solver would first hold back a dock per energy port, which on this placement takes a
-    # cell the cobblestone net needs (a separate defect, R6 in docs/spikes/164-channel-capacity.md),
-    # and the dock chain is greedy, so its pipes need not leave the build's cable column free.
+    # net, and the result passes the same gate. This pins the item router alone, power on ME: with
+    # nothing else in the way each item net takes one 3-block run, the build's own 12 blocks.
     problem, layout = proven_build
     items_only = problem.model_copy(update={"me_toggles": METoggles(power=True)})
     result = route(items_only, layout.placements)
@@ -403,6 +402,30 @@ def test_the_router_can_route_the_proven_placement(
     assert any(
         len({t.cell.as_tuple() for t in r.terminals}) < len(r.terminals) for r in result.routes
     )
+    assert len(set().union(*(r.cells() for r in result.routes))) == 12
     routed = layout.model_copy(update={"routes": list(result.routes)})
     report = validate(items_only, routed)
     assert report.ok, str(report)
+
+
+def test_the_solver_lays_the_proven_placement_as_it_was_built(
+    proven_build: tuple[InputIR, LayoutResult],
+) -> None:
+    # The regression pin for #164. Given the maintainer's placement, the solver's own assembly
+    # (router, power router, hatches, validator) lays it exactly as he built it in game: the same
+    # 12 pipe blocks and the same 3 cable blocks. Until the router negotiated docks and power
+    # together it could not route this placement at all, because the power hold took 3 of the 4
+    # dock cells of a middle hammer and gravel had nowhere left to dock.
+    problem, layout = proven_build
+    routed, failed = _assemble(problem, tuple(layout.placements), 0)
+
+    assert routed.status is LayoutStatus.VALID, routed.infeasibility
+    assert failed == ()
+
+    def cells(routes: Iterable[Route], power: bool) -> set[Cell]:
+        return {c for r in routes if (r.commodity is Commodity.POWER) is power for c in r.cells()}
+
+    assert len(cells(routed.routes, power=False)) == 12
+    assert len(cells(routed.routes, power=True)) == 3
+    assert cells(routed.routes, power=False) == cells(layout.routes, power=False)
+    assert cells(routed.routes, power=True) == cells(layout.routes, power=True)

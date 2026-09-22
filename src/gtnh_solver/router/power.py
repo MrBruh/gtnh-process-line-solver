@@ -29,6 +29,11 @@ machines load the net more for the same ``eut``; only each segment's summed load
 whole amps. A run so long that the delivered voltage reaches 0 cannot be powered at this tier and
 is rejected.
 
+**Where the cable may go is settled first.** Every power net takes part in ``router.core``'s
+negotiation as a tree, alongside the pipes, so the pipes that this router must route around were
+laid leaving room for a trunk. This router then lays the actual cable in that space: the negotiated
+tree is a reservation, and the trunk below is what is built and sized.
+
 Each machine docks **route-aware**: rather than committing a terminal on a fixed face, the router
 considers every usable (non-front) face and, via multi-goal A*, docks on whichever one yields the
 shortest cable to the trunk (``_grid.dock_candidates`` + ``astar_multi``). A cable connects to any
@@ -110,86 +115,20 @@ class PowerRouteResult:
         return self.infeasibility is None
 
 
-def reserve_power_docks(
-    problem: InputIR,
-    placements: Sequence[Placement],
-    *,
-    claimed_cells: Mapping[str, Collection[Cell]] = MappingProxyType({}),
-) -> set[Cell]:
-    """One free dock cell held back per power endpoint, before any pipe is laid.
-
-    Power routes **last** (``solver.core``), with every item/fluid route cell already a hard
-    obstacle, and the item router freezes its own docks up front - negotiated congestion prices
-    *routes*, never docks. So a machine whose last usable faces are taken by pipe cells has no
-    face left to put an energy hatch on, and the net fails ``face_reachability`` even though the
-    placement is fine: ``route_power`` on the identical placement, run alone, succeeds. That is a
-    routing-**order** defect, not a packing one (#76).
-
-    The cure is to take one cell per power endpoint out of the item router's reach before it
-    starts. The reservation is a *guarantee of availability*, never a prescription: these cells
-    are hard for pipes but ordinary free cells for :func:`route_power`, which still picks
-    whichever face yields the shortest cable. It guarantees a free cell, **not a way to reach it**:
-    a pipe may detour around a reserved cell and wall it into a pocket of one. The solver catches
-    that case after the fact by routing the failed power nets first and holding their whole trunk
-    from the pipes (``solver.core._assemble``, #226), rather than reserving a corridor up front
-    for every endpoint, which costs pipe room on the layouts that never needed it: measured, a
-    two-cell stub per endpoint lost parallel-sand a valid seed and did not fix the case it was for.
-
-    Held back per endpoint rather than per machine because a sink is a **connection** - a draw
-    spread over several energy hatches puts the same machine on the net once per hatch, and two
-    hatches are two casing cells.
-
-    Accumulates, so no two endpoints hold the same cell (the ``docked`` argument) and no two
-    hatches of one machine hold the same casing cell (:func:`_grid.claim_key`, which for a
-    slot-less single block IS the dock cell). An endpoint with nothing free to hold back is
-    skipped rather than raised on: this pass is an optimization, and ``route_power`` is the one
-    place entitled to report a real dock infeasibility.
-    """
-    if problem.me_toggles.toggled(Commodity.POWER):
-        return set()  # power rides the ME network; there is no cable, so no dock to protect
-    machines = {m.id: m for m in problem.machines}
-    placement_by_machine = placement_index(placements)
-    obstacles = obstacle_cells(problem, placements, machines)
-    region = problem.bounding_region
-    reserved: set[Cell] = set()
-    claimed: dict[str, set[Cell]] = {k: set(v) for k, v in claimed_cells.items()}
-    for net in problem.nets:
-        if net.commodity is not Commodity.POWER:
-            continue
-        for endpoint in net.endpoints:
-            placement = placement_by_machine.get(endpoint.machine_id)
-            machine = machines.get(endpoint.machine_id)
-            if placement is None or machine is None:
-                continue  # an unplaced machine is the placer's problem to report, not ours
-            candidates = dock_candidates(
-                endpoint.port_id,
-                placement,
-                machine,
-                obstacles,
-                reserved,
-                region,
-                claimed.get(endpoint.machine_id, ()),
-            )
-            if not candidates:
-                continue
-            terminal = candidates[0]  # deterministic: _grid orders by FACE_ORDER then host cell
-            reserved.add(terminal.cell.as_tuple())
-            claimed.setdefault(endpoint.machine_id, set()).add(claim_key(terminal, machine))
-    return reserved
-
-
 def route_power(
     problem: InputIR,
     placements: Sequence[Placement],
     *,
     extra_obstacles: Collection[Cell] = (),
     claimed_cells: Mapping[str, Collection[Cell]] = MappingProxyType({}),
-    nets: Collection[str] | None = None,
 ) -> PowerRouteResult:
     """Route each per-tier power net of ``problem`` as a shared-amperage trunk over ``placements``.
 
     ``extra_obstacles`` are cells already taken by other routes (the item/fluid pipes the solver
     laid first), so power cables never share a cell with them - the crude single-channel capacity.
+    Those pipes were negotiated with every power net's tree in play (``router.core``), so they
+    leave this router room for a trunk rather than a dock cell per endpoint that a pipe could wall
+    into a pocket of one.
     Each tier's trunk is likewise added to the obstacle set before the next tier routes, so two
     power trunks never collide - and since every terminal of a finished net (docked or tapped)
     sits on one of its segment cells, the same set keeps later nets from docking on this trunk.
@@ -197,7 +136,7 @@ def route_power(
 
     Because that accretion is order-dependent - a trunk laid for one tier can wedge a later tier's
     trunk out of a chokepoint - the tiers are routed with **failed-first rip-up/reroute** (the same
-    bounded retry the item router uses, ``core._rip_up_reroute``): route a pass, and if any net
+    bounded retry the item router once used): route a pass, and if any net
     failed, rip every trunk up and retry with the failed nets first, until a pass is clean or the
     failed-net set repeats (a genuine infeasibility, not a tier-ordering accident). This keeps the
     solver's feedback loop from getting a false infeasibility on power that it would not get on
@@ -209,19 +148,11 @@ def route_power(
     hatch compete for the same block - so an energy hatch must not be given a cell an input bus is
     standing on. ``extra_obstacles`` cannot express that: it names the cells *outside* the machine
     a pipe occupies, and one casing cell has up to five free faces.
-
-    ``nets`` limits the routing to those power net ids (every power net when ``None``). The solver's
-    power-first recovery uses it to lay just the nets a full pass could not, before any pipe is
-    down (``solver.core._assemble``, #226).
     """
     if problem.me_toggles.toggled(Commodity.POWER):
         return PowerRouteResult()  # power is on the ME network; nothing to route
 
-    power_nets = [
-        net
-        for net in problem.nets
-        if net.commodity is Commodity.POWER and (nets is None or net.id in nets)
-    ]
+    power_nets = [net for net in problem.nets if net.commodity is Commodity.POWER]
     routes, failures = _rip_up_reroute(
         power_nets,
         lambda order: _route_pass(problem, placements, order, extra_obstacles, claimed_cells),
@@ -288,7 +219,7 @@ def _route_pass(
 ) -> tuple[list[Route], dict[str, Infeasibility]]:
     """Route ``nets`` once in the given order as shared-amperage trunks, capacity-aware.
 
-    Mirrors ``core._route_pass`` for power: builds the obstacle set fresh (reserved + machine
+    Builds the obstacle set fresh (reserved + machine
     bodies + ``extra_obstacles``), then grows each net's trunk in turn, adding a finished trunk's
     cells to the obstacles so later tiers route around it. Failures are order-dependent - a
     malformed net (not one source + >=1 sink), an undockable/unroutable trunk, or an

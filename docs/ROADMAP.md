@@ -27,7 +27,7 @@ test CI; the **IR** contracts (`ir/`); the **adapter** (real gtnh-factory-flow e
 (per-commodity A* + single-channel capacity); the **previewer** and **build guide**; the
 **validator**; and the **`gtnh-solve` CLI**. On top of that, several **Phase 2 slices** have
 shipped: SA + LNS placement over a routing-aware cost with a selectable footprint/volume/balanced
-objective (lane C); **negotiated-congestion routing** for item/fluid nets plus the shared-amperage
+objective (lane C); **negotiated-congestion routing** with docks and power in the negotiation plus the shared-amperage
 power model (source synthesis, tree trunks, cable voltage-loss sizing, **per-hatch power intake**
 so a heavy machine's draw spreads over several 2 A energy hatches and as many cable runs as the
 16x cap needs, power trunks keeping failed-first rip-up/reroute) (lane D); the first slice of the
@@ -93,9 +93,13 @@ is demonstrably valid-but-bad (too large, unroutable, ugly). This is the recorde
 - **placement** - SA + LNS ruin-and-recreate + cheap routing-aware cost + orientation as a search
   variable (replaces the crude constructive placer). *SA and LNS are in; the routing-aware cost is
   still the HPWL + auto-output proxy, to grow into the incremental congestion estimate.*
-- **router** - **negotiated-congestion routing is in** for item/fluid nets (PathFinder-style:
-  contested cells are priced up round by round until every net owns its cells - order-robust, no
-  ordering-induced false infeasibility; GitHub #7); power trunks keep failed-first rip-up/reroute.
+- **router** - **negotiated-congestion routing is in** (PathFinder-style: contested cells are
+  priced up round by round until every net owns its cells - order-robust, no ordering-induced
+  false infeasibility; GitHub #7), with the **docks inside the negotiation** and **power
+  negotiated alongside the pipes** as a reserved tree (#164): each net is a group Steiner tree
+  whose dock cells its own search chooses, so one pipe block serves several machines of a net. The
+  power router lays the cable in what the pipes leave, its trunks keeping failed-first
+  rip-up/reroute across tiers.
   Ahead: the **channels-per-edge realizability invariant**, cell->block realizability fed back
   into search, ME-toggle endpoint placement, pluggable multi-channel backends.
 - **solver** - the **place<->route feedback loop** (built: a multi-start grid in
