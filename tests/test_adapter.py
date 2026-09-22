@@ -375,7 +375,7 @@ def _source_ids(ir: InputIR) -> set[str]:
 
 def test_tier_within_the_cable_cap_keeps_one_unsuffixed_source() -> None:
     # 136 EU/t at LV (32 V) is 4.25 A, well under the 16x cap, so the tier stays on one run and
-    # keeps the plain ids the build guide and previewer have always shown.
+    # keeps the plain ids the layout and the previewer have always shown.
     ir = to_input_ir(_powered_plan(16.0, 120.0))
     assert {n.id for n in _power_nets(ir)} == {"power:LV"}
     assert _source_ids(ir) == {"power-source:LV"}

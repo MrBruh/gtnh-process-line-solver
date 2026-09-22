@@ -11,7 +11,7 @@ Reconciled drift (chose the form that keeps every caller green):
 - ``producer`` / ``consumer`` / ``net`` carry a ``commodity`` keyword (test_router_auto's variadic
   form); the single-sink ITEM callers (test_solver) use the defaults. ``net`` is variadic in its
   sinks, so a 1->1 net is just the no-extra-sink case. ``type_`` / ``fluid`` keep the few callers
-  that pin a specific machine type or resource name (buildguide, previewer) exact.
+  that pin a specific machine type or resource name (previewer) exact.
 - ``PLACEMENT_CODES`` is the full seven-code set; test_adapter previously used a six-code subset
   (it omitted ``POWER_FEED_NOT_ON_BOUNDARY``), so asserting that code absent there too is a
   correct strengthening, not a new failure - the sand placement never trips it.

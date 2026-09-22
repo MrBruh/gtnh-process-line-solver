@@ -207,8 +207,7 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   but every item run was a plain tin pipe and only one stone hammer in three was ever fed, so the
   line ran at a third of its rate while `validate()` passed it. The router now sizes each item run
   and the parallel sand line solves with huge tin pipes (`gt_pipe_tin_huge`, mID 5593) on all four
-  runs; the exported `.schematic`, the build guide's bill of materials ("huge tin item pipe") and
-  the preview (a full-cube block) all carry it.
+  runs; the exported `.schematic` and the preview (a full-cube block) both carry it.
 
   The rule is in GT's own unit, which is not items. GT counts an item pipe's capacity in
   *insertions* per window, each landing at most one stack in one inventory, nearest first
@@ -262,16 +261,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   purpose: a payload assembled in-process is not a stale dump, and the gate belongs where a file
   crosses into the process. Two doc strings that still said "schema v1" now say v2.
 
-- **`-o/--output` and `--preview` create the directory their file goes in, as `--schematic`
-  already did (`cli.py`, `previewer/__init__.py`).** Pointing either at a path whose directory did
-  not exist yet failed with `error: could not write out/sand.html: [Errno 2] No such file or
-  directory` and exit 2. The write is the last step, so the run had already adapted, solved and
-  (for `--preview`) fetched the jar and baked every texture before throwing it away. It was also
-  the documented workflow that tripped: `out/` is gitignored, so on any fresh clone or worktree
-  the first `gtnh-solve ... --preview out/sand.html` failed. `write_preview` now makes its parent
-  the way `write_schematic` always has, and the CLI does the same before writing the guide. A
-  parent that cannot be made (it exists as a file, or is not creatable) is still reported as
-  `could not write` with exit 2.
+- **`--preview` creates the directory its file goes in, as `--schematic` already did
+  (`previewer/__init__.py`).** Pointing it at a path whose directory did not exist yet failed with
+  `error: could not write out/sand.html: [Errno 2] No such file or directory` and exit 2. The write
+  is the last step, so the run had already adapted, solved, fetched the jar and baked every texture
+  before throwing it away. It was also the documented workflow that tripped: `out/` is gitignored,
+  so on any fresh clone or worktree the first `gtnh-solve ... --preview out/sand.html` failed.
+  `write_preview` now makes its parent the way `write_schematic` always has. A parent that cannot
+  be made (it exists as a file, or is not creatable) is still reported as `could not write` with
+  exit 2.
 
 - **A machine on a tier too low to power is now an infeasibility, not an unloadable export
   (`adapter/power.py`, `cli.py`).** The adapter sizes energy hatches for a 16-block cable run
@@ -306,10 +304,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   mapping. The CLI's load guard also catches `ArithmeticError`, as the net under anything the
   contracts do not cover.
 
-  **New exit code 3 for an internal error.** Solving, rendering the guide and building the preview
-  had no guard at all, so any bug there also surfaced as exit 1. They now report
-  `internal error: <type>: <message>` with the traceback, and exit 3, which keeps 1 meaning an
-  explicit infeasibility and 2 meaning the export could not be loaded.
+  **New exit code 3 for an internal error.** Solving and building the preview had no guard at
+  all, so any bug there also surfaced as exit 1. They now report `internal error: <type>:
+  <message>` with the traceback, and exit 3, which keeps 1 meaning an explicit infeasibility and 2
+  meaning the export could not be loaded.
 - **A cable or pipe now joins to its texture entry under either name GT has given it, so a 2.9
   dataset keeps its cables (`dataset/pipes.py`).** Up to pack 2.8.4 the texture dump recorded one
   under GT's unlocalized name (`cable.tin.02`, `gt_pipe_bronze`); GT5U 5.09.54.20 records the
@@ -352,6 +350,20 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   sees no change: with `CI` set Hypothesis already runs its `ci` profile, which has no deadline and
   also derandomizes, and that stays in force. The `property_examples()` budgets are untouched,
   because a test's own `@settings` still wins for what it names.
+
+- **Breaking: `gtnh-solve plan.json` prints the layout as JSON, not a text build guide (#203).**
+  With neither `--preview` nor `--schematic`, stdout is now the `LayoutResult` contract
+  (`docs/IR.md`) as one JSON document and nothing else: every warning, note and log line stays on
+  stderr, so `gtnh-solve plan.json | python -m json.tool` always parses, and `> layout.json` is how
+  it goes to a file. The document uses the contract's field names, states every field (so
+  `version` is always there), is indented by two spaces and escapes non-ASCII, so it survives a
+  console or redirect of any encoding; it reads back with `LayoutResult.model_validate_json`. An
+  infeasible run still prints it (exit 1), since it carries `status` and `infeasibility`, and the
+  reason still goes to stderr. A plan the adapter refuses before any solve prints the same shape
+  the solver returns when nothing fits: the verdict, the seed, nothing placed. With an artifact
+  flag stdout stays empty, as it did for the guide, and the exit codes keep their meaning.
+  `LAYOUT_RESULT_VERSION` is unchanged: the schema is published, not changed. A script that read
+  the guide's text must read the JSON instead.
 
 - **`pytest` answers the same question on every machine: the suite pins the dataset it resolves
   (`tests/conftest.py`, #182).** `resolve_dataset_path` prefers the newest local `data/<version>/`
@@ -397,6 +409,18 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   machines. Every record stays in the new `PhysicalDataset.records` and addressable by `block_key`.
 
   Two files claiming the same **block_key** is still an error: that is one controller dumped twice.
+
+### Removed
+- **Breaking: the text build guide, and `-o/--output` with it (#203).** `buildguide/`
+  (`build_guide()`) and its tests are gone. `-o/--output` existed only to write the guide and is
+  now an argparse usage error (exit 2) rather than being kept or repurposed; the JSON goes to a
+  file with a shell redirect. The guide had been paused since 2026-07-01, and the `.schematic`
+  export and the 3D preview now cover what it said. Its bill of materials is the one part nothing
+  replaced yet, and returns in the preview (#202). Also dropped: `system_io.RATE_UNIT`, a per-tick
+  unit table only the guide read. Everything in this file is still unreleased, so the entries
+  further down that add or improve the guide (its bill of materials, placement table, connections,
+  power note and system I/O section) record work this release no longer ships.
+
 ### Added
 - **A node standing for several parallel machines is mapped instead of rejected (#76, adapter half).**
   `machineCount > 1` used to fail the load outright, which excluded most throughput-scaled
@@ -1918,9 +1942,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **CLI (`gtnh-solve`)** - the first real Phase 1 entry point: `gtnh-solve <export.json>` loads +
   adapts the export, solves (place -> auto-output -> item/fluid + power route -> self-validate),
-  and prints the build guide (`-o FILE` to write it, `--seed` to pick the seed). Exit code 0 when
-  the layout is fully VALID, 1 when the solver returns an explicit infeasibility (printed to
-  stderr), 2 when the export can't be loaded. Replaces the planning-stub entry point.
+  and prints the result (`--seed` to pick the seed; since #203 that is the layout as JSON, see
+  Changed). Exit code 0 when the layout is fully VALID, 1 when the solver returns an explicit
+  infeasibility (printed to stderr), 2 when the export can't be loaded. Replaces the planning-stub
+  entry point.
 
 - **Placement optimizer (`placement/search.py`) - Phase 2 simulated annealing.**
   `optimize_placement(problem, *, seed)` seeds from the constructive first-fit placer and
@@ -2363,9 +2388,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   previewer inlined the scene JSON into its `<script>` block unescaped, so a machine type or
   resource id containing `</script>` (plan JSON is external input) could close the tag and break or
   inject into the page; the inline JSON now escapes `</` to `<\/` (JSON-transparent, the scene still
-  round-trips). The CLI's `-o`/`--preview` writes raised an uncaught `OSError` on an unwritable path,
-  dumping a raw traceback instead of honoring the documented 0/1/2 exit-code contract; both writes
-  now report `error: could not write <path>: <reason>` to stderr and exit 2. (`previewer/`, `cli`.)
+  round-trips). The CLI's `--preview` write raised an uncaught `OSError` on an unwritable path,
+  dumping a raw traceback instead of honoring the documented 0/1/2 exit-code contract; it now
+  reports `error: could not write <path>: <reason>` to stderr and exits 2. (`previewer/`, `cli`.)
 - **Amperage is sized from fractional machine loads, rounded up per aggregate - not per machine**
   (maintainer-verified in game). GT machines pull whole packets (1 amp = one packet of up to tier
   voltage) into an internal buffer only when it has room, so a 16 EU/t LV machine *averages* 0.5

@@ -21,7 +21,7 @@ for the gauge and skinned with the real cable/pipe sprite where the manifest res
 unresolved route keeps its flat coloured bar - never a checkerboard, which on a noodle threaded
 through a layout reads as damage rather than as missing data) - the cells, their connections, their
 size and their two baked looks all resolved in Python and read straight off ``scene.routes[].cells``,
-so the build guide and the preview cannot disagree about what a layout is made of (#4); auto-output
+so no two surfaces can disagree about what a layout is made of (#4); auto-output
 is a small arrow on each source-machine face perpendicular to the ejecting direction (so one stays
 visible however the machines are packed), drawn for **single-block sources only** - a multiblock
 ejects from a hatch's own face, not from its bounding box, so there is no box face to mark (#153). A side panel lists the

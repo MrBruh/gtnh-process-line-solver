@@ -259,7 +259,7 @@ def test_scene_route_cell_takes_the_fattest_cable_that_meets_it() -> None:
     assert [by_cell[(c.x, c.y, c.z)]["thickness"] for c in (src, m1, fork, m3)] == [4, 2, 4, 1]
     # ...and the fork is BUILT as the 4x cable, which is the half that is a build instruction
     # rather than a rendering detail: it is one block and the fattest incident cable meets it.
-    # This fixture publishes no material, so the label degrades to the wording the build guide used
+    # This fixture publishes no material, so the label degrades to the generic wording a route had
     # before any of this - the gauge is real either way, and that is the half being pinned here.
     assert by_cell[(1, 0, 0)]["label"] == "4x power cable"
     assert by_cell[(1, 0, 0)]["block"] is None
@@ -423,7 +423,7 @@ def test_render_html_labels_the_auto_output_toggle_identically_before_and_after_
 
 def test_scene_still_carries_a_multiblock_auto_connection_it_draws_no_arrow_for() -> None:
     # The other half of #153: the arrow goes, the CONNECTION stays. It is a real connection - the
-    # build guide lists it and the validator re-checks it - so the fix belongs in the renderer, not
+    # layout records it and the validator re-checks it - so the fix belongs in the renderer, not
     # in the scene contract. Filtering these out of `autoConnections` would silently drop them from
     # every other consumer (and from the boundary-storage glyph orientation in `textures`).
     source = producer("mb").model_copy(update={"footprint": CellBox(sx=3, sy=3, sz=3)})

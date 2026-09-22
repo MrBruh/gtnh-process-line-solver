@@ -55,7 +55,7 @@ _MACHINE_PALETTE = (
 #: three.js ``BoxGeometry`` takes its six materials in this face order. A route box's open ends are
 #: emitted as a matching six-slot list, so the viewer needs no normal lookup of its own - the same
 #: split as ``textures._GT_SIDE_TO_THREE_SLOT``, which keeps renderer detail out of ``route_blocks``
-#: (shared with the build guide, which has no idea what three.js is).
+#: (a pure derivation over the contract, which has no idea what three.js is).
 _THREE_SLOT_NORMALS: tuple[Cell, ...] = (
     (1, 0, 0),
     (-1, 0, 0),
@@ -187,7 +187,7 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
                 # The blocks this route is built from, one per cell - the shape the viewer draws.
                 # Derived in ``route_blocks`` rather than in the template's JavaScript, which is
                 # where it used to live: the max-thickness rule in it is a build instruction
-                # (docs/DOMAIN.md) and the build guide has to agree with it block for block.
+                # (docs/DOMAIN.md), and a bill of materials has to agree with it block for block.
                 "cells": [
                     {
                         "cell": list(rc.cell),
@@ -385,7 +385,7 @@ def _contents(machine: Machine, me: METoggles) -> list[dict[str, Any]]:
 def _role(machine: Machine) -> str:
     """Coarse render role: a power source, a boundary storage, or a plain machine. Reuses the
     shared predicates (``Machine.is_power_source``, ``system_io.is_boundary_storage``) so the role
-    stays in step with the build guide instead of re-deriving them here."""
+    stays in step with the boundary summary instead of re-deriving them here."""
     if machine.is_power_source:
         return "source"
     if is_boundary_storage(machine.type):  # Super Chest / Super Tank boundary blocks

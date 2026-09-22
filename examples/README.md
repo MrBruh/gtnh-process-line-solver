@@ -17,9 +17,10 @@ The original upstream both forks descend from is
 [Samiracle64/gtnh-factory-flow](https://github.com/Samiracle64/gtnh-factory-flow).
 
 ```bash
-gtnh-solve examples/<your-plan>.json                 # print the build guide to stdout
-gtnh-solve examples/<your-plan>.json -o guide.txt    # ...or write the guide to a file
+gtnh-solve examples/<your-plan>.json                 # print the solved layout as JSON to stdout
+gtnh-solve examples/<your-plan>.json > layout.json   # ...which is how it goes to a file
 gtnh-solve examples/<your-plan>.json --preview view.html  # ...or a double-clickable 3D preview
+gtnh-solve examples/<your-plan>.json --schematic line.schematic  # ...or a Schematica build ghost
 ```
 
 These are user-exported data files (the GTNH recipe/texture data inside them belongs to its

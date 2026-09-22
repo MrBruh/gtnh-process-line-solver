@@ -1,11 +1,11 @@
 """ir - the two versioned data contracts everything couples to.
 
-``InputIR`` (the problem) and ``LayoutResult`` (the solution, consumed by previewer,
-build guide, and later export). Full spec: docs/IR.md. Implemented as Pydantic v2 models,
-split across submodules. The models + versions are re-exported here as the package's public
-surface, but the low-level cell-grid *helpers* in ``geometry`` (``FACE_DELTAS``,
-``occupied_cells``, ``in_region``, ...) are **not** - consumers deep-import those from
-``ir.geometry`` directly, a convention applied consistently across the placement, router, and
+``InputIR`` (the problem) and ``LayoutResult`` (the solution, consumed by the previewer and the
+``.schematic`` export, and published as JSON on stdout by ``gtnh-solve``). Full spec: docs/IR.md.
+Implemented as Pydantic v2 models, split across submodules. The models + versions are re-exported
+here as the package's public surface, but the low-level cell-grid *helpers* in ``geometry``
+(``FACE_DELTAS``, ``occupied_cells``, ``in_region``, ...) are **not** - consumers deep-import those
+from ``ir.geometry`` directly, a convention applied consistently across the placement, router, and
 validator lanes. Only the value types (``CellCoord``, ``CellBox``) surface here. The submodules:
 
 - ``enums``      - Commodity, IODirection, Facing, LayoutStatus, PipeFamily, PipeSize
@@ -260,4 +260,11 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   and non-null still means an exact controller identity, so no bump. Only the previewer and the
 #   exporter read the field; nothing in the router, solver or validator does, so no `LayoutResult`
 #   can change. (GitHub #205.)
+#
+# LayoutResult v2 (no change to the contract) - `gtnh-solve` now PUBLISHES it: with no `--preview`
+#   and no `--schematic`, the CLI prints the layout as JSON on stdout, infeasible runs included,
+#   where it used to print the text build guide (now retired). Nothing here changed, so nothing is
+#   bumped; what is new is that a script can consume the contract directly, which makes the
+#   versioning rules above bind on a consumer outside this repo too. The JSON uses field names (the
+#   contract has no aliases), states every field, and escapes non-ASCII. (GitHub #203.)
 # ---------------------------------------------------------------------------

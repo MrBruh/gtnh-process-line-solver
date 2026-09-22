@@ -14,8 +14,10 @@ compactness under fixed constraints (pinned I/O chest locations, reserved cells,
 region). It is **place-and-route** (VLSI/PCB problem family) + the **facility layout
 problem**, retargeted to GregTech with full physical fidelity.
 
-The primary v1 deliverable is an **interactive 3D previewer + a layer-by-layer build
-guide**. A paste-ready schematic export is a later, fidelity-gated milestone.
+The primary v1 deliverable is an **interactive 3D previewer**, with a paste-ready Schematica
+`.schematic` export as the fidelity-gated milestone after it (now shipped). v1 also had a
+layer-by-layer text build guide; it was retired (#203) once the export and the preview said
+everything it did.
 
 ## What makes it worth building
 
@@ -40,8 +42,8 @@ guide**. A paste-ready schematic export is a later, fidelity-gated milestone.
    one-fluid-per-pipe, wire limits/loss, accessible I/O faces. "Connected" ≠ "correct."
 4. **The optimizer is assembly of proven techniques, not novel research** - place-then-route;
    SA/LNS placement; A* maze routing with rip-up-and-reroute.
-5. **It needs a distribution path** - a pip-installable CLI/package producing the previewer +
-   build guide (and later the export).
+5. **It needs a distribution path** - a pip-installable CLI/package producing the previewer and
+   the `.schematic` export, and printing the layout itself as JSON for scripts.
 
 ## Chosen approach
 
@@ -62,7 +64,7 @@ shared-amperage power model, etc.) lives in [`ARCHITECTURE.md`](ARCHITECTURE.md)
 - When no valid layout exists, the solver reports the tightest violated constraint and a
   suggested relaxation - never a silent failure or a silently-invalid layout.
 - The previewer renders any candidate in 3D and supports comparing multiple seeds.
-- The build guide is precise enough to reproduce the layout by hand.
+- The previewer and the `.schematic` ghost are precise enough to reproduce the layout by hand.
 - (Later) An exported schematic pastes into GT:NH via Schematica-Plus and runs.
 
 ## Platform reality

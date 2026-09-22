@@ -1,9 +1,9 @@
 """system_io - the boundary of a solved line: what to feed in, what comes out, total power.
 
-Both the text build guide and the 3D previewer answer the same question - "what does this line
-consume and produce at its edge, and how much power does it draw" - so deriving it twice would let
-the two surfaces drift. This module is the single source, pure over the ``InputIR`` + the
-``LayoutResult``; the renderers only format it.
+The 3D previewer answers "what does this line consume and produce at its edge, and how much power
+does it draw". Deriving that inside a renderer is how two surfaces come to disagree, so it lives
+here instead: the single source, pure over the ``InputIR`` + the ``LayoutResult``; a renderer only
+formats it.
 
 - **inputs**: a boundary storage (Super Chest/Tank) that *only* sources the line - nothing feeds it,
   so the builder fills it. Each carries the resource + its typed rate.
@@ -27,10 +27,8 @@ from gtnh_solver.ir import Commodity, InputIR, IODirection, LayoutResult, Net, P
 from gtnh_solver.ir.nets import port_direction_map
 
 #: Per-commodity rate unit stem, no time suffix. The previewer appends ``/t`` or ``/s`` for its
-#: tick-vs-second toggle; the text guide uses ``RATE_UNIT`` below.
+#: tick-vs-second toggle; a rate itself is per tick (typed, docs/IR.md).
 RATE_STEM = {Commodity.ITEM: "items", Commodity.FLUID: "mB", Commodity.POWER: "EU"}
-#: Per-tick throughput unit (typed, docs/IR.md). The canonical map the text guide renders with.
-RATE_UNIT = {commodity: f"{stem}/t" for commodity, stem in RATE_STEM.items()}
 
 
 @dataclass(frozen=True)
@@ -60,7 +58,12 @@ class SystemIO:
     run (adapter.power): ``power_amps_by_source`` is what to feed **each source block** and is the
     one to render per source, while ``power_amps_by_tier`` is the tier-wide total across all of its
     sources, for a summary. They agree exactly when a tier has one source; when it has several the
-    tier figure is the lower of the two, since it rounds once rather than once per source."""
+    tier figure is the lower of the two, since it rounds once rather than once per source.
+
+    The per-source figure was the text build guide's wiring spec and has had no renderer since that
+    guide was retired (#203): the previewer's power panel shows the tier-wide one. It stays because
+    it is the number a builder needs at each source of a split tier, and it is not derivable from
+    the tier figure."""
 
     inputs: list[BoundaryFlow]
     outputs: list[BoundaryFlow]

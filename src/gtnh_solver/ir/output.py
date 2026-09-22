@@ -1,7 +1,8 @@
 """Output layout schema - the *solution* the solver produces.
 
 A first-class versioned contract (not a previewer-internal format), consumed by the
-previewer, the build guide, and later the .schematic exporter. Spec: docs/IR.md.
+previewer and the .schematic exporter, and published as JSON on stdout by ``gtnh-solve`` when no
+artifact is asked for. Spec: docs/IR.md.
 
 Routes are cell-paths; they are lowered to concrete blocks only at export, never here.
 Power routes additionally carry a per-segment cable thickness sized to the summed
@@ -68,7 +69,7 @@ class PlacedHatch(StrictModel):
 
     machine_id: str = Field(min_length=1)
     #: The ``gregtech.api.enums.HatchElement`` kind this hatch is (``InputBus``, ``Energy``,
-    #: ``Maintenance``, ...), so the build guide and the previewer can name and skin the real block.
+    #: ``Maintenance``, ...), so the previewer and the exporter can name and skin the real block.
     kind: str = Field(min_length=1)
     cell: CellCoord
     facing: Facing
@@ -101,9 +102,9 @@ class RouteMaterial(StrictModel):
 
     GT has many cable materials per voltage tier (at LV alone: tin, lead, cobalt, zinc, soldering
     alloy, redstone alloy), so "the LV cable" is not canonical, and nothing in this solver has ever
-    chosen between them. This carries the representative one so the build guide's bill of materials
-    and the previewer cannot disagree about what a route is made of - both read this field instead
-    of each deriving a guess.
+    chosen between them. This carries the representative one so no two consumers (the previewer,
+    the exporter, a bill of materials) can disagree about what a route is made of - each reads this
+    field instead of deriving a guess.
 
     ``stand_in`` is the honesty mechanism and is True for every route v1 emits. It is load-bearing,
     not decorative: a consumer that lowers a route to real blocks (the ``.schematic`` export, #96)
@@ -155,7 +156,7 @@ class Route(StrictModel):
 
     def cells(self) -> set[Cell]:
         """Every grid cell this route's segments touch (both endpoints of each hop). The
-        obstacle/occupancy set the routers, solver, and build guide each rebuilt by hand."""
+        obstacle/occupancy set the routers and the solver each rebuilt by hand."""
         out: set[Cell] = set()
         for seg in self.segments:
             out.add(seg.start.as_tuple())

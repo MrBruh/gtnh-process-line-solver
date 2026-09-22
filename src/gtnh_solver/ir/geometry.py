@@ -26,7 +26,7 @@ class CellCoord(FrozenModel):
 
     def as_tuple(self) -> Cell:
         """This coord as a bare ``(x, y, z)`` :data:`Cell` tuple - the lightweight form the hot
-        grid loops (routing, validation, the build guide) key sets and dicts on."""
+        grid loops (routing, validation, rendering) key sets and dicts on."""
         return (self.x, self.y, self.z)
 
 

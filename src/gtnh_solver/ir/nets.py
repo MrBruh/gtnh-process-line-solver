@@ -1,8 +1,8 @@
 """Net-topology helpers shared across the solver lanes.
 
 Small, pure lookups over the input IR that were hand-rolled identically in the placement, router,
-buildguide, solver, and system_io lanes: the port-direction map, a net's source/sink split, and
-the one-placement-per-machine index. Kept here (not re-exported from ``ir``) so the lanes
+solver, and system_io lanes: the port-direction map, a net's source/sink split, and the
+one-placement-per-machine index. Kept here (not re-exported from ``ir``) so the lanes
 deep-import them the way they deep-import ``ir.geometry`` - helpers stay off the contract's public
 surface (see ``ir/__init__``).
 

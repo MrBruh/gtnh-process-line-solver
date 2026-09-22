@@ -3,7 +3,7 @@
 The tool writes a **committed** artifact, which makes its failure mode unlike the rest of the
 codebase: a manifest that silently lost its cables is byte-for-byte a plausible manifest, it gets
 committed, and every consumer downstream then reports a *different* symptom (the exporter refuses,
-the previewer draws flat bars, the build guide says nothing) with no trace of the one cause. So the
+the previewer draws flat bars) with no trace of the one cause. So the
 route rule fails the run instead of keeping what it happens to find - that is the regression GT's
 2.9 rename produced and this pins (#176).
 

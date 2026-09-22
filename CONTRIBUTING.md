@@ -1,8 +1,8 @@
 # Contributing to gtnh_solver
 
 Thanks for helping build a place-and-route solver for GT:NH. Phase 1 has shipped a crude but
-end-to-end pipeline (adapter through solver, validator, previewer, and build guide); the work
-now is Phase 2 quality, organized as the **Build lanes** below.
+end-to-end pipeline (adapter through solver, validator, previewer, and `.schematic` export); the
+work now is Phase 2 quality, organized as the **Build lanes** below.
 
 ## Setup
 
@@ -57,7 +57,7 @@ as "safe to start on" rather than "unblocked".
 | C | placement: SA/LNS + routing-aware cost | Largely landed - SA + LNS + the routing-aware (HPWL / compactness / auto-output) cost are in; the incremental congestion-aware cost is the remaining refinement |
 | D | router: negotiated-congestion, multi-channel cap, shared-amperage power optimization | In progress - negotiated-congestion routing (item/fluid nets), single-channel capacity, and size-or-reject power landed; power trunks keep failed-first rip-up/reroute. Ahead: the per-edge multi-channel cap and power optimization |
 | E | validator rule-half: tier caps, summed amperage, face reachability | Largely landed - summed amperage, voltage drop, the does-enough-power-arrive check, the per-machine hatch-cell ceiling, and hatch/terminal legality all ship, each derived independently of the solver. Ahead: the per-net tier caps |
-| F | previewer / build-guide polish | Previewer polish in progress - real GT block textures and per-hatch blocks at their own facing have landed; pipe and cable textures are the open piece (#4, scoped by the spike in #105). Build-guide polish deferred |
+| F | previewer polish | Previewer polish in progress - real GT block textures and per-hatch blocks at their own facing have landed; pipe and cable textures are the open piece (#4, scoped by the spike in #105). The text build guide was retired (#203); its bill of materials moves to the previewer (#202) |
 
 Pick a lane, comment on (or open) an issue to claim it, and ship one logical change per PR.
 
@@ -112,7 +112,7 @@ locally by the `commit-msg` hook and in CI on PRs. Format:
   `chore`, `revert`. A breaking change adds `!` (e.g. `feat(ir)!: …`) and a
   `BREAKING CHANGE:` footer.
 - **scope** *(optional but encouraged)* - the module/lane it touches: `ir`, `adapter`,
-  `dataset`, `placement`, `router`, `solver`, `validator`, `buildguide`, `previewer`,
+  `dataset`, `placement`, `router`, `solver`, `validator`, `previewer`, `schematic`,
   `cli`, plus `ci`/`docs` for those.
 - **summary** - imperative, lower-case, no trailing period.
 

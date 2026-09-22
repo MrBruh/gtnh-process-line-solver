@@ -11,7 +11,7 @@
 ## Lane
 
 <!-- The module(s) this touches: ir / adapter / dataset / placement / router / solver /
-     validator / buildguide / previewer / cli / docs / ci -->
+     validator / previewer / schematic / cli / docs / ci -->
 
 ## Checklist
 
