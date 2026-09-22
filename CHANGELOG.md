@@ -67,6 +67,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **A GTNH 2.9 layout with frame boxes now exports instead of crashing (#212).** In GT 2.9 a
+  frame box's block metadata is its material id (Steel 305), and a `.schematic` holds four bits of
+  it, so the export died in `to_nbt` with `ValueError: byte must be in range(0, 256)` on any line
+  with an Industrial Coke Oven or a Large Fluid Extractor, and the crash left the CLI as a raw
+  traceback on exit 1. The maintainer's in-game saves (`tests/golden/schematic/28-sfb`, `29-sfb`)
+  show what Schematica itself does: it keeps the material's low nibble and nothing else, and a frame
+  keeps its material only in a tile entity (`mID = 4096 + material`). Every frame is now written in
+  that shape, so the file records each frame's material and `--inspect-schematic` names it. A
+  paste still cannot rebuild the material (GT drops a frame's tile entity unless its metadata says
+  it has one), so a `SchematicWarning` lists the frames to build by hand. Any other block
+  metadata above 15 is refused by name rather than truncated, and an unexpected exception from
+  the export is now an internal error (exit 3), like the preview's. The EV nitrobenzene line
+  exports its 7 controllers, 344 frames, 15 Super Tanks, 2 Super Chests and 3 power stand-ins with
+  nothing unresolved.
+
 - **A power net the pipes walled off from its machine now gets its cable laid first (#226).**
   Power is routed after the pipes, with every pipe cell a wall, and `reserve_power_docks` keeps one
   dock cell per power endpoint free of pipes: a free cell, but not a free way to it. A pipe could

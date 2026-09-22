@@ -646,6 +646,24 @@ def test_cli_a_preview_that_is_not_a_write_failure_is_an_internal_error(
     assert "internal error: RuntimeError: scene" in err
 
 
+def test_cli_a_schematic_that_is_not_a_write_failure_is_an_internal_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    solve_calls: list[dict[str, object]],
+) -> None:
+    # The same guard for the export (#212): a 2.9 frame box once crashed the lowering with a bare
+    # ValueError, which reached the shell as a traceback on exit 1, the code for an infeasibility.
+    def exploding_export(*args: object, **kwargs: object) -> None:
+        raise ValueError("byte must be in range(0, 256)")
+
+    monkeypatch.setattr(cli_module, "write_schematic", exploding_export)
+    code = main([_SAND, "--schematic", str(tmp_path / "line.schematic")])
+    err = capsys.readouterr().err
+    assert code == cli_module.INTERNAL_ERROR_EXIT
+    assert "internal error: ValueError: byte must be in range(0, 256)" in err
+
+
 def test_cli_unwritable_output_returns_2(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
 ) -> None:

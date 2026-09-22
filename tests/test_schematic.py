@@ -14,6 +14,7 @@ WebGL render. The tests cover everything up to the bytes.
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -37,8 +38,14 @@ from gtnh_solver.ir import (
     Segment,
     Terminal,
 )
-from gtnh_solver.previewer.textures import TextureManifest
-from gtnh_solver.schematic import SchematicError, build_schematic, nbt, write_schematic
+from gtnh_solver.previewer.textures import BlockCube, TextureManifest
+from gtnh_solver.schematic import (
+    SchematicError,
+    build_schematic,
+    nbt,
+    read_schematic,
+    write_schematic,
+)
 from gtnh_solver.schematic import core as schematic_core
 from gtnh_solver.solver import solve
 from tests._helpers import at, consumer, net, producer
@@ -502,3 +509,82 @@ def test_cli_reports_an_unexportable_layout_as_exit_2(
     monkeypatch.setattr(cli_module, "write_schematic", boom)
     assert cli_module.main([str(_SAND), "--schematic", str(tmp_path / "x.schematic")]) == 2
     assert "cannot export" in capsys.readouterr().err
+
+
+# ------------------------------------------------------------------ GT frame boxes (#212)
+
+_FRAMES = schematic_core.FRAME_BLOCK
+_STEEL, _BLACK_STEEL = 305, 334  # GT material ids, as the frame goldens hold them
+
+
+def test_a_frame_is_written_as_schematica_writes_a_covered_one() -> None:
+    """Data is the material's low nibble; the material itself rides a frame tile entity.
+
+    Cell for cell against the maintainer's 2.9 save: the same ``Data`` bytes, and at the covered
+    frame the same tile entity (``BaseMetaPipeEntity``, ``mID = 4096 + material``). The exporter
+    writes that tile entity on every frame, because a plain frame's nibble alone names the wrong
+    material and the file would have nothing better to say.
+    """
+    cells = {
+        (x, 0, 0): schematic_core._frame_cell(meta, x, 0, 0)
+        for x, meta in enumerate((_STEEL, _BLACK_STEEL, _STEEL))
+    }
+    ours = read_schematic(nbt.dumps("Schematic", schematic_core.to_nbt((3, 1, 1), cells)))
+    golden = read_schematic(_GOLDEN / "29-sfb.schematic")
+
+    assert [ours.block_at(x, 0, 0) for x in range(3)] == [
+        golden.block_at(x, 0, 0) for x in range(3)
+    ]
+    theirs = golden.tile_at(2, 0, 0)
+    assert theirs is not None
+    mine = ours.tile_at(2, 0, 0)
+    assert mine is not None
+    assert (mine.id, mine.mid, mine.pos) == (theirs.id, theirs.mid, theirs.pos)
+    assert [t.mid for t in ours.tile_entities] == [
+        4096 + _STEEL,
+        4096 + _BLACK_STEEL,
+        4096 + _STEEL,
+    ]
+
+
+def test_a_frame_keeps_its_material_when_it_already_carries_the_tile_entity_bit() -> None:
+    # 0x1000 is MTE_BIT: a frame dumped with its tile entity must name the same material.
+    cell = schematic_core._frame_cell(0x1000 | _STEEL, 0, 0, 0)
+    assert cell.data == _STEEL & 0xF
+    assert cell.tile is not None
+    assert int(cell.tile["mID"]) == 4096 + _STEEL
+
+
+def test_frames_warn_naming_what_a_paste_will_get_wrong() -> None:
+    manifest = TextureManifest(
+        {"blocks": {"gregtech:gt.blockmachines|4401": {"kind": "pipe", "display_name": "Steel"}}}
+    )
+    grid = {
+        (x, 0, 0): schematic_core._frame_cell(meta, x, 0, 0)
+        for x, meta in enumerate((_STEEL, _STEEL, _BLACK_STEEL))
+    }
+    with pytest.warns(schematic_core.SchematicWarning) as caught:
+        schematic_core._warn_about_frames(grid, manifest)
+    message = str(caught[0].message)
+    assert message.startswith("3 GT frame box(es) (Steel x2, material 334 x1)")
+    assert "wrong material" in message
+
+
+def test_a_line_without_frames_does_not_warn() -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", schematic_core.SchematicWarning)
+        _sand_schematic()
+
+
+def test_block_metadata_above_a_nibble_is_refused_rather_than_truncated() -> None:
+    # Only frames have a known encoding for it; anything else would be written as another block.
+    manifest = TextureManifest({"blocks": {"mod:casing|40": {"kind": "block"}}})
+    cube = BlockCube((0, 0, 0), "mod:casing", 40, 0)
+    with pytest.raises(SchematicError, match="metadata above 15"):
+        schematic_core._cube_cell(cube, manifest, Facing.NORTH, (0, 0, 0))
+
+
+def test_to_nbt_refuses_a_data_value_it_cannot_hold() -> None:
+    # The last line of defence: this used to escape as a bare ValueError from bytearray.
+    with pytest.raises(SchematicError, match="Data 305"):
+        schematic_core.to_nbt((1, 1, 1), {(0, 0, 0): schematic_core.Cell(_FRAMES, 305)})

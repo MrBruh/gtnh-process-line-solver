@@ -731,6 +731,8 @@ def main(argv: list[str] | None = None) -> int:
         except OSError as exc:
             print(f"error: could not write {args.schematic}: {exc}", file=sys.stderr)
             return 2
+        except Exception as exc:  # the lowering, not the write; see _internal_error (#212)
+            return _internal_error(exc)
         print(f"wrote schematic to {args.schematic}", file=sys.stderr)
 
     if layout.status is LayoutStatus.VALID:

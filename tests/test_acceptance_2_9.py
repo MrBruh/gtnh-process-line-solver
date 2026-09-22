@@ -37,7 +37,7 @@ from gtnh_solver.dataset import MultiblockDoc, extractor_hint, load_physical_dat
 from gtnh_solver.ir import InputIR, LayoutResult
 from gtnh_solver.previewer.scene import build_scene
 from gtnh_solver.previewer.textures import TextureManifest, load_multiblock_docs, machine_cubes
-from gtnh_solver.schematic import build_schematic, nbt, read_schematic
+from gtnh_solver.schematic import SchematicWarning, build_schematic, nbt, read_schematic
 from gtnh_solver.solver import solve
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -141,18 +141,19 @@ def test_every_machine_expands_to_the_doc_its_own_key_names(
     assert unexpanded == ["source"] * 3, "only the synthesized power sources stay placeholders"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=ValueError,
-    reason="#212: a 2.9 frame box's meta is its material id (Steel 305, Black Steel 334), which "
-    "the .schematic Data byte cannot hold, so the export crashes in to_nbt",
-)
 def test_the_schematic_holds_the_controllers_the_plan_names(
     solved: tuple[InputIR, LayoutResult],
     docs: dict[str, MultiblockDoc],
     manifest: TextureManifest,
 ) -> None:
-    root = build_schematic(*solved, manifest=manifest, docs=docs)
+    """The export names every machine, and every frame box keeps its material in the file (#212).
+
+    The Coke Ovens and the Fluid Extractor are built partly of frame boxes, whose 2.9 metadata is a
+    material id a ``.schematic`` cannot hold; the export writes each as Schematica writes a covered
+    frame, and warns that a paste will get the material wrong.
+    """
+    with pytest.warns(SchematicWarning, match="344 GT frame box"):
+        root = build_schematic(*solved, manifest=manifest, docs=docs)
     schematic = read_schematic(nbt.dumps("Schematic", root))
     machines = Counter(tile.mid for tile in schematic.tile_entities if tile.mid is not None)
     named = {mid: manifest.display_name(_GT_MACHINES, mid) for mid in machines}
@@ -163,3 +164,5 @@ def test_the_schematic_holds_the_controllers_the_plan_names(
     assert by_name["Super Tank I"] == 15
     assert by_name["Super Chest I"] == 2
     assert by_name["Debug Power Generator"] == 3
+    # The frames: 4096 + material, Steel 305 in the Coke Ovens, Black Steel 334 in the extractor.
+    assert (machines[4096 + 305], machines[4096 + 334]) == (320, 24)

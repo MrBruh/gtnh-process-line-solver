@@ -27,10 +27,23 @@ meta IS block metadata and it needs no tile entity.
 file, and Schematica remaps onto whatever the loading instance assigned, so the ids here are
 allocated compactly from 1 (air stays 0) rather than copied from any particular install. That
 also keeps every id under 256, so ``AddBlocks`` is only emitted if a file ever needs it.
+
+**A GT frame box does not fit, and nothing makes it fit** (#212). In GT 2.9 a frame's world
+metadata is its *material id* (``BlockFrameBox.MATERIAL_MASK``, 0xFFF; Steel is 305), plus
+``MTE_BIT`` (0x1000) once it carries a tile entity, while ``Data`` holds four bits. Measured on the
+maintainer's own saves (``tests/golden/schematic/28-sfb`` and ``29-sfb``, one per pack): Schematica
+writes the **low nibble** of the material (Steel 1, Black Steel 14) and keeps the material only in a
+frame that has a tile entity, as ``BaseMetaPipeEntity`` with ``mID = 4096 + material``. So every
+frame is written in that covered-frame shape (:func:`_frame_cell`): the file then says what each
+frame is made of. It cannot make a paste right, and :class:`SchematicWarning` says so: GT keeps a
+frame's tile entity only when ``MTE_BIT`` is in the metadata, which a nibble cannot carry, so in
+game the ghost and a paste show material 1 or 14 (Hydrogen, Fluorine) instead.
 """
 
 from __future__ import annotations
 
+import warnings
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -77,6 +90,28 @@ POWER_SOURCE_STAND_IN: Final = "Debug Power Generator"
 _NBT_VERSION: Final = 509051476
 
 _AIR: Final = "minecraft:air"
+#: The block every GT machine, pipe and cable is a meta of; frame tile entities are named there.
+_GT_MACHINES: Final = "gregtech:gt.blockmachines"
+
+#: The most a ``Data`` entry holds: Schematica keeps four bits of a block's metadata (#212).
+_DATA_NIBBLE: Final = 0x0F
+
+#: GT's frame box block, whose metadata is a material id rather than a nibble (see the module
+#: docstring and :func:`_frame_cell`).
+FRAME_BLOCK: Final = "gregtech:gt.blockframes"
+#: ``BlockFrameBox.MATERIAL_MASK``: the material-id bits of a frame's metadata.
+_FRAME_MATERIAL_MASK: Final = 0xFFF
+#: A frame's tile entity is ``mID = 4096 + material``: ``BlockFrameBox.spawnFrameEntity`` ("4096 is
+#: found in LoaderMetaTileEntities for frames"), and the covered frame in both frame goldens.
+FRAME_MID_BASE: Final = 4096
+
+
+class SchematicWarning(UserWarning):
+    """The file was written, but part of it will not rebuild faithfully in game.
+
+    Today that is only GT frame boxes, whose material a ``.schematic`` cannot carry into a paste
+    (#212); the file still records it, so the warning says where to read what to build.
+    """
 
 
 class SchematicError(RuntimeError):
@@ -139,6 +174,24 @@ def _gt_tile(
     return tile
 
 
+def _frame_cell(meta: int, x: int, y: int, z: int) -> Cell:
+    """A GT frame box, in the shape Schematica itself writes a frame that has a tile entity.
+
+    ``Data`` is the low nibble of the material id, which is all Schematica keeps (``28-sfb`` and
+    ``29-sfb``: Steel 305 reads back 1, Black Steel 334 reads back 14). The material itself goes in
+    a ``BaseMetaPipeEntity`` with ``mID = 4096 + material``, exactly as the covered frame in both
+    saves carries it, so the file says what every frame is made of. Written for every frame, not
+    only covered ones, because a plain frame's nibble names the wrong material (Steel's 1 is
+    Hydrogen) and the file would otherwise have nothing better to say.
+    """
+    material = meta & _FRAME_MATERIAL_MASK
+    return Cell(
+        FRAME_BLOCK,
+        material & _DATA_NIBBLE,
+        _gt_tile("pipe", FRAME_MID_BASE + material, x, y, z, facing=None, connections=0),
+    )
+
+
 def _untypeable(what: str, manifest: TextureManifest) -> SchematicError:
     """The refusal for a block whose ``te_base_type`` the consulted manifest does not carry.
 
@@ -180,7 +233,15 @@ def _cube_cell(
             f"{cube.block}|{cube.meta} is not in {manifest.origin()}, so it cannot be typed; "
             "regenerate the dataset (docs/dataset-extraction/implementation.md)"
         )
+    x, y, z = (cube.cell[i] - origin[i] for i in range(3))
+    if cube.block == FRAME_BLOCK:
+        return _frame_cell(cube.meta, x, y, z)
     if kind == "block":
+        if cube.meta > _DATA_NIBBLE:
+            raise SchematicError(
+                f"{cube.block}|{cube.meta} has block metadata above 15, which a .schematic's Data "
+                "cannot hold, and only GT frame boxes have a known encoding for it (GitHub #212)"
+            )
         return Cell(cube.block, cube.meta)  # a casing: meta IS block metadata, no tile entity
 
     base = manifest.te_base_type(cube.block, cube.meta)
@@ -188,7 +249,6 @@ def _cube_cell(
         raise _untypeable(f"{cube.block}|{cube.meta} ({kind})", manifest)
     # A hatch points where the router put it; anything else rides the machine's placed front.
     side = Facing(cube.facing.lower()) if cube.facing is not None else front
-    x, y, z = (cube.cell[i] - origin[i] for i in range(3))
     return Cell(
         cube.block,
         base,
@@ -264,7 +324,29 @@ def lower(
             key = tuple(int(raw["cell"][i]) - origin[i] for i in range(3))
             grid[key] = cell  # type: ignore[index]
 
+    _warn_about_frames(grid, manifest)
     return size, grid  # type: ignore[return-value]
+
+
+def _warn_about_frames(grid: dict[tuple[int, int, int], Cell], manifest: TextureManifest) -> None:
+    """Say how many frame boxes a paste will get wrong, and of which materials (#212)."""
+    mids: Counter[int] = Counter(
+        int(cell.tile["mID"]) for cell in grid.values() if cell.block == FRAME_BLOCK and cell.tile
+    )
+    if not mids:
+        return
+    named = ", ".join(
+        f"{manifest.display_name(_GT_MACHINES, mid) or f'material {mid - FRAME_MID_BASE}'} x{n}"
+        for mid, n in sorted(mids.items())
+    )
+    warnings.warn(
+        f"{sum(mids.values())} GT frame box(es) ({named}): a .schematic keeps only the low 4 bits "
+        "of a frame's material, and GT drops a pasted frame's tile entity, so in game the ghost "
+        "and a paste show these frames as the wrong material. The file records each frame's real "
+        "material (--inspect-schematic names it); build them from that (GitHub #212).",
+        SchematicWarning,
+        stacklevel=3,
+    )
 
 
 def _stand_in_cubes(machine: dict[str, Any], manifest: TextureManifest) -> list[BlockCube]:
@@ -315,6 +397,11 @@ def to_nbt(size: tuple[int, int, int], grid: dict[tuple[int, int, int], Cell]) -
                     continue
                 index = (y * length + z) * width + x  # MCEdit order, as the goldens are written
                 blocks[index] = ids[cell.block]
+                if not 0 <= cell.data <= _DATA_NIBBLE:
+                    raise SchematicError(
+                        f"{cell.block} at {(x, y, z)} has Data {cell.data}, which a .schematic "
+                        "cannot hold; nothing may reach the file unencoded (GitHub #212)"
+                    )
                 data[index] = cell.data
                 if cell.tile is not None:
                     tiles.append(cell.tile)
