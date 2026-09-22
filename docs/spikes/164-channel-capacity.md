@@ -3,6 +3,16 @@
 **Status:** design only, nothing implemented. Read this before touching
 `src/gtnh_solver/validator/core.py`.
 
+**Resolved (2026-09-22) by the negotiated router, landing with the corrected crowding gate.** The
+three blockers the update below lists are gone. `crowded_machines` now sees within-net sharing.
+`reserve_power_docks` (R6) is deleted: power nets are negotiated alongside the pipes as trees, so
+nothing holds a dock cell before routing starts. Docking is no longer greedy: each net is re-routed
+every round as a group Steiner tree whose dock cells its own search chooses (`router/steiner.py`),
+growing by cost per endpoint served, so one pipe block serves several machines of a net. Handed the
+maintainer's proven placement, the solver now lays exactly the build's 12 pipe blocks and 3 cable
+blocks (`tests/test_golden_sand_parallel.py`). Cross-net capacity stays at 1, as section 3
+recommends. The measurements that chose this approach are on #164.
+
 **Status update (2026-09-21).** Edits 1 and 2 of section 5 have landed together:
 `router/core.py::_free` no longer filters a net's own dock cells (`mine` is kept), and the validator
 gained rule C as `TERMINAL_FACE_CONTENTION`. Cross-net sharing stays forbidden, as section 3

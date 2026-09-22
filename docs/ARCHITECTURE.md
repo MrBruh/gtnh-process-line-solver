@@ -29,8 +29,8 @@ doc as intent and reconcile.
             ▼          routing-aware cost (cheap)        ▼
      ┌────────────┐  ◄──── feedback (penalty) ───── ┌────────────┐
      │ Placement  │                                 │  Router    │
-     │ SA/LNS,    │ ───────── placed cells ───────► │ A*, 3D,    │
-     │ orientation│                                 │ per-commod.│
+     │ SA/LNS,    │ ───────── placed cells ───────► │ negotiated │
+     │ orientation│                                 │ docks+paths│
      └─────┬──────┘                                 │ + power    │
            │            place↔route↔retry           └─────┬──────┘
            └──────────────────┬─────────────────────────┘
@@ -82,12 +82,21 @@ doc as intent and reconcile.
   failed *or starved* power net enters the cost as an MST trunk-length pull only once the
   feedback penalizes it. *(Phase 2, lane C: SA + LNS are in; the cheaper incremental
   routing/congestion estimate the cost is meant to grow into is still ahead.)*
-- **router/** - free-form per-commodity A* on the **full-3D** cell grid (all six faces are
-  neighbours); single-channel capacity; **negotiated-congestion routing** for item/fluid nets
-  (priced A*, PathFinder-style; power trunks keep failed-first rip-up/reroute); ME-toggle
-  skipping; the shared-amperage power primitive. It owns the **auto-output vs pipe** decision (`router/auto.py`,
-  `assign_auto_outputs`): adjacent 1-source-1-sink item/fluid nets take GT's free auto-output,
-  only the rest are piped. Each item pipe it lays is **sized** from what the run carries, in GT's
+- **router/** - free-form routing on the **full-3D** cell grid (all six faces are neighbours);
+  single-channel capacity; ME-toggle skipping; the shared-amperage power primitive. It owns the
+  **auto-output vs pipe** decision (`router/auto.py`, `assign_auto_outputs`): adjacent
+  1-source-1-sink item/fluid nets take GT's free auto-output, only the rest are routed. Those
+  nets, **power included**, are routed by one **negotiated congestion** (PathFinder-style,
+  `router/core.py`) in which **docks are part of the negotiation** (#164): each net is re-routed
+  every round as a group Steiner tree whose dock cells the same search chooses
+  (`router/steiner.py`), growing to whichever dock cell costs least per endpoint it serves, so
+  one pipe block serves several machines of a net as the maintainer's builds do. A dock another
+  net holds is a priced cell, not a wall, and a multiblock's casing cell is negotiated as a
+  resource of its own. A power net's tree is a reservation that keeps the pipes off the space a
+  cable needs; `router/power.py` then lays and sizes the real trunk in what the pipes leave
+  (failed-first rip-up/reroute across tiers). Nothing is held before routing starts: the old
+  one-dock-cell-per-energy-port hold, made blind, took a middle hammer's last dock cells on the
+  maintainer's proven parallel-sand build. Each item pipe it lays is **sized** from what the run carries, in GT's
   own unit: insertions per window, one per endpoint on the run's crowded side
   (`dataset/pipe_capacity.py`, docs/DOMAIN.md; #165). *(Phase 2, lane D: the
   margin→channels-per-edge cap + cell→block realizability, and power optimization beyond
@@ -169,7 +178,9 @@ doc as intent and reconcile.
 5. **Ground truth - golden corpus + property tests now**; harvested corpus via round-trip
    import is v1.1. Plus an in-game spot-check of the starter dataset during the Assignment.
 6. **Performance - target ~30-50 machines, anytime wall-clock budget** (best-valid-so-far on
-   timeout). Router uses **A\*** (not Lee BFS) with a Manhattan heuristic on the bounded grid.
+   timeout). The power router uses **A\*** (not Lee BFS) with a Manhattan heuristic on the
+   bounded grid; the negotiation grows each net's tree with a priced multi-source Dijkstra that
+   stops as soon as no unexplored dock cell can serve its endpoints more cheaply.
    *(Phase 2: the wall-clock/timeout budget. `solve()` already returns the best VALID layout by
    its quality ranking, but over a **deterministic bounded** multi-start grid keyed off the seed,
    not a wall-clock timeout - see `solver/core.py`. The other half of this target is per-iteration

@@ -28,6 +28,7 @@ from gtnh_solver.ir import (
     LayoutStatus,
     Machine,
     MachineFaceRef,
+    METoggles,
     Net,
     Placement,
     Port,
@@ -266,7 +267,9 @@ def test_two_energy_hatches_of_a_multiblock_take_two_casing_cells() -> None:
 
 def test_a_pipe_and_a_cable_do_not_share_one_casing_cell() -> None:
     # The pool is shared across commodities: a cell an input bus stands on cannot also hold an
-    # energy hatch. The item/fluid router docks first and hands its claims to the power router.
+    # energy hatch. Two guards keep them apart. The negotiating router prices a casing cell as a
+    # resource of its own, with the power net in the negotiation, and the power router honours the
+    # casing cells the pipes' hatches already hold (``claimed_cells``).
     # A corner-ish cell with TWO exposed faces (west and down), so the control below is real:
     # without the claim, power simply takes the other face of the block the bus is standing on.
     only_cell = [_slot(0, 0, 1, "InputBus", "Energy")]
@@ -315,7 +318,19 @@ def test_a_pipe_and_a_cable_do_not_share_one_casing_cell() -> None:
     )
     placements = [at("src", 8, 1, 3), at("feeder", 0, 1, 3), at("m", 2, 1, 2)]
 
-    items = route(problem, placements)
+    # Both nets need the machine's one hatch cell in every routing. The negotiation proves it, keeps
+    # the power net's tree (power is salvaged first) and fails the item net, rather than hand the
+    # block to both.
+    both = route(problem, placements)
+    assert not both.ok
+    assert both.failed_nets == ("items",)
+    assert both.infeasibility is not None
+    assert both.infeasibility.constraint == "congestion"
+    assert both.routes == ()
+
+    # The power router's own guard, fed the claim of a bus that did take the cell (the item net
+    # routed alone, with power on ME).
+    items = route(problem.model_copy(update={"me_toggles": METoggles(power=True)}), placements)
     assert items.ok, items.infeasibility
     claims = claims_by_machine(items.routes, {mm.id: mm for mm in problem.machines})
     assert claims["m"] == {(2, 1, 3)}  # the input bus took the machine's one hatch cell

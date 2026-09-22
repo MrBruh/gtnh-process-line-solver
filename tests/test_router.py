@@ -571,16 +571,34 @@ def test_route_chains_a_multi_endpoint_net_leg_by_leg() -> None:
 def test_route_infeasible_when_both_endpoints_want_the_only_free_cell() -> None:
     # A 3x1x1 corridor: the lone free cell (1,0,0) is the ONLY dock candidate of both machines.
     # One pipe block wired to both would be a real build, but it lays no segment, and a route with
-    # none is not a route (ROUTE_DISCONTINUOUS). The chain cannot even start (a leg's goals exclude
-    # its own start), so docking falls back to first-fit, which never shares a cell (#164) - it
-    # seats the first endpoint and leaves the second with nothing.
+    # none is not a route (ROUTE_DISCONTINUOUS). The tree search lays a one-block stub beside a
+    # shared cell for exactly this, and here there is no free cell for one, so the net fails
+    # explicitly as a routing failure and nothing is emitted for it.
     problem = _item_pair(CellBox(sx=3, sy=1, sz=1))
     result = route(problem, [at("a", 0, 0, 0), at("b", 2, 0, 0)])
 
     assert not result.ok
     assert result.infeasibility is not None
-    assert result.infeasibility.constraint == "face_reachability"
-    assert "'b'" in result.infeasibility.detail  # the endpoint left without a cell, not the first
+    assert result.infeasibility.constraint == "routing"
+    assert result.failed_nets == ("n",)
+    assert result.routes == ()
+
+
+def test_two_machines_sharing_their_only_cell_get_a_stub() -> None:
+    # The same two machines with a free cell above the one they share: both terminals land on the
+    # shared block, and a one-block stub gives the route the segment it needs.
+    problem = _item_pair(CellBox(sx=3, sy=2, sz=1))
+    placements = [at("a", 0, 0, 0), at("b", 2, 0, 0)]
+    result = route(problem, placements)
+
+    assert result.ok, result.infeasibility
+    (laid,) = result.routes
+    assert {t.cell.as_tuple() for t in laid.terminals} == {(1, 0, 0)}
+    assert len(laid.segments) == 1
+    layout = LayoutResult(
+        status=LayoutStatus.VALID, seed=0, placements=placements, routes=list(result.routes)
+    )
+    assert validate(problem, layout).ok, str(validate(problem, layout))
 
 
 # ------------------------------------------ #164: several terminals of one net on one dock cell
@@ -656,7 +674,9 @@ def test_terminals_of_one_net_share_a_dock_cell() -> None:
 def test_two_nets_still_never_share_a_dock_cell() -> None:
     # The relaxation is within ONE net. X=(1,0,0) is the only dock cell of both a (net n1) and b
     # (net n2), and a pipe delivers to any inventory wired to it whatever the plan meant it to
-    # carry, so letting n2 dock there would feed n1's items into b. n2 must fail, naming b.
+    # carry, so letting n2 dock there would feed n1's items into b. Both nets need X in every
+    # routing, which the negotiation proves, so it keeps n1 (problem order) and fails n2 as
+    # congestion. Nothing of n2 is laid.
     #
     #   z=0   a  X  b      a, b front SOUTH: X is all either has left
     #   z=1   .  .  .
@@ -681,21 +701,18 @@ def test_two_nets_still_never_share_a_dock_cell() -> None:
     assert not result.ok
     assert result.failed_nets == ("n2",)
     assert result.infeasibility is not None
-    assert result.infeasibility.constraint == "face_reachability"
-    assert "'b'" in result.infeasibility.detail
+    assert result.infeasibility.constraint == "congestion"
+    assert "'n2'" in result.infeasibility.detail
     (n1,) = result.routes
     assert (1, 0, 0) in n1.cells()  # n1 kept X; nothing of n2 was laid on it
 
 
-def test_a_shared_dock_cell_is_never_handed_to_another_net() -> None:
-    # The re-seat rescue frees a cell a stranded net needs by moving whoever holds it. A cell two
-    # endpoints of one net share cannot be freed that way: moving one leaves the other on it, so
-    # handing it over would put two nets on one pipe block.
-    #
-    # The manifold above, one layer taller. Net n docks on U0 and U1 (asserted below, since the
-    # test means nothing otherwise), and c's only dock cell is U0: its front is SOUTH, d sits
-    # EAST, and every other face is off the region. U0's holders a0 and b0 could each move to P,
-    # so a rescue that re-seated one of them would "succeed" and give U0 to net m.
+def test_a_net_moves_its_manifold_so_another_net_can_dock() -> None:
+    # A cell several terminals of one net share is that net's alone, and docks are negotiated with
+    # the paths, so a net can give up the cells it would have liked for ones that leave another
+    # net room. The manifold above, one layer taller: c's only dock cell is U0 (its front is SOUTH,
+    # d sits EAST, every other face is off the region), which is one of the manifold's two pairs.
+    # The manifold takes the other pair, P and Q, so all three nets route with no cell shared.
     problem, placements = _manifold()
     c = _stage("c", IODirection.OUTPUT, Facing.SOUTH)
     d = _stage("d", IODirection.INPUT, Facing.WEST)  # fronting c, so no free auto-output
@@ -713,13 +730,15 @@ def test_a_shared_dock_cell_is_never_handed_to_another_net() -> None:
     ]
     result = route(problem, placements)
 
-    manifold = next((r for r in result.routes if r.net_id == "n"), None)
-    assert manifold is not None, f"the manifold lost its cell to net m: {result.failed_nets}"
-    assert {t.cell.as_tuple() for t in manifold.terminals} == {(0, 1, 0), (0, 1, 1)}
-    assert result.failed_nets == ("m",)
-    assert result.infeasibility is not None
-    assert result.infeasibility.constraint == "face_reachability"
-    assert "'c'" in result.infeasibility.detail
+    assert result.ok, result.infeasibility
+    by_net = {r.net_id: r for r in result.routes}
+    assert {t.cell.as_tuple() for t in by_net["n"].terminals} == {(1, 0, 0), (1, 0, 1)}
+    assert (0, 1, 0) in {t.cell.as_tuple() for t in by_net["m"].terminals}
+    assert by_net["n"].cells().isdisjoint(by_net["m"].cells())
+    layout = LayoutResult(
+        status=LayoutStatus.VALID, seed=0, placements=placements, routes=list(result.routes)
+    )
+    assert validate(problem, layout).ok, str(validate(problem, layout))
 
 
 def test_route_skips_me_toggled_commodity() -> None:

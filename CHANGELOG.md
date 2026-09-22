@@ -67,6 +67,49 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **The crowding gate no longer turns away placements whose connections share a pipe block
+  (#164).** `crowded_machines` gave every pipe port a dock cell of its own, so it could not see
+  that terminals of different machines on one net may share one (#194). It named 6 machines
+  crowded on the maintainer's build proven in game, which the validator passes, so the solver
+  discarded exactly the placements #164 wants. For each machine it now seats that machine's own
+  connections together with one stand-in per other net among its neighbours, each able to take any
+  cell that net could use there; a view that cannot be seated proves the machine cannot be hosted.
+  It names the proven build 0 times, still catches the #76 solid row, and no longer depends on the
+  order placements are handed over. It was held back until the router could route what it admits
+  (see the next entry); the two land together, and parallel-sand goes from 11 of 16 valid seeds to
+  16 of 16.
+
+- **The router negotiates dock cells and power together with the paths, so tight placements route
+  and the maintainer's parallel-sand placement comes out exactly as he built it (#164).** The old
+  router chose every net's dock cells greedily, net by net, before it negotiated any path, and
+  before that held one dock cell per energy port (`reserve_power_docks`), picked in a fixed face
+  order. A dock another net held was a wall. On a tight placement those blind choices could not be
+  undone: on the maintainer's proven placement the power hold took 3 of the 4 dock cells of a middle
+  hammer, so gravel could not dock and the placement did not route at all, and of the 23 placements
+  `solve()` tried on parallel-sand seeds 0 to 7 once the crowding gate stopped turning tight ones
+  away, it routed none. Now every net, power included, is re-routed each PathFinder round as a
+  group Steiner tree whose dock cells its own search chooses (`router/steiner.py`). It grows to
+  whichever dock cell costs least per endpoint it serves, so one pipe block serves several machines
+  of a net as the maintainer's builds do, and it tries several starts because the first dock picks
+  the pocket the tree grows in. A cell, or a multiblock's casing cell, that two nets hold is priced
+  up round by round until nothing is shared. A power net's tree is a reservation that keeps the
+  pipes off the space its cable needs; `route_power` still lays and sizes the cable, in what the
+  pipes leave.
+
+  Handed the proven placement, the solver now lays the build's own 12 pipe blocks and 3 cable
+  blocks, pinned by `tests/test_golden_sand_parallel.py`; the 23 placements above all route VALID
+  (`tests/test_parallel_sand_tight.py`). Failure labels move with it: an item net that loses a
+  contested cell is now `congestion` rather than `face_reachability`, which now means an endpoint
+  with no free dock cell at all, and a net with no room for any route is `routing`.
+
+  Measured against `main` in one session: parallel-sand goes from 11 of 16 seeds valid to 16 of 16,
+  its median box from 168 to 128 and its median 45 pipe cells to 32, for about 2x the solve time
+  (1.7 s to 3.6 s a seed, and the extra time is spent in negotiations that do not converge, on
+  attempts the loop then discards). sand and ev-nitrobenzene keep their time (1.0x; ev-nitrobenzene
+  lays 295 pipe cells against 339 and 130 cable cells against 148), and nitrobenzene costs 1.14x
+  and trades a smaller box (median 1050 against 1190) for more pipe (32 against 24), which is what
+  the loop's footprint-first quality ranking asks for.
+
 - **A GTNH 2.9 layout with frame boxes now exports instead of crashing (#212).** In GT 2.9 a
   frame box's block metadata is its material id (Steel 305), and a `.schematic` holds four bits of
   it, so the export died in `to_nbt` with `ValueError: byte must be in range(0, 256)` on any line
@@ -411,6 +454,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Two files claiming the same **block_key** is still an error: that is one controller dumped twice.
 
 ### Removed
+- **Breaking: `router.reserve_power_docks`, the power-first recovery pass, and the parameters only
+  they used (#164).** The one-cell-per-energy-port hold is what the negotiated router replaces
+  (see Fixed). The power-first recovery (#226) routed a failed power net alone and laid the attempt
+  again, because a pipe could wall a held dock cell into a pocket; with power negotiated alongside
+  the pipes it fired on nitrobenzene attempts and never rescued one, so an attempt is one pass
+  again. `route(..., reserved=)` and `route_power(..., nets=)` existed only for the recovery and are
+  gone with it. The `_grid.astar` path search had no caller left.
+
 - **Breaking: the text build guide, and `-o/--output` with it (#203).** `buildguide/`
   (`build_guide()`) and its tests are gone. `-o/--output` existed only to write the guide and is
   now an argparse usage error (exit 2) rather than being kept or repurposed; the JSON goes to a
