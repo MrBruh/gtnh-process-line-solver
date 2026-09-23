@@ -40,8 +40,10 @@ scrubbed over and over) while the four set-once view toggles fold above it behin
 which is the difference between a 60px bar and a 180px one; targets grow to 44px on a coarse
 pointer; and the gesture hint folds behind the HUD's ``?``, restating itself for touch
 (``tap: identify``, not ``right-drag``).
-Those folded states are chosen once at load, never re-applied on resize - rotating the device must
-not reopen a panel the builder closed. Identification is the part touch could not reach at all:
+All three follow the viewport across that width, because dragging a desktop window narrow is how
+this gets looked at and a page that reacted only on reload reads as broken - but a panel the
+builder has pressed themselves stops listening, so a rotation cannot reopen one they closed.
+Identification is the part touch could not reach at all:
 hover does not exist there, so a **tap** picks and the tag *latches* until the next tap, since a
 finger that lifts would take a tag that followed it. A drag or a pinch is not a tap, so orbiting
 never flashes one.
@@ -666,28 +668,36 @@ if (arrows.length === 0) {
 }
 
 // Phone-first chrome (#237). Three panels fold away - the legend drawer, the gesture hint, and the
-// four view toggles above the layer slider - and all three start folded at phone width, where the
-// panels together leave barely any model to look at. Decided ONCE, at load, never re-applied on
-// resize: rotating the device must not reopen a panel the builder deliberately closed, nor close
-// one they opened.
+// four view toggles above the layer slider - and all three fold themselves at phone width, where
+// the panels together leave barely any model to look at.
+//
+// They FOLLOW the viewport across that boundary rather than reading it once at load. Dragging a
+// desktop window narrow is how this gets looked at, and a page that only reacted on reload reads
+// as broken. But the moment the builder presses a button themselves, that panel stops listening:
+// their choice outranks the default, so rotating a phone cannot reopen a panel they closed.
 //
 // One helper for all three, because they differ only in which class hides the panel: a class on
 // <body> does the hiding (the CSS decides what that means at each width) and the button carries
 // the open state for a screen reader. Three hand-written copies would drift.
-const NARROW = window.matchMedia('(max-width: 720px)').matches;
+const NARROW = window.matchMedia('(max-width: 720px)');
 const TOUCH = window.matchMedia('(pointer: coarse)').matches;
-function folds(buttonId, hiddenClass, open) {
+function folds(buttonId, hiddenClass) {
   const button = document.getElementById(buttonId);
-  const set = (o) => {
-    document.body.classList.toggle(hiddenClass, !o);
-    button.setAttribute('aria-expanded', String(o));
+  let chosen = false;
+  const set = (open) => {
+    document.body.classList.toggle(hiddenClass, !open);
+    button.setAttribute('aria-expanded', String(open));
   };
-  set(open);
-  button.addEventListener('click', () => set(document.body.classList.contains(hiddenClass)));
+  set(!NARROW.matches);
+  button.addEventListener('click', () => {
+    chosen = true;
+    set(document.body.classList.contains(hiddenClass));
+  });
+  NARROW.addEventListener('change', (ev) => { if (!chosen) set(!ev.matches); });
 }
-folds('legendToggle', 'legend-collapsed', !NARROW);
-folds('hintToggle', 'hint-hidden', !NARROW);
-folds('moreToggle', 'toggles-hidden', !NARROW);
+folds('legendToggle', 'legend-collapsed');
+folds('hintToggle', 'hint-hidden');
+folds('moreToggle', 'toggles-hidden');
 // The hint has to name gestures the device actually has: 'right-drag / arrows: pan' is unreachable
 // advice on a phone, and 'hover' names the one interaction touch does not have at all. The mouse
 // wording is the markup default, so a page opened with a mouse never runs this.
