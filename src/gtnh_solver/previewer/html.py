@@ -35,11 +35,15 @@ solver's oversized search region.
 **The page is built for a phone as well as a desktop** (#237), because the preview is what a
 builder opens while standing at the build. The side panel is a *drawer* behind ``#legendToggle``,
 open at desktop width and folded at phone width, where it would otherwise cover the model; the
-controls bar wraps and spans the screen so the layer slider is a full-width target instead of four
-buttons pushed off the right edge; targets grow to 44px on a coarse pointer; and the gesture hint
-folds behind the HUD's ``?``, restating itself for touch (``tap: identify``, not ``right-drag``).
-Those two states are chosen once at load, never re-applied on resize - rotating the device must
-not reopen a panel the builder closed. Identification is the part touch could not reach at all:
+controls bar spans the screen and splits in two, the layer slider keeping a row of its own (it is
+scrubbed over and over) while the four set-once view toggles fold above it behind ``#moreToggle``,
+which is the difference between a 60px bar and a 180px one; targets grow to 44px on a coarse
+pointer; and the gesture hint folds behind the HUD's ``?``, restating itself for touch
+(``tap: identify``, not ``right-drag``).
+All three follow the viewport across that width, because dragging a desktop window narrow is how
+this gets looked at and a page that reacted only on reload reads as broken - but a panel the
+builder has pressed themselves stops listening, so a rotation cannot reopen one they closed.
+Identification is the part touch could not reach at all:
 hover does not exist there, so a **tap** picks and the tag *latches* until the next tap, since a
 finger that lifts would take a tag that followed it. A drag or a pinch is not a tap, so orbiting
 never flashes one.
@@ -80,16 +84,21 @@ _TEMPLATE = """<!doctype html>
 <style>__STYLE__</style>
 </head>
 <body>
-<div id="hud"><button id="hintToggle" aria-controls="hint" title="show / hide the gesture hint">?</button><span id="status">loading...</span><div id="hint">drag: rotate &middot; right-drag / arrows: pan &middot; scroll: zoom &middot; hover: name / contents</div></div>
+<div id="hud"><button id="hintToggle" aria-controls="hint" aria-expanded="true" title="show / hide the gesture hint">?</button><span id="status">loading...</span><div id="hint">drag: rotate &middot; right-drag / arrows: pan &middot; scroll: zoom &middot; hover: name / contents</div></div>
 <button id="legendToggle" aria-controls="legend" aria-expanded="true" title="show / hide the legend and system i/o">legend</button>
 <div id="legend"></div>
 <div id="controls">
-  <span>layer <b id="layerVal">all</b></span>
-  <input id="layer" type="range" min="-1" max="0" value="-1" step="1">
-  <button id="reset">reset camera</button>
-  <button id="rateUnit" title="toggle throughput units">rate: per tick</button>
-  <button id="stateToggle" title="toggle machine idle / running skins">state: idle</button>
-  <button id="arrowToggle" title="show / hide the auto-output arrows">auto-output arrows: on</button>
+  <div id="bar">
+    <span>layer <b id="layerVal">all</b></span>
+    <input id="layer" type="range" min="-1" max="0" value="-1" step="1">
+    <button id="moreToggle" aria-controls="toggles" aria-expanded="true" title="show / hide the view toggles">&#x22EF;</button>
+  </div>
+  <div id="toggles">
+    <button id="reset">reset camera</button>
+    <button id="rateUnit" title="toggle throughput units">rate: per tick</button>
+    <button id="stateToggle" title="toggle machine idle / running skins">state: idle</button>
+    <button id="arrowToggle" title="show / hide the auto-output arrows">auto-output arrows: on</button>
+  </div>
 </div>
 <div id="nametag"></div>
 
@@ -133,9 +142,13 @@ _STYLE = """
   #legendToggle { position: fixed; z-index: 11; top: var(--edge-t); right: var(--edge-r); }
   body.legend-collapsed #legend { transform: translateX(calc(100% + var(--edge-r)));
                                   pointer-events: none; }
+  /* One row on a desktop, exactly as it always was: #bar (the layer readout and its slider) then
+     #toggles (the four view buttons), with the fold button that splits them hidden. */
   #controls { bottom: var(--edge-b); left: var(--edge-l); display: flex; flex-wrap: wrap;
               gap: 8px 12px; align-items: center; }
+  #bar, #toggles { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
   #controls input[type=range] { width: 180px; }
+  #moreToggle { display: none; }
   .sw { display: inline-block; width: 11px; height: 11px; margin-right: 6px; border-radius: 2px;
         vertical-align: middle; }
   b { color: #aab2bd; font-weight: 600; }
@@ -154,8 +167,19 @@ _STYLE = """
      the right edge, and the HUD is held clear of the legend toggle. */
   @media (max-width: 720px) {
     #hud { max-width: calc(100vw - 130px); }
-    #controls { left: var(--edge-l); right: var(--edge-r); }
-    #controls input[type=range] { flex: 1 1 100%; width: auto; }
+    /* The four toggles are set once and then left alone; the layer slider is scrubbed over and
+       over. So the slider keeps a row of its own at the bottom and the toggles fold above it
+       behind #moreToggle, which is the difference between a 60px bar and a 180px one. The fold
+       rule lives INSIDE this query on purpose: at desktop width the toggles are always shown, so
+       a page loaded narrow and then widened cannot strand them hidden with no button to restore
+       them (#moreToggle is itself phone-only). */
+    #controls { left: var(--edge-l); right: var(--edge-r); flex-direction: column-reverse;
+                align-items: stretch; }
+    #bar { flex-wrap: nowrap; }
+    #controls input[type=range] { flex: 1 1 auto; width: auto; min-width: 0; }
+    #toggles { flex-direction: column; align-items: stretch; }
+    body.toggles-hidden #toggles { display: none; }
+    #moreToggle { display: block; flex: 0 0 auto; }
     /* Opaque, and above the HUD: at 390px an open drawer and the HUD share the width, and two
        translucent panels stacked read as mud rather than as one panel over another. */
     #legend { background: rgba(20,22,28,0.96);
@@ -643,24 +667,37 @@ if (arrows.length === 0) {
   });
 }
 
-// Phone-first chrome (#237). The legend is a drawer and the gesture hint folds away; both start
-// folded at phone width, where the legend alone covers the model the page exists to show. Decided
-// ONCE, at load, never re-applied on resize: rotating the device must not reopen a panel the
-// builder deliberately closed, nor close one they opened.
-const NARROW = window.matchMedia('(max-width: 720px)').matches;
+// Phone-first chrome (#237). Three panels fold away - the legend drawer, the gesture hint, and the
+// four view toggles above the layer slider - and all three fold themselves at phone width, where
+// the panels together leave barely any model to look at.
+//
+// They FOLLOW the viewport across that boundary rather than reading it once at load. Dragging a
+// desktop window narrow is how this gets looked at, and a page that only reacted on reload reads
+// as broken. But the moment the builder presses a button themselves, that panel stops listening:
+// their choice outranks the default, so rotating a phone cannot reopen a panel they closed.
+//
+// One helper for all three, because they differ only in which class hides the panel: a class on
+// <body> does the hiding (the CSS decides what that means at each width) and the button carries
+// the open state for a screen reader. Three hand-written copies would drift.
+const NARROW = window.matchMedia('(max-width: 720px)');
 const TOUCH = window.matchMedia('(pointer: coarse)').matches;
-const legendToggle = document.getElementById('legendToggle');
-function setLegendOpen(open) {
-  document.body.classList.toggle('legend-collapsed', !open);
-  legendToggle.setAttribute('aria-expanded', String(open));
+function folds(buttonId, hiddenClass) {
+  const button = document.getElementById(buttonId);
+  let chosen = false;
+  const set = (open) => {
+    document.body.classList.toggle(hiddenClass, !open);
+    button.setAttribute('aria-expanded', String(open));
+  };
+  set(!NARROW.matches);
+  button.addEventListener('click', () => {
+    chosen = true;
+    set(document.body.classList.contains(hiddenClass));
+  });
+  NARROW.addEventListener('change', (ev) => { if (!chosen) set(!ev.matches); });
 }
-setLegendOpen(!NARROW);
-legendToggle.addEventListener('click', () =>
-  setLegendOpen(document.body.classList.contains('legend-collapsed')));
-
-const hintToggle = document.getElementById('hintToggle');
-document.body.classList.toggle('hint-hidden', NARROW);
-hintToggle.addEventListener('click', () => document.body.classList.toggle('hint-hidden'));
+folds('legendToggle', 'legend-collapsed');
+folds('hintToggle', 'hint-hidden');
+folds('moreToggle', 'toggles-hidden');
 // The hint has to name gestures the device actually has: 'right-drag / arrows: pan' is unreachable
 // advice on a phone, and 'hover' names the one interaction touch does not have at all. The mouse
 // wording is the markup default, so a page opened with a mouse never runs this.
