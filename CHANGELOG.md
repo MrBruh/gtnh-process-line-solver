@@ -10,11 +10,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **The `--preview` page works on a phone (#237).** It is what a builder opens while standing at
   the build, and three things made that impossible. The legend and system-i/o panel is now a
   **drawer** behind a `legend` button: open at desktop width, folded at phone width, where at 390px
-  it covered the model the page exists to show. The controls bar **wraps** and spans the screen, so
-  the layer slider is a full-width target instead of a 180px one with `reset camera` and two toggles
-  pushed off the right edge, and every button grows to a 44px target on a coarse pointer. The
-  gesture hint folds behind the HUD's `?`, and restates itself for touch rather than advertising
-  `right-drag / arrows: pan`.
+  it covered the model the page exists to show. The controls bar spans the screen and **splits in
+  two**: the layer slider keeps a row of its own, because it is the control you scrub over and over,
+  while the four set-once view toggles fold above it behind a `⋯` button. That is a 62px bar rather
+  than the 180px one four 44px targets wrap into, and every button does grow to 44px on a coarse
+  pointer. The gesture hint folds behind the HUD's `?`, and restates itself for touch rather than
+  advertising `right-drag / arrows: pan`.
 
   **Tap to identify.** The name tag was driven by hover, which a finger does not have, so on a phone
   the only thing that says which of a bundle of crossing pipes carries what (#155) could not be

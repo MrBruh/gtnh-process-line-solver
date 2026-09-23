@@ -410,17 +410,22 @@ def test_render_html_ships_the_page_shell_and_its_stable_controls() -> None:
     assert "getElementById('status')" in html
 
 
-def test_render_html_ships_a_legend_drawer_wired_to_the_panel_it_opens() -> None:
-    # The side panel collapses (GitHub #237): on a phone it is wider than the model, so being able
-    # to put it away is what makes the page usable at all. The toggle is the addressable surface;
-    # the invariant worth pinning beside it is that its aria-controls names the panel that actually
-    # exists - point it at the wrong id and it still LOOKS right, it just annnounces nothing.
+def test_render_html_folds_three_panels_each_wired_to_one_that_exists() -> None:
+    # What makes the page fit a phone (GitHub #237): the legend drawer, the gesture hint, and the
+    # four view toggles above the layer slider all fold away. The buttons are the addressable
+    # surface; the invariant worth pinning beside them is that each one's aria-controls names a
+    # panel that actually exists - point it at the wrong id and it still LOOKS right on screen, it
+    # just announces nothing and no test would notice.
     html = render_html(_sand_scene())
-    toggle = re.search(r"<button id=\"legendToggle\"([^>]*)>", html)
-    assert toggle is not None, "the page ships no #legendToggle"
-    controls = re.search(r'aria-controls="(\w+)"', toggle.group(1))
-    assert controls is not None, "#legendToggle controls nothing"
-    assert f'id="{controls.group(1)}"' in html
+    folds = {
+        button: re.search(r'aria-controls="(\w+)"', attrs)
+        for button, attrs in re.findall(r'<button id="(\w+)"([^>]*)>', html)
+        if "aria-controls" in attrs
+    }
+    assert set(folds) == {"legendToggle", "hintToggle", "moreToggle"}
+    for button, panel in folds.items():
+        assert panel is not None, f"#{button} controls nothing"
+        assert f'id="{panel.group(1)}"' in html
 
 
 def test_render_html_adapts_to_narrow_viewports_and_coarse_pointers() -> None:
