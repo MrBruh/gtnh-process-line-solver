@@ -32,6 +32,18 @@ hover tag, because no pipe and no ME block is drawn for it, and an unconnected c
 reads as a missing pipe. The view frames the layout's *actual* extent (``scene.bounds``), not the
 solver's oversized search region.
 
+**The page is built for a phone as well as a desktop** (#237), because the preview is what a
+builder opens while standing at the build. The side panel is a *drawer* behind ``#legendToggle``,
+open at desktop width and folded at phone width, where it would otherwise cover the model; the
+controls bar wraps and spans the screen so the layer slider is a full-width target instead of four
+buttons pushed off the right edge; targets grow to 44px on a coarse pointer; and the gesture hint
+folds behind the HUD's ``?``, restating itself for touch (``tap: identify``, not ``right-drag``).
+Those two states are chosen once at load, never re-applied on resize - rotating the device must
+not reopen a panel the builder closed. Identification is the part touch could not reach at all:
+hover does not exist there, so a **tap** picks and the tag *latches* until the next tap, since a
+finger that lifts would take a tag that followed it. A drag or a pinch is not a tap, so orbiting
+never flashes one.
+
 The scene JSON is *inlined*, not fetched, so there is no ``file://`` CORS problem. The page is
 assembled by replacing tokens (NOT an f-string / ``.format``) so the JS/CSS braces stay literal:
 a shell with ``__CSP__``, ``__STYLE__``, ``__IMPORTMAP__`` and ``__VIEWER_JS__`` holes, and the
@@ -63,12 +75,13 @@ _TEMPLATE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="__CSP__">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>gtnh-solve preview</title>
 <style>__STYLE__</style>
 </head>
 <body>
-<div id="hud">loading...<div id="hint">drag: rotate &middot; right-drag / arrows: pan &middot; scroll: zoom &middot; hover: name / contents</div></div>
+<div id="hud"><button id="hintToggle" aria-controls="hint" title="show / hide the gesture hint">?</button><span id="status">loading...</span><div id="hint">drag: rotate &middot; right-drag / arrows: pan &middot; scroll: zoom &middot; hover: name / contents</div></div>
+<button id="legendToggle" aria-controls="legend" aria-expanded="true" title="show / hide the legend and system i/o">legend</button>
 <div id="legend"></div>
 <div id="controls">
   <span>layer <b id="layerVal">all</b></span>
@@ -90,15 +103,38 @@ _TEMPLATE = """<!doctype html>
 #: The page's stylesheet, the exact text of the inline ``<style>`` block. Split out of the
 #: shell so ``render_html`` can hash precisely the bytes the browser hashes (see ``_csp``).
 _STYLE = """
+  /* Every fixed panel is offset from its own edge by that edge's safe-area inset: the page asks
+     for viewport-fit=cover (so the 3D view fills a notched screen), which means an untouched
+     `top: 10px` puts the HUD under the notch and the controls under the home indicator. */
+  :root { --edge-t: calc(10px + env(safe-area-inset-top));
+          --edge-b: calc(10px + env(safe-area-inset-bottom));
+          --edge-l: calc(10px + env(safe-area-inset-left));
+          --edge-r: calc(10px + env(safe-area-inset-right));
+          /* The legend hangs below #legendToggle, so it has to know how tall a button is - which
+             the coarse-pointer rules below grow to a thumb-sized target. */
+          --toggle-h: 26px; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1d22;
-               font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: #e8eaed; }
+               font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: #e8eaed;
+               -webkit-text-size-adjust: 100%; }
   #hud, #legend, #controls { position: fixed; z-index: 10; background: rgba(20,22,28,0.82);
                border: 1px solid #333a44; border-radius: 6px; padding: 8px 10px; }
-  #hud { top: 10px; left: 10px; }
+  #hud { top: var(--edge-t); left: var(--edge-l); }
   #hint { color: #8b94a0; margin-top: 4px; }
   #standin, #menote { color: #8b94a0; }
-  #legend { top: 10px; right: 10px; max-height: 80vh; overflow: auto; }
-  #controls { bottom: 10px; left: 10px; display: flex; gap: 12px; align-items: center; }
+  body.hint-hidden #hint { display: none; }
+  #hintToggle { float: right; margin-left: 12px; padding: 0 7px; }
+  /* The legend is a DRAWER: it slides off the right edge under its own toggle, which sits above
+     it and stays put. On a phone it is wider than the model is, so being able to put it away is
+     what makes the page usable at all; on a desktop it is simply open (#237). */
+  #legend { top: calc(var(--edge-t) + var(--toggle-h) + 8px); right: var(--edge-r); z-index: 11;
+            overflow: auto; max-width: min(340px, calc(100vw - 20px));
+            max-height: calc(100vh - var(--edge-t) - var(--toggle-h) - 100px);
+            transition: transform 0.18s ease; }
+  #legendToggle { position: fixed; z-index: 11; top: var(--edge-t); right: var(--edge-r); }
+  body.legend-collapsed #legend { transform: translateX(calc(100% + var(--edge-r)));
+                                  pointer-events: none; }
+  #controls { bottom: var(--edge-b); left: var(--edge-l); display: flex; flex-wrap: wrap;
+              gap: 8px 12px; align-items: center; }
   #controls input[type=range] { width: 180px; }
   .sw { display: inline-block; width: 11px; height: 11px; margin-right: 6px; border-radius: 2px;
         vertical-align: middle; }
@@ -107,11 +143,33 @@ _STYLE = """
            border-radius: 4px; padding: 3px 8px; cursor: pointer; }
   #nametag { position: fixed; z-index: 20; left: 0; top: 0; display: none; pointer-events: none;
              transform: translate(-50%, -100%); background: rgba(20,22,28,0.92);
-             border: 1px solid #3a4150; border-radius: 4px; padding: 2px 7px; white-space: nowrap;
+             border: 1px solid #3a4150; border-radius: 4px; padding: 2px 7px;
+             max-width: min(44ch, calc(100vw - 20px)); overflow-wrap: anywhere;
              font-weight: 600; box-shadow: 0 2px 6px rgba(0,0,0,0.45); text-align: center; }
   /* What the hovered thing holds or carries, under its headline: the same secondary weight the
      legend's labels use, so the name/resource stays the thing the eye lands on. */
   #nametag div + div { color: #aab2bd; font-weight: 400; }
+  /* Phone width: the panels stop competing for the corners. The controls bar spans the screen so
+     the layer slider is a full-width target instead of a 180px one with four buttons pushed off
+     the right edge, and the HUD is held clear of the legend toggle. */
+  @media (max-width: 720px) {
+    #hud { max-width: calc(100vw - 130px); }
+    #controls { left: var(--edge-l); right: var(--edge-r); }
+    #controls input[type=range] { flex: 1 1 100%; width: auto; }
+    /* Opaque, and above the HUD: at 390px an open drawer and the HUD share the width, and two
+       translucent panels stacked read as mud rather than as one panel over another. */
+    #legend { background: rgba(20,22,28,0.96);
+              max-height: calc(100vh - var(--edge-t) - var(--toggle-h) - 180px); }
+  }
+  /* A finger is not a cursor. 44px is the smallest target a thumb hits reliably, and a range
+     input's default thumb is nowhere near it. The hint's `?` is exempt: it rides inside the HUD's
+     first line, so growing it would stretch the panel rather than the target. */
+  @media (pointer: coarse) {
+    :root { --toggle-h: 44px; }
+    button { min-height: 44px; padding: 6px 12px; }
+    #hintToggle { min-height: 0; padding: 2px 9px; }
+    #controls input[type=range] { height: 34px; }
+  }
 """
 
 #: The inline ``<script type="importmap">`` body, verbatim, for the same reason. Bare
@@ -137,7 +195,10 @@ const FACE_NORMAL = { north: [0,0,-1], south: [0,0,1], east: [1,0,0], west: [-1,
                       up: [0,1,0], down: [0,-1,0] };
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(window.devicePixelRatio);
+// Capped at 2: a phone reports a device pixel ratio of 3 or more, which is 9x the fragments of a
+// 1x buffer for a gain no eye can find on a 5-inch screen - and on a layout of a few thousand
+// textured cubes that is the difference between orbiting smoothly and not (#237).
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
@@ -582,7 +643,32 @@ if (arrows.length === 0) {
   });
 }
 
-document.getElementById('hud').firstChild.textContent =
+// Phone-first chrome (#237). The legend is a drawer and the gesture hint folds away; both start
+// folded at phone width, where the legend alone covers the model the page exists to show. Decided
+// ONCE, at load, never re-applied on resize: rotating the device must not reopen a panel the
+// builder deliberately closed, nor close one they opened.
+const NARROW = window.matchMedia('(max-width: 720px)').matches;
+const TOUCH = window.matchMedia('(pointer: coarse)').matches;
+const legendToggle = document.getElementById('legendToggle');
+function setLegendOpen(open) {
+  document.body.classList.toggle('legend-collapsed', !open);
+  legendToggle.setAttribute('aria-expanded', String(open));
+}
+setLegendOpen(!NARROW);
+legendToggle.addEventListener('click', () =>
+  setLegendOpen(document.body.classList.contains('legend-collapsed')));
+
+const hintToggle = document.getElementById('hintToggle');
+document.body.classList.toggle('hint-hidden', NARROW);
+hintToggle.addEventListener('click', () => document.body.classList.toggle('hint-hidden'));
+// The hint has to name gestures the device actually has: 'right-drag / arrows: pan' is unreachable
+// advice on a phone, and 'hover' names the one interaction touch does not have at all. The mouse
+// wording is the markup default, so a page opened with a mouse never runs this.
+if (TOUCH)
+  document.getElementById('hint').textContent =
+    'drag: rotate \\u00b7 two fingers: pan / zoom \\u00b7 tap: identify';
+
+document.getElementById('status').textContent =
   'status: ' + SCENE.status + '   seed: ' + SCENE.seed +
   '   build ' + (bmax.x - bmin.x) + 'x' + (bmax.y - bmin.y) + 'x' + (bmax.z - bmin.z) +
   '   machines ' + SCENE.machines.length;
@@ -686,6 +772,10 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  // The name tag's cached size can be stale now: its max-width is a fraction of the viewport, so a
+  // rotated phone wraps it differently. Forgetting the text makes the next frame rebuild and
+  // re-measure it.
+  _tagText = null;
 });
 
 // Hover name tag: raycast the pointer against the machine boxes, block cubes and route blocks, and
@@ -729,36 +819,77 @@ function routeLines(r) {
   const detail = ((r.resource ? r.commodity + '   ' : '') + rate).trim();
   return detail ? [r.resource || r.commodity, detail] : [r.resource || r.commodity];
 }
-renderer.domElement.addEventListener('pointermove', (ev) => {
+function pickAt(ev) {
   const rect = renderer.domElement.getBoundingClientRect();
   pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(pointer, camera);
   const hit = raycaster.intersectObjects(hoverables, false).find((h) => h.object.visible);
   const what = hit ? hit.object.userData : null;
-  if (!what) hover = null;
-  else if (what.route) hover = routeHover(what.route, what.cell);
-  else hover = machineHover(what.machineId);
+  if (!what) return null;
+  return what.route ? routeHover(what.route, what.cell) : machineHover(what.machineId);
+}
+// Mouse only: a touch 'pointermove' is a finger dragging the camera, and picking along it would
+// flash a tag on every orbit. Touch gets the tap handler below instead.
+renderer.domElement.addEventListener('pointermove', (ev) => {
+  if (ev.pointerType === 'mouse') hover = pickAt(ev);
 });
-renderer.domElement.addEventListener('pointerleave', () => { hover = null; });
+renderer.domElement.addEventListener('pointerleave', (ev) => {
+  if (ev.pointerType === 'mouse') hover = null;   // a finger's 'leave' is just it lifting
+});
+
+// Touch has no hover, so on a phone the name tag - the only thing that says which of eight
+// identical blue noodles carries what (#155) - was unreachable. A TAP picks instead, and the tag
+// LATCHES until the next tap: a finger that lifts is gone, so a tag that went with it could never
+// be read. A tap is one pointer that neither travelled nor lingered; anything else is an orbit or
+// a pinch. Tapping empty space picks nothing, which is how the tag is dismissed.
+const TAP_SLOP = 12, TAP_MS = 500;
+let tap = null, touching = 0;
+renderer.domElement.addEventListener('pointerdown', (ev) => {
+  if (ev.pointerType === 'mouse') return;
+  touching += 1;
+  tap = touching === 1 ? { x: ev.clientX, y: ev.clientY, t: performance.now() } : null;
+});
+function endTouch(ev) {
+  if (ev.pointerType === 'mouse') return;
+  touching = Math.max(0, touching - 1);
+  const t = tap;
+  tap = null;
+  if (!t || ev.type !== 'pointerup') return;   // cancelled: the browser took the gesture
+  if (Math.hypot(ev.clientX - t.x, ev.clientY - t.y) > TAP_SLOP) return;
+  if (performance.now() - t.t > TAP_MS) return;
+  hover = pickAt(ev);
+}
+renderer.domElement.addEventListener('pointerup', endTouch);
+renderer.domElement.addEventListener('pointercancel', endTouch);
 const _tagPos = new THREE.Vector3();
-let _tagText = null;
+let _tagText = null, _tagW = 0, _tagH = 0;
 function updateNametag() {
   const lines = hover ? hover.lines() : null;
   if (!lines) { nametag.style.display = 'none'; return; }
   const a = hover.anchor;
   _tagPos.set(a[0], a[1], a[2]).project(camera);
   if (_tagPos.z >= 1) { nametag.style.display = 'none'; return; }   // behind the camera
-  nametag.style.left = ((_tagPos.x * 0.5 + 0.5) * window.innerWidth) + 'px';
-  nametag.style.top = ((-_tagPos.y * 0.5 + 0.5) * window.innerHeight) + 'px';
   // One DOM text node per line, never innerHTML: every line here is a machine name or a resource
   // id out of the plan, which is somebody else's file (#111). Rebuilt only when the text actually
-  // changes, so an open tag is not re-created 60 times a second.
+  // changes, so an open tag is not re-created 60 times a second - and its size is measured in the
+  // same branch, because reading offsetWidth every frame forces a synchronous layout every frame.
   const text = lines.join('\\n');
   if (text !== _tagText) {
     _tagText = text;
     nametag.replaceChildren(...lines.map((t) => el('div', t)));
+    nametag.style.display = 'block';
+    _tagW = nametag.offsetWidth;
+    _tagH = nametag.offsetHeight;
   }
+  // Clamp the tag inside the viewport. It is anchored to a block and drawn centred above it, so a
+  // block near the edge of the screen - routine on a phone, where the model fills the width -
+  // would otherwise hang half off it, taking the resource id with it.
+  const m = 6;
+  const x = (_tagPos.x * 0.5 + 0.5) * window.innerWidth;
+  const y = (-_tagPos.y * 0.5 + 0.5) * window.innerHeight;
+  nametag.style.left = Math.min(Math.max(x, _tagW / 2 + m), window.innerWidth - _tagW / 2 - m) + 'px';
+  nametag.style.top = Math.max(y, _tagH + m) + 'px';
   nametag.style.display = 'block';
 }
 

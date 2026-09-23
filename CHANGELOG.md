@@ -7,6 +7,26 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **The `--preview` page works on a phone (#237).** It is what a builder opens while standing at
+  the build, and three things made that impossible. The legend and system-i/o panel is now a
+  **drawer** behind a `legend` button: open at desktop width, folded at phone width, where at 390px
+  it covered the model the page exists to show. The controls bar **wraps** and spans the screen, so
+  the layer slider is a full-width target instead of a 180px one with `reset camera` and two toggles
+  pushed off the right edge, and every button grows to a 44px target on a coarse pointer. The
+  gesture hint folds behind the HUD's `?`, and restates itself for touch rather than advertising
+  `right-drag / arrows: pan`.
+
+  **Tap to identify.** The name tag was driven by hover, which a finger does not have, so on a phone
+  the only thing that says which of a bundle of crossing pipes carries what (#155) could not be
+  reached at all. A tap now picks, and the tag *latches* until the next tap, since a finger that
+  lifts would take a tag that followed it; a drag or a pinch is not a tap, so orbiting never flashes
+  one, and a tap on empty space dismisses it. Hover is unchanged on a mouse.
+
+  Smaller things that were the same bug: the tag is clamped inside the viewport and a long resource
+  id wraps instead of running off the edge, the panels honour the safe-area insets so none of them
+  lands under a notch, and the renderer caps its pixel ratio at 2 (a phone reporting 3 was drawing
+  9x the fragments of a 1x buffer for no visible gain).
+
 - **`gtnh-solve --me COMMODITY` leaves items, fluids or power to ME (AE2) instead of pipes and
   cables (#222).** `InputIR.me_toggles` was honoured by placement, routing, repair and the validator
   all along, but the adapter never set it and the CLI had no flag for it, so every line was solved
