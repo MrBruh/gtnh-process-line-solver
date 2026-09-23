@@ -403,6 +403,52 @@ def test_render_html_ships_the_page_shell_and_its_stable_controls() -> None:
     assert 'id="layer"' in html  # the layer-by-layer slider...
     assert 'type="range"' in html  # ...is a range input
     assert 'id="nametag"' in html  # the floating name tag a hovered block writes into
+    assert 'id="status"' in html  # the HUD headline the viewer writes the solve summary into
+    # The headline is markup in one place and a write target in another, and the markup ships the
+    # placeholder: rename the span alone and the page loads saying 'loading...' forever, with
+    # nothing else to notice. So assert the writer actually addresses the element that exists.
+    assert "getElementById('status')" in html
+
+
+def test_render_html_ships_a_legend_drawer_wired_to_the_panel_it_opens() -> None:
+    # The side panel collapses (GitHub #237): on a phone it is wider than the model, so being able
+    # to put it away is what makes the page usable at all. The toggle is the addressable surface;
+    # the invariant worth pinning beside it is that its aria-controls names the panel that actually
+    # exists - point it at the wrong id and it still LOOKS right, it just annnounces nothing.
+    html = render_html(_sand_scene())
+    toggle = re.search(r"<button id=\"legendToggle\"([^>]*)>", html)
+    assert toggle is not None, "the page ships no #legendToggle"
+    controls = re.search(r'aria-controls="(\w+)"', toggle.group(1))
+    assert controls is not None, "#legendToggle controls nothing"
+    assert f'id="{controls.group(1)}"' in html
+
+
+def test_render_html_adapts_to_narrow_viewports_and_coarse_pointers() -> None:
+    # The responsive contract, as two coarse markers rather than pinned rule text: a width query
+    # (the controls bar spans the screen instead of running off it) and a pointer query (44px
+    # targets for a thumb). Drop either and the page silently reverts to desktop-only, which no
+    # other test would catch - the panels all still render, just off the edge of a phone.
+    html = render_html(_sand_scene())
+    assert "viewport-fit=cover" in html  # ...which is what makes the safe-area insets apply
+    assert "@media (max-width:" in html
+    assert "@media (pointer: coarse)" in html
+
+
+def test_render_html_states_the_touch_gestures_without_promising_a_mouse() -> None:
+    # The hint is written twice: the markup carries the mouse wording, and the viewer replaces it on
+    # a coarse pointer. The invariant is that the touch wording does not advertise gestures a phone
+    # does not have - 'right-drag to pan' is unreachable advice, and 'hover' is the one interaction
+    # touch lacks entirely, which is why the tap picker exists at all (#237).
+    html = render_html(_sand_scene())
+    mouse = re.search(r'<div id="hint">(.*?)</div>', html)
+    touch = re.search(r"getElementById\('hint'\)\.textContent =\s*'(.*?)';", html)
+    assert mouse is not None, "the page ships no gesture hint"
+    assert touch is not None, "no touch wording replaces the mouse hint"
+    assert "hover" in mouse.group(1)
+    assert "drag" in mouse.group(1)
+    assert "tap" in touch.group(1)
+    assert "hover" not in touch.group(1)
+    assert "right-drag" not in touch.group(1)
 
 
 def test_render_html_labels_the_auto_output_toggle_identically_before_and_after_a_click() -> None:
