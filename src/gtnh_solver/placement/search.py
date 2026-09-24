@@ -55,6 +55,8 @@ import math
 import random
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
+from functools import cache
+from itertools import product
 from types import MappingProxyType
 from typing import Literal, NamedTuple
 
@@ -536,22 +538,47 @@ def _dockable_cells(
     which hatch kind, so it only ever over-counts. An over-count means the penalty fires strictly
     less often than it could - it never invents a shortfall that is not real.
     """
-    # Materialized, not the bare generator: it is rescanned once per face, and a generator
-    # would be exhausted by the first of them and read as no body cells for the other five.
-    body = tuple(occupied_cells(placement.cell, machine.footprint, placement.orientation))
+    box = rotated_footprint(machine.footprint, placement.orientation)
+    ox, oy, oz = placement.cell.x, placement.cell.y, placement.cell.z
+    rx, ry, rz = region.sx, region.sy, region.sz
     cells: set[Cell] = set()
-    for face, (dx, dy, dz) in FACE_DELTAS.items():
-        if face is placement.orientation:  # front face carries no I/O
+    for dx, dy, dz in _shell_offsets(box.sx, box.sy, box.sz, placement.orientation):
+        x, y, z = cand = (ox + dx, oy + dy, oz + dz)
+        if cand in occupied or cand in reserved:
             continue
-        for bx, by, bz in body:
-            cand = (bx + dx, by + dy, bz + dz)
-            # ``occupied`` holds this machine's own body too, so an interior slot - one walled
-            # inside the structure, which could reach nothing - is excluded by the same test.
-            if cand in occupied or cand in reserved:
-                continue
-            if in_region(cand, region):
-                cells.add(cand)
+        if 0 <= x < rx and 0 <= y < ry and 0 <= z < rz:
+            cells.add(cand)
     return cells
+
+
+@cache
+def _shell_offsets(sx: int, sy: int, sz: int, front: Facing) -> tuple[Cell, ...]:
+    """Offsets from a body's origin to the cells one step outside it through a non-front face.
+
+    What :func:`_dockable_cells` scans, worked out once per rotated box rather than per call.
+    Stepping every body cell through every face mostly lands back inside the body (on a 3x3x3, 90
+    of 135 steps), and those cells are always occupied - by the machine itself - so they are dropped
+    here instead of being built and hashed to be rejected. A cell two body cells reach turns up once.
+
+    **The order is load-bearing.** It is each cell's first appearance in the face-major,
+    body-cell-minor scan the dockable set used to be built from, so filtering this sequence inserts
+    the same cells into the set in the same order, and the set iterates identically. That matters
+    because :func:`_face_shortfall` sums floats over it: a different order can round differently,
+    and a cost that moves in its last bit can flip an annealing decision.
+    """
+    seen: set[Cell] = set()
+    shell: list[Cell] = []
+    for face, (dx, dy, dz) in FACE_DELTAS.items():
+        if face is front:  # front face carries no I/O
+            continue
+        for bx, by, bz in product(range(sx), range(sy), range(sz)):
+            x, y, z = cell = (bx + dx, by + dy, bz + dz)
+            if 0 <= x < sx and 0 <= y < sy and 0 <= z < sz:
+                continue  # inside the machine's own body, so never a free cell
+            if cell not in seen:
+                seen.add(cell)
+                shell.append(cell)
+    return tuple(shell)
 
 
 def _face_shortfall(

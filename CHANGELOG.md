@@ -469,6 +469,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **Dockable cells come from a body's outside shell, not a walk of every body cell
+  (`placement/`, #256).** The placement cost prices crowded faces on every evaluation:
+  `_face_shortfall` asks each machine which free cells it could dock a connection on.
+  `_dockable_cells` found them by stepping every body cell out through each non-front face, and on
+  a multiblock almost every step lands back inside the body: 90 of 135 on a 3x3x3, 1,470 of 1,715
+  on a 7x7x7. Which cells lie one step outside a box depends only on its rotated size and its
+  front, so `_shell_offsets` works them out once per shape and the scan visits only those. The
+  order is kept exactly (each cell's first appearance in the old walk) because the shortfall sums
+  floats over the resulting set, and a set filled in another order can iterate in another order
+  and round differently; a test compares the two as lists, not sets, on every facing.
+  `ir.geometry.occupied_cells` yields from `itertools.product` instead of three nested loops: the
+  same cells, in the same order. Layouts are byte-identical. CPU for a whole `gtnh-solve` run on
+  Python 3.14, measured at a410588: `nitrobenzene` 27.1 s to 22.2 s (median of 3),
+  `ev-nitrobenzene` 139 s to 70 s (mean of 2).
+
 - **parallel-sand now solves to the maintainer's own build (`placement/banks.py`).** Handed
   `examples/gtnh-parallel-sand.json`, the solver returned a 128-cell box with 32 pipe blocks and
   18 cable blocks (the median over seeds 0 to 15). The maintainer's build of the same plan, built
