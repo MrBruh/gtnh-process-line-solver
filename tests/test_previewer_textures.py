@@ -23,7 +23,7 @@ from gtnh_solver.dataset import roots as dataset_roots
 from gtnh_solver.dataset.schema import MultiblockDoc
 from gtnh_solver.ir import InputIR, LayoutResult, LayoutStatus
 from gtnh_solver.previewer.bake import bake_layers
-from gtnh_solver.previewer.scene import build_scene
+from gtnh_solver.previewer.scene import FACE_CAP, FACE_COVERED, block_face_cover, build_scene
 from gtnh_solver.previewer.textures import (
     _GT_SIDE_TO_THREE_SLOT,
     TextureManifest,
@@ -771,6 +771,22 @@ def test_multiblock_expands_to_many_cubes_not_one_box(dataset: tuple[Path, Path]
     assert len(scene["blocks"]) == 5
     assert scene["machines"][0].get("expanded") is True, "the box is replaced by the cubes"
     assert "Test EBF" in summary.textured_types
+
+
+def test_every_block_says_which_of_its_faces_another_block_hides(
+    dataset: tuple[Path, Path],
+) -> None:
+    """The viewer draws only the faces ``cover`` leaves showing, so every cube must carry one, and it
+    must be the cover of the cubes the pass actually wrote rather than of some other set."""
+    mb, manifest = dataset
+    scene = _scene([_machine("m1", "Test EBF", [0, 0, 0], [2, 2, 2])])
+    texturize_scene(scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider)
+    expected = block_face_cover(tuple(b["cell"]) for b in scene["blocks"])
+    for b in scene["blocks"]:
+        assert b["cover"] == list(expected[tuple(b["cell"])])
+    assert any(FACE_COVERED in b["cover"] or FACE_CAP in b["cover"] for b in scene["blocks"]), (
+        "five blocks of one 2x2x2 EBF touch, so some face must be hidden"
+    )
 
 
 def test_interior_coil_texture_distinct_from_casing(dataset: tuple[Path, Path]) -> None:

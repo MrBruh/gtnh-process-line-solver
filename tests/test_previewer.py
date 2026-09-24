@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.ir import (
@@ -32,6 +34,12 @@ from gtnh_solver.ir import (
     Terminal,
 )
 from gtnh_solver.previewer import build_scene, render_html, write_preview
+from gtnh_solver.previewer.scene import (
+    FACE_CAP,
+    FACE_COVERED,
+    FACE_EXPOSED,
+    block_face_cover,
+)
 from gtnh_solver.solver import solve
 from tests._helpers import at, consumer, machine, net, producer
 
@@ -125,6 +133,50 @@ def test_scene_bounds_count_a_one_block_pipe() -> None:
     )
     scene = build_scene(problem, LayoutResult(status=LayoutStatus.VALID, seed=0, routes=[route]))
     assert scene["bounds"] == {"min": [2, 3, 4], "max": [3, 4, 5]}
+
+
+# ------------------------------------------------------ which block faces the viewer can skip
+
+
+def test_a_face_against_a_block_on_its_own_layer_is_covered() -> None:
+    # Two blocks side by side on x: the faces they press together are never seen in any view.
+    cover = block_face_cover([(0, 0, 0), (1, 0, 0)])
+    assert cover[(0, 0, 0)] == (FACE_COVERED, 0, 0, 0, 0, 0)  # +x, -x, +y, -y, +z, -z
+    assert cover[(1, 0, 0)] == (0, FACE_COVERED, 0, 0, 0, 0)
+
+
+def test_a_face_against_the_next_layer_is_a_cap() -> None:
+    # Stacked blocks hide each other's touching faces only while both layers show. Isolate either
+    # layer and that face is its lid, so it is a CAP rather than covered.
+    cover = block_face_cover([(0, 0, 0), (0, 1, 0)])
+    assert cover[(0, 0, 0)] == (0, 0, FACE_CAP, 0, 0, 0)
+    assert cover[(0, 1, 0)] == (0, 0, 0, FACE_CAP, 0, 0)
+
+
+def test_a_block_with_no_neighbour_shows_every_face() -> None:
+    assert block_face_cover([(3, 4, 5)]) == {(3, 4, 5): (FACE_EXPOSED,) * 6}
+
+
+_cells = st.sets(
+    st.tuples(st.integers(0, 3), st.integers(0, 3), st.integers(0, 3)), min_size=1, max_size=24
+)
+
+
+@given(cells=_cells)
+def test_cover_is_exactly_what_the_neighbours_are(cells: set[tuple[int, int, int]]) -> None:
+    """Restated independently of the implementation: a face is exposed iff no block is beside it,
+    and a hidden face is a cap iff it is a top or bottom. Nothing else hides a face, because the
+    layer slider hides whole layers and nothing else hides a block."""
+    normals = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)]
+    cover = block_face_cover(cells)
+    assert set(cover) == cells
+    for (x, y, z), slots in cover.items():
+        for (dx, dy, dz), slot in zip(normals, slots, strict=True):
+            beside = (x + dx, y + dy, z + dz) in cells
+            if not beside:
+                assert slot == FACE_EXPOSED
+            else:
+                assert slot == (FACE_CAP if dy else FACE_COVERED)
 
 
 def test_scene_routes_carry_terminals() -> None:
@@ -444,6 +496,18 @@ def test_render_html_makes_every_legend_section_a_fold() -> None:
     assert ".sec > summary" in html  # the heading's style
     for heading in ("'machines'", "'routes'", "'nets'", "'materials'", "'system i/o'"):
         assert heading in html, f"legend section {heading} is gone"
+
+
+def test_render_html_draws_merged_meshes_and_only_on_change() -> None:
+    # What keeps a large preview smooth: blocks and pipes merged into a few meshes instead of a mesh
+    # (and a draw call per face) each, the faces the scene says another block hides left out, and a
+    # frame drawn only when something changed. ev-nitrobenzene went from 19,193 draw calls a frame to
+    # 680. The merging runs in the browser, so one coarse marker each (GitHub #94); what `cover`
+    # says is tested in Python, and the rest was compared against the old page in a browser.
+    html = render_html(_sand_scene())
+    assert "b.cover" in html  # the viewer reads which faces to skip...
+    assert "new Batch()" in html  # ...merges what is left...
+    assert "requestRender" in html  # ...and draws a frame only when asked to
 
 
 def test_scene_is_deterministic() -> None:

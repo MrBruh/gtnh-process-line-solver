@@ -115,6 +115,24 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **A large preview orbits smoothly instead of lagging.** The viewer drew every block as a mesh of
+  its own with six materials, and three.js makes a draw call per material, so every face of every
+  block was a separate draw call carrying two triangles. On `ev-nitrobenzene` that was 19,193 draw
+  calls a frame, and the CPU spent about 90 ms of every frame just handing them to the GPU, which
+  caps the view near 11 frames a second on any graphics card. Now the blocks of each layer are one
+  merged mesh, and so are the pipes of each net on each layer, with one shared material per
+  texture. The faces another block hides (two in three) are left out; the scene works out which
+  (`previewer.scene.block_face_cover`, tested in Python). A top or bottom face against the next
+  layer is kept aside and shown only when the layer slider isolates that layer, so an isolated layer
+  still has its lid. Measured in headless Chromium: `ev-nitrobenzene` 19,193 draw calls to 680 and
+  about 90 ms of CPU a frame to about 2; `nitrobenzene` 2,825 to 303 and about 10 ms to 1.
+  Screenshots against the old page differ only at block edges (at most 0.13% of pixels, in the
+  antialiasing), and hover names the same thing at every one of 1,536 sample points.
+
+  The page also stops drawing when nothing changes. It used to render every frame even with the
+  model standing still, which kept a laptop's GPU busy for a picture that never moved. Hover picking
+  runs at most once a frame and only against what is showing.
+
 - **A pipe whose two ends share a cell is one block, not two with one leading nowhere.** Since the
   router started choosing dock cells in its tree search (#236), two machines with one free cell in
   common connect through that one pipe block, which is the right build. But every route had to
