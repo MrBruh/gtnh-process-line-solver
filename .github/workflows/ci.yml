@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.14"  # the one supported version (requires-python)
           cache: "pip"
           cache-dependency-path: |
             pyproject.toml
@@ -42,10 +42,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Floor (requires-python) and latest only. The failures worth catching are "used a
-        # newer-than-floor feature" and "new release broke us"; when both ends pass, the
-        # intermediates do too, so testing them only burns runner minutes and flake surface.
-        python-version: ["3.10", "3.14"]
+        # requires-python is ">=3.14", so the floor is also the newest release and one leg
+        # covers both. It used to run the floor and the latest on the reasoning that the
+        # intermediates would pass whenever both ends did, and #255 was the counterexample: a
+        # stdlib rule only 3.11 enforced broke the package there with both legs green. When a
+        # newer release lands, add it here and keep the coverage include below on the newest.
+        python-version: ["3.14"]
         # Coverage is gated on ONE leg (the number is interpreter-independent, and the tracer
         # used to cost ~3/4 of every leg's wall clock - issue #74). It rides the latest leg
         # because sys.monitoring can only measure BRANCH coverage on 3.14+; keep this include

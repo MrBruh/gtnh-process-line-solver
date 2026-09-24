@@ -6,14 +6,14 @@ work now is Phase 2 quality, organized as the **Build lanes** below.
 
 ## Setup
 
-Requires **Python 3.10+** (`pyproject.toml` pins `requires-python = ">=3.10"`). If your default
-`python` is older (3.8 is a common system default), `pip install` fails opaquely, so create the
-venv with an explicit 3.10+ interpreter - e.g. `py -3.12` on Windows.
+Requires **Python 3.14+** (`pyproject.toml` pins `requires-python = ">=3.14"`). If your default
+`python` is older, `pip install` fails opaquely, so create the venv with an explicit 3.14
+interpreter - e.g. `py -3.14` on Windows.
 
 ```bash
 git clone <repo>
 cd gtnh-process-line-solver
-python -m venv .venv && . .venv/bin/activate   # Windows: py -3.12 -m venv .venv; .venv\Scripts\activate
+python -m venv .venv && . .venv/bin/activate   # Windows: py -3.14 -m venv .venv; .venv\Scripts\activate
 pip install -e ".[dev]" -c constraints-dev.txt
 pre-commit install   # wire the git hooks (lint, format, types, commit-msg)
 pytest               # run tests (with coverage)
@@ -86,7 +86,7 @@ One logical change per branch/PR, whether or not there's an issue behind it.
 
 Enforced by CI and the pre-commit hooks - none of this is hand-policed:
 
-- **Python ≥ 3.10**, `src/` layout, **fully typed** under `mypy --strict` (the Pydantic
+- **Python ≥ 3.14**, `src/` layout, **fully typed** under `mypy --strict` (the Pydantic
   mypy plugin checks the IR models). No `# type: ignore` without a reason comment.
 - **Formatting is `ruff format`** (line length 100). Let the tool fix formatting automatically.
 - **Lint is `ruff check`** with a curated rule set (pycodestyle, pyflakes, isort, naming,

@@ -1,7 +1,9 @@
 """Enumerations shared by the input IR and the output layout schema.
 
-String-valued enums (not ``StrEnum``, which is 3.11+) so they serialize to the same
-literal strings the docs use (``"item"``, ``"output"``, ...) and stay 3.10-compatible.
+String-valued enums, so they serialize to the same literal strings the docs use (``"item"``,
+``"output"``, ...). Mixed-in ``(str, Enum)`` rather than ``StrEnum``: the two serialize alike,
+but ``str()`` and f-string formatting of a member differ between them, so switching would
+change any message that prints one.
 """
 
 from __future__ import annotations

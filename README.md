@@ -59,11 +59,11 @@ with the shared-amperage power net and the per-tick system I/O the line consumes
 
 ## Quickstart
 
-Needs **Python 3.10+** (`pyproject.toml` sets `requires-python = ">=3.10"`; an older default
+Needs **Python 3.14+** (`pyproject.toml` sets `requires-python = ">=3.14"`; an older default
 `python` makes `pip install` fail opaquely). Work inside a virtual env:
 
 ```bash
-python -m venv .venv && . .venv/bin/activate   # Windows: py -3.12 -m venv .venv; .venv\Scripts\activate
+python -m venv .venv && . .venv/bin/activate   # Windows: py -3.14 -m venv .venv; .venv\Scripts\activate
 pip install -e ".[dev]"
 gtnh-solve examples/gtnh-sand.json        # solve an exported plan, print the layout as JSON
 gtnh-solve plan.json > layout.json        # ...which is how it goes to a file

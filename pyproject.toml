@@ -8,7 +8,7 @@ name = "gtnh_solver"
 version = "0.0.0"
 description = "Physical place-and-route solver for GregTech: New Horizons process lines."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.14"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "The gtnh_solver authors" }]
@@ -17,10 +17,7 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering",
 ]
@@ -65,7 +62,7 @@ packages = ["src/gtnh_solver"]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
-target-version = "py310"  # match requires-python; gates pyupgrade (UP) suggestions
+target-version = "py314"  # match requires-python; gates pyupgrade (UP) suggestions
 
 [tool.ruff.lint]
 # Explicit, curated rule set (ruff's default is only E + F). Keep this list as the
@@ -75,7 +72,7 @@ select = [
     "F",       # pyflakes
     "I",       # isort (import ordering - autofixable)
     "N",       # pep8-naming
-    "UP",      # pyupgrade (modernize for the >=3.10 floor)
+    "UP",      # pyupgrade (modernize for the >=3.14 floor)
     "B",       # flake8-bugbear (likely bugs)
     "C4",      # flake8-comprehensions
     "SIM",     # flake8-simplify
@@ -87,6 +84,9 @@ ignore = [
     # un-splittable tokens (long string literals, docstring prose) over. Enforcing
     # E501 on top of the formatter just fights it, so we don't. (Astral's own advice.)
     "E501",
+    # `(str, Enum)` -> `StrEnum`. Not a pure modernization: the two serialize alike, but `str()`
+    # and f-string formatting of a member differ, so it would change any message that prints one.
+    "UP042",
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -97,7 +97,7 @@ ignore = [
 docstring-code-format = true  # keep ASCII diagrams / code in docstrings tidy
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.14"
 # Tests are checked at the same strictness, because CLAUDE.md and CONTRIBUTING both claim "typed
 # throughout" and the suite is the half of the codebase most likely to drift from the contracts it
 # asserts on - it calls every public signature in the project. It paid for itself immediately: the
