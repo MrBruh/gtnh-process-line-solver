@@ -51,7 +51,6 @@ from __future__ import annotations
 
 import itertools
 import math
-from typing import TypeVar
 
 import pytest
 from hypothesis import HealthCheck, event, given, settings
@@ -94,8 +93,6 @@ from tests._helpers import property_examples
 
 # ------------------------------------------------------------------------------------- problems
 
-_T = TypeVar("_T")
-
 #: Tiers to draw machines at. On-ladder and low, so the synthesized supply is always well
 #: defined: ULV is excluded because it cannot survive the design cable run at all, which raises
 #: ``UnpowerableError`` out of the adapter (#112) - a real bug, but the adapter's, not this
@@ -124,7 +121,7 @@ _ROUTED_COMMODITIES: tuple[tuple[Commodity, str, str], ...] = (
 )
 
 
-def _subsets(items: tuple[_T, ...], *, empty: bool) -> tuple[tuple[_T, ...], ...]:
+def _subsets[T](items: tuple[T, ...], *, empty: bool) -> tuple[tuple[T, ...], ...]:
     """Every subset of ``items``, in size order. Enumerated up front so the strategies below can
     ``sampled_from`` them: drawing a unique list of the same things instead makes hypothesis
     *filter* the rejected draws, and at four items that churn was a sixth of the budget."""

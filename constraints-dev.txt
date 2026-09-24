@@ -6,10 +6,9 @@
 # that no commit caused, or worse, a green one that should not have been.
 #
 # WHY A CONSTRAINTS FILE AND NOT A FULL FREEZE. A `pip freeze` lockfile is resolved for one
-# interpreter on one OS; this project's CI spans Python 3.10 and 3.14 on Linux while most
-# development happens on Windows, so a freeze would pin wheels that do not exist on half the
-# matrix. A constraints file only bounds what actually gets installed, never forces it, so it
-# stays correct across the whole matrix.
+# interpreter on one OS; this project's CI runs on Linux while most development happens on
+# Windows, so a freeze would pin wheels that do not exist on the other. A constraints file only
+# bounds what actually gets installed, never forces it, so it stays correct on both.
 #
 # WHY THESE PACKAGES AND NOT EVERY TRANSITIVE DEP. These are the ones whose version alone can
 # turn CI red or green without a line of this repo changing: the linters and type checker decide

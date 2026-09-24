@@ -123,11 +123,11 @@ def _lower_priority() -> bool:
             kernel32.SetPriorityClass.argtypes = [wintypes.HANDLE, wintypes.DWORD]
             handle = kernel32.GetCurrentProcess()
             return bool(kernel32.SetPriorityClass(handle, _BELOW_NORMAL_PRIORITY_CLASS))
-        except (OSError, AttributeError):
+        except OSError, AttributeError:
             return False
     try:
         os.nice(_POSIX_NICE_INCREMENT)
-    except (OSError, AttributeError):
+    except OSError, AttributeError:
         return False
     return True
 

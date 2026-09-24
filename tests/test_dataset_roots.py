@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 import warnings
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -114,15 +114,15 @@ def test_generated_at_dates_both_shapes_of_dump(tmp_path: Path) -> None:
         tmp_path / "2.8.4" / "textures" / "manifest.json", stamp="2026-09-18T00:00:00Z"
     )
     directory = _multiblocks(tmp_path / "2.8.4" / "multiblocks", stamp="2026-07-02T00:00:00Z")
-    assert generated_at(manifest) == datetime(2026, 9, 18, tzinfo=timezone.utc)
-    assert generated_at(directory) == datetime(2026, 7, 2, tzinfo=timezone.utc)
+    assert generated_at(manifest) == datetime(2026, 9, 18, tzinfo=UTC)
+    assert generated_at(directory) == datetime(2026, 7, 2, tzinfo=UTC)
 
 
 def test_generated_at_offsets_are_read_as_written(tmp_path: Path) -> None:
     # Not every writer says "Z". An explicit offset has to compare against a "Z" stamp correctly,
     # which it only does if both come back as aware datetimes.
     path = _manifest(tmp_path / "textures" / "manifest.json", stamp="2026-09-18T02:00:00+02:00")
-    assert generated_at(path) == datetime(2026, 9, 18, tzinfo=timezone.utc)
+    assert generated_at(path) == datetime(2026, 9, 18, tzinfo=UTC)
 
 
 @pytest.mark.parametrize(

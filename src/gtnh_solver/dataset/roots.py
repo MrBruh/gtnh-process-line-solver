@@ -135,11 +135,10 @@ def generated_at(path: str | Path) -> datetime | None:
     found = _STAMP.search(head)
     if found is None:
         return None
-    # The extractor writes UTC with a trailing "Z", which fromisoformat only accepts from 3.11 and
-    # this project supports 3.10.
+    # The extractor writes UTC with a trailing "Z", which fromisoformat reads as UTC.
     text = found.group(1).decode("utf-8", "replace")
     try:
-        return datetime.fromisoformat(f"{text[:-1]}+00:00" if text.endswith("Z") else text)
+        return datetime.fromisoformat(text)
     except ValueError:
         return None
 

@@ -176,7 +176,7 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
             key = (machine.id, port_id)
             try:
                 load = amp_load(eut, tier, distance=power_distance.get(key, 0))
-            except (UnknownTierError, UnpowerableError):
+            except UnknownTierError, UnpowerableError:
                 continue  # an off-ladder tier or a run loss has killed: nothing sizeable to report
             load_by_tier[tier] = load_by_tier.get(tier, 0.0) + load
             source = source_of.get(key)

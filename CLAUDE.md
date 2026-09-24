@@ -33,7 +33,7 @@ disagree, the doc is the intent - fix one of them and say which.
 
 ## Conventions
 
-- **Python ≥ 3.10**, `src/` layout, typed throughout (`mypy --strict`). Format/lint with
+- **Python ≥ 3.14**, `src/` layout, typed throughout (`mypy --strict`). Format/lint with
   `ruff`.
 - **The IR is a contract.** Both `ir/` schemas are versioned; never break a consumer
   silently. See [`docs/IR.md`](docs/IR.md).

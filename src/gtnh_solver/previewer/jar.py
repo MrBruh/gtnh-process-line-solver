@@ -54,7 +54,7 @@ def gt5u_version_from_manifest(manifest_path: str | Path) -> str | None:
     """
     try:
         raw = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return None
     mods = raw.get("provenance", {}).get("mod_versions", {})
     version = mods.get("GT5-Unofficial") if isinstance(mods, dict) else None

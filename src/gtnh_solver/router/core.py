@@ -65,7 +65,6 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import pairwise
 from types import MappingProxyType
-from typing import TypeVar
 
 from gtnh_solver.dataset import (
     DEFAULT_PIPE_SIZE,
@@ -117,9 +116,6 @@ _PRESENT_GROWTH = 1.5
 
 #: Added to a cell's (or casing key's) history every round it ends over-used.
 _HISTORY_STEP = 1.0
-
-#: A negotiated resource: a packed cell, or a multiblock casing key.
-_R = TypeVar("_R", int, Key)
 
 
 @dataclass(frozen=True)
@@ -425,11 +421,12 @@ def _endpoints(
     return eps
 
 
-def _prices(
-    history: Mapping[_R, float], usage: Mapping[_R, int], present: float
-) -> dict[_R, float]:
+def _prices[R: (int, Key)](
+    history: Mapping[R, float], usage: Mapping[R, int], present: float
+) -> dict[R, float]:
     """Each resource's price on top of its unit step: ``(1 + history) * (1 + present * users) - 1``.
 
+    A resource ``R`` is what the nets negotiate over: a packed cell, or a multiblock casing key.
     ``usage`` counts the other nets on it: the net being priced has been ripped up already.
     """
     out = dict(history)
@@ -438,7 +435,7 @@ def _prices(
     return out
 
 
-def _count(counter: dict[_R, int], resources: Collection[_R], step: int) -> None:
+def _count[R: (int, Key)](counter: dict[R, int], resources: Collection[R], step: int) -> None:
     for r in resources:
         counter[r] = counter.get(r, 0) + step
         if not counter[r]:

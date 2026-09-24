@@ -469,6 +469,24 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **Breaking: Python 3.14 is now required (#256).** `requires-python` is `>=3.14` (it was
+  `>=3.10`) and CI tests 3.14 alone. Installing on 3.10 to 3.13 now stops at `pip install`; rebuild
+  the venv on a 3.14 interpreter (`py -3.14 -m venv .venv` on Windows). The gain is the local test
+  run: with branch coverage on, 3.12 and 3.13 fall back to coverage's C tracer, while 3.14 measures
+  through `sys.monitoring`, so the default `pytest` measured 602 CPU-s on 3.12 against 230 on 3.14.
+  The cost was the solver, which ran about 20% slower on 3.14 because of pydantic field reads.
+  After the two entries below, a solve on 3.14 takes less CPU than it did on 3.12 before them
+  (`nitrobenzene` 0.69x, `ev-nitrobenzene` 0.45x) and about the same as 3.12 on the same code. A
+  single supported version also ends the class of bug #255 was: a stdlib rule that only an
+  untested intermediate version enforced.
+
+  Moving the floor retires a 3.10 shim: `dataset.roots.generated_at` hands the extractor's
+  trailing-`Z` stamps to `datetime.fromisoformat` directly. The ruff target moves to `py314`, so
+  multi-exception `except` clauses lose their parentheses (PEP 758) and three generic functions
+  take PEP 695 type parameters. The one modernization held back is `(str, Enum)` to `StrEnum`
+  (UP042, now ignored): the two serialize alike, but `str()` and f-strings of a member differ, so
+  it would change any message that prints one.
+
 - **The placement search runs on plain values, not pydantic models (`placement/`, `router/`,
   #256).** On Python 3.14 and later a field read off a pydantic model cannot take the interpreter's
   specialized path, because pydantic-core replaces every instance's `__dict__`, and it costs about

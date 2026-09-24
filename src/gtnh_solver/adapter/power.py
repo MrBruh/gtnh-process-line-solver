@@ -123,7 +123,7 @@ def _supply_tier(machine: Machine) -> str:
         return machine.voltage_tier
     try:
         needed = energy_hatches_for(machine.eut, machine.voltage_tier)
-    except (UnknownTierError, UnpowerableError):
+    except UnknownTierError, UnpowerableError:
         return machine.voltage_tier
     if needed <= MAX_HATCHES_BEFORE_UPGRADE:
         return machine.voltage_tier

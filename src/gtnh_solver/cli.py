@@ -583,7 +583,7 @@ def _inspect_schematic(path: str, version: str | None) -> int:
     manifest: TextureManifest | None = None
     try:
         manifest = TextureManifest.load(manifest_path)
-    except (OSError, ValueError):
+    except OSError, ValueError:
         print(f"warning: no texture manifest at {manifest_path}; mIDs stay raw", file=sys.stderr)
 
     width, height, length = schematic.size
