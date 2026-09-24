@@ -81,7 +81,12 @@ doc as intent and reconcile.
   bias: height is paid only through the volume term. Power nets carry no base wirelength term; a
   failed *or starved* power net enters the cost as an MST trunk-length pull only once the
   feedback penalizes it. *(Phase 2, lane C: SA + LNS are in; the cheaper incremental
-  routing/congestion estimate the cost is meant to grow into is still ahead.)*
+  routing/congestion estimate the cost is meant to grow into is still ahead.)* One narrow
+  constructor sits beside the annealer (`placement/banks.py`): a line that is one chain of
+  **banks** of parallel single blocks (a plan node's `machineCount` copies) is laid as columns,
+  consecutive stages diagonal so that one straight pipe run is next to every machine of both. It
+  is the maintainer's parallel-sand build derived from the plan; the annealer's cost cannot see
+  the shared run that makes it small, and measured on that line it ranked a flat row level with it.
 - **router/** - free-form routing on the **full-3D** cell grid (all six faces are neighbours);
   single-channel capacity; ME-toggle skipping; the shared-amperage power primitive. It owns the
   **auto-output vs pipe** decision (`router/auto.py`, `assign_auto_outputs`): adjacent
@@ -105,7 +110,9 @@ doc as intent and reconcile.
   - SA weight modes x seeds - that fully routes + validates every attempt and keeps the best
   VALID layout by a quality ranking, penalizing the nets a pass leaves unrouted - and the power
   net of any machine validation proves starved of power, which is a placement defect, not a bug -
-  so the next placement pulls them tighter - `solver/core.py`). It also owns the **power-source
+  so the next placement pulls them tighter - `solver/core.py`). A bank-column layout, where the
+  line has one, is routed first and ranked with the grid's attempts: a candidate, never a
+  verdict. It also owns the **power-source
   repair pass** (`solver/repair.py`): the annealer has no gradient on a source (a 1x1x1 block
   inside the bounding box is cost-neutral to move), so after the pipes are laid each source
   **aims at the load it serves** - its trunk's first branch, or its only connection - takes the

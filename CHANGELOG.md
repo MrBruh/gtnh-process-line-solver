@@ -460,6 +460,30 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **parallel-sand now solves to the maintainer's own build (`placement/banks.py`).** Handed
+  `examples/gtnh-parallel-sand.json`, the solver returned a 128-cell box with 32 pipe blocks and
+  18 cable blocks (the median over seeds 0 to 15). The maintainer's build of the same plan, built
+  and run in game, is a 3x3x4 box on 12 pipe blocks and 3 cable blocks
+  (`tests/golden/schematic/sand-parallel-*`). The solver now returns that build on every one of
+  those seeds: box 36, 12 pipes, 3 cables, in the same time (3.77 s a seed against 3.78, the two
+  run side by side).
+
+  The annealer could not find it, and measuring it said why. What makes the build small is a
+  straight run of cells next to every machine of two stages, so one pipe block serves a machine
+  on each side, and no term the annealer can afford sees that: its cost ranks a flat row of the
+  nine hammers level with the build. A one-cell nudge move got the search much closer on this line
+  but cost ev-nitrobenzene 409 to 467 pipe blocks where it had laid 295, and neither cost term
+  tried (a footprint grown to seat every dock, a shared-run route estimate) fixed that.
+
+  So a line that is one chain of **banks** of parallel single blocks (a plan node's
+  `machineCount` copies, every one on the same nets) is also laid out directly: each bank a
+  column, consecutive stages diagonal so that they share one straight pipe run, the feed, the
+  drain and the power source capping the column that serves them. The solver routes that layout
+  first and ranks it with its annealed attempts, so it wins only where the routed structure really
+  is smaller, and it is dropped unless it comes out VALID. Any other line (a multiblock, a branch,
+  pinned I/O, no bank of two) gets no such candidate and solves exactly as before: sand (seed 0),
+  nitrobenzene (seeds 0 to 7) and ev-nitrobenzene (seed 0) return the same layouts as `main`.
+
 - **The solver ranks attempts on pipe blocks as well as cable (`solver/_structure.py`).** Of two
   attempts with the same floor area, it kept the one with less cable however many pipes each
   laid. It now counts every route cell, because the builder places a pipe block as surely as a
