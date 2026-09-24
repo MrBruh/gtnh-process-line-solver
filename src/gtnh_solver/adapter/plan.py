@@ -100,8 +100,9 @@ class MachineConfigTier(BaseModel):
 class MachineConfigControl(BaseModel):
     """A configurable dimension of a machine: its parallel step, coil, pipe casing, solenoid.
 
-    Only ``machineParallel`` is read, and only to *report* that the adapter is not modelling it
-    (``core._handler_parallel``). The node names its chosen setting in
+    Two are read. ``machineParallel`` is read only to *report* that the adapter is not modelling
+    it (``core._handler_parallel``). ``cokeOvenSlices`` sets which built form an Industrial Coke
+    Oven reserves (``core._trigger_stack``). The node names its chosen setting in
     ``Node.machine_config_tiers``; absent, ``default_key`` is what the machine is running.
     """
 
@@ -200,6 +201,9 @@ class Recipe(BaseModel):
     inputs: list[Resource] = Field(default_factory=list)
     outputs: list[Resource] = Field(default_factory=list)
     source: RecipeSource | None = None
+    #: The recipe's own machine-configuration controls, which BOTH forks emit: the Industrial Coke
+    #: Oven's casing and slice count sit here.
+    machine_config_controls: list[MachineConfigControl] = Field(default_factory=list)
     #: Empty on a MrBruh-fork plan, which never emits it; see :class:`MachineHandler`.
     machine_handlers: list[MachineHandler] = Field(default_factory=list)
 

@@ -30,6 +30,7 @@ from gtnh_solver.previewer.textures import (
     expand_machine,
     primary_variant,
     texturize_scene,
+    variant_for_size,
 )
 from tests._helpers import at
 
@@ -1054,6 +1055,70 @@ def test_expansion_falls_back_to_the_largest_form_for_an_unmatched_size() -> Non
     # A size no variant reports (a machine reserved before selection existed) keeps the old choice.
     cubes = expand_machine(_machine("m1", "Test Tower", [0, 0, 0], [3, 9, 3]), _tower_doc())
     assert len(cubes) == 45  # the 3x5x3 form, clamped into the larger reservation
+
+
+def _oven_block(x: int, length: int) -> dict[str, Any]:
+    """One cell of :func:`_sliced_oven_doc`'s bar: the controller, the far end cap, or a casing."""
+    if x == 0:
+        return {"d": [x, 0, 0], "block": "gregtech:gt.blockmachines", "meta": 15543}
+    return {
+        "d": [x, 0, 0],
+        "block": "gregtech:gt.blockcasings",
+        "meta": 12 if x == 2 - length else 11,
+    }
+
+
+def _sliced_oven_doc() -> MultiblockDoc:
+    """Three forms of a bar that grows away from its controller, 6, 8 and 10 long, each closed by
+    an end cap (meta 12) at its far end.
+
+    That is how the Industrial Coke Oven grows (#229). A longer form clipped to a shorter box keeps
+    one end of the bar: either the slices without the controller, or the controller without the
+    end cap.
+    """
+    variants: list[dict[str, Any]] = []
+    for n in (1, 2, 3):
+        length = 4 + 2 * n
+        variants.append(
+            {
+                "trigger_stack_size": n,
+                "channels": {},
+                "blocks": [_oven_block(x, length) for x in range(2 - length, 2)],
+                "hints": [],
+                "bbox": [length, 1, 1],
+            }
+        )
+    return MultiblockDoc.model_validate(
+        {
+            "schema": 2,
+            "controller": {
+                "registry_name": "gregtech:gt.blockmachines",
+                "meta": 15543,
+                "display_name": "Test Oven",
+                "source_class": "test.MTETestOven",
+            },
+            "variants": variants,
+        }
+    )
+
+
+@pytest.mark.parametrize("front", ["east", "west"])
+def test_a_quarter_turned_machine_renders_the_form_it_reserved(front: str) -> None:
+    """The scene's size is the box AS PLACED, so a quarter turn swaps its horizontal extents while
+    a variant's bbox stays as dumped. Compared as they come, a 6x1x1 oven facing east or west
+    (reserved 1x1x6) matched no form and drew a clipped piece of the 10-long one."""
+    doc = _sliced_oven_doc()
+    cubes = expand_machine(_machine("m1", "Test Oven", [0, 0, 0], [1, 1, 6], front=front), doc)
+    assert len(cubes) == 6
+    assert {c.cell[2] for c in cubes} == set(range(6))
+    assert sum(c.block == "gregtech:gt.blockmachines" for c in cubes) == 1, "the controller shows"
+    assert sum(c.meta == 12 for c in cubes) == 1, "and so does the end cap"
+
+
+def test_a_half_turn_leaves_the_reserved_size_alone() -> None:
+    doc = _sliced_oven_doc()
+    assert tuple(variant_for_size(doc, [8, 1, 1], steps=2).bbox) == (8, 1, 1)
+    assert tuple(variant_for_size(doc, [1, 1, 8], steps=3).bbox) == (8, 1, 1)
 
 
 def test_block_key_expands_a_machine_whose_type_does_not_match(dataset: tuple[Path, Path]) -> None:

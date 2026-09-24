@@ -106,6 +106,10 @@ class VariantShape:
     #: ``Placement.cell`` names), so a consumer can turn them with the machine. Empty when the dump
     #: recorded no slots, which reads as "unknown", not "none".
     slots: tuple[HatchSlot, ...] = ()
+    #: The controller stack size the dump built this form from. For a machine whose length rides
+    #: the trigger stack it is how a plan names the form: GT builds an Industrial Coke Oven of N
+    #: slices from a stack of N (``MTEIndustrialCokeOven.construct``), 4 + 2N blocks long.
+    trigger_stack_size: int = 1
 
     def energy_hatch_budget(self, routed_ports: int = 0) -> int:
         """Cells left for energy hatches once ``routed_ports`` item/fluid connections and this
@@ -171,13 +175,16 @@ class MachinePhysical:
     #: of. Cells they occupy cannot carry routed I/O, so the budget subtracts them.
     upkeep_hatch_count: int = 0
 
-    def energy_hatch_budget(self, routed_ports: int = 0, fluid_outputs: int = 0) -> int:
+    def energy_hatch_budget(
+        self, routed_ports: int = 0, fluid_outputs: int = 0, trigger_stack: int | None = None
+    ) -> int:
         """:meth:`VariantShape.energy_hatch_budget` for the form this recipe reserves.
 
-        ``fluid_outputs`` selects the form, exactly as :meth:`footprint_for` does, so the budget is
-        always charged against the shape the builder is actually told to raise.
+        ``fluid_outputs`` and ``trigger_stack`` select the form, exactly as :meth:`footprint_for`
+        does, so the budget is always charged against the shape the builder is actually told to
+        raise.
         """
-        return self.variant_for(fluid_outputs).energy_hatch_budget(routed_ports)
+        return self.variant_for(fluid_outputs, trigger_stack).energy_hatch_budget(routed_ports)
 
     @property
     def is_layer_indexed(self) -> bool:
@@ -201,21 +208,40 @@ class MachinePhysical:
                 return False
         return self.variants[0].output_layers > 0
 
-    def variant_for(self, fluid_outputs: int = 0) -> VariantShape:
-        """The built form this recipe reserves: the smallest that can route ``fluid_outputs``
-        fluids, else the form :attr:`footprint` describes.
+    def variant_for(self, fluid_outputs: int = 0, trigger_stack: int | None = None) -> VariantShape:
+        """The built form this recipe reserves, chosen by the first rule that applies:
+
+        1. ``trigger_stack`` given: the form GT builds from that stack, because the plan named it.
+           An Industrial Coke Oven's slice count is its stack, and the plan's parallels depend on
+           it. Reserving its 36-long maximum instead cost every oven 30 blocks of length (#229).
+        2. A layer-indexed machine: the smallest form that can route ``fluid_outputs`` fluids.
+        3. Anything else: the form :attr:`footprint` describes, the largest.
 
         **The single selection point.** Footprint and hatch counts must come from the same form or
         they describe different buildings: a Distillation Tower reserved 3x6x3 used to be charged
         the 3x12x3 form's 97 hatch cells, a ceiling twice its own, which with geometric hatch slots
         would place hatches outside the box the builder was told to raise.
         """
+        if self.variants and trigger_stack is not None:
+            return self._form_at_stack(trigger_stack)
         if self.variants and self.is_layer_indexed:
             for shape in self.variants:  # smallest first
                 if shape.output_layers >= fluid_outputs:
                     return shape
             return self.variants[-1]
         return self._primary_shape()
+
+    def _form_at_stack(self, trigger_stack: int) -> VariantShape:
+        """The form GT builds from a controller stack of ``trigger_stack``.
+
+        That is the swept form with the largest stack not above it. The extractor keeps sweeping
+        until the shape stops changing, so a stack past the last form builds the last form. A stack
+        below the first form builds the first, the same way GT clamps a structure length to at
+        least 1.
+        """
+        by_stack = sorted(self.variants, key=lambda s: s.trigger_stack_size)
+        built = [s for s in by_stack if s.trigger_stack_size <= trigger_stack]
+        return built[-1] if built else by_stack[0]
 
     def _primary_shape(self) -> VariantShape:
         """The form :attr:`footprint` describes, with that form's own hatch counts.
@@ -236,15 +262,15 @@ class MachinePhysical:
             upkeep_hatch_count=self.upkeep_hatch_count,
         )  # no slots: a hand-built record has no offsets to hand out
 
-    def footprint_for(self, fluid_outputs: int = 0) -> CellBox:
-        """The smallest built form that can route ``fluid_outputs`` fluids, else the largest form.
+    def footprint_for(self, fluid_outputs: int = 0, trigger_stack: int | None = None) -> CellBox:
+        """The box of the form :meth:`variant_for` selects.
 
         For a layer-indexed machine this is the difference between telling a builder to raise a
-        3-tall tower and a 12-tall one. Everything else - a fixed-shape machine, a growth pattern we
-        cannot read, or a pre-v2 dump with no hatch data - keeps the previous behaviour of the
-        largest form.
+        3-tall tower and a 12-tall one, and for an Industrial Coke Oven between a 6-long oven and a
+        36-long one. Everything else - a fixed-shape machine, a growth pattern we cannot read, or a
+        pre-v2 dump with no hatch data - keeps the previous behaviour of the largest form.
         """
-        return self.variant_for(fluid_outputs).footprint
+        return self.variant_for(fluid_outputs, trigger_stack).footprint
 
     @property
     def block_key(self) -> str:
@@ -466,7 +492,8 @@ def _variant_shapes(doc: MultiblockDoc) -> tuple[VariantShape, ...]:
 
     Sized from the blocks each form actually spans (the same derivation the primary variant gets, so
     a form's footprint here always agrees with :attr:`MachinePhysical.footprint` for the largest).
-    Ordered by volume so :meth:`MachinePhysical.footprint_for` can take the first form that fits.
+    Ordered by volume so :meth:`MachinePhysical.footprint_for` can take the first form that fits,
+    with the trigger stack breaking a tie so the order never depends on the dump's.
     """
     shapes = []
     for variant in doc.variants:
@@ -483,9 +510,15 @@ def _variant_shapes(doc: MultiblockDoc) -> tuple[VariantShape, ...]:
                 energy_hatch_cells=energy_hatch_cells,
                 upkeep_hatch_count=upkeep_hatch_count,
                 slots=_hatch_slots(variant, min_corner),
+                trigger_stack_size=variant.trigger_stack_size,
             )
         )
-    return tuple(sorted(shapes, key=lambda s: s.footprint.sx * s.footprint.sy * s.footprint.sz))
+    return tuple(
+        sorted(
+            shapes,
+            key=lambda s: (s.footprint.sx * s.footprint.sy * s.footprint.sz, s.trigger_stack_size),
+        )
+    )
 
 
 def load_physical_dataset(

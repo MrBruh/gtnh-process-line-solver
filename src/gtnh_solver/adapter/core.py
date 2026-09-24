@@ -36,8 +36,10 @@ machine: its ``block_key`` is stamped on the ``Machine``, so the previewer and `
 draw the controller the footprint came from instead of re-guessing it from ``type`` (#205).
 Footprints are single-block 1x1x1 until that join lands a record, so the solver runs with or without
 a ``data/multiblocks/`` dump, and the bounding region is sized to fit whatever footprints result
-(``_bounding_region``). What a *census* miss means depends on ``handler.kind`` and the two readings
-are opposites - see ``_classify_census_miss``.
+(``_bounding_region``). A machine with several built forms reserves the one the node or its recipe
+calls for: a Coke Oven's slice count (``_trigger_stack``), a tower's fluid-output count. What a
+*census* miss means depends on ``handler.kind`` and the two readings are opposites - see
+``_classify_census_miss``.
 
 **A node standing for several machines expands** into one ``Machine`` per physical machine
 (``_instance_ids``), all sharing the node's nets - which needed no IR concept, because
@@ -77,6 +79,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import warnings
 from pathlib import Path
 
@@ -123,6 +126,10 @@ _STORAGE_TYPE = {"item": "Super Chest", "fluid": "Super Tank"}
 _RESOLVED_EUT_TOLERANCE = 1e-6
 #: The machine-configuration control that sets a GT++ multiblock's parallel batch count.
 _PARALLEL_CONTROL = "machineParallel"
+#: The control that sets an Industrial Coke Oven's length, and with it its parallels, as a slice
+#: count keyed "slice-1" upward (both forks).
+_SLICES_CONTROL = "cokeOvenSlices"
+_SLICE_KEY = re.compile(r"slice-([1-9][0-9]*)")
 
 
 def load_plan(path: str | Path) -> Plan:
@@ -307,12 +314,13 @@ def to_input_ir(
         # a Dangote Distillus drew and exported as a plain Distillation Tower (#205). With no
         # record, the export's key (or None) passes through as before.
         block_key = record.block_key if record is not None else exported_key
-        # One fluid-output count drives both the reserved shape and its hatch ceiling, so the two
-        # cannot describe different built forms of the same machine. Both now come from the single
-        # record resolved above, so the footprint cannot be looked up differently from the ceiling.
-        fluid_outputs = _fluid_output_count(recipe)
-        footprint = (
-            record.footprint_for(fluid_outputs) if record is not None else _DEFAULT_FOOTPRINT
+        # The built form is selected ONCE, and the footprint, hatch ceiling and hatch slots below
+        # all read it, so they cannot describe different built forms of the same machine. The
+        # plan's slice count or the recipe's fluid-output count chooses it (`variant_for`).
+        shape = (
+            record.variant_for(_fluid_output_count(recipe), _trigger_stack(recipe, node))
+            if record is not None
+            else None
         )
         if record is None and identifies_single_blocks:
             _classify_census_miss(recipe, node, single_block_ids)
@@ -325,17 +333,12 @@ def to_input_ir(
                 id=instance_id,
                 type=recipe.machine_type,
                 block_key=block_key,
-                footprint=footprint,
+                footprint=shape.footprint if shape is not None else _DEFAULT_FOOTPRINT,
                 # None without a dataset record: no structural ceiling is known, so the power
                 # synthesis keeps such a machine on one connection (see adapter.power).
-                hatch_cells=(
-                    record.variant_for(fluid_outputs).hatch_cells or None
-                    if record is not None
-                    else None
-                ),
-                # From the same variant as the footprint and the ceiling, so all three describe one
-                # built form. Empty when the dump recorded no slots, which reads as "unknown".
-                hatch_slots=(record.variant_for(fluid_outputs).slots if record is not None else ()),
+                hatch_cells=(shape.hatch_cells or None) if shape is not None else None,
+                # Empty when the dump recorded no slots, which reads as "unknown".
+                hatch_slots=shape.slots if shape is not None else (),
                 faces=FaceSpec(ports=_recipe_ports(recipe, node)),
                 voltage_tier=node.overclock_tier,
                 # Every machine keeps all four horizontal facings: occupied_cells rotates a
@@ -591,6 +594,35 @@ def _check_unmodelled_parallel(recipe: Recipe, node: Node) -> None:
         AdapterWarning,
         stacklevel=3,
     )
+
+
+def _trigger_stack(recipe: Recipe, node: Node) -> int | None:
+    """The trigger stack the node's machine is built from, when the plan says, else ``None``.
+
+    Only an Industrial Coke Oven says: its ``cokeOvenSlices`` setting "slice-N" is N slices, and
+    both forks work its parallels out from N (16 + 8(N-1), or 32 + 16(N-1) with Heat Proof casing).
+    ``node.parallel`` stays 1 either way. GT builds N slices from a stack of N, so N names the form
+    to reserve, the smallest that covers those parallels (#229). The node's own choice comes first,
+    then the control's default. ``None`` leaves form selection to the recipe, and a key that is not
+    a slice count gets ``None`` as well, with a warning, because reserving the largest form can
+    never leave the oven short of the parallels the plan counted on.
+    """
+    control = next((c for c in recipe.machine_config_controls if c.id == _SLICES_CONTROL), None)
+    key = node.machine_config_tiers.get(_SLICES_CONTROL) or (
+        control.default_key if control is not None else ""
+    )
+    if not key:
+        return None
+    match = _SLICE_KEY.fullmatch(key)
+    if match is None:
+        warnings.warn(
+            f"node {node.id!r} sets {_SLICES_CONTROL} to {key!r}, which is not a slice count; "
+            f"reserving the machine's largest form",
+            AdapterWarning,
+            stacklevel=3,
+        )
+        return None
+    return int(match.group(1))
 
 
 def _effective_duration(recipe: Recipe, node: Node) -> float:

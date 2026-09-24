@@ -152,7 +152,7 @@ def test_the_schematic_holds_the_controllers_the_plan_names(
     material id a ``.schematic`` cannot hold; the export writes each as Schematica writes a covered
     frame, and warns that a paste will get the material wrong.
     """
-    with pytest.warns(SchematicWarning, match="344 GT frame box"):
+    with pytest.warns(SchematicWarning, match="^44 GT frame box"):
         root = build_schematic(*solved, manifest=manifest, docs=docs)
     schematic = read_schematic(nbt.dumps("Schematic", root))
     machines = Counter(tile.mid for tile in schematic.tile_entities if tile.mid is not None)
@@ -165,4 +165,6 @@ def test_the_schematic_holds_the_controllers_the_plan_names(
     assert by_name["Super Chest I"] == 2
     assert by_name["Debug Power Generator"] == 3
     # The frames: 4096 + material, Steel 305 in the Coke Ovens, Black Steel 334 in the extractor.
-    assert (machines[4096 + 305], machines[4096 + 334]) == (320, 24)
+    # Each oven is its one-slice base, the 10 frames GT's tooltip lists for it; at the 36-long form
+    # it used to reserve whatever the plan asked for, it was 160 (#229).
+    assert (machines[4096 + 305], machines[4096 + 334]) == (20, 24)

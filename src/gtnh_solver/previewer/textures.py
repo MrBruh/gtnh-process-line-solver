@@ -594,8 +594,9 @@ def primary_variant(doc: MultiblockDoc) -> Variant:
     return max(doc.variants, key=lambda v: (len(v.blocks), v.trigger_stack_size))
 
 
-def variant_for_size(doc: MultiblockDoc, size: Sequence[int] | None) -> Variant:
-    """The variant whose bbox is exactly ``size``, else :func:`primary_variant`.
+def variant_for_size(doc: MultiblockDoc, size: Sequence[int] | None, steps: int = 0) -> Variant:
+    """The variant whose bbox is exactly ``size`` turned back ``steps`` quarter turns, else
+    :func:`primary_variant`.
 
     A parametric machine has many forms and the adapter already chose one, sizing it to the recipe
     (``MachinePhysical.footprint_for``). The reserved ``size`` on the scene machine IS that choice,
@@ -603,9 +604,14 @@ def variant_for_size(doc: MultiblockDoc, size: Sequence[int] | None) -> Variant:
     through the IR. Getting this wrong is silent, not loud: ``expand_machine`` clamps every cube to
     the reserved box, so rendering a taller form than was reserved would quietly draw a truncated
     tower rather than fail.
+
+    ``size`` is the box AS PLACED, and a quarter turn swaps its horizontal extents, while a
+    variant's ``bbox`` is the form as dumped, facing north. So the two are compared un-turned. A
+    tower's square base hid the difference, but a 6x7x5 Coke Oven facing east is reserved 5x7x6
+    and matched no form, so it drew one clipped end of the 36-long form instead (#229).
     """
     if size is not None:
-        want = tuple(size)
+        want = (size[2], size[1], size[0]) if steps % 2 else tuple(size)
         for variant in doc.variants:
             if tuple(variant.bbox) == want:
                 return variant
@@ -713,7 +719,7 @@ def expand_machine(
     cell = machine["cell"]
     size = machine.get("size", [1, 1, 1])
     steps = _FRONT_CW_STEPS.get(str(machine.get("front", "north")), 0)
-    variant = variant_for_size(doc, size)
+    variant = variant_for_size(doc, size, steps)
     cubes = [
         c for c in _place_blocks(variant, cell, steps) if _within_footprint(c.cell, cell, size)
     ]

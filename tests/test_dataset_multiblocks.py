@@ -13,13 +13,17 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from gtnh_solver.adapter import (
+    AdapterWarning,
     Edge,
     MachineBlock,
+    MachineConfigControl,
+    MachineConfigTier,
     Node,
     Plan,
     Recipe,
@@ -38,7 +42,7 @@ from gtnh_solver.dataset import (
     load_physical_dataset,
     to_physical,
 )
-from gtnh_solver.ir import CellBox, Facing, LayoutStatus
+from gtnh_solver.ir import CellBox, Facing, LayoutStatus, Machine
 from gtnh_solver.solver import solve
 from gtnh_solver.validator import validate
 from tests._helpers import PLACEMENT_CODES
@@ -312,11 +316,12 @@ def test_every_dumped_controller_agrees_on_which_form_it_reserved(
     cannot pick up one form's box and another form's ceiling.
     """
     for name, record in dataset.machines.items():
-        for fluid_outputs in range(0, 13):
-            shape = record.variant_for(fluid_outputs)
-            assert shape.footprint == record.footprint_for(fluid_outputs), name
-            assert shape.hatch_cells >= shape.energy_hatch_cells, name
-            assert shape.hatch_cells >= shape.upkeep_hatch_count, name
+        for trigger_stack in (None, 1, 2, 17):
+            for fluid_outputs in range(0, 13):
+                shape = record.variant_for(fluid_outputs, trigger_stack)
+                assert shape.footprint == record.footprint_for(fluid_outputs, trigger_stack), name
+                assert shape.hatch_cells >= shape.energy_hatch_cells, name
+                assert shape.hatch_cells >= shape.upkeep_hatch_count, name
 
 
 def test_slots_are_re_anchored_onto_the_forms_minimum_corner(dataset: PhysicalDataset) -> None:
@@ -390,6 +395,157 @@ def test_adapter_sizes_a_tower_from_the_recipes_fluid_outputs() -> None:
         # slots, so a 3-tall tower has 2 cells and a 6-tall one 5; before this was fixed both were
         # charged the 12-tall form's 11, a ceiling the reserved shape cannot host.
         assert machine.hatch_cells == expected_height - 1, f"{fluids} fluid outputs"
+
+
+# ------------------------------------------------- slice-count form selection (GitHub #229)
+#
+# GT 2.9's Industrial Coke Oven grows one 2-block slice per trigger-stack step, 6 to 36 long, and its
+# parallels grow with it. It never grows a layer, so it is not layer-indexed, and it used to reserve
+# its 36-long form whatever the plan built. The plan names the form by its slice count instead.
+
+
+def _sliced_oven_doc(slices: int = 4) -> MultiblockDoc:
+    """A synthetic sliced oven: its N-slice form is a (4 + 2N)x1x1 bar.
+
+    Like the real one, it grows away from the controller (toward -x) and keeps its hatch cells on
+    the 6-long base, so a longer form's box puts the base at its far end.
+    """
+    variants = []
+    for n in range(1, slices + 1):
+        length = 4 + 2 * n
+        variants.append(
+            {
+                "trigger_stack_size": n,
+                "blocks": [
+                    {"d": [x, 0, 0], "block": "casing", "meta": 0} for x in range(2 - length, 2)
+                ],
+                "hatch_slots": [
+                    {"d": [x, 0, 0], "kinds": ["Energy", "InputBus"]} for x in range(-4, 2)
+                ],
+                "bbox": [length, 1, 1],
+            }
+        )
+    return MultiblockDoc.model_validate(
+        {
+            "schema": 2,
+            "controller": {
+                "registry_name": "r",
+                "meta": 0,
+                "display_name": "Industrial Coke Oven",
+                "source_class": "C",
+            },
+            "variants": variants,
+        }
+    )
+
+
+def test_a_sliced_oven_reserves_the_form_its_slice_count_builds() -> None:
+    record = to_physical(_sliced_oven_doc())
+    assert not record.is_layer_indexed  # nothing but the plan's slice count can size it
+    for slices in range(1, 5):
+        assert record.variant_for(trigger_stack=slices).trigger_stack_size == slices
+        assert record.footprint_for(trigger_stack=slices) == CellBox(sx=4 + 2 * slices, sy=1, sz=1)
+
+
+def test_without_a_slice_count_a_sliced_oven_keeps_its_largest_form() -> None:
+    record = to_physical(_sliced_oven_doc())
+    assert record.footprint_for() == record.footprint == CellBox(sx=12, sy=1, sz=1)
+
+
+def test_a_slice_count_outside_the_family_takes_the_nearest_end() -> None:
+    record = to_physical(_sliced_oven_doc())
+    # The extractor stops sweeping once the shape stops changing, so a bigger stack builds the last
+    # form it recorded; GT clamps a structure length to at least 1, so a smaller one builds the first.
+    assert record.footprint_for(trigger_stack=40) == CellBox(sx=12, sy=1, sz=1)
+    assert record.footprint_for(trigger_stack=0) == CellBox(sx=6, sy=1, sz=1)
+
+
+def test_a_slice_count_selects_the_hatch_cells_of_its_own_form() -> None:
+    """Every form has the same six base cells, but a longer form's box puts the base further from
+    its minimum corner, so offsets read off another form would put the hatches in the slices."""
+    record = to_physical(_sliced_oven_doc())
+    short = record.variant_for(trigger_stack=1)
+    longer = record.variant_for(trigger_stack=3)
+    assert [slot.offset.x for slot in short.slots] == list(range(0, 6))
+    assert [slot.offset.x for slot in longer.slots] == list(range(4, 10))
+    assert record.energy_hatch_budget(trigger_stack=3) == 6
+
+
+def test_a_record_without_forms_ignores_a_slice_count() -> None:
+    # A hand-built record or a pre-v2 dump has no forms to choose among, only its own footprint.
+    bare = replace(to_physical(_sliced_oven_doc()), variants=())
+    assert bare.footprint_for(trigger_stack=1) == bare.footprint
+
+
+def _oven_machine(*, chosen: str | None = None, default: str | None = "slice-1") -> Machine:
+    """The machine the adapter makes of one Industrial Coke Oven node.
+
+    ``default`` is the recipe's ``cokeOvenSlices`` default (``None``: the recipe has no such
+    control) and ``chosen`` the node's own setting (``None``: it names none).
+    """
+    controls = (
+        [
+            MachineConfigControl(
+                id="cokeOvenSlices",
+                default_key=default,
+                tiers=[MachineConfigTier(key=f"slice-{n}") for n in range(1, 5)],
+            )
+        ]
+        if default is not None
+        else []
+    )
+    recipe = Recipe(
+        id="r",
+        machine_type="Industrial Coke Oven",
+        eut=96.0,
+        duration_ticks=256.0,
+        outputs=[Resource(kind="item", id="minecraft:coal@1", amount=20.0)],
+        machine_config_controls=controls,
+    )
+    node = Node(
+        id="n",
+        recipe_id="r",
+        overclock_tier="MV",
+        machine_config_tiers={"cokeOvenSlices": chosen} if chosen is not None else {},
+    )
+    dataset = PhysicalDataset(
+        meta=load_physical_dataset(_DATA_DIR).meta,
+        machines={"Industrial Coke Oven": to_physical(_sliced_oven_doc())},
+    )
+    plan = Plan(schema_version=1, recipes=[recipe], nodes=[node])
+    return next(m for m in to_input_ir(plan, physical=dataset).machines if m.id == "n")
+
+
+def test_the_adapter_reserves_the_default_slice_count() -> None:
+    # examples/ev-nitrobenzene.json: the node names no slice count, so it runs the default, one
+    # slice, 16 parallels. It used to reserve 36x7x5 for that.
+    assert _oven_machine().footprint == CellBox(sx=6, sy=1, sz=1)
+
+
+def test_the_nodes_slice_count_beats_the_default() -> None:
+    machine = _oven_machine(chosen="slice-3")
+    assert machine.footprint == CellBox(sx=10, sy=1, sz=1)
+    # The ceiling and the offsets come from the same 3-slice form as the box.
+    assert machine.hatch_cells == len(machine.hatch_slots) == 6
+    assert [slot.offset.x for slot in machine.hatch_slots] == list(range(4, 10))
+
+
+def test_a_slice_count_the_recipe_does_not_list_is_still_honoured() -> None:
+    assert _oven_machine(chosen="slice-2", default=None).footprint == CellBox(sx=8, sy=1, sz=1)
+
+
+@pytest.mark.parametrize("default", [None, ""])
+def test_no_slice_count_anywhere_keeps_the_largest_form(default: str | None) -> None:
+    assert _oven_machine(default=default).footprint == CellBox(sx=12, sy=1, sz=1)
+
+
+@pytest.mark.parametrize("key", ["slice-0", "slice-two", "3", "slice-3 "])
+def test_an_unreadable_slice_count_warns_and_keeps_the_largest_form(key: str) -> None:
+    # The largest form has the most parallels, so it can never leave the oven short of what the
+    # plan counted on. Under-reserving could.
+    with pytest.warns(AdapterWarning, match="not a slice count"):
+        machine = _oven_machine(chosen=key)
+    assert machine.footprint == CellBox(sx=12, sy=1, sz=1)
 
 
 # --------------------------------------------------------------- interpretation branches
