@@ -31,21 +31,25 @@ from gtnh_solver.ir import (
 from gtnh_solver.ir.geometry import (
     FACE_DELTAS,
     Cell,
+    Pose,
     box_in_region,
     front_on_boundary,
     in_region,
     occupied_cells,
+    pose_of,
     rotated_footprint,
 )
 from gtnh_solver.placement import optimize_placement, place
 from gtnh_solver.placement.search import (
     _apply_occupied_delta,
     _AutoPair,
+    _body,
     _box_offsets,
     _dockable_cells,
     _marginal_insertion_cost,
     _occupancy_grid,
     _placed_invariants,
+    _placement,
     _relocate,
     _SearchContext,
     _turn_fits,
@@ -359,14 +363,18 @@ def test_apply_occupied_delta_survives_lns_reordering_with_multiblock_footprints
     )
     machines = {m.id: m for m in (_hub("a"), wide, _spoke("c"))}
 
-    def on_row(mid: str, x: int) -> Placement:
-        return at(mid, x, 0, 0)
+    def on_row(mid: str, x: int) -> Pose:
+        return pose_of(at(mid, x, 0, 0))
 
-    def rebuild(placements: list[Placement]) -> set[tuple[int, int, int]]:
+    def rebuild(placements: list[Pose]) -> set[tuple[int, int, int]]:
         return {
             c
             for p in placements
-            for c in occupied_cells(p.cell, machines[p.machine_id].footprint, p.orientation)
+            for c in occupied_cells(
+                CellCoord(x=p.cell[0], y=p.cell[1], z=p.cell[2]),
+                machines[p.machine_id].footprint,
+                p.orientation,
+            )
         }
 
     before = [on_row("a", 0), on_row("wide", 2), on_row("c", 5)]
@@ -374,7 +382,7 @@ def test_apply_occupied_delta_survives_lns_reordering_with_multiblock_footprints
     # front of the list, and the wide machine lands at the tail with a new origin.
     after = [before[0], before[2], on_row("wide", 7)]
     occupied = rebuild(before)
-    _apply_occupied_delta(occupied, before, after, machines)
+    _apply_occupied_delta(occupied, before, after, {k: _body(m) for k, m in machines.items()})
     assert occupied == rebuild(after)
 
 
@@ -392,20 +400,24 @@ def test_apply_occupied_delta_follows_a_reorient_that_never_moves_the_cell() -> 
     )
     machines = {m.id: m for m in (_hub("a"), wide)}
 
-    def rebuild(placements: list[Placement]) -> set[tuple[int, int, int]]:
+    def rebuild(placements: list[Pose]) -> set[tuple[int, int, int]]:
         return {
             c
             for p in placements
-            for c in occupied_cells(p.cell, machines[p.machine_id].footprint, p.orientation)
+            for c in occupied_cells(
+                CellCoord(x=p.cell[0], y=p.cell[1], z=p.cell[2]),
+                machines[p.machine_id].footprint,
+                p.orientation,
+            )
         }
 
-    before = [at("a", 0, 0, 0), at("wide", 4, 0, 0)]
-    turned = before[1].model_copy(update={"orientation": Facing.EAST})
+    before = [pose_of(at("a", 0, 0, 0)), pose_of(at("wide", 4, 0, 0))]
+    turned = Pose("wide", before[1].cell, Facing.EAST)
     after = [before[0], turned]
     assert before[1].cell == turned.cell, "the premise: a reorient does not move the origin"
 
     occupied = rebuild(before)
-    _apply_occupied_delta(occupied, before, after, machines)
+    _apply_occupied_delta(occupied, before, after, {k: _body(m) for k, m in machines.items()})
     assert occupied == rebuild(after)
     assert rebuild(before) != rebuild(after), "a turned 3x1x1 must cover different cells"
 
@@ -419,8 +431,9 @@ def _fit_ctx(
     them nets would only obscure which rejection the test is actually pinning.
     """
     return _SearchContext(
-        machines={m.id: m for m in machines},
+        bodies={m.id: _body(m) for m in machines},
         region=region,
+        bounds=(region.sx, region.sy, region.sz),
         reserved=reserved or set(),
         adjacency={},
         machine_nets={},
@@ -444,12 +457,12 @@ def test_turn_fits_rejects_a_turn_that_swings_the_body_out_of_the_region() -> No
     along x can need room along z the region does not have. The test is on the rotated box rather
     than on the turned cells (issue #110) and has to give the cell walk's answer at the wall.
     """
-    wide = _wide()
-    p = at("wide", 0, 0, 0)  # facing NORTH: 3 of x, 1 of z
-    slot = _fit_ctx(CellBox(sx=3, sy=1, sz=1), [wide])
+    wide = _body(_wide())
+    p = pose_of(at("wide", 0, 0, 0))  # facing NORTH: 3 of x, 1 of z
+    slot = _fit_ctx(CellBox(sx=3, sy=1, sz=1), [wide.machine])
     assert _turn_fits(wide, p, Facing.NORTH, slot, set())  # same extents: the short-circuit
     assert not _turn_fits(wide, p, Facing.EAST, slot, set())  # turned it needs 3 of z, there is 1
-    room = _fit_ctx(CellBox(sx=3, sy=1, sz=3), [wide])
+    room = _fit_ctx(CellBox(sx=3, sy=1, sz=3), [wide.machine])
     assert _turn_fits(wide, p, Facing.EAST, room, set())
     # In-region is necessary, not sufficient: the swept cells must also be free of everyone else.
     # `occupied` is the whole layout's set, so the machine's own cells are excluded by the move.
@@ -476,7 +489,7 @@ def test_relocate_rejects_an_origin_whose_feed_turn_leaves_the_region() -> None:
     )
     assert tall.is_power_source, "the premise: only a source is ever re-oriented for its feed face"
     ctx = _fit_ctx(CellBox(sx=1, sy=1, sz=8), [tall], reserved={(0, 0, 0)})
-    placed = [at("src", 0, 0, 5)]
+    placed = [pose_of(at("src", 0, 0, 5))]
     occupied = {(0, 0, 5), (0, 0, 6), (0, 0, 7)}
     assert _relocate(placed, ctx, occupied, random.Random(0)) is None
     assert occupied == {(0, 0, 5), (0, 0, 6), (0, 0, 7)}, "the move must restore what it borrowed"
@@ -493,8 +506,9 @@ def _cost_ctx(machines: list[Machine], region: CellBox) -> _SearchContext:
     """
     ids = [m.id for m in machines]
     return _SearchContext(
-        machines={m.id: m for m in machines},
+        bodies={m.id: _body(m) for m in machines},
         region=region,
+        bounds=(region.sx, region.sy, region.sz),
         reserved=set(),
         adjacency={ids[0]: set(ids[1:])},
         machine_nets={ids[0]: [(ids, 1.0)], ids[1]: [(ids, 1.0)], ids[2]: [(ids, 1.0)]},
@@ -525,14 +539,14 @@ def test_the_pruning_bound_never_changes_which_cost_is_reported() -> None:
     machines = [_hub("a"), _hub("b"), _hub("c")]
     region = CellBox(sx=6, sy=2, sz=6)
     ctx = _cost_ctx(machines, region)
-    placed_pos = {"b": at("b", 4, 0, 0), "c": at("c", 0, 0, 4)}
+    placed_pos = {"b": pose_of(at("b", 4, 0, 0)), "c": pose_of(at("c", 0, 0, 4))}
     net_boxes, power_attach = _placed_invariants("a", placed_pos, ctx)
+    body = ctx.bodies["a"]
 
     checked = 0
     for x in range(region.sx):
         for z in range(region.sz):
-            origin = CellCoord(x=x, y=0, z=z)
-            args = (origin, Facing.NORTH, machines[0], placed_pos, net_boxes, power_attach, ctx)
+            args = ((x, 0, z), Facing.NORTH, body, placed_pos, net_boxes, power_attach, ctx)
             exact = _marginal_insertion_cost("a", *args)
             assert math.isfinite(exact)
             # A bound above the true cost must not perturb it...
@@ -553,19 +567,18 @@ def test_the_pruning_bound_matches_an_unbounded_scan() -> None:
     machines = [_hub("a"), _hub("b"), _hub("c")]
     region = CellBox(sx=6, sy=2, sz=6)
     ctx = _cost_ctx(machines, region)
-    placed_pos = {"b": at("b", 4, 0, 0), "c": at("c", 0, 0, 4)}
+    placed_pos = {"b": pose_of(at("b", 4, 0, 0)), "c": pose_of(at("c", 0, 0, 4))}
     net_boxes, power_attach = _placed_invariants("a", placed_pos, ctx)
 
     def scan(use_bound: bool) -> tuple[float, tuple[int, int, int] | None]:
         best_cost, best = math.inf, None
         for x in range(region.sx):
             for z in range(region.sz):
-                origin = CellCoord(x=x, y=0, z=z)
                 cost = _marginal_insertion_cost(
                     "a",
-                    origin,
+                    (x, 0, z),
                     Facing.NORTH,
-                    machines[0],
+                    ctx.bodies["a"],
                     placed_pos,
                     net_boxes,
                     power_attach,
@@ -588,7 +601,7 @@ def test_placed_invariants_summarise_only_the_placed_members() -> None:
     machines = [_hub("a"), _hub("b"), _hub("c")]
     ctx = _cost_ctx(machines, CellBox(sx=6, sy=2, sz=6))
     assert _placed_invariants("a", {}, ctx)[0] == []
-    boxes, power = _placed_invariants("a", {"b": at("b", 4, 0, 0)}, ctx)
+    boxes, power = _placed_invariants("a", {"b": pose_of(at("b", 4, 0, 0))}, ctx)
     assert len(boxes) == 1
     assert boxes[0].x0 == boxes[0].x1, "one placed member is a degenerate box, not an empty one"
     assert [len(pa.centroids) for pa in power] == [1]
@@ -644,7 +657,7 @@ def test_box_offsets_address_exactly_the_body_cells() -> None:
     machine = _wide()
     for orientation in (Facing.NORTH, Facing.EAST):
         box = rotated_footprint(machine.footprint, orientation)
-        offsets = _box_offsets(box, region)
+        offsets = _box_offsets((box.sx, box.sy, box.sz), (region.sx, region.sy, region.sz))
         for origin in (CellCoord(x=0, y=0, z=0), CellCoord(x=2, y=1, z=3)):
             base = _flat((origin.x, origin.y, origin.z), region)
             got = sorted(base + off for off in offsets)
@@ -679,7 +692,8 @@ def test_the_grid_fit_test_agrees_with_the_set_test_everywhere() -> None:
                     want = reserved.isdisjoint(cells) and occupied.isdisjoint(cells)
                     box = rotated_footprint(machine.footprint, orientation)
                     base = _flat((x, y, z), region)
-                    got = not any(grid[base + off] for off in _box_offsets(box, region))
+                    size, bounds = (box.sx, box.sy, box.sz), (region.sx, region.sy, region.sz)
+                    got = not any(grid[base + off] for off in _box_offsets(size, bounds))
                     assert got == want, (origin, orientation)
                     checked += 1
     assert checked > 50, "the sweep must actually reach in-region placements"
@@ -700,13 +714,13 @@ def test_the_grid_never_drifts_from_occupied_during_a_recreate() -> None:
     seen = 0
 
     def checking_best_insertion(
-        p: Placement,
-        placed: list[Placement],
+        p: Pose,
+        placed: list[Pose],
         occupied: set[Cell],
         grid: bytearray,
         ctx: _SearchContext,
         rng: random.Random,
-    ) -> tuple[CellCoord, Facing] | None:
+    ) -> tuple[Cell, Facing] | None:
         nonlocal seen
         seen += 1
         assert grid == _occupancy_grid(ctx.region, occupied, ctx.reserved), (
@@ -724,22 +738,19 @@ def test_the_grid_never_drifts_from_occupied_during_a_recreate() -> None:
     assert seen > 0, "the recreate move never ran; the invariant went unchecked"
 
 
-# ------------------------------------------------------- the dockable-cell shell (#256)
+# ------------------------------------------------------- plain values in the hot loops (#256)
 
 
 def _dockable_by_scan(
-    placement: Placement,
-    machine: Machine,
-    occupied: set[Cell],
-    region: CellBox,
-    reserved: set[Cell],
+    pose: Pose, footprint: CellBox, occupied: set[Cell], region: CellBox, reserved: set[Cell]
 ) -> set[Cell]:
     """The dockable set built the way it was before #256: every body cell stepped through every
     non-front face, in ``FACE_DELTAS`` order, and filtered as it goes."""
-    body = tuple(occupied_cells(placement.cell, machine.footprint, placement.orientation))
+    origin = CellCoord(x=pose.cell[0], y=pose.cell[1], z=pose.cell[2])
+    body = tuple(occupied_cells(origin, footprint, pose.orientation))
     cells: set[Cell] = set()
     for face, (dx, dy, dz) in FACE_DELTAS.items():
-        if face is placement.orientation:
+        if face is pose.orientation:
             continue
         for bx, by, bz in body:
             cand = (bx + dx, by + dy, bz + dz)
@@ -748,6 +759,11 @@ def _dockable_by_scan(
             if in_region(cand, region):
                 cells.add(cand)
     return cells
+
+
+def _pose_cells(pose: Pose, machine: Machine) -> list[Cell]:
+    origin = CellCoord(x=pose.cell[0], y=pose.cell[1], z=pose.cell[2])
+    return list(occupied_cells(origin, machine.footprint, pose.orientation))
 
 
 @pytest.mark.parametrize("front", list(Facing))
@@ -763,6 +779,7 @@ def test_dockable_cells_match_the_face_by_body_scan_in_iteration_order(front: Fa
     """
     rng = random.Random(0)
     region = CellBox(sx=9, sy=6, sz=9)
+    bounds = (region.sx, region.sy, region.sz)
     checked = 0
     for sx in range(1, 5):
         for sy in range(1, 4):
@@ -774,20 +791,44 @@ def test_dockable_cells_match_the_face_by_body_scan_in_iteration_order(front: Fa
                     voltage_tier="LV",
                     orientation_options=[Facing.NORTH],
                 )
-                box = rotated_footprint(machine.footprint, front)
+                body = _body(machine)
+                size = body.sizes[front]
                 for _ in range(3):
-                    x = rng.randrange(region.sx - box.sx + 1)
-                    y = rng.randrange(region.sy - box.sy + 1)
-                    z = rng.randrange(region.sz - box.sz + 1)
-                    placement = at("m", x, y, z, orientation=front)
+                    x, y, z = (rng.randrange(bounds[a] - size[a] + 1) for a in range(3))
+                    pose = Pose("m", (x, y, z), front)
                     # The machine's own body is always in `occupied`: that is the precondition the
                     # shell leans on to drop the offsets that land back inside it.
-                    occupied = set(occupied_cells(placement.cell, machine.footprint, front))
+                    occupied = set(_pose_cells(pose, machine))
                     for _ in range(40):
                         occupied.add((rng.randrange(9), rng.randrange(6), rng.randrange(9)))
                     reserved = {(rng.randrange(9), rng.randrange(6), rng.randrange(9))}
-                    got = _dockable_cells(placement, machine, occupied, region, reserved)
-                    want = _dockable_by_scan(placement, machine, occupied, region, reserved)
-                    assert list(got) == list(want), (box, front, (x, y, z))
+                    got = _dockable_cells(pose, body, occupied, bounds, reserved)
+                    want = _dockable_by_scan(pose, machine.footprint, occupied, region, reserved)
+                    assert list(got) == list(want), (size, front, pose.cell)
                     checked += 1
     assert checked == 4 * 3 * 4 * 3
+
+
+def test_a_pose_round_trips_to_the_same_placement() -> None:
+    """The anneal holds poses and converts back once; the layout it returns must be unchanged."""
+    placement = at("m", 3, 1, 4, orientation=Facing.EAST)
+    pose = pose_of(placement)
+    assert pose == Pose("m", (3, 1, 4), Facing.EAST)
+    assert _placement(pose) == placement
+
+
+def test_a_body_reads_the_machine_as_placement_sees_it() -> None:
+    """``_Body`` restates a machine in plain values, so it must say what the model says."""
+    source = power_source("src", orientations=[Facing.NORTH, Facing.WEST])
+    wide = _wide()
+    for machine in (source, wide, _hub("h")):
+        body = _body(machine)
+        assert body.machine is machine
+        assert body.orientations == tuple(machine.orientation_options)
+        assert body.is_power_source == machine.is_power_source
+        assert body.port_ids == tuple(port.id for port in machine.faces.ports)
+        for facing in Facing:
+            box = rotated_footprint(machine.footprint, facing)
+            assert body.sizes[facing] == (box.sx, box.sy, box.sz)
+    assert _body(source).is_power_source
+    assert _body(wide).sizes[Facing.EAST] == (1, 1, 3)

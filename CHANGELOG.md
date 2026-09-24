@@ -469,6 +469,32 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **The placement search runs on plain values, not pydantic models (`placement/`, `router/`,
+  #256).** On Python 3.14 and later a field read off a pydantic model cannot take the interpreter's
+  specialized path, because pydantic-core replaces every instance's `__dict__`, and it costs about
+  three times what it did on 3.12. Building a model got dearer too. The anneal read `Placement`,
+  `CellCoord`, `CellBox` and `Machine` fields millions of times a solve, and it built a `CellCoord`
+  for every LNS candidate origin and a `Placement` for every candidate it scored for auto-output.
+  It now holds each machine as an `ir.geometry.Pose` (a slotted dataclass: machine id, a bare
+  `Cell`, a facing) and reads the rest from a per-solve `_Body` table: the rotated size and
+  dockable shell for each facing, the facings on offer, whether it is a power source, and its port
+  ids. It converts back to `Placement` once, on the way out. `router.auto.auto_output_possible`
+  takes poses and caches each port's rotated size beside its host cells. The rules stay written
+  once: new plain-value helpers in `ir.geometry` (`box_cells`, `box_within`,
+  `box_front_on_boundary`) are what `occupied_cells`, `box_in_region` and `front_on_boundary` now
+  call. The power router's A* reads the region's extents once, not per neighbour. No contract
+  changes, and layouts are byte-identical. CPU for a whole `gtnh-solve` run (median of 3, measured
+  at a410588):
+
+  | | 3.12, before | 3.14, before | 3.14, after | 3.12, after |
+  |---|---|---|---|---|
+  | `nitrobenzene` | 22.8 s | 27.1 s | 15.7 s | 15.5 s |
+  | `ev-nitrobenzene` | 117 s | 139 s | 53 s | 55 s |
+  | `gtnh-parallel-sand` | 7.3 s | 8.4 s | 7.0 s | 6.7 s |
+
+  Each figure includes the ~1.4 s the physical dataset takes to load. With both changes, a solve
+  on 3.14 is faster than it was on 3.12 before them, which is what moving to 3.14 needed.
+
 - **Dockable cells come from a body's outside shell, not a walk of every body cell
   (`placement/`, #256).** The placement cost prices crowded faces on every evaluation:
   `_face_shortfall` asks each machine which free cells it could dock a connection on.
