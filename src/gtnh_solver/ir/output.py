@@ -24,7 +24,9 @@ from .geometry import Cell, CellCoord
 #: v2 added ``RouteMaterial.size``, a bump for the same reason: a consumer that ignores it builds
 #: every pipe at the normal size, and a normal tin pipe starved two of three parallel machines in
 #: game (#165).
-LAYOUT_RESULT_VERSION = 2
+#: v3 lets a pipe route be one block with no segments. The shape is unchanged, and yet a bump: a
+#: consumer that builds a route's blocks from its segments alone builds nothing for that pipe.
+LAYOUT_RESULT_VERSION = 3
 
 #: Allowed GT cable thicknesses, smallest first (1x/2x/4x/8x/12x/16x; docs/DOMAIN.md). The single
 #: source: this contract enforces membership on every power route, and ``dataset`` re-exports the
@@ -144,6 +146,10 @@ class Route(StrictModel):
     endpoint). For power, ``thickness_per_segment`` is required and aligns 1:1 with
     ``segments``; for items/fluids it must be omitted.
 
+    A pipe route with no ``segments`` is **one block**: the cell its terminals all share, wired
+    straight to each of their machines (v3). A cable route always has a segment, since its gauge
+    lives on them. Read a route's blocks through :meth:`cells`, never off ``segments`` alone.
+
     ``material`` is optional and additive: ``None`` means "unspecified pipe", which is exactly what
     every route said before it existed, so a producer that omits it is as correct as it ever was."""
 
@@ -155,8 +161,11 @@ class Route(StrictModel):
     material: RouteMaterial | None = None  # the stand-in it is drawn as; None = unspecified
 
     def cells(self) -> set[Cell]:
-        """Every grid cell this route's segments touch (both endpoints of each hop). The
+        """Every grid cell this route occupies: both ends of each hop, or, for a route with no
+        segments, its terminals' cells (one, for the one-block pipe the validator accepts). The
         obstacle/occupancy set the routers and the solver each rebuilt by hand."""
+        if not self.segments:
+            return {t.cell.as_tuple() for t in self.terminals}
         out: set[Cell] = set()
         for seg in self.segments:
             out.add(seg.start.as_tuple())

@@ -239,6 +239,19 @@ def _problems(draw: st.DrawFn) -> InputIR:
 # ----------------------------------------------------------------------------- the invariant (1)
 
 
+def _dead_ends(route: Route) -> set[tuple[int, int, int]]:
+    """The blocks of ``route`` that lead nowhere: joined to one other block at most, and to no
+    machine. The router used to lay one beside every pipe whose ends shared a cell, only so the
+    route would have a segment. The validator does not refuse one: it is connected, and a wasted
+    block breaks no rule, so this is where it is caught."""
+    joined: dict[tuple[int, int, int], int] = {}
+    for seg in route.segments:
+        for cell in (seg.start.as_tuple(), seg.end.as_tuple()):
+            joined[cell] = joined.get(cell, 0) + 1
+    docked = {t.cell.as_tuple() for t in route.terminals}
+    return {c for c in route.cells() if joined.get(c, 0) <= 1 and c not in docked}
+
+
 @pytest.mark.parametrize("optimize", [True, False])
 @settings(
     max_examples=property_examples(200),
@@ -250,6 +263,10 @@ def test_solve_is_valid_or_explicitly_infeasible(
 ) -> None:
     """Either the independent validator passes the layout, or the result says why it could not.
 
+    A valid layout's pipes also lay no block that leads nowhere (:func:`_dead_ends`), which no
+    validator rule refuses. Power is left out: this is the pipes' promise, and a cable is laid by
+    ``router.power``, which never made that stub.
+
     Asserted on both paths the site exposes: the annealed feedback loop and ``--fast``. They
     assemble layouts differently (``_solve_fast`` places constructively and repairs nothing), so a
     promise that held on one of them would be half a promise.
@@ -260,6 +277,9 @@ def test_solve_is_valid_or_explicitly_infeasible(
     if layout.status is LayoutStatus.VALID:
         report = validate(problem, layout)
         assert report.ok, f"solve returned VALID for a layout the validator rejects:\n{report}"
+        for r in layout.routes:
+            if r.commodity is not Commodity.POWER:
+                assert not _dead_ends(r), f"pipe for net {r.net_id!r} has a block leading nowhere"
     else:
         # The contract forbids the alternative (a non-VALID result must carry one), but that is
         # exactly the thing being promised, so it is asserted rather than assumed.

@@ -343,12 +343,8 @@ def _content_bounds(
         size = _reserved_size(m.footprint, pl.orientation)
         grow(cell, [cell[i] + size[i] for i in range(3)])
     for route in layout.routes:
-        for seg in route.segments:
-            for cell in (
-                [seg.start.x, seg.start.y, seg.start.z],
-                [seg.end.x, seg.end.y, seg.end.z],
-            ):
-                grow(cell, [cell[i] + 1 for i in range(3)])
+        for x, y, z in route.cells():  # a one-block pipe has a block and no segment
+            grow([x, y, z], [x + 1, y + 1, z + 1])
 
     if lo[0] is None:  # nothing placed or routed - frame the whole region instead
         region = problem.bounding_region

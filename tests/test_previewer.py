@@ -110,6 +110,23 @@ def test_scene_bounds_fall_back_to_region_when_empty() -> None:
     assert scene["bounds"] == {"min": [0, 0, 0], "max": [3, 2, 4]}
 
 
+def test_scene_bounds_count_a_one_block_pipe() -> None:
+    # A route with no segment (LayoutResult v3) is still a block that gets built, so it frames the
+    # scene like any other. Read off the segments, it was nothing, and the scene fell back.
+    problem = InputIR(bounding_region=CellBox(sx=5, sy=5, sz=5))
+    block = CellCoord(x=2, y=3, z=4)
+    route = Route(
+        net_id="n",
+        commodity=Commodity.ITEM,
+        terminals=[
+            Terminal(machine_id="a", port_id="out", face=Facing.UP, cell=block),
+            Terminal(machine_id="b", port_id="in", face=Facing.DOWN, cell=block),
+        ],
+    )
+    scene = build_scene(problem, LayoutResult(status=LayoutStatus.VALID, seed=0, routes=[route]))
+    assert scene["bounds"] == {"min": [2, 3, 4], "max": [3, 4, 5]}
+
+
 def test_scene_routes_carry_terminals() -> None:
     power = next(r for r in _sand_scene()["routes"] if r["commodity"] == "power")
     assert power["terminals"]  # so the viewer can draw a lead to each machine face

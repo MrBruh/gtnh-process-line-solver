@@ -278,8 +278,9 @@ def _route_trunk(
     wins, candidate order breaking ties) - or **extends** the tree with a multi-goal A* leg from
     all trunk cells laid so far to any of its free dock cells (``dock_candidates`` +
     ``astar_multi``). The cell a leg reaches is the terminal, so routing - not a fixed face order
-    - chooses the face. One exception keeps the route well-formed: a route with no segments fails
-    validation, so the last sink never taps a still-segment-less trunk - it lays a real leg.
+    - chooses the face. One exception keeps the route well-formed: a cable route with no segments
+    fails validation (a pipe may be one block, but a cable's gauge lives on its segments), so the
+    last sink never taps a still-segment-less trunk - it lays a real leg.
 
     A sink is a **connection**, not a machine: a machine's draw is spread over its energy hatches
     and several of them can sit on one net, so the same machine appears once per hatch here. Each
@@ -340,8 +341,8 @@ def _route_trunk(
             cand = [t for t in cand if _claim(t, machines) not in mine]
             if not cand:
                 return _no_dock(net_id)
-        # A tap lays no cable and a zero-segment route fails validation (ROUTE_DISCONTINUOUS),
-        # so the last sink must extend a trunk that has no segments yet.
+        # A tap lays no cable and a zero-segment cable route fails validation (ROUTE_DISCONTINUOUS:
+        # its gauge lives on its segments), so the last sink must extend a trunk with none yet.
         may_tap = bool(legs) or i < len(sinks) - 1
         taps = [t for t in cand if _cell(t) in depth] if may_tap else []
         if taps:
