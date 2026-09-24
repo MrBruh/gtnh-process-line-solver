@@ -460,6 +460,24 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **The preview draws every texture from one image.** Each baked face used to ship as a data URI
+  of its own (500 on `ev-nitrobenzene`) and become a material of its own, and since three.js makes a
+  draw call per material, a merged layer still cost one draw call per texture on it: 680 a frame on
+  `ev-nitrobenzene` after the merging under Fixed. `previewer.atlas.pack_atlas` now packs every baked
+  face into one image, a tile per face with a one-pixel border copied from its own edge (so nearest
+  sampling on a block's very edge can never pick up a neighbouring texture), plus the missing-texture
+  checkerboard as a tile of its own. Every textured face shares one material, so a merged mesh is
+  one draw call: `ev-nitrobenzene` 680 to 97 a frame (about 2 ms of CPU to 0.3), `nitrobenzene` 303
+  to 60. The idle/running toggle swaps one image for another with the same layout, where only the
+  faces with a running skin differ. The pages got smaller too, since one PNG compresses better than
+  hundreds: `ev-nitrobenzene` 1.85 MB to 1.65 MB, `nitrobenzene` 489 KB to 377 KB. Hover names the
+  same thing at all 1,536 sample points as before, and screenshots differ in at most 0.084% of
+  pixels, single-pixel speckle where a texel boundary rounds differently.
+
+  `write_preview` also recovers properly now when the texture pass fails part way: every trace of
+  the pass is removed, so each machine is drawn as its plain box. Before, a machine flagged for its
+  blocks before the failure could be left with neither its box nor its blocks, and so be invisible.
+
 - **A busy machine no longer fails a property test on wall clock (`tests/conftest.py`, #216).**
   Hypothesis gives each generated example a 200 ms deadline by default, and 24 of the suite's 27
   `@given` tests ran with it; only three solver properties had opted out, one by one. Under

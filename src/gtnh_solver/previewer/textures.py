@@ -1109,7 +1109,9 @@ def texturize_scene(
     and bakes each cube face, and writes ``scene["blocks"]`` (the per-block cubes, each carrying a
     six-slot ``texture`` list of pool keys and a six-slot ``cover`` saying which faces another block
     hides, :func:`~gtnh_solver.previewer.scene.block_face_cover`) plus ``scene["textures"]`` (pool
-    key -> baked ``data:`` URI). Every expanded machine is flagged ``expanded`` so the viewer draws its cubes instead of a
+    key -> baked ``data:`` URI). That pool is what the pass bakes and what its tests read; the page
+    draws from :func:`~gtnh_solver.previewer.atlas.pack_atlas`'s one image, which ``write_preview``
+    packs it into. Every expanded machine is flagged ``expanded`` so the viewer draws its cubes instead of a
     box; machines with no doc (or no baked face) keep their placeholder box. Missing data, no PNGs,
     or no Pillow all degrade to all-placeholder. Returns a :class:`TextureSummary`.
 
