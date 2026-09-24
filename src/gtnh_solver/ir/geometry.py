@@ -9,13 +9,18 @@ units, not blocks. Axes follow Minecraft: ``x``/``z`` horizontal, ``y`` vertical
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import dataclass
 from functools import cache
 from itertools import product
+from typing import TYPE_CHECKING
 
 from pydantic import Field
 
 from ._base import FrozenModel
 from .enums import Facing
+
+if TYPE_CHECKING:
+    from .output import Placement  # output imports this module, so only the annotation may
 
 
 class CellCoord(FrozenModel):
@@ -52,6 +57,33 @@ class CellBox(FrozenModel):
 # A bare (x, y, z) cell triple - the lightweight form used in hot grid loops, distinct
 # from the validated CellCoord value type above.
 Cell = tuple[int, int, int]
+
+#: A box's extents as a bare ``(sx, sy, sz)`` triple - the lightweight form of a ``CellBox``, as
+#: :data:`Cell` is of a ``CellCoord``. Where a function takes one for a machine body, it is the box
+#: as it sits in the world, already rotated (:func:`rotated_footprint`).
+Size = tuple[int, int, int]
+
+
+@dataclass(frozen=True, slots=True)
+class Pose:
+    """One placed machine as plain values: a ``Placement`` with its ``cell`` as a bare :data:`Cell`.
+
+    Not a contract type, and never serialized. It exists for the loops that read a placement's
+    fields millions of times a solve - the placement search, and the auto-output rule its cost asks
+    per candidate. Reading a field off a pydantic model is the slowest way to get it on Python 3.14
+    and later: pydantic-core replaces every instance's ``__dict__``, and the interpreter cannot
+    specialize an attribute load on such an object, so each read takes the generic path. A slotted
+    dataclass keeps the fast one, and costs a fraction as much to build (#256).
+    """
+
+    machine_id: str
+    cell: Cell
+    orientation: Facing
+
+
+def pose_of(placement: Placement) -> Pose:
+    """``placement`` as a :class:`Pose`."""
+    return Pose(placement.machine_id, placement.cell.as_tuple(), placement.orientation)
 
 
 #: Clockwise quarter-turns about +Y that take NORTH to each horizontal facing. The multiblock dump
@@ -124,15 +156,22 @@ def occupied_cells(origin: CellCoord, footprint: CellBox, orientation: Facing) -
     validates clean and cannot be built). Making it required turns every such caller into a type
     error instead. The validator does not use this function at all; it expands independently
     (``validator/_geometry.body_cells``).
-
-    Built on ``itertools.product`` rather than three nested ``for`` loops: the order is the same
-    (x outermost, z innermost) and so are the tuples, but no Python frame resumes per cell. A solve
-    takes millions of cells from here, and on 3.14 each resume also re-read ``origin``'s fields
-    through pydantic's replaced ``__dict__``, which that interpreter cannot specialize (#256).
     """
-    x, y, z = origin.x, origin.y, origin.z
     box = rotated_footprint(footprint, orientation)
-    return product(range(x, x + box.sx), range(y, y + box.sy), range(z, z + box.sz))
+    return box_cells((origin.x, origin.y, origin.z), (box.sx, box.sy, box.sz))
+
+
+def box_cells(origin: Cell, size: Size) -> Iterator[Cell]:
+    """:func:`occupied_cells` on plain values: every cell of a box of ``size`` at ``origin``.
+
+    ``size`` is already rotated, which is what lets a hot loop hand over a size it looked up once
+    rather than a model and a facing. The cells come x outermost, z innermost, the order every
+    caller has always had. ``itertools.product`` yields them without resuming a Python frame per
+    cell, which matters to a solve that takes millions of cells from here.
+    """
+    x, y, z = origin
+    sx, sy, sz = size
+    return product(range(x, x + sx), range(y, y + sy), range(z, z + sz))
 
 
 def rotated_slot(offset: Cell, footprint: CellBox, orientation: Facing) -> Cell:
@@ -188,14 +227,18 @@ def box_in_region(
     here in exactly the way it would be wrong there - silently, on a layout that still validates.
     """
     box = rotated_footprint(footprint, orientation)
-    return (
-        origin.x >= 0
-        and origin.x + box.sx <= region.sx
-        and origin.y >= 0
-        and origin.y + box.sy <= region.sy
-        and origin.z >= 0
-        and origin.z + box.sz <= region.sz
+    return box_within(
+        (origin.x, origin.y, origin.z), (box.sx, box.sy, box.sz), (region.sx, region.sy, region.sz)
     )
+
+
+def box_within(origin: Cell, size: Size, bounds: Size) -> bool:
+    """:func:`box_in_region` on plain values: a box of the (rotated) ``size`` at ``origin`` inside
+    the origin-anchored region of extents ``bounds``."""
+    x, y, z = origin
+    sx, sy, sz = size
+    bx, by, bz = bounds
+    return x >= 0 and x + sx <= bx and y >= 0 and y + sy <= by and z >= 0 and z + sz <= bz
 
 
 # Unit step out of each block face. Minecraft axes: north -z, south +z, east +x, west -x,
@@ -240,17 +283,29 @@ def front_on_boundary(
     # The depth to step is the ROTATED extent: an east-facing 5x1x2 is 2 deep along x, not 5.
     # ``front`` is the orientation, so the box is measured as it actually sits in the world.
     box = rotated_footprint(footprint, front)
+    return box_front_on_boundary(
+        (origin.x, origin.y, origin.z),
+        (box.sx, box.sy, box.sz),
+        front,
+        (region.sx, region.sy, region.sz),
+    )
+
+
+def box_front_on_boundary(origin: Cell, size: Size, front: Facing, bounds: Size) -> bool:
+    """:func:`front_on_boundary` on plain values, for a box whose ``size`` is already rotated to
+    face ``front``, in the origin-anchored region of extents ``bounds``."""
+    x, y, z = origin
     if front is Facing.NORTH:
-        return origin.z == 0
+        return z == 0
     if front is Facing.SOUTH:
-        return origin.z + box.sz == region.sz
+        return z + size[2] == bounds[2]
     if front is Facing.WEST:
-        return origin.x == 0
+        return x == 0
     if front is Facing.EAST:
-        return origin.x + box.sx == region.sx
+        return x + size[0] == bounds[0]
     if front is Facing.DOWN:
-        return origin.y == 0
-    return origin.y + box.sy == region.sy  # UP
+        return y == 0
+    return y + size[1] == bounds[1]  # UP
 
 
 def auto_output_faces(

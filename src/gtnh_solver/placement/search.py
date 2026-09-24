@@ -53,7 +53,7 @@ from __future__ import annotations
 
 import math
 import random
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
 from functools import cache
 from itertools import product
@@ -73,10 +73,12 @@ from gtnh_solver.ir.geometry import (
     FACE_DELTAS,
     FACE_OFFSETS,
     Cell,
-    box_in_region,
-    front_on_boundary,
-    in_region,
-    occupied_cells,
+    Pose,
+    Size,
+    box_cells,
+    box_front_on_boundary,
+    box_within,
+    pose_of,
     rotated_footprint,
 )
 from gtnh_solver.ir.nets import net_sources_sinks, port_direction_map
@@ -185,6 +187,53 @@ class _PowerAttach(NamedTuple):
     centroids: list[_Centroid]
 
 
+@dataclass(frozen=True, slots=True)
+class _Body:
+    """What the search reads of one machine, as plain values, gathered once per solve.
+
+    ``Machine`` is a pydantic model, and on Python 3.14+ every field read off one takes the slow,
+    unspecialized path (#256), while the search reads a machine's footprint, facings and ports per
+    candidate and per cost evaluation. So it reads them from here instead. ``is_power_source`` is
+    the extreme case: a property that rescans the machine's ports on every read, for an answer that
+    never changes during a solve.
+
+    ``machine`` is kept for the callers that genuinely need the model: the auto-output rule, which
+    keys its caches on it, and the first-fit fallback.
+    """
+
+    machine: Machine
+    #: The footprint as it sits facing each way (:func:`rotated_footprint`), for every facing.
+    sizes: Mapping[Facing, Size]
+    #: :func:`_shell_offsets` of each of those sizes, facing that way.
+    shells: Mapping[Facing, tuple[Cell, ...]]
+    orientations: tuple[Facing, ...]
+    is_power_source: bool
+    port_ids: tuple[str, ...]
+
+
+def _body(machine: Machine) -> _Body:
+    sizes: dict[Facing, Size] = {}
+    for facing in Facing:
+        box = rotated_footprint(machine.footprint, facing)
+        sizes[facing] = (box.sx, box.sy, box.sz)
+    return _Body(
+        machine=machine,
+        sizes=sizes,
+        shells={facing: _shell_offsets(*size, facing) for facing, size in sizes.items()},
+        orientations=tuple(machine.orientation_options),
+        is_power_source=machine.is_power_source,
+        port_ids=tuple(port.id for port in machine.faces.ports),
+    )
+
+
+def _placement(pose: Pose) -> Placement:
+    """``pose`` back as the contract's ``Placement``, for the result."""
+    x, y, z = pose.cell
+    return Placement(
+        machine_id=pose.machine_id, cell=CellCoord(x=x, y=y, z=z), orientation=pose.orientation
+    )
+
+
 @dataclass(frozen=True)
 class _SearchContext:
     """Immutable per-solve context threaded through the neighbourhood + recreate helpers.
@@ -196,8 +245,9 @@ class _SearchContext:
     dozen constants three levels deep. Purely a container: it changes no value the cost computes.
     """
 
-    machines: dict[str, Machine]
+    bodies: dict[str, _Body]
     region: CellBox
+    bounds: Size  # ``region``'s extents as plain ints, for the per-candidate bounds tests
     reserved: set[Cell]
     adjacency: dict[str, set[str]]
     machine_nets: dict[str, list[_WeightedNet]]
@@ -237,8 +287,9 @@ def optimize_placement(
     if not base.ok or len(base.placements) < 2:
         return base  # infeasible, or nothing to optimize (0/1 machine)
 
-    machines = {m.id: m for m in problem.machines}
+    bodies = {m.id: _body(m) for m in problem.machines}
     region = problem.bounding_region
+    bounds = (region.sx, region.sy, region.sz)
     reserved = {(c.x, c.y, c.z) for c in problem.reserved_cells}
     penalties = net_penalties or {}
     # Nets that are physically routed (skip ME-toggled): each is (machine ids, weight), where a
@@ -265,8 +316,9 @@ def optimize_placement(
     # net edges), and the per-machine net/power/auto views recreate ranks insertions with cheaply,
     # without a full cost recompute.
     ctx = _SearchContext(
-        machines=machines,
+        bodies=bodies,
         region=region,
+        bounds=bounds,
         reserved=reserved,
         adjacency=_net_adjacency(problem),
         machine_nets=_machine_nets(problem, wire_nets),
@@ -276,24 +328,21 @@ def optimize_placement(
     weights = _OBJECTIVE_WEIGHTS[objective]
     rng = random.Random(seed)
 
-    current = list(base.placements)
+    # The anneal holds plain poses and hands back ``Placement``s only at the end (see Pose).
+    current = [pose_of(p) for p in base.placements]
     # ``current``'s occupied-cell set, maintained incrementally: relocate/swap test a candidate
     # against it (temporarily lifting the moved machine's own cells) instead of rebuilding the whole
     # set per proposal, and each accepted move folds in only its delta (see _apply_occupied_delta).
-    occupied = {
-        c
-        for p in current
-        for c in occupied_cells(p.cell, machines[p.machine_id].footprint, p.orientation)
-    }
+    occupied = _occupied(current, bodies)
     faces_penalty = face_penalties or {}
     current_cost = _cost(
         current,
-        machines,
+        bodies,
         wire_nets,
         power_nets,
         auto_pairs,
         weights,
-        region,
+        bounds,
         reserved,
         faces_penalty,
     )
@@ -308,30 +357,43 @@ def optimize_placement(
         if cand is not None:
             cand_cost = _cost(
                 cand,
-                machines,
+                bodies,
                 wire_nets,
                 power_nets,
                 auto_pairs,
                 weights,
-                region,
+                bounds,
                 reserved,
                 faces_penalty,
             )
             delta = cand_cost - current_cost
             if delta < 0 or rng.random() < math.exp(-delta / temp):
-                _apply_occupied_delta(occupied, current, cand, machines)
+                _apply_occupied_delta(occupied, current, cand, bodies)
                 current, current_cost = cand, cand_cost
                 if current_cost < best_cost:
                     best, best_cost = current, current_cost
         temp *= _ALPHA
-    return PlacementResult(placements=tuple(best))
+    return PlacementResult(placements=tuple(_placement(p) for p in best))
+
+
+def _cells(pose: Pose, body: _Body) -> Iterator[Cell]:
+    """Every cell ``pose``'s body covers - ``occupied_cells`` for a pose and its body."""
+    return box_cells(pose.cell, body.sizes[pose.orientation])
+
+
+def _occupied(poses: list[Pose], bodies: Mapping[str, _Body]) -> set[Cell]:
+    """Every cell the bodies at ``poses`` cover."""
+    occupied: set[Cell] = set()
+    for p in poses:
+        occupied.update(_cells(p, bodies[p.machine_id]))
+    return occupied
 
 
 def _apply_occupied_delta(
     occupied: set[Cell],
-    before: list[Placement],
-    after: list[Placement],
-    machines: dict[str, Machine],
+    before: list[Pose],
+    after: list[Pose],
+    bodies: Mapping[str, _Body],
 ) -> None:
     """Fold an accepted move into ``occupied`` in place, instead of rebuilding it.
 
@@ -344,15 +406,15 @@ def _apply_occupied_delta(
     so two machines swapping into each other's footprints stay occupied. The result is exactly the
     full-rebuild occupied set of ``after`` - every layout the loop holds is overlap-free - only far
     cheaper to reach."""
-    before_pose = {p.machine_id: (p.cell, p.orientation) for p in before}
+    before_pose = {p.machine_id: p for p in before}
     removed: set[Cell] = set()
     added: set[Cell] = set()
     for new_p in after:
-        old_cell, old_orientation = before_pose[new_p.machine_id]
-        if (old_cell, old_orientation) != (new_p.cell, new_p.orientation):
-            footprint = machines[new_p.machine_id].footprint
-            removed.update(occupied_cells(old_cell, footprint, old_orientation))
-            added.update(occupied_cells(new_p.cell, footprint, new_p.orientation))
+        old_p = before_pose[new_p.machine_id]
+        if (old_p.cell, old_p.orientation) != (new_p.cell, new_p.orientation):
+            body = bodies[new_p.machine_id]
+            removed.update(_cells(old_p, body))
+            added.update(_cells(new_p, body))
     occupied.difference_update(removed)
     occupied.update(added)
 
@@ -391,12 +453,16 @@ def _machine_auto(problem: InputIR, auto_pairs: list[_AutoPair]) -> dict[str, li
     return by_machine
 
 
-class _AutoPair(NamedTuple):
+@dataclass(frozen=True, slots=True)
+class _AutoPair:
     """One directed auto-output candidate: which port on which machine, on each side.
 
     The ports are the part that used to be dropped. They decide which casing cells could host the
     two hatches, and therefore whether the connection is possible at all on a multiblock, so a
     (machine, machine) pair cannot answer the question the router actually asks (#107).
+
+    Slotted rather than a ``NamedTuple``: the cost reads these fields by name per evaluation, and
+    a named-tuple field is a descriptor the interpreter will not specialize the load of.
     """
 
     source_id: str
@@ -431,13 +497,13 @@ def _auto_candidate_pairs(problem: InputIR) -> list[_AutoPair]:
 
 
 def _cost(
-    placements: list[Placement],
-    machines: dict[str, Machine],
+    placements: list[Pose],
+    bodies: Mapping[str, _Body],
     wire_nets: list[_WeightedNet],
     power_nets: list[_WeightedNet],
     auto_pairs: list[_AutoPair],
     weights: tuple[float, float],
-    region: CellBox,
+    bounds: Size,
     reserved: set[Cell],
     face_penalties: Mapping[str, float],
 ) -> float:
@@ -461,7 +527,7 @@ def _cost(
     pos = {p.machine_id: p for p in placements}
     wire = 0.0
     for machine_ids, weight in wire_nets:
-        centers = [_center(pos[mid], machines[mid]) for mid in machine_ids if mid in pos]
+        centers = [_center(pos[mid], bodies[mid]) for mid in machine_ids if mid in pos]
         if len(centers) < 2:
             continue
         for axis in range(3):
@@ -470,7 +536,7 @@ def _cost(
 
     cable = 0.0
     for machine_ids, weight in power_nets:
-        centers = [_center(pos[mid], machines[mid]) for mid in machine_ids if mid in pos]
+        centers = [_center(pos[mid], bodies[mid]) for mid in machine_ids if mid in pos]
         cable += weight * _mst_length(centers)
 
     # Bounding box from each footprint's two extreme corners (its origin and origin+size-1) rather
@@ -479,15 +545,13 @@ def _cost(
     # this is O(machines), not O(total cell volume), on the hottest path in the solver.
     # Rotated extents: a turned non-cubic machine reaches a different distance along each axis, so
     # the declared footprint would misreport the floor area and volume these objectives rank on.
-    boxes = [
-        (p, rotated_footprint(machines[p.machine_id].footprint, p.orientation)) for p in placements
-    ]
-    min_x = min(p.cell.x for p, _ in boxes)
-    max_x = max(p.cell.x + b.sx - 1 for p, b in boxes)
-    min_y = min(p.cell.y for p, _ in boxes)
-    max_y = max(p.cell.y + b.sy - 1 for p, b in boxes)
-    min_z = min(p.cell.z for p, _ in boxes)
-    max_z = max(p.cell.z + b.sz - 1 for p, b in boxes)
+    boxes = [(p.cell, bodies[p.machine_id].sizes[p.orientation]) for p in placements]
+    min_x = min(c[0] for c, _ in boxes)
+    max_x = max(c[0] + s[0] - 1 for c, s in boxes)
+    min_y = min(c[1] for c, _ in boxes)
+    max_y = max(c[1] + s[1] - 1 for c, s in boxes)
+    min_z = min(c[2] for c, _ in boxes)
+    max_z = max(c[2] + s[2] - 1 for c, s in boxes)
     footprint = (max_x - min_x + 1) * (max_z - min_z + 1)
     volume = footprint * (max_y - min_y + 1)
 
@@ -499,17 +563,17 @@ def _cost(
             continue
         if auto_output_possible(
             sp,
-            machines[pair.source_id],
+            bodies[pair.source_id].machine,
             pair.source_port,
             tp,
-            machines[pair.sink_id],
+            bodies[pair.sink_id].machine,
             pair.sink_port,
         ):
             auto += 1
             # This pair ejects straight across, so neither end needs a cell to dock a pipe on.
             free_ports.add((pair.source_id, pair.source_port))
             free_ports.add((pair.sink_id, pair.sink_port))
-    faces = _face_shortfall(placements, machines, region, reserved, free_ports, face_penalties)
+    faces = _face_shortfall(placements, bodies, bounds, reserved, free_ports, face_penalties)
     w_footprint, w_volume = weights
     return (
         _W_WIRE * wire
@@ -522,10 +586,10 @@ def _cost(
 
 
 def _dockable_cells(
-    placement: Placement,
-    machine: Machine,
+    pose: Pose,
+    body: _Body,
     occupied: set[Cell],
-    region: CellBox,
+    bounds: Size,
     reserved: set[Cell],
 ) -> set[Cell]:
     """The free cells this machine could put a connection on, front face excluded.
@@ -538,11 +602,10 @@ def _dockable_cells(
     which hatch kind, so it only ever over-counts. An over-count means the penalty fires strictly
     less often than it could - it never invents a shortfall that is not real.
     """
-    box = rotated_footprint(machine.footprint, placement.orientation)
-    ox, oy, oz = placement.cell.x, placement.cell.y, placement.cell.z
-    rx, ry, rz = region.sx, region.sy, region.sz
+    ox, oy, oz = pose.cell
+    rx, ry, rz = bounds
     cells: set[Cell] = set()
-    for dx, dy, dz in _shell_offsets(box.sx, box.sy, box.sz, placement.orientation):
+    for dx, dy, dz in body.shells[pose.orientation]:
         x, y, z = cand = (ox + dx, oy + dy, oz + dz)
         if cand in occupied or cand in reserved:
             continue
@@ -582,9 +645,9 @@ def _shell_offsets(sx: int, sy: int, sz: int, front: Facing) -> tuple[Cell, ...]
 
 
 def _face_shortfall(
-    placements: list[Placement],
-    machines: dict[str, Machine],
-    region: CellBox,
+    placements: list[Pose],
+    bodies: Mapping[str, _Body],
+    bounds: Size,
     reserved: set[Cell],
     free_ports: Collection[tuple[str, str]] = (),
     penalties: Mapping[str, float] = MappingProxyType({}),
@@ -630,19 +693,15 @@ def _face_shortfall(
     layouts that build - a false shortfall costs compactness on every line - and to speak up on
     the crowding that #76 hit.
     """
-    occupied = {
-        c
-        for p in placements
-        for c in occupied_cells(p.cell, machines[p.machine_id].footprint, p.orientation)
-    }
+    occupied = _occupied(placements, bodies)
     exempt = set(free_ports)
     demand: list[tuple[str, int, set[Cell]]] = []
     for p in placements:
-        machine = machines[p.machine_id]
-        needed = sum(1 for port in machine.faces.ports if (p.machine_id, port.id) not in exempt)
+        body = bodies[p.machine_id]
+        needed = sum(1 for port_id in body.port_ids if (p.machine_id, port_id) not in exempt)
         if needed:
             demand.append(
-                (p.machine_id, needed, _dockable_cells(p, machine, occupied, region, reserved))
+                (p.machine_id, needed, _dockable_cells(p, body, occupied, bounds, reserved))
             )
     contenders: dict[Cell, int] = {}
     for _mid, needed, cells in demand:
@@ -685,56 +744,37 @@ def _manhattan(a: tuple[float, float, float], b: tuple[float, float, float]) -> 
     return abs(a[0] - b[0]) + abs(a[1] - b[1]) + abs(a[2] - b[2])
 
 
-def _center(p: Placement, m: Machine) -> tuple[float, float, float]:
+def _center(p: Pose, body: _Body) -> tuple[float, float, float]:
     # Rotated: a wrong centroid feeds HPWL and the power MST, so it would steer the search.
-    box = rotated_footprint(m.footprint, p.orientation)
-    return (
-        p.cell.x + box.sx / 2,
-        p.cell.y + box.sy / 2,
-        p.cell.z + box.sz / 2,
-    )
+    x, y, z = p.cell
+    sx, sy, sz = body.sizes[p.orientation]
+    return (x + sx / 2, y + sy / 2, z + sz / 2)
 
 
-def _feed_ok(machine: Machine, origin: CellCoord, orientation: Facing, region: CellBox) -> bool:
-    """Whether placing ``machine`` here honors the power-source feed rule (trivially true for
+def _feed_ok(body: _Body, origin: Cell, orientation: Facing, bounds: Size) -> bool:
+    """Whether placing ``body`` here honors the power-source feed rule (trivially true for
     non-sources): a source's front face is its reserved external-feed face and must lie flush on
     the region boundary (docs/DOMAIN.md; validator-enforced)."""
-    return _feed_ok_for(machine.is_power_source, machine, origin, orientation, region)
+    return not body.is_power_source or box_front_on_boundary(
+        origin, body.sizes[orientation], orientation, bounds
+    )
 
 
-def _feed_ok_for(
-    is_source: bool, machine: Machine, origin: CellCoord, orientation: Facing, region: CellBox
-) -> bool:
-    """:func:`_feed_ok` with the source test already answered, for callers that ask in a loop.
-
-    ``Machine.is_power_source`` is a Pydantic property that rescans ``faces.ports`` on every read,
-    and it depends on the machine alone - never on where the machine is put. ``_best_insertion``
-    asks it once per (origin, orientation) pair, which measured at ~4% of a nitrobenzene solve for
-    an answer that cannot change inside the loop. Splitting the flag out keeps the rule itself in
-    one place rather than inlining ``front_on_boundary`` at the hot call site.
-    """
-    return not is_source or front_on_boundary(origin, machine.footprint, orientation, region)
-
-
-def _feed_orientation(
-    machine: Machine, origin: CellCoord, current: Facing, region: CellBox
-) -> Facing | None:
-    """The orientation ``machine`` should take at ``origin``: ``current`` when it is legal there,
+def _feed_orientation(body: _Body, origin: Cell, current: Facing, bounds: Size) -> Facing | None:
+    """The orientation ``body`` should take at ``origin``: ``current`` when it is legal there,
     else the first option that puts a source's feed face back on the boundary, else ``None``
     (the move cannot place this machine here)."""
-    if _feed_ok(machine, origin, current, region):
+    if _feed_ok(body, origin, current, bounds):
         return current
-    return next(
-        (o for o in machine.orientation_options if _feed_ok(machine, origin, o, region)), None
-    )
+    return next((o for o in body.orientations if _feed_ok(body, origin, o, bounds)), None)
 
 
 def _move(
-    placements: list[Placement],
+    placements: list[Pose],
     ctx: _SearchContext,
     occupied: set[Cell],
     rng: random.Random,
-) -> list[Placement] | None:
+) -> list[Pose] | None:
     """Propose one small move; return a VALID candidate layout, or None if it could not be made.
 
     ``occupied`` is ``placements``' occupied-cell set (owned by the annealing loop): relocate and
@@ -749,36 +789,37 @@ def _move(
 
 
 def _relocate(
-    placements: list[Placement],
+    placements: list[Pose],
     ctx: _SearchContext,
     occupied: set[Cell],
     rng: random.Random,
-) -> list[Placement] | None:
+) -> list[Pose] | None:
     i = rng.randrange(len(placements))
     p = placements[i]
-    m = ctx.machines[p.machine_id]
+    body = ctx.bodies[p.machine_id]
     # Lift machine i's own cells out of the shared occupied set so a candidate may reuse them; the
     # remainder is exactly the other machines' cells (what ``others`` was). Restored in the finally.
-    own = set(occupied_cells(p.cell, m.footprint, p.orientation))
+    own = set(_cells(p, body))
     occupied.difference_update(own)
     try:
         for _ in range(_RELOCATE_TRIES):
-            origin = _rand_origin(m, ctx.region, p.orientation, rng)
+            origin = _rand_origin(body, ctx.bounds, p.orientation, rng)
             if origin is None:
                 return None
             # Orientation first: which cells a turned non-cubic machine covers depends on it, so
             # the fit test cannot run before it is known. _feed_orientation draws no randomness, so
             # hoisting it above the test leaves the RNG trajectory (and every existing layout)
             # exactly as it was.
-            orientation = _feed_orientation(m, origin, p.orientation, ctx.region)
+            orientation = _feed_orientation(body, origin, p.orientation, ctx.bounds)
             if orientation is None:
                 continue  # a source relocated off the boundary: no legal feed face, keep trying
-            if not box_in_region(origin, m.footprint, orientation, ctx.region):
+            size = body.sizes[orientation]
+            if not box_within(origin, size, ctx.bounds):
                 continue  # the body would hang off the region: cheaper to reject than to expand
-            cells = list(occupied_cells(origin, m.footprint, orientation))
+            cells = list(box_cells(origin, size))
             if ctx.reserved.isdisjoint(cells) and occupied.isdisjoint(cells):
                 new = list(placements)
-                new[i] = p.model_copy(update={"cell": origin, "orientation": orientation})
+                new[i] = Pose(p.machine_id, origin, orientation)
                 return new
         return None
     finally:
@@ -786,36 +827,33 @@ def _relocate(
 
 
 def _swap(
-    placements: list[Placement],
+    placements: list[Pose],
     ctx: _SearchContext,
     occupied: set[Cell],
     rng: random.Random,
-) -> list[Placement] | None:
+) -> list[Pose] | None:
     i, j = rng.sample(range(len(placements)), 2)
     pi, pj = placements[i], placements[j]
-    mi, mj = ctx.machines[pi.machine_id], ctx.machines[pj.machine_id]
+    bi, bj = ctx.bodies[pi.machine_id], ctx.bodies[pj.machine_id]
     # Lift both machines' current cells so the remainder is the other machines' (what ``others``
     # was); restored in the finally on every exit.
-    own = set(occupied_cells(pi.cell, mi.footprint, pi.orientation)) | set(
-        occupied_cells(pj.cell, mj.footprint, pj.orientation)
-    )
+    own = set(_cells(pi, bi)) | set(_cells(pj, bj))
     occupied.difference_update(own)
     try:
         # Orientation first, as in _relocate: each swapped body's cells depend on the orientation
         # it lands with, and neither call draws randomness.
-        oi = _feed_orientation(mi, pj.cell, pi.orientation, ctx.region)
-        oj = _feed_orientation(mj, pi.cell, pj.orientation, ctx.region)
+        oi = _feed_orientation(bi, pj.cell, pi.orientation, ctx.bounds)
+        oj = _feed_orientation(bj, pi.cell, pj.orientation, ctx.bounds)
         if oi is None or oj is None:
             return None  # the swap would strand a source's feed face off the boundary
         # Each body's own in-region test first, off the boxes: a swap that lands a bigger machine
         # in a smaller one's slot usually fails right here, and then neither body is ever expanded.
-        if not box_in_region(pj.cell, mi.footprint, oi, ctx.region) or not box_in_region(
-            pi.cell, mj.footprint, oj, ctx.region
+        size_i, size_j = bi.sizes[oi], bj.sizes[oj]
+        if not box_within(pj.cell, size_i, ctx.bounds) or not box_within(
+            pi.cell, size_j, ctx.bounds
         ):
             return None
-        moved = list(occupied_cells(pj.cell, mi.footprint, oi)) + list(
-            occupied_cells(pi.cell, mj.footprint, oj)
-        )
+        moved = list(box_cells(pj.cell, size_i)) + list(box_cells(pi.cell, size_j))
         if (
             len(set(moved)) != len(moved)  # the two swapped bodies overlap each other
             or not ctx.reserved.isdisjoint(moved)
@@ -823,40 +861,41 @@ def _swap(
         ):
             return None
         new = list(placements)
-        new[i] = pi.model_copy(update={"cell": pj.cell, "orientation": oi})
-        new[j] = pj.model_copy(update={"cell": pi.cell, "orientation": oj})
+        new[i] = Pose(pi.machine_id, pj.cell, oi)
+        new[j] = Pose(pj.machine_id, pi.cell, oj)
         return new
     finally:
         occupied.update(own)
 
 
 def _turn_fits(
-    m: Machine, p: Placement, orientation: Facing, ctx: _SearchContext, occupied: set[Cell]
+    body: _Body, p: Pose, orientation: Facing, ctx: _SearchContext, occupied: set[Cell]
 ) -> bool:
-    """Whether ``m`` still fits at its own origin once turned to ``orientation``.
+    """Whether ``body`` still fits at its own origin once turned to ``orientation``.
 
     Short-circuits the common case: a turn that leaves the extents alone cannot change which cells
     are covered, so every 1x1x1 block and every square-base multiblock skips the test and the hot
     path is untouched.
     """
-    if rotated_footprint(m.footprint, orientation) == rotated_footprint(m.footprint, p.orientation):
+    size = body.sizes[orientation]
+    if size == body.sizes[p.orientation]:
         return True
-    if not box_in_region(p.cell, m.footprint, orientation, ctx.region):
+    if not box_within(p.cell, size, ctx.bounds):
         return False  # the turn swings the body out of the region; no need to expand either set
-    own = set(occupied_cells(p.cell, m.footprint, p.orientation))
-    cells = list(occupied_cells(p.cell, m.footprint, orientation))
+    own = set(_cells(p, body))
+    cells = list(box_cells(p.cell, size))
     return ctx.reserved.isdisjoint(cells) and (occupied - own).isdisjoint(cells)
 
 
 def _reorient(
-    placements: list[Placement],
+    placements: list[Pose],
     ctx: _SearchContext,
     occupied: set[Cell],
     rng: random.Random,
-) -> list[Placement] | None:
+) -> list[Pose] | None:
     candidates: list[tuple[int, list[Facing]]] = []
     for k, p in enumerate(placements):
-        m = ctx.machines[p.machine_id]
+        body = ctx.bodies[p.machine_id]
         # A source only reorients among feed-legal facings (its front must stay on the boundary),
         # and ANY machine only among facings it still fits at. A quarter turn swaps a non-cubic
         # machine's horizontal extents, so a turn can push it out of the region, onto a reserved
@@ -864,10 +903,10 @@ def _reorient(
         # accepted state that broke it would violate this loop's overlap-free invariant in silence.
         alts = [
             o
-            for o in m.orientation_options
+            for o in body.orientations
             if o != p.orientation
-            and _feed_ok(m, p.cell, o, ctx.region)
-            and _turn_fits(m, p, o, ctx, occupied)
+            and _feed_ok(body, p.cell, o, ctx.bounds)
+            and _turn_fits(body, p, o, ctx, occupied)
         ]
         if alts:
             candidates.append((k, alts))
@@ -876,15 +915,15 @@ def _reorient(
     k, alts = candidates[rng.randrange(len(candidates))]
     p = placements[k]
     new = list(placements)
-    new[k] = p.model_copy(update={"orientation": rng.choice(alts)})
+    new[k] = Pose(p.machine_id, p.cell, rng.choice(alts))
     return new
 
 
 def _ruin_and_recreate(
-    placements: list[Placement],
+    placements: list[Pose],
     ctx: _SearchContext,
     rng: random.Random,
-) -> list[Placement] | None:
+) -> list[Pose] | None:
     """Ruin a related cluster of machines and greedily re-insert them (the LNS large move).
 
     Removes a net-connected cluster (2..``_MAX_RUIN`` machines), then re-inserts each at the
@@ -900,13 +939,11 @@ def _ruin_and_recreate(
     ruined = _related_cluster(placements, ctx.adjacency, rng.randint(2, min(n, _MAX_RUIN)), rng)
     kept = [p for i, p in enumerate(placements) if i not in ruined]
 
-    occupied: set[Cell] = set()
-    for p in kept:
-        occupied.update(occupied_cells(p.cell, ctx.machines[p.machine_id].footprint, p.orientation))
+    occupied = _occupied(kept, ctx.bodies)
     # One grid for the whole recreate, updated in step with `occupied` as each machine lands,
     # rather than rebuilt per insertion: `_best_insertion` only reads it.
     grid = _occupancy_grid(ctx.region, occupied, ctx.reserved)
-    row, plane = ctx.region.sx, ctx.region.sx * ctx.region.sy
+    row, plane = ctx.bounds[0], ctx.bounds[0] * ctx.bounds[1]
 
     placed = list(kept)
     placed_ids = {p.machine_id for p in placed}
@@ -917,14 +954,13 @@ def _ruin_and_recreate(
         key=lambda p: -_placed_neighbor_count(p.machine_id, ctx.adjacency, placed_ids),
     )
     for p in to_insert:
-        m = ctx.machines[p.machine_id]
         spot = _best_insertion(p, placed, occupied, grid, ctx, rng)
         if spot is None:
             return None  # could not re-place this machine; abandon the move, the loop skips it
-        origin, orientation = spot
-        placed.append(p.model_copy(update={"cell": origin, "orientation": orientation}))
+        landed = Pose(p.machine_id, *spot)
+        placed.append(landed)
         placed_ids.add(p.machine_id)
-        for cell in occupied_cells(origin, m.footprint, orientation):
+        for cell in _cells(landed, ctx.bodies[p.machine_id]):
             occupied.add(cell)
             grid[cell[0] + cell[1] * row + cell[2] * plane] = 1
 
@@ -933,7 +969,7 @@ def _ruin_and_recreate(
 
 
 def _related_cluster(
-    placements: list[Placement], adjacency: dict[str, set[str]], k: int, rng: random.Random
+    placements: list[Pose], adjacency: dict[str, set[str]], k: int, rng: random.Random
 ) -> set[int]:
     """Indices of a net-connected cluster of ``k`` machines grown from a random seed; padded with
     random machines when the seed's net-component is smaller than ``k`` (e.g. isolated machines)."""
@@ -966,7 +1002,7 @@ def _placed_neighbor_count(
 
 
 def _placed_invariants(
-    machine_id: str, placed_pos: dict[str, Placement], ctx: _SearchContext
+    machine_id: str, placed_pos: dict[str, Pose], ctx: _SearchContext
 ) -> tuple[list[_NetBox], list[_PowerAttach]]:
     """Everything :func:`_marginal_insertion_cost` needs that does NOT depend on the candidate.
 
@@ -975,7 +1011,7 @@ def _placed_invariants(
     fixed summary of the placed members - a bounding box for HPWL, the centroid list for the MST
     pull - so this computes each once per insertion and the candidate loop just reads them.
     """
-    centroids = {mid: _center(q, ctx.machines[mid]) for mid, q in placed_pos.items()}
+    centroids = {mid: _center(q, ctx.bodies[mid]) for mid, q in placed_pos.items()}
 
     def placed_centroids(ids: list[str]) -> list[_Centroid]:
         return [centroids[mid] for mid in ids if mid != machine_id and mid in placed_pos]
@@ -1011,7 +1047,7 @@ def _occupancy_grid(region: CellBox, occupied: set[Cell], reserved: set[Cell]) -
     ``occupied_cells`` yields in a solve and the single hottest line in the solver. A byte grid
     answers the same question by indexing, with no allocation and no hashing per candidate.
 
-    Unpadded on purpose. ``box_in_region`` already gates every test with six comparisons on the
+    Unpadded on purpose. ``box_within`` already gates every test with six comparisons on the
     rotated box's corners, so an index built from a passing origin is always in range; a padded
     border would buy a bounds check that has already been paid for.
     """
@@ -1019,32 +1055,31 @@ def _occupancy_grid(region: CellBox, occupied: set[Cell], reserved: set[Cell]) -
     plane = sx * sy
     grid = bytearray(plane * sz)
     for x, y, z in occupied:
-        grid[x + y * sx + z * plane] = 1  # every placed body cleared box_in_region to get here
+        grid[x + y * sx + z * plane] = 1  # every placed body cleared box_within to get here
     for x, y, z in reserved:  # caller-supplied, so this one is guarded
         if 0 <= x < sx and 0 <= y < sy and 0 <= z < sz:
             grid[x + y * sx + z * plane] = 1
     return grid
 
 
-def _box_offsets(box: CellBox, region: CellBox) -> tuple[int, ...]:
-    """Flat offsets from an origin to every cell a rotated ``box`` covers, in this region."""
-    sx, plane = region.sx, region.sx * region.sy
+def _box_offsets(size: Size, bounds: Size) -> tuple[int, ...]:
+    """Flat offsets from an origin to every cell a box of the (rotated) ``size`` covers, in a
+    region of extents ``bounds``."""
+    sx, sy, sz = size
+    row, plane = bounds[0], bounds[0] * bounds[1]
     return tuple(
-        dx + dy * sx + dz * plane
-        for dz in range(box.sz)
-        for dy in range(box.sy)
-        for dx in range(box.sx)
+        dx + dy * row + dz * plane for dz in range(sz) for dy in range(sy) for dx in range(sx)
     )
 
 
 def _best_insertion(
-    p: Placement,
-    placed: list[Placement],
+    p: Pose,
+    placed: list[Pose],
     occupied: set[Cell],
     grid: bytearray,
     ctx: _SearchContext,
     rng: random.Random,
-) -> tuple[CellCoord, Facing] | None:
+) -> tuple[Cell, Facing] | None:
     """The valid (origin, orientation) for ``p``'s machine that minimises its *marginal* cost, over
     candidate cells beside its placed net-neighbours plus a few random ones; falls back to any
     first-fit free slot, or ``None`` if the machine cannot be placed at all.
@@ -1053,49 +1088,48 @@ def _best_insertion(
     costs O(machine degree), not a full O(all nets) recompute - the loop's ``_cost`` still gates
     acceptance globally.
     """
-    m = ctx.machines[p.machine_id]
-    is_source = m.is_power_source  # fixed for this machine; see _feed_ok_for
+    body = ctx.bodies[p.machine_id]
     placed_pos = {q.machine_id: q for q in placed}
     net_boxes, power_attach = _placed_invariants(p.machine_id, placed_pos, ctx)
-    region = ctx.region
-    offsets_by_box: dict[tuple[int, int, int], tuple[int, ...]] = {}
-    row, plane = region.sx, region.sx * region.sy
-    best: tuple[CellCoord, Facing] | None = None
+    bounds = ctx.bounds
+    offsets_by_size: dict[Size, tuple[int, ...]] = {}
+    row, plane = bounds[0], bounds[0] * bounds[1]
+    best: tuple[Cell, Facing] | None = None
     best_cost = math.inf
-    for origin in _candidate_origins(p, m, placed, ctx, rng):
+    for origin in _candidate_origins(p, body, placed, ctx, rng):
         # The fit test moved inside the orientation loop, because which cells the machine covers
         # depends on how it is turned - but it depends ONLY on the rotated box, and four facings
         # yield at most two of those. Memoizing per box keeps this at one test per origin for a
         # square-base machine (every machine in both shipped examples) instead of four.
-        fits: dict[tuple[int, int, int], bool] = {}
-        for orientation in m.orientation_options:
-            if not _feed_ok_for(is_source, m, origin, orientation, ctx.region):
+        fits: dict[Size, bool] = {}
+        for orientation in body.orientations:
+            if not _feed_ok(body, origin, orientation, bounds):
                 continue  # a source's feed face must stay on the boundary
-            box = rotated_footprint(m.footprint, orientation)
-            key = (box.sx, box.sy, box.sz)
-            ok = fits.get(key)
+            size = body.sizes[orientation]
+            ok = fits.get(size)
             if ok is None:
                 # In-region off the box first: this is the hottest fit test in the solve (one per
                 # candidate origin, and _candidate_origins offers plenty that hang off the region),
                 # and only a candidate that clears it is worth expanding into cells.
-                ok = box_in_region(origin, m.footprint, orientation, ctx.region)
+                ok = box_within(origin, size, bounds)
                 if ok:
-                    offsets = offsets_by_box.get(key)
+                    offsets = offsets_by_size.get(size)
                     if offsets is None:
-                        offsets = offsets_by_box[key] = _box_offsets(box, region)
-                    base = origin.x + origin.y * row + origin.z * plane
+                        offsets = offsets_by_size[size] = _box_offsets(size, bounds)
+                    x, y, z = origin
+                    base = x + y * row + z * plane
                     for off in offsets:
                         if grid[base + off]:
                             ok = False
                             break
-                fits[key] = ok
+                fits[size] = ok
             if not ok:
                 continue
             cost = _marginal_insertion_cost(
                 p.machine_id,
                 origin,
                 orientation,
-                m,
+                body,
                 placed_pos,
                 net_boxes,
                 power_attach,
@@ -1108,15 +1142,16 @@ def _best_insertion(
         return best
     # Last resort: any free slot in first-fit order (a source additionally requires a slot +
     # orientation with its feed face on the boundary - the same rule the constructive seed used).
-    return _fit(m, ctx.region, occupied | ctx.reserved)
+    fit = _fit(body.machine, ctx.region, occupied | ctx.reserved)
+    return None if fit is None else (fit[0].as_tuple(), fit[1])
 
 
 def _marginal_insertion_cost(
     machine_id: str,
-    origin: CellCoord,
+    origin: Cell,
     orientation: Facing,
-    m: Machine,
-    placed_pos: dict[str, Placement],
+    body: _Body,
+    placed_pos: dict[str, Pose],
     net_boxes: list[_NetBox],
     power_attach: list[_PowerAttach],
     ctx: _SearchContext,
@@ -1142,15 +1177,15 @@ def _marginal_insertion_cost(
     comparing it against ``bound`` directly would discard candidates the reward would have made
     best. Subtracting the largest reward still available - every remaining pair scoring - makes the
     test admissible, and the layouts it produces are identical to scoring every candidate in full.
-    What it skips is the auto term entirely: the ``Placement`` this function would have to build
-    to ask with, and a ``router.auto.auto_output_possible`` call per pair. That rule got
-    substantially dearer when it started asking the question the router actually answers (#107),
-    which is what makes the early-out worth having - it takes a nitrobenzene solve from 6.32s to
-    4.36s."""
-    box = rotated_footprint(m.footprint, orientation)  # same centroid rule as _center
-    cx = origin.x + box.sx / 2
-    cy = origin.y + box.sy / 2
-    cz = origin.z + box.sz / 2
+    What it skips is the auto term entirely: the ``Pose`` this function would have to build to ask
+    with, and a ``router.auto.auto_output_possible`` call per pair. That rule got substantially
+    dearer when it started asking the question the router actually answers (#107), which is what
+    makes the early-out worth having - it takes a nitrobenzene solve from 6.32s to 4.36s."""
+    x, y, z = origin
+    sx, sy, sz = body.sizes[orientation]  # same centroid rule as _center
+    cx = x + sx / 2
+    cy = y + sy / 2
+    cz = z + sz / 2
     # Widening the precomputed box with this candidate's centroid *is* the HPWL, so the span is
     # identical to taking min/max over the members plus the candidate - the same two operands,
     # just not rebuilt per candidate. Inlined conditionals rather than min()/max(): this runs
@@ -1173,14 +1208,15 @@ def _marginal_insertion_cost(
     if _W_WIRE * wire + cable - _W_AUTO * len(pairs) >= bound:
         return math.inf  # even every pair scoring cannot beat the incumbent
     auto = 0
-    here = Placement(machine_id=machine_id, cell=origin, orientation=orientation)
+    here = Pose(machine_id, origin, orientation)
+    m = body.machine
     for pair in pairs:
         is_source = pair.source_id == machine_id
         other = pair.sink_id if is_source else pair.source_id
         op = placed_pos.get(other)
         if op is None:
             continue
-        om = ctx.machines[other]
+        om = ctx.bodies[other].machine
         if is_source:
             possible = auto_output_possible(here, m, pair.source_port, op, om, pair.sink_port)
         else:
@@ -1191,51 +1227,48 @@ def _marginal_insertion_cost(
 
 
 def _candidate_origins(
-    p: Placement,
-    m: Machine,
-    placed: list[Placement],
+    p: Pose,
+    body: _Body,
+    placed: list[Pose],
     ctx: _SearchContext,
     rng: random.Random,
-) -> list[CellCoord]:
-    """Origins to try inserting ``m`` at: its freed origin, the cells face-adjacent to each placed
-    net-neighbour (to cluster / auto-output), and a few random free origins - deduped, in-region."""
+) -> list[Cell]:
+    """Origins to try inserting ``body`` at: its freed origin, the cells face-adjacent to each
+    placed net-neighbour (to cluster / auto-output), and a few random free origins - deduped,
+    in-region."""
     neighbor_ids = ctx.adjacency.get(p.machine_id, set())
-    origins: list[CellCoord] = []
+    rx, ry, rz = ctx.bounds
+    origins: list[Cell] = []
     seen: set[Cell] = set()
 
     def add(c: Cell) -> None:
-        if c not in seen and in_region(c, ctx.region):
+        x, y, z = c
+        if c not in seen and 0 <= x < rx and 0 <= y < ry and 0 <= z < rz:
             seen.add(c)
-            origins.append(CellCoord(x=c[0], y=c[1], z=c[2]))
+            origins.append(c)
 
-    add((p.cell.x, p.cell.y, p.cell.z))  # freed origin (may be retaken; validity checked by caller)
+    add(p.cell)  # freed origin (may be retaken; validity checked by caller)
     for q in placed:
         if len(origins) >= _MAX_CANDIDATES:
             break  # enough neighbour-adjacent sites; keep recreate cheap
         if q.machine_id in neighbor_ids:
-            for bx, by, bz in occupied_cells(
-                q.cell, ctx.machines[q.machine_id].footprint, q.orientation
-            ):
+            for bx, by, bz in _cells(q, ctx.bodies[q.machine_id]):
                 for dx, dy, dz in _FACE_DELTAS:
                     add((bx + dx, by + dy, bz + dz))
     for _ in range(_LNS_RANDOM_CANDIDATES):
-        origin = _rand_origin(m, ctx.region, p.orientation, rng)
+        origin = _rand_origin(body, ctx.bounds, p.orientation, rng)
         if origin is not None:
-            add((origin.x, origin.y, origin.z))
+            add(origin)
     return origins
 
 
-def _rand_origin(
-    m: Machine, region: CellBox, orientation: Facing, rng: random.Random
-) -> CellCoord | None:
+def _rand_origin(body: _Body, bounds: Size, orientation: Facing, rng: random.Random) -> Cell | None:
     # The rotated extents, not the declared ones: an east-facing 5x1x2 needs 2 of x and 5 of z, so
     # bounding by the declared box would both reject origins that fit and offer origins that do
     # not - and the draws below consume randomness, so a wrong bound shifts every later draw.
-    fp = rotated_footprint(m.footprint, orientation)
-    if fp.sx > region.sx or fp.sy > region.sy or fp.sz > region.sz:
+    sx, sy, sz = body.sizes[orientation]
+    rx, ry, rz = bounds
+    if sx > rx or sy > ry or sz > rz:
         return None
-    return CellCoord(
-        x=rng.randrange(region.sx - fp.sx + 1),
-        y=rng.randrange(region.sy - fp.sy + 1),
-        z=rng.randrange(region.sz - fp.sz + 1),
-    )
+    # A tuple display evaluates left to right, so the draws come x, y, z, as they always have.
+    return (rng.randrange(rx - sx + 1), rng.randrange(ry - sy + 1), rng.randrange(rz - sz + 1))

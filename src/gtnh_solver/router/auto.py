@@ -57,6 +57,9 @@ from gtnh_solver.ir.geometry import (
     FACE_DELTAS,
     OPPOSITE_FACE,
     Cell,
+    Pose,
+    Size,
+    pose_of,
     rotated_footprint,
 )
 from gtnh_solver.ir.nets import net_sources_sinks, placement_index, port_direction_map
@@ -86,7 +89,7 @@ def assign_auto_outputs(problem: InputIR, placements: Sequence[Placement]) -> Au
     machines in contact - see the module docstring.
     """
     machines = {m.id: m for m in problem.machines}
-    placement_of = placement_index(placements)
+    pose_by_id = {mid: pose_of(p) for mid, p in placement_index(placements).items()}
     port_dir = port_direction_map(problem)
 
     spent: set[str] = set()  # single-block sources that have used their one auto-output face
@@ -107,10 +110,10 @@ def assign_auto_outputs(problem: InputIR, placements: Sequence[Placement]) -> Au
             continue  # a single block has ONE auto-output face; the rest of its nets pipe
 
         found = _auto_faces(
-            placement_of.get(source.machine_id),
+            pose_by_id.get(source.machine_id),
             source_m,
             source.port_id,
-            placement_of.get(sink.machine_id),
+            pose_by_id.get(sink.machine_id),
             sink_m,
             sink.port_id,
             claimed,
@@ -145,10 +148,10 @@ _NOTHING_CLAIMED: Mapping[str, Collection[Cell]] = MappingProxyType({})
 
 
 def auto_output_possible(
-    source_p: Placement | None,
+    source: Pose | None,
     source_m: Machine,
     source_port: str,
-    target_p: Placement | None,
+    target: Pose | None,
     target_m: Machine,
     target_port: str,
 ) -> bool:
@@ -165,22 +168,14 @@ def auto_output_possible(
     loose body rule agree on it exactly.
     """
     return (
-        _auto_faces(
-            source_p, source_m, source_port, target_p, target_m, target_port, _NOTHING_CLAIMED
-        )
+        _auto_faces(source, source_m, source_port, target, target_m, target_port, _NOTHING_CLAIMED)
         is not None
     )
 
 
-#: ``(id(machine), port, orientation)`` -> that machine and its host cells as offsets from the
-#: placement origin. The machine is kept beside the offsets so its ``id`` cannot be recycled onto a
-#: different object while the entry lives, and so a hit can verify identity rather than trust the
-#: key. Bounded by machines x ports x 4 orientations.
-_HOST_OFFSETS: dict[tuple[int, str, Facing], tuple[Machine, tuple[Cell, ...]]] = {}
-
-
-def _host_offsets(machine: Machine, port_id: str, orientation: Facing) -> tuple[Cell, ...]:
-    """``port_cells`` relative to the placement origin, computed once per orientation.
+@dataclass(frozen=True, slots=True)
+class _Host:
+    """One port of one machine, turned one way: everything :func:`_auto_faces` reads of a side.
 
     Which casing cells can host a port does not depend on *where* the machine stands, only on how
     it is turned - so the rotation is the whole computation, and the position is an addition. The
@@ -188,41 +183,45 @@ def _host_offsets(machine: Machine, port_id: str, orientation: Facing) -> tuple[
     and the uncached form rebuilt both sets every time: 16M ``rotated_slot`` calls and 26M
     ``occupied_cells`` yields on one nitrobenzene solve, two thirds of its runtime (#107). That is
     the same shape as the enumeration #110 took off this path, one level down.
+
+    The rotated footprint rides along for the same reason, plus one more: it is otherwise read off
+    two pydantic models per call, which on 3.14 cannot take the fast attribute path (#256).
     """
+
+    #: Kept so the machine's ``id`` cannot be recycled onto a different object while the entry
+    #: lives, and so a hit can verify identity rather than trust the key.
+    machine: Machine
+    size: Size  # the footprint as it sits facing this way
+    offsets: tuple[Cell, ...]  # host cells relative to the origin; the source side iterates these
+    offset_set: frozenset[Cell]  # the same cells, for the target side's "does it contain" test
+
+
+#: ``(id(machine), port, orientation)`` -> :class:`_Host`. Bounded by machines x ports x facings.
+_HOSTS: dict[tuple[int, str, Facing], _Host] = {}
+
+
+def _host(machine: Machine, port_id: str, orientation: Facing) -> _Host:
+    """The :class:`_Host` for ``machine``'s ``port_id`` facing ``orientation``, built once."""
     key = (id(machine), port_id, orientation)
-    hit = _HOST_OFFSETS.get(key)
-    if hit is not None and hit[0] is machine:
-        return hit[1]
+    hit = _HOSTS.get(key)
+    if hit is not None and hit.machine is machine:
+        return hit
     origin = CellCoord(x=0, y=0, z=0)
-    cells = hatches.port_cells(
-        Placement(machine_id=machine.id, cell=origin, orientation=orientation), machine, port_id
+    cells = tuple(
+        hatches.port_cells(
+            Placement(machine_id=machine.id, cell=origin, orientation=orientation), machine, port_id
+        )
     )
-    offsets = tuple(cells)
-    _HOST_OFFSETS[key] = (machine, offsets)
-    return offsets
-
-
-#: The same offsets as a set, for the target side, which is asked "does it contain" rather than
-#: iterated. Kept apart from the tuple so neither side pays for the other's shape.
-_HOST_OFFSET_SETS: dict[tuple[int, str, Facing], tuple[Machine, frozenset[Cell]]] = {}
-
-
-def _host_offset_set(machine: Machine, port_id: str, orientation: Facing) -> frozenset[Cell]:
-    """:func:`_host_offsets` as a frozenset - the membership form the target side needs."""
-    key = (id(machine), port_id, orientation)
-    hit = _HOST_OFFSET_SETS.get(key)
-    if hit is not None and hit[0] is machine:
-        return hit[1]
-    offsets = frozenset(_host_offsets(machine, port_id, orientation))
-    _HOST_OFFSET_SETS[key] = (machine, offsets)
-    return offsets
+    box = rotated_footprint(machine.footprint, orientation)
+    host = _HOSTS[key] = _Host(machine, (box.sx, box.sy, box.sz), cells, frozenset(cells))
+    return host
 
 
 def _auto_faces(
-    source_p: Placement | None,
+    source: Pose | None,
     source_m: Machine,
     source_port: str,
-    target_p: Placement | None,
+    target: Pose | None,
     target_m: Machine,
     target_port: str,
     claimed: Mapping[str, Collection[Cell]],
@@ -235,7 +234,7 @@ def _auto_faces(
     ``FACE_DELTAS`` order, the same order ``ir.geometry.auto_output_faces`` used, so an assignment
     that was legal before and is still legal comes out identical.
     """
-    if source_p is None or target_p is None:
+    if source is None or target is None:
         return None
     # Per face, cheapest test first. The BOX overlap is six integer comparisons and rejects most
     # candidates outright; only a face whose bodies actually touch is worth scanning casing cells
@@ -247,32 +246,34 @@ def _auto_faces(
     # The scan itself runs in OFFSET space: which cells can host a hatch depends on how a machine
     # is turned, not where it stands (:func:`_host_offsets`), so position enters only as the vector
     # between the two origins. World cells are built solely when a pair matches.
-    source_box = rotated_footprint(source_m.footprint, source_p.orientation)
-    target_box = rotated_footprint(target_m.footprint, target_p.orientation)
-    source_offsets = _host_offsets(source_m, source_port, source_p.orientation)
-    target_offsets = _host_offset_set(target_m, target_port, target_p.orientation)
-    ox, oy, oz = source_p.cell.x, source_p.cell.y, source_p.cell.z
-    tx, ty, tz = target_p.cell.x, target_p.cell.y, target_p.cell.z
-    tx_max, ty_max, tz_max = tx + target_box.sx, ty + target_box.sy, tz + target_box.sz
+    source_front, target_front = source.orientation, target.orientation
+    source_host = _host(source_m, source_port, source_front)
+    target_host = _host(target_m, target_port, target_front)
+    source_offsets, target_offsets = source_host.offsets, target_host.offset_set
+    ssx, ssy, ssz = source_host.size
+    tsx, tsy, tsz = target_host.size
+    ox, oy, oz = source.cell
+    tx, ty, tz = target.cell
+    tx_max, ty_max, tz_max = tx + tsx, ty + tsy, tz + tsz
     # source origin - target origin: added to a source offset it lands in the target's frame.
     bx, by, bz = ox - tx, oy - ty, oz - tz
-    taken_source = claimed.get(source_p.machine_id, ())
-    taken_target = claimed.get(target_p.machine_id, ())
+    taken_source = claimed.get(source.machine_id, ())
+    taken_target = claimed.get(target.machine_id, ())
     for face, (dx, dy, dz) in FACE_DELTAS.items():
-        if face is source_p.orientation:  # the source's front carries no I/O
+        if face is source_front:  # the source's front carries no I/O
             continue
         opposite = OPPOSITE_FACE[face]
-        if opposite is target_p.orientation:  # the target's input face would be its front
+        if opposite is target_front:  # the target's input face would be its front
             continue
         # The stepped source box against the target box, half-open on both sides.
         sx0, sy0, sz0 = ox + dx, oy + dy, oz + dz
         if not (
             sx0 < tx_max
-            and tx < sx0 + source_box.sx
+            and tx < sx0 + ssx
             and sy0 < ty_max
-            and ty < sy0 + source_box.sy
+            and ty < sy0 + ssy
             and sz0 < tz_max
-            and tz < sz0 + source_box.sz
+            and tz < sz0 + ssz
         ):
             continue
         ax, ay, az = bx + dx, by + dy, bz + dz

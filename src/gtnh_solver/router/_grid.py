@@ -216,6 +216,9 @@ def astar_multi(
     came_from: dict[Cell, Cell] = {}
     best: dict[Cell, int] = dict.fromkeys(starts, 0)
     visited: set[Cell] = set()
+    # ``in_region`` inlined against extents read once: it would re-read three fields off the
+    # pydantic ``region`` for every neighbour, the slow path on Python 3.14 (#256).
+    rx, ry, rz = region.sx, region.sy, region.sz
     while heap:
         _, g, cur = heapq.heappop(heap)
         if cur in goals:
@@ -224,8 +227,8 @@ def astar_multi(
             continue
         visited.add(cur)
         for dx, dy, dz in NEIGHBORS:
-            nxt = (cur[0] + dx, cur[1] + dy, cur[2] + dz)
-            if not in_region(nxt, region) or nxt in obstacles:
+            nxt = x, y, z = (cur[0] + dx, cur[1] + dy, cur[2] + dz)
+            if not (0 <= x < rx and 0 <= y < ry and 0 <= z < rz) or nxt in obstacles:
                 continue
             ng = g + 1
             if ng < best.get(nxt, _UNREACHABLE):
