@@ -267,4 +267,17 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   bumped; what is new is that a script can consume the contract directly, which makes the
 #   versioning rules above bind on a consumer outside this repo too. The JSON uses field names (the
 #   contract has no aliases), states every field, and escapes non-ASCII. (GitHub #203.)
+#
+# LayoutResult v3 (BREAKING) - a pipe route may be ONE block: a route with no `segments` whose
+#   terminals all share one cell is a single pipe block wired straight to each of their machines.
+#   Until now every route needed a segment (ROUTE_DISCONTINUOUS), so when both ends of a pipe net
+#   docked on one cell the router laid a second block beside it just to have a hop, and that block
+#   led nowhere: a dead-end pipe in the nitrobenzene preview, on the nitrogen and water feeds. A
+#   cable still needs a segment, because its gauge lives in `thickness_per_segment`.
+#
+#   The shape is unchanged (`segments` was always allowed to be empty), and yet a bump, for the
+#   omission rule `hatches` set: a v2 consumer that builds a route's blocks from its segments builds
+#   nothing for a one-block pipe, and the line is missing a connection with nothing raising.
+#   `Route.cells()` is the one reading of a route's blocks that covers both forms, so a consumer
+#   should use it (or, like `route_blocks`, take the terminals' cells as well as the segments').
 # ---------------------------------------------------------------------------

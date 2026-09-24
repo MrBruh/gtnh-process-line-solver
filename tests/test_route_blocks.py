@@ -151,6 +151,29 @@ def test_a_non_unit_segment_is_a_block_at_each_end_and_no_arm_between() -> None:
     assert all(rc.dirs == frozenset() for rc in cells)
 
 
+def test_a_one_block_pipe_is_one_block_with_an_arm_into_each_machine() -> None:
+    """A route with no segment (LayoutResult v3) is the cell its terminals share, wired to both
+    machines: here a tank's west face and the input hatch above, the nitrobenzene line's nitrogen
+    feed. It is charged as the one block it is."""
+    shared = CellCoord(x=1, y=0, z=0)
+    route = Route(
+        net_id="nitrogen",
+        commodity=Commodity.FLUID,
+        terminals=[
+            Terminal(machine_id="tank", port_id="out", face=Facing.WEST, cell=shared),
+            Terminal(machine_id="reactor", port_id="in", face=Facing.DOWN, cell=shared),
+        ],
+        material=RouteMaterial(
+            family=PipeFamily.FLUID_PIPE, material="bronze", size=PipeSize.NORMAL
+        ),
+    )
+    (rc,) = route_cells(route)
+    assert rc.cell == (1, 0, 0)
+    assert rc.dirs == {(1, 0, 0), (0, 1, 0)}  # east into the tank, up into the hatch
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, routes=[route])
+    assert [(b.label, n) for b, n in route_block_counts(layout)] == [("bronze fluid pipe", 1)]
+
+
 # ------------------------------------------------------------------------------------------- 2
 
 

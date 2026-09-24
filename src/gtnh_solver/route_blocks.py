@@ -130,6 +130,9 @@ class RouteCell:
 def route_cells(route: Route) -> list[RouteCell]:
     """``route`` as one :class:`RouteCell` per cell it occupies, ordered by coordinate.
 
+    Terminal cells count as well as segment ends, which is what makes a **one-block pipe** (a route
+    with no segments, LayoutResult v3) come out as its one block, with an arm into each machine.
+
     A **non-unit** segment contributes its two endpoints but no connection: it cannot be an arm to
     an adjacent block, and drawing one would run a cable through whatever is in between. The
     validator reports it as ``ROUTE_SEGMENT_NOT_UNIT``; this renders the honest shape of a layout
@@ -156,7 +159,7 @@ def route_cells(route: Route) -> list[RouteCell]:
 
     for terminal in route.terminals:
         cell = terminal.cell.as_tuple()
-        touch(cell, 1)  # a dock cell with no segment (the source's own cell) is the thin case
+        touch(cell, 1)  # a dock cell no segment touches (a one-block pipe's) is the thin case
         dx, dy, dz = FACE_DELTAS[terminal.face]
         dirs[cell].add((-dx, -dy, -dz))  # the lead runs from the cell *into* the machine face
 

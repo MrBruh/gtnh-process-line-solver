@@ -126,7 +126,8 @@ def is_connected(edges: Iterable[tuple[Cell, Cell]]) -> bool:
     """Whether the cell graph formed by ``edges`` is a single connected component.
 
     Handles trees (a power route serving several machines is Steiner-tree-like), not just
-    simple paths. An empty edge set is *not* connected - a routed net needs at least one hop.
+    simple paths. An empty edge set is *not* connected: the one route that may have no hop, a
+    one-block pipe, is the caller's to recognise (it is a single cell, not an edge graph).
     """
     parent: dict[Cell, Cell] = {}
 

@@ -40,6 +40,7 @@ from gtnh_solver.ir import (
     Route,
     RouteMaterial,
     Segment,
+    Terminal,
 )
 from gtnh_solver.ir._base import FrozenModel, StrictModel
 
@@ -476,6 +477,25 @@ def test_non_power_route_must_not_carry_thickness() -> None:
     segs = [Segment(start=CellCoord(x=0, y=0, z=0), end=CellCoord(x=1, y=0, z=0), channel=0)]
     with pytest.raises(ValidationError):
         Route(net_id="i", commodity=Commodity.ITEM, segments=segs, thickness_per_segment=[1])
+
+
+def test_route_cells_are_its_segment_ends_or_else_its_terminals_cell() -> None:
+    """A one-block pipe (v3) has no segment, so its block is the cell its terminals share; every
+    consumer reads blocks through ``cells()``, and one that walked ``segments`` would build nothing.
+    With segments, the terminals add nothing: the validator already holds them on the route."""
+    shared = CellCoord(x=1, y=0, z=0)
+    terminals = [
+        Terminal(machine_id="a", port_id="out", face=Facing.EAST, cell=shared),
+        Terminal(machine_id="b", port_id="in", face=Facing.WEST, cell=shared),
+    ]
+    one_block = Route(net_id="i", commodity=Commodity.ITEM, terminals=terminals)
+    assert one_block.cells() == {(1, 0, 0)}
+
+    segs = [Segment(start=CellCoord(x=0, y=0, z=0), end=shared, channel=0)]
+    far = Terminal(machine_id="c", port_id="in", face=Facing.UP, cell=CellCoord(x=5, y=5, z=5))
+    run = Route(net_id="i", commodity=Commodity.ITEM, terminals=[far], segments=segs)
+    assert run.cells() == {(0, 0, 0), (1, 0, 0)}
+    assert Route(net_id="i", commodity=Commodity.ITEM).cells() == set()
 
 
 def _cable(**over: object) -> RouteMaterial:

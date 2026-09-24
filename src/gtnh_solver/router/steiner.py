@@ -31,10 +31,11 @@ tries up to ``STARTS`` single cells, and a start whose distance bound cannot bea
 far is skipped without being grown.
 
 **What a tree may not do.** Two connections of one machine never share a claim key
-(``_grid.claim_key``: the dock cell of a single block, the casing cell of a multiblock), and a
-tree always has a segment, since a route with no segment is not a route (``ROUTE_DISCONTINUOUS``):
-if every endpoint lands on one cell, a pipe gets a one-block stub beside it, and a power net's
-tree gets the leg ``router.power`` would lay its last sink instead.
+(``_grid.claim_key``: the dock cell of a single block, the casing cell of a multiblock). If every
+endpoint lands on one cell, a pipe is that one block and nothing more: a route with no segment is a
+one-block pipe (docs/IR.md), which is the real build, one block wired to both machines. A cable may
+not be one, because its gauge lives on its segments, so a power net's tree gets the leg
+``router.power`` would lay its last sink instead.
 
 Cells are packed into ints, ``(x * sy + y) * sz + z``, which orders exactly as the ``(x, y, z)``
 tuples do, so every tie breaks as it would on tuples and the search is deterministic.
@@ -210,9 +211,9 @@ def _grow(
 ) -> Tree | None:
     """Grow one tree from ``seeds`` (dock cells of the first endpoint, with their entry costs).
 
-    If every endpoint lands on one cell, a pipe gets a one-block stub beside it; a ``trunk`` gets a
-    real leg from that cell to another dock cell of its last endpoint instead, because that is what
-    ``router.power`` will lay (its last sink never taps a trunk that has no segment yet)."""
+    If every endpoint lands on one cell, a pipe is that one block, a tree with no legs. A ``trunk``
+    gets a real leg from that cell to another dock cell of its last endpoint instead, because that
+    is what ``router.power`` will lay (its last sink never taps a trunk that has no segment yet)."""
     tree = Tree()
     mine: dict[str, set[Cell]] = {}  # machine -> the claim keys this net already holds on it
     machine_of = [ep.machine_id for ep in eps]
@@ -273,21 +274,11 @@ def _grow(
             tree.cells.update(path)
             tree.legs.append(path)
         pathed = dict.fromkeys(tree.cells, 0.0)
-    if tree.legs:
-        return tree
-    # Every endpoint landed on one cell, and a route needs a segment.
+    if tree.legs or not trunk:
+        return tree  # with no legs, a one-block pipe: every endpoint landed on one cell
+    # A cable trunk may not be one block: router.power never lets its last sink tap a trunk with no
+    # segment, it lays that sink a leg to a dock cell of its own. Reserve what that leg will need.
     (only,) = tree.cells
-    if not trunk:
-        # A pipe block may simply have a one-block stub beside it.
-        stubs = [(extra.get(n, 0.0), n) for n in grid.adj(only) if n not in blocked]
-        if not stubs:
-            return None
-        stub = min(stubs)[1]
-        tree.cells.add(stub)
-        tree.legs.append([only, stub])
-        return tree
-    # A cable trunk may not: router.power never lets its last sink tap a trunk with no segment,
-    # it lays that sink a leg to a dock cell of its own. Reserve what that leg will need.
     last = len(eps) - 1
     ep = eps[last]
     mine[ep.machine_id].discard(ep.key_of[tree.terminals.pop(last)[0]])

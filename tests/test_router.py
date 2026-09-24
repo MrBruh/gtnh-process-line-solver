@@ -568,33 +568,21 @@ def test_route_chains_a_multi_endpoint_net_leg_by_leg() -> None:
     assert validate(problem, layout).ok, str(validate(problem, layout))
 
 
-def test_route_infeasible_when_both_endpoints_want_the_only_free_cell() -> None:
-    # A 3x1x1 corridor: the lone free cell (1,0,0) is the ONLY dock candidate of both machines.
-    # One pipe block wired to both would be a real build, but it lays no segment, and a route with
-    # none is not a route (ROUTE_DISCONTINUOUS). The tree search lays a one-block stub beside a
-    # shared cell for exactly this, and here there is no free cell for one, so the net fails
-    # explicitly as a routing failure and nothing is emitted for it.
-    problem = _item_pair(CellBox(sx=3, sy=1, sz=1))
-    result = route(problem, [at("a", 0, 0, 0), at("b", 2, 0, 0)])
-
-    assert not result.ok
-    assert result.infeasibility is not None
-    assert result.infeasibility.constraint == "routing"
-    assert result.failed_nets == ("n",)
-    assert result.routes == ()
-
-
-def test_two_machines_sharing_their_only_cell_get_a_stub() -> None:
-    # The same two machines with a free cell above the one they share: both terminals land on the
-    # shared block, and a one-block stub gives the route the segment it needs.
-    problem = _item_pair(CellBox(sx=3, sy=2, sz=1))
+@pytest.mark.parametrize("height", [1, 2])
+def test_two_machines_sharing_one_cell_are_one_pipe_block(height: int) -> None:
+    # Both machines' best dock is the one cell between them, so the pipe is that block, wired to
+    # both, with no segment (LayoutResult v3). It used to need a segment: with a free cell above
+    # (height 2) it got a second block there that led nowhere, and in a one-high corridor, where the
+    # shared cell is the only free cell at all, the net failed to route.
+    problem = _item_pair(CellBox(sx=3, sy=height, sz=1))
     placements = [at("a", 0, 0, 0), at("b", 2, 0, 0)]
     result = route(problem, placements)
 
     assert result.ok, result.infeasibility
     (laid,) = result.routes
     assert {t.cell.as_tuple() for t in laid.terminals} == {(1, 0, 0)}
-    assert len(laid.segments) == 1
+    assert laid.segments == []
+    assert laid.cells() == {(1, 0, 0)}
     layout = LayoutResult(
         status=LayoutStatus.VALID, seed=0, placements=placements, routes=list(result.routes)
     )

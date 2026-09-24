@@ -47,10 +47,11 @@ the maintainer's build.
 Two nets never share a cell, the crude single-channel cap the validator enforces as
 ``ROUTE_CELL_COLLISION``. Several terminals of ONE net may share a dock cell when they belong to
 different machines (#164): one pipe block wired to several neighbours is how GT builds a manifold,
-and the tree search prefers it, ranking each step by cost per endpoint served. Two connections of
-one machine never share a claim key (``_grid.claim_key``), and two nets never share a multiblock's
-casing cell, which is negotiated as a resource of its own because a casing cell has up to five
-free faces and a cell price alone cannot see it.
+and the tree search prefers it, ranking each step by cost per endpoint served. When every terminal
+of a pipe net lands on one cell, that block is the whole route and it has no segment. Two
+connections of one machine never share a claim key (``_grid.claim_key``), and two nets never share
+a multiblock's casing cell, which is negotiated as a resource of its own because a casing cell has
+up to five free faces and a cell price alone cannot see it.
 
 Returns the auto-connections plus the item/fluid routes, or an explicit ``Infeasibility`` naming
 the net that could not dock, route, or win a contested cell - never raises for the expected case,

@@ -2783,6 +2783,114 @@ def test_a_consumer_the_route_does_not_reach_is_not_served_through_it() -> None:
     assert ViolationCode.ITEM_PIPE_SIZE_INSUFFICIENT not in report.codes(), str(report)
 
 
+# ------------------------------------------------------------------ one-block pipes (LayoutResult v3)
+
+
+def _one_block(
+    size: PipeSize = PipeSize.NORMAL, commodity: Commodity = Commodity.ITEM
+) -> tuple[InputIR, LayoutResult]:
+    """A producer below and a consumer above one shared cell: the pipe is that block alone."""
+    return _pipe_run(size, (0, _OUT, 0.1), (0, _IN, 0.1), length=1, commodity=commodity)
+
+
+@pytest.mark.parametrize("commodity", [Commodity.ITEM, Commodity.FLUID])
+def test_a_pipe_with_every_terminal_on_one_block_is_a_route(commodity: Commodity) -> None:
+    # One pipe block wired to both machines is the real build, and it has no segment. Before v3 a
+    # route needed one, so the router laid a second block beside it that led nowhere.
+    problem, layout = _one_block(commodity=commodity)
+    assert layout.routes[0].segments == []
+    report = validate(problem, layout)
+    assert report.ok, str(report)
+
+
+@pytest.mark.parametrize(("size", "refused"), [(PipeSize.TINY, {0}), (PipeSize.NORMAL, set())])
+def test_a_one_block_item_pipe_still_pays_for_its_stream(size: PipeSize, refused: set[int]) -> None:
+    # Its one block is both the sender's and the consumer's, so it pays the stream's one insertion
+    # per 40 ticks: more than a tiny pipe makes (0.25), within a normal one. With no segment to
+    # read the block off, the size check must not lose it.
+    assert set(_refused(*_one_block(size))) == refused
+
+
+def _two_cells_no_segment() -> tuple[InputIR, LayoutResult]:
+    problem, run = _pipe_run(PipeSize.NORMAL, (0, _OUT, 0.1), (1, _IN, 0.1), length=2)
+    (r,) = run.routes
+    return problem, run.model_copy(update={"routes": [r.model_copy(update={"segments": []})]})
+
+
+def _no_terminal_no_segment() -> tuple[InputIR, LayoutResult]:
+    problem, layout = _one_block()
+    (r,) = layout.routes
+    return problem, layout.model_copy(update={"routes": [r.model_copy(update={"terminals": []})]})
+
+
+def _one_block_cable() -> tuple[InputIR, LayoutResult]:
+    # The power pair with its sink moved beside the source's dock cell, so both dock on (0, 0, 1).
+    problem, power = _power_pair()
+    sink = Placement(machine_id="mp", cell=_coord(1, 0, 1), orientation=Facing.NORTH)
+    (r,) = power.routes
+    source, _ = r.terminals
+    beside = Terminal(machine_id="mp", port_id="pwr", face=Facing.WEST, cell=_coord(0, 0, 1))
+    cable = r.model_copy(
+        update={"terminals": [source, beside], "segments": [], "thickness_per_segment": []}
+    )
+    return problem, power.model_copy(
+        update={"placements": [power.placements[0], sink], "routes": [cable]}
+    )
+
+
+@pytest.mark.parametrize(
+    "build",
+    [_two_cells_no_segment, _no_terminal_no_segment, _one_block_cable],
+    ids=["terminals-on-two-cells", "nothing-at-all", "a-cable"],
+)
+def test_a_route_with_no_segment_is_only_a_one_block_pipe(
+    build: Callable[[], tuple[InputIR, LayoutResult]],
+) -> None:
+    # Two cells with nothing between them are not joined; a route with no block is nothing; and a
+    # cable may not be one block, because its gauge lives on its segments.
+    assert ViolationCode.ROUTE_DISCONTINUOUS in validate(*build()).codes()
+
+
+def _blocked_by_another_net(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    other = Route(
+        net_id="other",
+        commodity=Commodity.ITEM,
+        segments=[Segment(start=_coord(0, 1, 0), end=_coord(0, 1, 1), channel=0)],
+    )
+    return p, layout.model_copy(update={"routes": [*layout.routes, other]})
+
+
+def _on_a_reserved_cell(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    return p.model_copy(update={"reserved_cells": [_coord(0, 1, 1)]}), layout
+
+
+def _moved_to(cell: CellCoord) -> Mutator:
+    def mutate(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+        (r,) = layout.routes
+        moved = [t.model_copy(update={"cell": cell}) for t in r.terminals]
+        return p, layout.model_copy(update={"routes": [r.model_copy(update={"terminals": moved})]})
+
+    return mutate
+
+
+@pytest.mark.parametrize(
+    ("mutate", "code"),
+    [
+        (_blocked_by_another_net, ViolationCode.ROUTE_CELL_COLLISION),
+        (_on_a_reserved_cell, ViolationCode.ROUTE_ON_RESERVED),
+        (_moved_to(_coord(0, 0, 1)), ViolationCode.ROUTE_THROUGH_MACHINE),  # the producer's body
+        (_moved_to(_coord(0, 1, 5)), ViolationCode.ROUTE_OUT_OF_BOUNDS),
+    ],
+    ids=["another-net", "reserved", "machine-body", "out-of-bounds"],
+)
+def test_a_one_block_pipe_is_held_to_every_rule_a_route_cell_is(
+    mutate: Mutator, code: ViolationCode
+) -> None:
+    # Its block comes from its terminals, not its segments, and every check that used to read cells
+    # off segments alone would have waved it through.
+    assert code in validate(*mutate(*_one_block())).codes()
+
+
 @pytest.mark.parametrize(
     ("build", "left_to"),
     [

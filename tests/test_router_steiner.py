@@ -124,9 +124,10 @@ def test_a_cell_several_machines_touch_serves_them_all() -> None:
     assert _cells(tree, grid) == {(1, 0, 1), (1, 0, 2)}  # H and the one cell down to a
 
 
-def test_every_endpoint_on_one_cell_gets_a_stub() -> None:
-    # Two machines whose best dock is the one cell between them: a route needs a segment, so the
-    # tree lays a one-block stub beside the shared cell rather than a route with no segment.
+def test_every_endpoint_on_one_cell_is_one_block() -> None:
+    # Two machines whose best dock is the one cell between them: that block is the whole pipe, a
+    # tree with no legs. It used to get a stub beside it, a second block that led nowhere, only so
+    # the route would have a segment.
     problem = InputIR(
         bounding_region=CellBox(sx=3, sy=2, sz=1),
         machines=[producer("a"), consumer("b")],
@@ -137,8 +138,8 @@ def test_every_endpoint_on_one_cell_gets_a_stub() -> None:
 
     assert tree is not None
     assert set(_docks(tree, grid).values()) == {(1, 0, 0)}
-    assert _cells(tree, grid) == {(1, 0, 0), (1, 1, 0)}
-    assert len(tree.legs) == 1
+    assert _cells(tree, grid) == {(1, 0, 0)}
+    assert tree.legs == []
 
 
 def test_a_price_moves_the_dock_not_just_the_path() -> None:
@@ -368,16 +369,18 @@ def _pair_sharing_one_cell(region: CellBox) -> tuple[list[Endpoint], Grid]:
     return _endpoints(problem, [at("a", 0, 0, 0), at("b", 2, 0, 0)], "n")
 
 
-def test_a_trunk_lays_its_last_endpoint_a_leg_not_a_stub() -> None:
+def test_a_trunk_lays_its_last_endpoint_a_leg_where_a_pipe_is_one_block() -> None:
     # ``router.power`` never lets its last sink tap a trunk with no segment: it lays that sink a
-    # leg to a dock cell of its own. A power net's tree reserves that shape, not a pipe's stub.
+    # leg to a dock cell of its own, since a cable's gauge lives on its segments. A power net's tree
+    # reserves that shape, not a pipe's single block.
     eps, grid = _pair_sharing_one_cell(CellBox(sx=3, sy=2, sz=1))
     pipe = route_tree(eps, grid, {}, {})
     trunk = route_tree(eps, grid, {}, {}, trunk=True)
 
     assert pipe is not None
     assert trunk is not None
-    assert set(_docks(pipe, grid).values()) == {(1, 0, 0)}  # both on the shared cell, plus a stub
+    assert set(_docks(pipe, grid).values()) == {(1, 0, 0)}  # both on the shared cell, and only it
+    assert _cells(pipe, grid) == {(1, 0, 0)}
     docks = _docks(trunk, grid)
     assert docks[0] != docks[1]  # the sink docks on a cell of its own, at the end of a real leg
     assert grid.dec(trunk.legs[-1][-1]) == docks[1]
@@ -385,9 +388,13 @@ def test_a_trunk_lays_its_last_endpoint_a_leg_not_a_stub() -> None:
 
 def test_no_trunk_when_the_last_endpoint_has_no_other_cell() -> None:
     # The same pair in a one-cell-high corridor: the sink's only other dock is off the region, so
-    # there is no trunk router.power could lay, and the tree says so rather than reserve a stub.
+    # there is no trunk router.power could lay, and the tree says so. A pipe needs nothing more
+    # than the shared cell, so the same corridor is a one-block pipe.
     eps, grid = _pair_sharing_one_cell(CellBox(sx=3, sy=1, sz=1))
     assert route_tree(eps, grid, {}, {}, trunk=True) is None
+    pipe = route_tree(eps, grid, {}, {})
+    assert pipe is not None
+    assert _cells(pipe, grid) == {(1, 0, 0)}
 
 
 # ------------------------------------------------------------------------------------- the search

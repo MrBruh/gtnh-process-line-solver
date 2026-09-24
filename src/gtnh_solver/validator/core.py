@@ -13,7 +13,8 @@ What is checked now (needs only the IR):
   routed; route commodity matches its net; a routed net has a consumer (>=1 INPUT endpoint,
   any number of same-commodity producers) and one commodity across its endpoints.
   geometry - machines in-bounds, non-overlapping, off reserved cells; routes in-bounds,
-  contiguous, every segment a unit (+/-1) hop, never running through a machine body or a
+  contiguous (or, for a pipe with no segments, one block that every terminal shares), every
+  segment a unit (+/-1) hop, never running through a machine body or a
   reserved cell, and no two nets' routes sharing a cell (crude single-channel capacity); pinned
   I/O actually sits on its net's route.
   terminals - every net endpoint has a terminal, and every terminal pins one of the net's own
@@ -326,7 +327,7 @@ def _item_streams(
     Terminals that are foreign, duplicated or off the route are left out; ``_check_terminals``
     reports each of those. A net with no producer or no consumer on the route moves nothing here.
     """
-    adjacency = _route_adjacency(route.segments)
+    adjacency = _route_adjacency(route)
     endpoints = {(e.machine_id, e.port_id) for e in net.endpoints}
     seen: set[tuple[str, str]] = set()
     senders: list[tuple[Cell, float | None]] = []
@@ -379,10 +380,10 @@ def _endpoint_shares(rates: list[float | None], throughput: float) -> tuple[list
     return [x / total for x in items], total
 
 
-def _route_adjacency(segments: list[Segment]) -> dict[Cell, set[Cell]]:
-    """Each cell of a route and the cells its segments join it to."""
-    adjacency: dict[Cell, set[Cell]] = {}
-    for seg in segments:
+def _route_adjacency(route: Route) -> dict[Cell, set[Cell]]:
+    """Each block of a route and the blocks its segments join it to (none, for a one-block pipe)."""
+    adjacency: dict[Cell, set[Cell]] = {cell: set() for cell in route.cells()}
+    for seg in route.segments:
         a, b = seg.start.as_tuple(), seg.end.as_tuple()
         adjacency.setdefault(a, set()).add(b)
         adjacency.setdefault(b, set()).add(a)
@@ -579,20 +580,10 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
             )
 
         edges: list[tuple[Cell, Cell]] = []
-        route_cells: set[Cell] = set()
         for seg in r.segments:
             start = (seg.start.x, seg.start.y, seg.start.z)
             end = (seg.end.x, seg.end.y, seg.end.z)
             edges.append((start, end))
-            route_cells.update((start, end))
-            for cell in (start, end):
-                if not in_region(cell, region):
-                    out.append(
-                        Violation(
-                            ViolationCode.ROUTE_OUT_OF_BOUNDS,
-                            f"route for net {r.net_id!r} passes through {cell}, out of bounds",
-                        )
-                    )
             if not is_unit_step(start, end):
                 out.append(
                     Violation(
@@ -601,17 +592,26 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
                         f"(a route hop must move exactly one cell)",
                     )
                 )
-        if not is_connected(edges):
+        if not (is_connected(edges) or _is_one_block_pipe(r)):
             out.append(
                 Violation(
                     ViolationCode.ROUTE_DISCONTINUOUS,
-                    f"route for net {r.net_id!r} is empty or not a single connected path",
+                    f"route for net {r.net_id!r} is empty or not a single connected path (with no "
+                    f"segments, only a pipe with every terminal on one block is a route)",
                 )
             )
         # A coarse cell that the placer/router treats as solid must not also carry a route -
         # the abstraction would otherwise certify a pipe running through a machine body or a
-        # reserved cell (docs/ARCHITECTURE.md: cell->block realizability).
-        for cell in sorted(route_cells):
+        # reserved cell (docs/ARCHITECTURE.md: cell->block realizability). Read off ``cells()``
+        # rather than the segments, so a one-block pipe's block is checked like any other.
+        for cell in sorted(r.cells()):
+            if not in_region(cell, region):
+                out.append(
+                    Violation(
+                        ViolationCode.ROUTE_OUT_OF_BOUNDS,
+                        f"route for net {r.net_id!r} passes through {cell}, out of bounds",
+                    )
+                )
             if cell in all_body_cells:
                 out.append(
                     Violation(
@@ -663,6 +663,16 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
             )
         if routed_here:
             _check_routed_net_endpoints(net, port_dir, port_commodity, out)
+
+
+def _is_one_block_pipe(route: Route) -> bool:
+    """Whether ``route`` is a pipe that is one block: no segments, every terminal on one cell.
+
+    That block is wired straight to each terminal's machine, which is the real GT build when both
+    ends of a net dock on one cell (LayoutResult v3). A cable may not be one, because its gauge
+    lives on its segments and a cable with none states no gauge to check.
+    """
+    return not route.segments and route.commodity is not Commodity.POWER and len(route.cells()) == 1
 
 
 def _check_routed_net_endpoints(
@@ -1157,14 +1167,9 @@ def _check_terminals(problem: InputIR, layout: LayoutResult, out: list[Violation
         net = nets.get(r.net_id)
         if net is None:
             continue  # UNKNOWN_NET already reported by _check_routes
-        route_cells = {
-            cell
-            for seg in r.segments
-            for cell in (
-                (seg.start.x, seg.start.y, seg.start.z),
-                (seg.end.x, seg.end.y, seg.end.z),
-            )
-        }
+        # With no segments these are the terminals' own cells, so each is trivially on the route;
+        # ROUTE_DISCONTINUOUS is what refuses them unless they are all one block.
+        route_cells = r.cells()
         endpoint_keys = {(ep.machine_id, ep.port_id) for ep in net.endpoints}
         have = {(t.machine_id, t.port_id) for t in r.terminals}
         for ep in net.endpoints:
@@ -1667,9 +1672,8 @@ def _check_route_capacity(_problem: InputIR, layout: LayoutResult, out: list[Vio
     # ``_problem`` is unused here; kept for the uniform ``_check_*(problem, layout, out)`` dispatch.
     owners: dict[Cell, set[str]] = defaultdict(set)
     for r in layout.routes:
-        for seg in r.segments:
-            owners[(seg.start.x, seg.start.y, seg.start.z)].add(r.net_id)
-            owners[(seg.end.x, seg.end.y, seg.end.z)].add(r.net_id)
+        for cell in r.cells():  # a one-block pipe's block included
+            owners[cell].add(r.net_id)
     for cell in sorted(owners):
         nets = owners[cell]
         if len(nets) > 1:
