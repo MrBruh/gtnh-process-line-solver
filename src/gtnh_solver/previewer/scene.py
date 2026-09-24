@@ -15,6 +15,7 @@ WebGL last mile stays a thin static template while the mapping here is pure and 
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 from gtnh_solver.dataset import tier_voltage
@@ -64,6 +65,38 @@ _THREE_SLOT_NORMALS: tuple[Cell, ...] = (
     (0, 0, 1),
     (0, 0, -1),
 )
+
+#: What :func:`block_face_cover` says about one face of a block cube. EXPOSED is always drawn.
+#: COVERED sits against a block on its own layer, so nothing can ever see it. CAP is a top or bottom
+#: face against a block on the next layer: hidden while every layer shows, but the only lid that
+#: layer has once the slider isolates it, so the viewer draws it then and only then.
+FACE_EXPOSED, FACE_COVERED, FACE_CAP = 0, 1, 2
+
+
+def block_face_cover(cells: Iterable[Cell]) -> dict[Cell, tuple[int, ...]]:
+    """For each block cell, what covers each of its six faces, in three.js ``BoxGeometry`` order.
+
+    The viewer draws every block as a full, opaque unit cube, so a face flush against another block
+    is invisible whatever the block is in game. On the nitrobenzene lines that is two faces in
+    three, and the viewer used to draw each of them as a draw call of its own, which is what made a
+    large preview lag. Only a block covers a face: a pipe is thinner than a block and a placeholder
+    machine box is inset from its cell, so a face beside either still shows.
+
+    A face is judged against the blocks alone, because the layer slider is the one thing that hides
+    blocks, and it hides whole layers. So a face covered on its own layer stays covered in every view,
+    and only a top or bottom face can be uncovered by it (``FACE_CAP``).
+    """
+    occupied = set(cells)
+    cover: dict[Cell, tuple[int, ...]] = {}
+    for x, y, z in occupied:
+        slots = []
+        for dx, dy, dz in _THREE_SLOT_NORMALS:
+            if (x + dx, y + dy, z + dz) not in occupied:
+                slots.append(FACE_EXPOSED)
+            else:
+                slots.append(FACE_CAP if dy else FACE_COVERED)
+        cover[(x, y, z)] = tuple(slots)
+    return cover
 
 
 #: Route colours by commodity. The single source: routes carry their colour, and the scene's

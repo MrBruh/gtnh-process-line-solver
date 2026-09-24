@@ -53,6 +53,16 @@ hover does not exist there, so a **tap** picks and the tag *latches* until the n
 finger that lifts would take a tag that followed it. A drag or a pinch is not a tap, so orbiting
 never flashes one.
 
+**A large line has to orbit smoothly**, and what decides that is draw calls, not triangles: the GPU
+draws a whole layout's triangles in no time, but the CPU hands it each draw call separately. So the
+blocks of a layer are merged into one mesh, and the pipes of one net on one layer into another
+(those being the only things the slider and a solo hide), with a group per material and one shared
+material per texture; the faces another block hides are dropped (``cover``, worked out in
+``scene.py`` where it is tested), except the top and bottom lids a layer needs once the slider
+isolates it. Hover picking reads what it hit off a per-triangle owner list, and at most once a
+frame. And a frame is drawn only when something changed. On ev-nitrobenzene that took a frame from
+19,193 draw calls to 680, and the CPU's time on each from about 90 ms to 2.
+
 The scene JSON is *inlined*, not fetched, so there is no ``file://`` CORS problem. The page is
 assembled by replacing tokens (NOT an f-string / ``.format``) so the JS/CSS braces stay literal:
 a shell with ``__CSP__``, ``__STYLE__``, ``__IMPORTMAP__`` and ``__VIEWER_JS__`` holes, and the
@@ -247,6 +257,13 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
+// The page draws a frame only when something on it changed: the camera moved (or is still easing
+// to a stop), a texture finished loading, or a control changed what shows. A model standing still
+// on screen costs nothing, where a render every frame kept a laptop's GPU busy for a picture that
+// never changed. Everything that changes the picture calls requestRender(); animate() does the rest.
+let dirty = true;
+function requestRender() { dirty = true; }
+
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#1a1d22');
 
@@ -285,9 +302,56 @@ grid.position.set(Math.round(center.x), bmin.y, Math.round(center.z));
 scene.add(grid);
 scene.add(new THREE.Box3Helper(new THREE.Box3(bmin.clone(), bmax.clone()), new THREE.Color('#46506a')));
 
-const layered = [];   // { obj, minY, maxY }
-function track(obj, minY, maxY) { layered.push({ obj, minY, maxY }); scene.add(obj); }
+const layered = [];   // { obj, minY, maxY, cap }; `cap`: shown only when its layer is isolated
+function track(obj, minY, maxY, cap = false) { layered.push({ obj, minY, maxY, cap }); scene.add(obj); }
 function cc(c) { return new THREE.Vector3(c[0] + 0.5, c[1] + 0.5, c[2] + 0.5); }
+
+// Blocks and pipes are drawn MERGED: every face of a layer's blocks, or of one net's pipes on one
+// layer, goes into one Batch, which becomes ONE mesh with a group per material. They used to be a
+// mesh per block with six materials each, and three.js issues a draw call per material of a mesh,
+// so every face was a draw call of its own carrying two triangles. ev-nitrobenzene issued 19,193 a
+// frame, and the CPU spent about 90 ms a frame just handing them to the GPU, which is the lag a
+// large preview had. A draw call costs the same whether it carries two triangles or twenty thousand.
+//
+// A merged mesh has no per-block object for the hover raycast to hit, so the Batch keeps an OWNER
+// per triangle - what the name tag should say about it - in the order the index buffer ends up in,
+// which is the order the raycaster's faceIndex counts in.
+class Batch {
+  constructor() { this.pos = []; this.nor = []; this.uv = []; this.groups = new Map(); }
+  // Face `f` of box geometry `g` (BoxGeometry's layout: 4 vertices and 6 indices per face, faces in
+  // three.js material order), moved to world position `at`, drawn in `mat`, named by `owner`.
+  face(g, f, at, mat, owner) {
+    let group = this.groups.get(mat);
+    if (!group) { group = { idx: [], owners: [] }; this.groups.set(mat, group); }
+    const P = g.attributes.position, N = g.attributes.normal, U = g.attributes.uv, I = g.index;
+    const base = this.pos.length / 3;
+    for (let v = f * 4; v < f * 4 + 4; v++) {
+      this.pos.push(P.getX(v) + at[0], P.getY(v) + at[1], P.getZ(v) + at[2]);
+      this.nor.push(N.getX(v), N.getY(v), N.getZ(v));
+      this.uv.push(U.getX(v), U.getY(v));
+    }
+    for (let k = f * 6; k < f * 6 + 6; k++) group.idx.push(I.getX(k) - f * 4 + base);
+    group.owners.push(owner, owner);   // a face is two triangles
+  }
+  mesh() {
+    if (this.groups.size === 0) return null;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(this.nor, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
+    const idx = [], owners = [], mats = [];
+    for (const [mat, group] of this.groups) {
+      geo.addGroup(idx.length, group.idx.length, mats.length);
+      mats.push(mat);
+      for (const i of group.idx) idx.push(i);   // a loop, not a spread: a layer can be 100k indices
+      for (const o of group.owners) owners.push(o);
+    }
+    geo.setIndex(idx);
+    const mesh = new THREE.Mesh(geo, mats);
+    mesh.userData.owners = owners;
+    return mesh;
+  }
+}
 
 // A cable or pipe is materially ISOTROPIC - one sprite on all six faces, its shape coming from the
 // geometry - so a box needs only the two looks GT itself draws: the OPEN end the cable runs out of
@@ -458,7 +522,7 @@ const TEXTURES_ACTIVE = SCENE.texturesActive || {};
 const _texCache = {}, _texCacheActive = {};
 const stateMaterials = [];   // { mat, idle, active } for faces whose running skin actually differs
 function loadTex(uri) {
-  const tex = new THREE.TextureLoader().load(uri);
+  const tex = new THREE.TextureLoader().load(uri, requestRender);   // decoded after the first frame
   tex.magFilter = THREE.NearestFilter;    // crisp pixel art, no bilinear smear
   tex.minFilter = THREE.NearestFilter;
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -482,8 +546,8 @@ function flatMaterial(m) {
   if (m.role === 'source') { mm.emissive = new THREE.Color(m.color); mm.emissiveIntensity = 0.45; }
   return mm;
 }
-// A per-block cube's six materials from its baked-face pool keys (three.js material order). A face
-// with no baked texture gets Minecraft's own missing-texture checkerboard - magenta and black, 2x2 -
+// A block face's material, from its baked-face pool key. A face with no baked texture gets
+// Minecraft's own missing-texture checkerboard - magenta and black, 2x2 -
 // instead of a neutral grey. Grey was actively misleading: a great many GT casings ARE plain grey,
 // so an unresolved sprite was indistinguishable from a correctly rendered one and the gap stayed
 // invisible in the very view meant to reveal it (GitHub #98 asks for gaps to be loud, not silent).
@@ -503,20 +567,26 @@ const _MISSING = (() => {
   tex.colorSpace = THREE.SRGBColorSpace;
   return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, metalness: 0.05 });
 })();
-function blockMaterials(faces) {
-  return faces.map((key) => {
-    const tex = faceTexture(key);
-    if (!tex) return _MISSING;
+// ONE material per texture, shared by every face that shows it. A casing covers hundreds of blocks,
+// and a material per face made 15,050 of them on ev-nitrobenzene; sharing is also what lets a
+// merged layer be a few groups rather than one per face.
+const _blockMats = {};
+function blockMaterial(key) {
+  const tex = faceTexture(key);
+  if (!tex) return _MISSING;
+  if (!(key in _blockMats)) {
     const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, metalness: 0.03 });
     const active = faceTextureActive(key);
     if (active) stateMaterials.push({ mat, idle: tex, active });   // swappable by #stateToggle
-    return mat;
-  });
+    _blockMats[key] = mat;
+  }
+  return _blockMats[key];
 }
 
 const centerById = {}, sizeById = {}, expandedById = {};
-// Hover identification (#): every machine box, per-block cube AND route block is a raycast target
-// tagged with what it is, so hovering any of them floats a tag above it - the textures alone don't
+// Hover identification (#): every machine box, block AND route block is a raycast target that says
+// what it is (a merged mesh through the owner of the triangle hit, see Batch), so hovering any of
+// them floats a tag above it - the textures alone don't
 // say which machine is which, and one pipe of a crossing bundle looks like the next. nameById maps
 // a machine id to its label; contentsById to what a boundary storage holds (#155), which is the
 // only thing that tells four identical Super Tanks apart. A machine that holds nothing keeps the
@@ -554,18 +624,41 @@ for (const m of SCENE.machines) {
   track(plane, minY, maxY);
 }
 
-// Per-block cubes: one nearest-filtered 1x1x1 cube per constituent block of every expanded machine
+// Per-block cubes: a nearest-filtered 1x1x1 cube per constituent block of every expanded machine
 // (SCENE.blocks), each of its six faces textured from the baked pool key the scene resolved. This is
 // the principle-6 render - a multiblock shows its casings, coils, glass, and hatch faces as distinct
 // blocks instead of one stretched box. Blocks sit flush (real GT blocks touch); the per-block texture
 // pattern is what makes the internal structure legible.
+//
+// Drawn merged, one Batch per layer, and only the faces that can be seen: `cover` (from the scene,
+// previewer.scene.block_face_cover) drops the two faces in three that sit against another block.
+// A top or bottom face against the next layer is a CAP: hidden while every layer shows, but the lid
+// a layer needs once the slider isolates it, so each layer keeps its caps in a second mesh that
+// only an isolated layer shows. A block with no `cover` is drawn whole.
+const FACE_COVERED = 1, FACE_CAP = 2;   // previewer.scene's FACE_* values
+const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
+const blockLayers = new Map();   // y -> { main: Batch, caps: Batch }
+const machineOwner = {};         // machine id -> the hover owner every one of its faces shares
 for (const b of (SCENE.blocks || [])) {
-  const geo = new THREE.BoxGeometry(1, 1, 1);
-  const cube = new THREE.Mesh(geo, blockMaterials(b.texture));
-  cube.position.set(b.cell[0] + 0.5, b.cell[1] + 0.5, b.cell[2] + 0.5);
-  cube.userData.machineId = b.machine;   // hover any block -> its parent machine's name tag
-  hoverables.push(cube);
-  track(cube, b.cell[1], b.cell[1]);
+  const y = b.cell[1];
+  let lb = blockLayers.get(y);
+  if (!lb) { lb = { main: new Batch(), caps: new Batch() }; blockLayers.set(y, lb); }
+  if (!(b.machine in machineOwner)) machineOwner[b.machine] = { machineId: b.machine };
+  const at = [b.cell[0] + 0.5, b.cell[1] + 0.5, b.cell[2] + 0.5];
+  for (let f = 0; f < 6; f++) {
+    const cover = b.cover ? b.cover[f] : 0;
+    if (cover === FACE_COVERED) continue;
+    (cover === FACE_CAP ? lb.caps : lb.main)
+      .face(UNIT_BOX, f, at, blockMaterial(b.texture[f]), machineOwner[b.machine]);
+  }
+}
+for (const [y, lb] of blockLayers) {
+  for (const [batch, cap] of [[lb.main, false], [lb.caps, true]]) {
+    const mesh = batch.mesh();
+    if (!mesh) continue;
+    hoverables.push(mesh);   // hover any block -> its parent machine's name tag, via the owners
+    track(mesh, y, y, cap);
+  }
 }
 
 // A route is a run of axis-aligned boxes: per cell, a uniform cross-section core plus one arm from
@@ -580,28 +673,43 @@ for (const b of (SCENE.blocks || [])) {
 // faces - coplanar and overlapping on the outside of the run - tore against each other. Flat
 // coloured bars hid it completely; it surfaced the instant those faces carried textures. In Python
 // "no two boxes of a cell overlap" is a property test.
-// Every route block, so the legend's solo filter can hide the ones that are not the picked net
-// (#240). Kept apart from `hoverables`, which also holds machine boxes and per-block cubes.
+// Every route mesh, so the legend's solo filter can hide the ones that are not the picked net
+// (#240). Kept apart from `hoverables`, which also holds machine boxes and the block layers.
+//
+// Merged like the blocks, one Batch per net per layer, because those are the two things that hide
+// a pipe: a solo hides every other net, and the slider every other layer. So each mesh is wholly
+// shown or wholly hidden, and hiding stays a flag rather than a rebuild.
 const routeMeshes = [];
 let solo = null;   // the soloed net's `netId`, or null for every net at once
+const routeBatches = new Map();   // netId -> (y -> Batch)
 for (const r of SCENE.routes) {
+  if (!routeBatches.has(r.netId)) routeBatches.set(r.netId, new Map());
+  const byLayer = routeBatches.get(r.netId);
   for (const e of (r.cells || [])) {
     const y = e.cell[1];
+    if (!byLayer.has(y)) byLayer.set(y, new Batch());
+    // Hover -> what this pipe or cable carries (#155). Owned by both the ROUTE and the CELL: the
+    // route says what flows and how fast, the cell says where to float the tag, since one route
+    // spans a whole layout and its middle is nowhere near the block under the pointer.
+    const owner = { route: r, cell: e.cell };
     for (const b of e.boxes) {
       const geo = new THREE.BoxGeometry(b.size[0], b.size[1], b.size[2]);
       const faces = pipeFaces(e.tex, b.open);
       if (faces) gtBlockUVs(geo, b.center, e.cell);   // sample the sprite the way Minecraft does
-      const mesh = new THREE.Mesh(geo, faces || routeFlat(r.color));
-      mesh.position.set(b.center[0], b.center[1], b.center[2]);
-      // Hover -> what this pipe or cable carries (#155). Tagged with both the ROUTE and the CELL:
-      // the route says what flows and how fast, the cell says where to float the tag, since one
-      // route spans a whole layout and its middle is nowhere near the block under the pointer.
-      mesh.userData.route = r;
-      mesh.userData.cell = e.cell;
-      hoverables.push(mesh);
-      routeMeshes.push(mesh);
-      track(mesh, y, y);
+      for (let f = 0; f < 6; f++)
+        byLayer.get(y).face(geo, f, b.center, faces ? faces[f] : routeFlat(r.color), owner);
+      geo.dispose();
     }
+  }
+}
+for (const [netId, byLayer] of routeBatches) {
+  for (const [y, batch] of byLayer) {
+    const mesh = batch.mesh();
+    if (!mesh) continue;
+    mesh.userData.netId = netId;
+    hoverables.push(mesh);
+    routeMeshes.push(mesh);
+    track(mesh, y, y);
   }
 }
 
@@ -657,7 +765,9 @@ function applyLayer() {
   const v = parseInt(layer.value, 10);
   const all = v < bmin.y;
   layerVal.textContent = all ? 'all' : String(v);
-  for (const it of layered) it.obj.visible = all || (it.minY <= v && v <= it.maxY);
+  // A layer's caps (its block faces against the next layer) show only when that layer is alone.
+  for (const it of layered)
+    it.obj.visible = it.cap ? !all && it.minY === v : all || (it.minY <= v && v <= it.maxY);
   if (!arrowsOn) for (const a of arrows) a.visible = false;   // #arrowToggle overrides the layer filter
   // Solo (#240): a net picked in the legend hides every OTHER route, so one run reads end to end
   // through a bundle that is otherwise eight identical noodles. The machines stay, because a net
@@ -665,7 +775,8 @@ function applyLayer() {
   // and beside the arrow override, because all three are filters on top of the layer the slider
   // chose rather than competing notions of what is visible.
   if (solo !== null)
-    for (const m of routeMeshes) if (m.userData.route.netId !== solo) m.visible = false;
+    for (const m of routeMeshes) if (m.userData.netId !== solo) m.visible = false;
+  requestRender();
 }
 layer.addEventListener('input', applyLayer);
 document.getElementById('reset').addEventListener('click', resetCamera);
@@ -683,6 +794,7 @@ if (stateMaterials.length === 0) {
     running = !running;
     stateToggle.textContent = 'state: ' + (running ? 'running' : 'idle');
     for (const s of stateMaterials) { s.mat.map = running ? s.active : s.idle; s.mat.needsUpdate = true; }
+    requestRender();
   });
 }
 
@@ -909,6 +1021,7 @@ window.addEventListener('resize', () => {
   // rotated phone wraps it differently. Forgetting the text makes the next frame rebuild and
   // re-measure it.
   _tagText = null;
+  requestRender();
 });
 
 // Hover name tag: raycast the pointer against the machine boxes, block cubes and route blocks, and
@@ -957,18 +1070,28 @@ function pickAt(ev) {
   pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(pointer, camera);
-  const hit = raycaster.intersectObjects(hoverables, false).find((h) => h.object.visible);
-  const what = hit ? hit.object.userData : null;
+  // Only what is showing: the slider and a solo hide whole meshes, and testing a hidden one costs
+  // as much as a shown one for a hit that could only be thrown away.
+  const hit = raycaster.intersectObjects(hoverables.filter((o) => o.visible), false)[0];
+  if (!hit) return null;
+  // A merged mesh names its hit through the triangle's owner (see Batch); a placeholder machine
+  // box is still a mesh of its own and carries its machine id directly.
+  const owners = hit.object.userData.owners;
+  const what = owners ? owners[hit.faceIndex] : hit.object.userData;
   if (!what) return null;
   return what.route ? routeHover(what.route, what.cell) : machineHover(what.machineId);
 }
 // Mouse only: a touch 'pointermove' is a finger dragging the camera, and picking along it would
 // flash a tag on every orbit. Touch gets the tap handler below instead.
+//
+// Picked at most once a frame, in animate(): a mouse can report several moves per frame, and a
+// merged layer is thousands of triangles to test, so only the latest position is worth picking.
+let pendingPick = null;
 renderer.domElement.addEventListener('pointermove', (ev) => {
-  if (ev.pointerType === 'mouse') hover = pickAt(ev);
+  if (ev.pointerType === 'mouse') pendingPick = ev;
 });
 renderer.domElement.addEventListener('pointerleave', (ev) => {
-  if (ev.pointerType === 'mouse') hover = null;   // a finger's 'leave' is just it lifting
+  if (ev.pointerType === 'mouse') { pendingPick = null; hover = null; }   // a finger's 'leave' is it lifting
 });
 
 // Touch has no hover, so on a phone the name tag - the only thing that says which of eight
@@ -1026,11 +1149,19 @@ function updateNametag() {
   nametag.style.display = 'block';
 }
 
+// The camera moving is the commonest reason to draw. OrbitControls updates itself on a drag, a
+// wheel or an arrow key and says so with 'change'; its update() below is what keeps easing the camera
+// to a stop after a drag (damping), and it returns true for every frame that still moves.
+controls.addEventListener('change', requestRender);
 function animate() {
   requestAnimationFrame(animate);
-  controls.update();
-  updateNametag();
-  renderer.render(scene, camera);
+  if (pendingPick) { hover = pickAt(pendingPick); pendingPick = null; }
+  const moved = controls.update();
+  updateNametag();   // the tag is a DOM element, not part of the frame, so it needs no render
+  if (moved || dirty) {
+    dirty = false;
+    renderer.render(scene, camera);
+  }
 }
 applyLayer();
 animate();

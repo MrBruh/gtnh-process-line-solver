@@ -45,6 +45,7 @@ from gtnh_solver.dataset.roots import extractor_hint, resolve_dataset_path
 from gtnh_solver.dataset.schema import MultiblockDoc, Variant, load_multiblock_doc
 
 from .bake import BakeUnavailableError, bake_layers
+from .scene import block_face_cover
 
 _log = logging.getLogger(__name__)
 
@@ -1106,8 +1107,9 @@ def texturize_scene(
 
     Loads the docs + layered manifest, expands each machine whose type has a committed doc, resolves
     and bakes each cube face, and writes ``scene["blocks"]`` (the per-block cubes, each carrying a
-    six-slot ``texture`` list of pool keys) plus ``scene["textures"]`` (pool key -> baked ``data:``
-    URI). Every expanded machine is flagged ``expanded`` so the viewer draws its cubes instead of a
+    six-slot ``texture`` list of pool keys and a six-slot ``cover`` saying which faces another block
+    hides, :func:`~gtnh_solver.previewer.scene.block_face_cover`) plus ``scene["textures"]`` (pool
+    key -> baked ``data:`` URI). Every expanded machine is flagged ``expanded`` so the viewer draws its cubes instead of a
     box; machines with no doc (or no baked face) keep their placeholder box. Missing data, no PNGs,
     or no Pillow all degrade to all-placeholder. Returns a :class:`TextureSummary`.
 
@@ -1277,9 +1279,12 @@ def texturize_scene(
             )
 
     # Null out face keys that did not bake so the viewer draws a neutral placeholder there, but keep
-    # every cube so the machine's full block structure renders (never a single stretched box).
+    # every cube so the machine's full block structure renders (never a single stretched box). And
+    # say which faces sit against another block, so the viewer draws only the ones that can be seen.
+    cover = block_face_cover(tuple(rendered["cell"]) for rendered in cubes)
     for rendered in cubes:
         rendered["texture"] = [key if key in pool else None for key in rendered["texture"]]
+        rendered["cover"] = list(cover[tuple(rendered["cell"])])
     scene["blocks"] = cubes
     scene["textures"] = pool
     scene["texturesActive"] = pool_active
