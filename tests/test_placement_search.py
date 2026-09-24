@@ -10,6 +10,8 @@ from __future__ import annotations
 import math
 import random
 
+import pytest
+
 from gtnh_solver.ir import (
     CellBox,
     CellCoord,
@@ -27,9 +29,11 @@ from gtnh_solver.ir import (
     Port,
 )
 from gtnh_solver.ir.geometry import (
+    FACE_DELTAS,
     Cell,
     box_in_region,
     front_on_boundary,
+    in_region,
     occupied_cells,
     rotated_footprint,
 )
@@ -38,6 +42,7 @@ from gtnh_solver.placement.search import (
     _apply_occupied_delta,
     _AutoPair,
     _box_offsets,
+    _dockable_cells,
     _marginal_insertion_cost,
     _occupancy_grid,
     _placed_invariants,
@@ -717,3 +722,72 @@ def test_the_grid_never_drifts_from_occupied_during_a_recreate() -> None:
 
     assert result.ok
     assert seen > 0, "the recreate move never ran; the invariant went unchecked"
+
+
+# ------------------------------------------------------- the dockable-cell shell (#256)
+
+
+def _dockable_by_scan(
+    placement: Placement,
+    machine: Machine,
+    occupied: set[Cell],
+    region: CellBox,
+    reserved: set[Cell],
+) -> set[Cell]:
+    """The dockable set built the way it was before #256: every body cell stepped through every
+    non-front face, in ``FACE_DELTAS`` order, and filtered as it goes."""
+    body = tuple(occupied_cells(placement.cell, machine.footprint, placement.orientation))
+    cells: set[Cell] = set()
+    for face, (dx, dy, dz) in FACE_DELTAS.items():
+        if face is placement.orientation:
+            continue
+        for bx, by, bz in body:
+            cand = (bx + dx, by + dy, bz + dz)
+            if cand in occupied or cand in reserved:
+                continue
+            if in_region(cand, region):
+                cells.add(cand)
+    return cells
+
+
+@pytest.mark.parametrize("front", list(Facing))
+def test_dockable_cells_match_the_face_by_body_scan_in_iteration_order(front: Facing) -> None:
+    """The shell of precomputed offsets must give the set the full scan gave, in the same order.
+
+    Equal as sets is not enough. ``_face_shortfall`` sums floats over the set, so a set that held
+    the same cells but iterated them differently could round differently, move the cost in its
+    last bit and flip an annealing decision - a layout change with no bug anywhere to point at. The
+    order survives only if the shell inserts the surviving cells in the scan's order, so the lists
+    are compared, not the sets. Swept over box shapes (so a rotation swaps unequal extents), every
+    facing, origins against the region walls, and neighbours and reserved cells scattered around.
+    """
+    rng = random.Random(0)
+    region = CellBox(sx=9, sy=6, sz=9)
+    checked = 0
+    for sx in range(1, 5):
+        for sy in range(1, 4):
+            for sz in range(1, 5):
+                machine = Machine(
+                    id="m",
+                    type="m",
+                    footprint=CellBox(sx=sx, sy=sy, sz=sz),
+                    voltage_tier="LV",
+                    orientation_options=[Facing.NORTH],
+                )
+                box = rotated_footprint(machine.footprint, front)
+                for _ in range(3):
+                    x = rng.randrange(region.sx - box.sx + 1)
+                    y = rng.randrange(region.sy - box.sy + 1)
+                    z = rng.randrange(region.sz - box.sz + 1)
+                    placement = at("m", x, y, z, orientation=front)
+                    # The machine's own body is always in `occupied`: that is the precondition the
+                    # shell leans on to drop the offsets that land back inside it.
+                    occupied = set(occupied_cells(placement.cell, machine.footprint, front))
+                    for _ in range(40):
+                        occupied.add((rng.randrange(9), rng.randrange(6), rng.randrange(9)))
+                    reserved = {(rng.randrange(9), rng.randrange(6), rng.randrange(9))}
+                    got = _dockable_cells(placement, machine, occupied, region, reserved)
+                    want = _dockable_by_scan(placement, machine, occupied, region, reserved)
+                    assert list(got) == list(want), (box, front, (x, y, z))
+                    checked += 1
+    assert checked == 4 * 3 * 4 * 3

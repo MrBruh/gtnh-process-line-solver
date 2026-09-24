@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from functools import cache
+from itertools import product
 
 from pydantic import Field
 
@@ -123,12 +124,15 @@ def occupied_cells(origin: CellCoord, footprint: CellBox, orientation: Facing) -
     validates clean and cannot be built). Making it required turns every such caller into a type
     error instead. The validator does not use this function at all; it expands independently
     (``validator/_geometry.body_cells``).
+
+    Built on ``itertools.product`` rather than three nested ``for`` loops: the order is the same
+    (x outermost, z innermost) and so are the tuples, but no Python frame resumes per cell. A solve
+    takes millions of cells from here, and on 3.14 each resume also re-read ``origin``'s fields
+    through pydantic's replaced ``__dict__``, which that interpreter cannot specialize (#256).
     """
+    x, y, z = origin.x, origin.y, origin.z
     box = rotated_footprint(footprint, orientation)
-    for dx in range(box.sx):
-        for dy in range(box.sy):
-            for dz in range(box.sz):
-                yield (origin.x + dx, origin.y + dy, origin.z + dz)
+    return product(range(x, x + box.sx), range(y, y + box.sy), range(z, z + box.sz))
 
 
 def rotated_slot(offset: Cell, footprint: CellBox, orientation: Facing) -> Cell:
