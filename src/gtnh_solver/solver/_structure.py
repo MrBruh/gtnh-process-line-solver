@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from gtnh_solver.ir import Commodity, InputIR, Placement, Route
+from gtnh_solver.ir import InputIR, Placement, Route
 from gtnh_solver.ir.geometry import Cell, occupied_cells
 from gtnh_solver.placement import Objective
 
@@ -54,21 +54,26 @@ def structure_quality(
     """Rank an assembled structure; smaller-lexicographic is better.
 
     The ``objective``'s compactness metric leads (``footprint`` = floor area, ``volume`` =
-    enclosing box, ``balanced`` = their sum); real power cable cells come second - only a routed
-    layout knows them (placement-time proxies cannot see dock faces or shared taps) - and the
-    other compactness metric breaks ties toward the smaller build.
+    enclosing box, ``balanced`` = their sum); the real route cells come second, pipes and cable
+    alike - only a routed layout knows them (placement-time proxies cannot see dock faces or shared
+    taps) - and the other compactness metric breaks ties toward the smaller build.
+
+    Pipes count as well as cable because a pipe block is built exactly like a cable block, and a
+    tighter layout is one that needs fewer of either: with cable alone, two attempts of one
+    footprint ranked the same however many pipes each laid. The power-source repair pass ranks on
+    this key too, and there the pipes are the same for every candidate, so they cannot change which
+    pose wins.
     """
     cells = structure_cells(problem, placements, routes)
     if not cells:
         return (0, 0, 0)
-    power_cells: set[Cell] = set()
+    route_cells: set[Cell] = set()
     for r in routes:
-        if r.commodity is Commodity.POWER:
-            power_cells.update(r.cells())
+        route_cells.update(r.cells())
     footprint, layers = footprint_and_layers(cells)
     volume = footprint * layers
     if objective == "volume":
-        return (volume, len(power_cells), footprint)
+        return (volume, len(route_cells), footprint)
     if objective == "balanced":
-        return (footprint + volume, len(power_cells), volume)
-    return (footprint, len(power_cells), volume)
+        return (footprint + volume, len(route_cells), volume)
+    return (footprint, len(route_cells), volume)

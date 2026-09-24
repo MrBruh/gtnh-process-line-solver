@@ -37,7 +37,7 @@ is also where layout *quality* is judged: cheap placement-time proxies cannot se
 shared cable taps, so the real per-segment cable cost is only knowable on a routed layout. The
 loop is a bounded **multi-start grid** - SA weight modes x seeds - where every attempt is fully
 routed + validated and the best VALID layout by the requested objective's quality ranking
-(compactness metric, then real power cable cells, then the other metric) is kept, not
+(compactness metric, then real route cells - pipes and cable - then the other metric) is kept, not
 first-valid-wins. The footprint weighting always participates as the explorer: it generates the
 stacked, cable-dense candidates whose routed structure often wins the volume/balanced rankings
 too. If an attempt leaves nets unrouted - or lands a machine so far from its power source that
@@ -47,6 +47,12 @@ starved power trunk); with no valid layout yet in hand, it stops early when re-p
 help (a non-routing defect, or the same nets failing again). It is **deterministic** (a bounded
 grid keyed off ``seed`` + the penalties, no wall-clock), so a given input always yields the same
 layout.
+
+One candidate comes from outside the grid. A line that is one chain of banks of parallel single
+blocks has a compact layout the annealer does not reach, each bank a column and each pair of stages
+sharing one straight pipe run (``placement.banks``). It is routed first and ranked with the rest,
+so it wins only where the routed structure really is smaller; on any other line there is no such
+candidate and the loop is exactly the grid.
 
 ``solve(..., optimize=False)`` is the **fast** path: a single constructive placement with no
 annealing and no feedback loop (near-instant, simpler layout), still validated. The two modes are
@@ -67,6 +73,7 @@ from gtnh_solver.ir import (
 )
 from gtnh_solver.placement import (
     Objective,
+    bank_columns,
     crowded_machines,
     optimize_placement,
     place,
@@ -135,6 +142,13 @@ def solve(
     best_quality: tuple[int, int, int] | None = None
     best_partial: LayoutResult | None = None
     best_failures = -1
+    # The bank-column candidate (module docstring). Only a VALID result is kept: it is not an
+    # annealed placement, so its failures are no evidence about the nets the penalties steer.
+    columns = bank_columns(problem)
+    if columns is not None and not crowded_machines(problem, columns):
+        layout, _ = _assemble(problem, columns, seed, objective)
+        if layout.status is LayoutStatus.VALID:
+            best_valid, best_quality = layout, _quality(problem, layout, objective)
     # The multi-start grid: SA weight modes x seeds, always ranked by the REQUESTED objective's
     # quality. The footprint weighting is the universal explorer - it is what generates stacked,
     # dense candidates, whose routed structure often wins the volume/balanced rankings too (a

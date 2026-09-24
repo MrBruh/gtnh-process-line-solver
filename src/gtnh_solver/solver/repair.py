@@ -59,7 +59,7 @@ from gtnh_solver.router import PowerRouteResult, route_power
 from ._structure import structure_quality
 
 #: A candidate's rank: unroutable power nets first (a relocation that rescues one always wins),
-#: then the loop's own (compactness, cable cells, compactness) quality key.
+#: then the loop's own (compactness, route cells, compactness) quality key.
 _Score = tuple[int, tuple[int, int, int]]
 
 #: How many of the nearest legal wall poses to really route per source. Measured, not guessed: 20
