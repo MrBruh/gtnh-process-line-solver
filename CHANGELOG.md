@@ -115,6 +115,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **The package imports on Python 3.11 again (#255).** `import gtnh_solver` failed there with
+  `ValueError: mutable default <class 'mappingproxy'> for field claimed is not allowed`, so every
+  entry point, `gtnh-solve` included, failed before doing anything. Two frozen dataclass fields
+  (`AutoAssignment.claimed` and `RouteResult.claimed`) defaulted to `MappingProxyType({})`. Python
+  3.10 lets that through because it only refuses `list`, `dict` and `set` defaults. 3.12 and later
+  let it through because `mappingproxy` gained a `__hash__` there. 3.11 refuses it. Both fields now
+  use a `default_factory`. CI only tests 3.10 and 3.14, so a 3.11 leg is not what pins this: a new
+  test hashes every dataclass default in the package, which fails on every interpreter for anything
+  3.11 would refuse.
 - **A large preview orbits smoothly instead of lagging.** The viewer drew every block as a mesh of
   its own with six materials, and three.js makes a draw call per material, so every face of every
   block was a separate draw call carrying two triangles. On `ev-nitrobenzene` that was 19,193 draw
