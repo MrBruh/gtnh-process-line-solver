@@ -432,6 +432,20 @@ def test_render_html_wires_the_per_net_solo_rows() -> None:
     assert ".net.on" in html  # the soloed row's lit style
 
 
+def test_render_html_makes_every_legend_section_a_fold() -> None:
+    # Each legend section folds under its heading. It is a native <details>, so the page needs no
+    # handler of its own to open or close one, and a screen reader announces it as expandable. The
+    # sections are built at runtime, so what ships is the element, its heading and the style they
+    # share: one coarse marker each (GitHub #94). Remembering a folded section across the legend's
+    # rebuilds is JS no test executes, and is eye-validated.
+    html = render_html(_sand_scene())
+    assert "el('details')" in html  # a section is a disclosure...
+    assert "el('summary'" in html  # ...whose heading is what folds it
+    assert ".sec > summary" in html  # the heading's style
+    for heading in ("'machines'", "'routes'", "'nets'", "'materials'", "'system i/o'"):
+        assert heading in html, f"legend section {heading} is gone"
+
+
 def test_scene_is_deterministic() -> None:
     assert _sand_scene() == _sand_scene()
 
