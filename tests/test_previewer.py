@@ -389,6 +389,32 @@ def test_the_nitrobenzene_super_tanks_are_individually_identifiable(
     assert {"gregtech:gt.metaitem.01@2022", "minecraft:log@32767"} <= chests
 
 
+def test_scene_routes_carry_the_distinct_net_id_the_solo_filter_keys_on(
+    solved_nitrobenzene: tuple[InputIR, LayoutResult],
+) -> None:
+    # The legend's per-net solo (GitHub #240) keys on netId, and it has to: a power route names no
+    # resource at all (`resource` is None), and nothing in a plan says two nets cannot carry the
+    # same fluid. Distinctness is the half that matters for the filter - if two routes shared an
+    # id, the row for one of them would light up the other's pipes too, which is exactly the
+    # confusion the feature exists to end. This line has six fluid nets and three power nets.
+    problem, layout = solved_nitrobenzene
+    ids = [r["netId"] for r in build_scene(problem, layout)["routes"]]
+    assert len(ids) > 1
+    assert all(ids), "a route with no net id cannot be soloed"
+    assert len(set(ids)) == len(ids), f"two routes share a net id: {ids}"
+
+
+def test_render_html_wires_the_per_net_solo_rows() -> None:
+    # The legend's net rows (GitHub #240): each hides every other run so one reads end to end. The
+    # rows are built at runtime out of scene.routes, so what the page itself can be asserted on is
+    # that the section, the row that clears a solo, and the lit state all ship - one coarse marker
+    # each, not the JS that filters the meshes, which is eye-validated (GitHub #94).
+    html = render_html(_sand_scene())
+    assert "'nets'" in html  # the legend section heading
+    assert "show all nets" in html  # the row that clears an active solo
+    assert ".net.on" in html  # the soloed row's lit style
+
+
 def test_scene_is_deterministic() -> None:
     assert _sand_scene() == _sand_scene()
 

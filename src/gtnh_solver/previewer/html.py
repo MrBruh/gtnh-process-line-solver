@@ -25,7 +25,10 @@ so no two surfaces can disagree about what a layout is made of (#4); auto-output
 is a small arrow on each source-machine face perpendicular to the ejecting direction (so one stays
 visible however the machines are packed), drawn for **single-block sources only** - a multiblock
 ejects from a hatch's own face, not from its bounding box, so there is no box face to mark (#153). A side panel lists the
-machine/route legend (materials footnoted as stand-ins where they are) plus the
+machine/route legend (materials footnoted as stand-ins where they are), an inventory of the
+**nets** - what each carries and at what rate, every row a button that *solos* that net by hiding
+every other route, which is how one run reads end to end through a bundle the hover tag can only
+identify a block at a time (#240, keyed on ``netId``: a power route names no resource) - plus the
 system's boundary inputs, outputs, and power (``scene.io``), with a per-tick / per-second rate
 toggle; a flow whose commodity rides ME (``--me``) is marked "via ME" there and in a storage's
 hover tag, because no pipe and no ME block is drawn for it, and an unconnected chest otherwise
@@ -154,6 +157,13 @@ _STYLE = """
   b { color: #aab2bd; font-weight: 600; }
   button { font: inherit; color: #e8eaed; background: #2a2f37; border: 1px solid #3a4150;
            border-radius: 4px; padding: 3px 8px; cursor: pointer; }
+  /* A net row reads as a legend line, not as a control: no chrome until you point at it, and a
+     lit background once it is the soloed one. It stays a real <button> underneath (#240). */
+  .net { display: block; width: 100%; text-align: left; background: none; border: 1px solid
+         transparent; border-radius: 3px; padding: 1px 4px; margin-bottom: 1px; color: inherit; }
+  .net:hover { background: #262b33; }
+  .net.on { background: #2f3742; border-color: #4a5464; }
+  .net.clear { color: #8b94a0; }
   #nametag { position: fixed; z-index: 20; left: 0; top: 0; display: none; pointer-events: none;
              transform: translate(-50%, -100%); background: rgba(20,22,28,0.92);
              border: 1px solid #3a4150; border-radius: 4px; padding: 2px 7px;
@@ -192,6 +202,9 @@ _STYLE = """
     :root { --toggle-h: 44px; }
     button { min-height: 44px; padding: 6px 12px; }
     #hintToggle { min-height: 0; padding: 2px 9px; }
+    /* Net rows are a LIST, and a 31-net build (ev-nitrobenzene) at 44px a row is a drawer you
+       scroll forever. 34px still takes a thumb without turning the legend into a scroll bucket. */
+    .net { min-height: 34px; padding: 4px 6px; }
     #controls input[type=range] { height: 34px; }
   }
 """
@@ -559,6 +572,10 @@ for (const b of (SCENE.blocks || [])) {
 // faces - coplanar and overlapping on the outside of the run - tore against each other. Flat
 // coloured bars hid it completely; it surfaced the instant those faces carried textures. In Python
 // "no two boxes of a cell overlap" is a property test.
+// Every route block, so the legend's solo filter can hide the ones that are not the picked net
+// (#240). Kept apart from `hoverables`, which also holds machine boxes and per-block cubes.
+const routeMeshes = [];
+let solo = null;   // the soloed net's `netId`, or null for every net at once
 for (const r of SCENE.routes) {
   for (const e of (r.cells || [])) {
     const y = e.cell[1];
@@ -574,6 +591,7 @@ for (const r of SCENE.routes) {
       mesh.userData.route = r;
       mesh.userData.cell = e.cell;
       hoverables.push(mesh);
+      routeMeshes.push(mesh);
       track(mesh, y, y);
     }
   }
@@ -633,6 +651,13 @@ function applyLayer() {
   layerVal.textContent = all ? 'all' : String(v);
   for (const it of layered) it.obj.visible = all || (it.minY <= v && v <= it.maxY);
   if (!arrowsOn) for (const a of arrows) a.visible = false;   // #arrowToggle overrides the layer filter
+  // Solo (#240): a net picked in the legend hides every OTHER route, so one run reads end to end
+  // through a bundle that is otherwise eight identical noodles. The machines stay, because a net
+  // with nothing to run between is not a picture of anything. Applied here, after the layer pass
+  // and beside the arrow override, because all three are filters on top of the layer the slider
+  // chose rather than competing notions of what is visible.
+  if (solo !== null)
+    for (const m of routeMeshes) if (m.userData.route.netId !== solo) m.visible = false;
 }
 layer.addEventListener('input', applyLayer);
 document.getElementById('reset').addEventListener('click', resetCamera);
@@ -748,6 +773,35 @@ function row(parent, ...parts) {
 function viaMe(flow) {
   return flow.me ? ' via ME' : '';
 }
+// The nets, each a row that solos it (#240). Sorted by commodity then resource rather than left in
+// solver order, because the list is how you FIND a net - ev-nitrobenzene has 31 of them - and
+// solver order means nothing to a reader.
+const _COMMODITY_ORDER = { item: 0, fluid: 1, power: 2 };
+function netsByReadingOrder() {
+  return [...SCENE.routes].sort((a, b) =>
+    (_COMMODITY_ORDER[a.commodity] - _COMMODITY_ORDER[b.commodity]) ||
+    String(a.resource || '').localeCompare(String(b.resource || '')) ||
+    String(a.netId).localeCompare(String(b.netId)));
+}
+// One net's row. A <button>, not a styled span: soloing is an action, so it should be reachable by
+// keyboard and announced as pressable without inventing ARIA for a div. The label is the same
+// verbatim resource id the hover tag and the system-i/o panel print, appended through textContent
+// like every other value out of the plan (#111) - a net named `<img src=x onerror=...>` stays text.
+function netRow(r) {
+  const sfx = perSecond ? '/s' : '/t';
+  const button = el('button');
+  button.className = 'net';
+  if (r.netId === solo) button.classList.add('on');
+  button.setAttribute('aria-pressed', String(r.netId === solo));
+  button.append(swatch(r.color), r.resource || r.commodity);
+  if (r.rate != null) button.append('   ' + rateText(r.rate) + ' ' + r.unit + sfx);
+  button.addEventListener('click', () => {
+    solo = r.netId === solo ? null : r.netId;   // pressing the soloed net again clears it
+    applyLayer();
+    renderLegend();
+  });
+  return button;
+}
 function renderLegend() {
   const panel = document.createDocumentFragment();
   row(panel, el('b', 'machines'));
@@ -755,6 +809,18 @@ function renderLegend() {
   row(panel, el('b', 'routes'));
   for (const k of ['item', 'fluid', 'power']) row(panel, swatch(COMMODITY[k]), k);
   row(panel, swatch('#00e5ff'), 'auto-output');
+  // The net inventory, which the page did not have at all: what nets exist, what each carries and
+  // at what rate, and a click to see one of them by itself.
+  if (SCENE.routes.length) {
+    row(panel, el('b', 'nets'));
+    if (solo !== null) {
+      const clear = el('button', 'show all nets');
+      clear.className = 'net clear';
+      clear.addEventListener('click', () => { solo = null; applyLayer(); renderLegend(); });
+      panel.append(clear);
+    }
+    for (const r of netsByReadingOrder()) panel.append(netRow(r));
+  }
   // Which cable/pipe material the routes above are DRAWN as, and - the point of the line - that the
   // choice is representative. GT ships several cables per voltage tier and the solver sizes by
   // gauge, never by material, so a preview that shows Tin without saying so reads as a spec

@@ -7,6 +7,24 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **The 3D preview can show one net by itself (#240).** #155 made it answer "which one is this?":
+  hover or tap a pipe and its tag names the resource, the commodity and the rate. It could not
+  answer the other half. On a line with crossing fluid pipes you could identify any single block
+  and still not follow one run from source to sink, because the other seven are drawn identically
+  and on top of it, and the legend's three colours (item, fluid, power) make every fluid net in
+  `examples/gtnh-nitrobenzene.json` the same blue.
+
+  The legend now carries a **nets** section: one row per route, with its swatch, the resource it
+  carries (verbatim, as the plan spells it, the same as the hover tag and the system-i/o panel) and
+  its rate. Clicking a row hides every other route, so that run reads end to end; the machines stay
+  put, because a net with nothing to run between is not a picture of anything. Clicking it again,
+  or the "show all nets" row, clears it. It composes with the layer slider the way the auto-output
+  arrow toggle already does, as a filter on top of whatever layer the slider chose.
+
+  It keys on `netId`, not on the resource: a power route names no resource, and nothing in a plan
+  says two nets cannot carry the same fluid. The section also gives the page something it did not
+  have at all, which is an inventory of what nets exist.
+
 - **The `--preview` page works on a phone (#237).** It is what a builder opens while standing at
   the build, and three things made that impossible. The legend and system-i/o panel is now a
   **drawer** behind a `legend` button: open at desktop width, folded at phone width, where at 390px
