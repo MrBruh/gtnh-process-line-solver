@@ -212,7 +212,7 @@ _STYLE = """
        scroll forever. 34px still takes a thumb without turning the legend into a scroll bucket. */
     .net { min-height: 34px; padding: 4px 6px; }
     /* A section heading is a tap target too, sized like a net row for the same reason. */
-    .sec > summary { padding: 7px 0; }
+    .sec > summary { min-height: 34px; box-sizing: border-box; padding: 7px 0; }
     #controls input[type=range] { height: 34px; }
   }
 """
