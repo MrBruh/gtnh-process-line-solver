@@ -3,9 +3,9 @@
 ``render_html`` injects ``build_scene``'s dict (as JSON) into a static template: one double-
 clickable ``.html`` that pulls three.js from a CDN and draws the layout. The camera orbits AND
 pans (right-drag / arrow keys), and a layer-by-layer slider isolates each y-level. Machines are
-solid boxes skinned with their real GT casing texture where ``scene.textures`` supplies one (the
-six per-face icons ride ``machine.texture``; a face with no resolved icon draws the missing-texture
-checkerboard, while a machine with no doc at all keeps a flat type-coloured box), with
+solid boxes skinned with their real GT casing texture where ``scene.atlas`` has one (each block's
+six faces name their tiles in ``blocks[].texture``; a face with no resolved icon draws the
+missing-texture checkerboard, while a machine with no doc at all keeps a flat type-coloured box), with
 the machine name on the front face and, since a textured cube shows no name, a hover name tag that
 floats above whatever the pointer picks out (raycast): a machine's name, a Super Chest/Tank's name
 AND what it holds, or - hovering a pipe or cable - the resource that route carries, its commodity
@@ -13,7 +13,7 @@ and its rate, which is the only way to tell one noodle of a crossing bundle from
 Resource ids are shown verbatim as the plan carries them, never a display name invented here; a
 state control swaps every machine between
 its idle and running
-skin where the two differ (the running faces ride ``scene.texturesActive``, default idle); routes
+skin where the two differ (the running tiles ride ``scene.atlas.active``, default idle); routes
 (cables and
 pipes) are drawn GT-style, a small cube at each cell centre with a uniform arm out to the block edge
 for every connection (an adjacent route cell or a docked machine face), at GT's own cross-section
@@ -56,12 +56,14 @@ never flashes one.
 **A large line has to orbit smoothly**, and what decides that is draw calls, not triangles: the GPU
 draws a whole layout's triangles in no time, but the CPU hands it each draw call separately. So the
 blocks of a layer are merged into one mesh, and the pipes of one net on one layer into another
-(those being the only things the slider and a solo hide), with a group per material and one shared
-material per texture; the faces another block hides are dropped (``cover``, worked out in
+(those being the only things the slider and a solo hide). Every baked face lives in one image
+(``scene.atlas``, packed in ``atlas.py``), so every textured face shares one material and a merged
+mesh is a single draw call. The faces another block hides are dropped (``cover``, worked out in
 ``scene.py`` where it is tested), except the top and bottom lids a layer needs once the slider
 isolates it. Hover picking reads what it hit off a per-triangle owner list, and at most once a
-frame. And a frame is drawn only when something changed. On ev-nitrobenzene that took a frame from
-19,193 draw calls to 680, and the CPU's time on each from about 90 ms to 2.
+frame. And a frame is drawn only when something changed. On ev-nitrobenzene the merging took a
+frame from 19,193 draw calls to 680, and the CPU's time on each from about 90 ms to 2; the atlas
+then took it to 97.
 
 The scene JSON is *inlined*, not fetched, so there is no ``file://`` CORS problem. The page is
 assembled by replacing tokens (NOT an f-string / ``.format``) so the JS/CSS braces stay literal:
@@ -319,8 +321,9 @@ function cc(c) { return new THREE.Vector3(c[0] + 0.5, c[1] + 0.5, c[2] + 0.5); }
 class Batch {
   constructor() { this.pos = []; this.nor = []; this.uv = []; this.groups = new Map(); }
   // Face `f` of box geometry `g` (BoxGeometry's layout: 4 vertices and 6 indices per face, faces in
-  // three.js material order), moved to world position `at`, drawn in `mat`, named by `owner`.
-  face(g, f, at, mat, owner) {
+  // three.js material order), moved to world position `at`, drawn in `mat`, named by `owner`. A
+  // `tile` ([u0, v0, u1, v1], see tileUV) squeezes the face's 0..1 UVs into that window of the atlas.
+  face(g, f, at, mat, owner, tile = null) {
     let group = this.groups.get(mat);
     if (!group) { group = { idx: [], owners: [] }; this.groups.set(mat, group); }
     const P = g.attributes.position, N = g.attributes.normal, U = g.attributes.uv, I = g.index;
@@ -328,7 +331,9 @@ class Batch {
     for (let v = f * 4; v < f * 4 + 4; v++) {
       this.pos.push(P.getX(v) + at[0], P.getY(v) + at[1], P.getZ(v) + at[2]);
       this.nor.push(N.getX(v), N.getY(v), N.getZ(v));
-      this.uv.push(U.getX(v), U.getY(v));
+      const u = U.getX(v), w = U.getY(v);
+      if (tile) this.uv.push(tile[0] + u * (tile[2] - tile[0]), tile[1] + w * (tile[3] - tile[1]));
+      else this.uv.push(u, w);
     }
     for (let k = f * 6; k < f * 6 + 6; k++) group.idx.push(I.getX(k) - f * 4 + base);
     group.owners.push(owner, owner);   // a face is two triangles
@@ -357,23 +362,11 @@ class Batch {
 // geometry - so a box needs only the two looks GT itself draws: the OPEN end the cable runs out of
 // (wire core + insulation ring, or the pipe's bore) and the CLOSED face it does not (solid
 // insulation, or the barrel). `open` is the scene's six-slot list saying which faces are ends.
-// Returns null unless BOTH looks baked - half a pipe reads as a bug, where the flat coloured bar
-// beside it is a correct answer (docs/DOMAIN.md, the stand-in rule).
-const _pipeMats = {};
-function pipeMaterial(key) {
-  if (!key) return null;
-  if (!(key in _pipeMats)) {
-    const tex = faceTexture(key);
-    _pipeMats[key] = tex
-      ? new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, metalness: 0.03 })
-      : null;
-  }
-  return _pipeMats[key];
-}
+// Returns each face's atlas tile, or null unless BOTH looks baked - half a pipe reads as a bug, where
+// the flat coloured bar beside it is a correct answer (docs/DOMAIN.md, the stand-in rule).
 function pipeFaces(tex, open) {
-  if (!tex) return null;
-  const o = pipeMaterial(tex.open), c = pipeMaterial(tex.closed);
-  if (!o || !c) return null;
+  if (!tex || !ATLAS || !(tex.open in ATLAS.tiles) || !(tex.closed in ATLAS.tiles)) return null;
+  const o = tileUV(tex.open), c = tileUV(tex.closed);
   return open.map((isEnd) => (isEnd ? o : c));
 }
 
@@ -508,19 +501,27 @@ function frontFace(text, bg, size, normal) {
   return { plane, axis };
 }
 
-// Real GT block textures are pre-baked per (block, meta, side, state) into flat PNGs and embedded in
-// SCENE.textures (pool key -> data: URI). A machine that resolved its structure is drawn as ONE
-// nearest-filtered cube PER constituent block (SCENE.blocks), not a single stretched box - so coils,
-// glass, hatch faces, and the internal structure stay visible (principle 6). A machine with no
-// committed doc, or whose blocks did not bake, keeps its flat colour placeholder box.
-// Each machine face is baked idle (SCENE.textures) and, where the running skin differs, ALSO active
-// (SCENE.texturesActive - only the faces with an _ACTIVE overlay, so the page never carries a second
-// copy of an identical texture). The default render is idle; the #stateToggle control swaps the
-// registered face materials to their active map (see stateMaterials).
-const TEXTURES = SCENE.textures || {};
-const TEXTURES_ACTIVE = SCENE.texturesActive || {};
-const _texCache = {}, _texCacheActive = {};
-const stateMaterials = [];   // { mat, idle, active } for faces whose running skin actually differs
+// Real GT block textures are pre-baked per (block, meta, side, state) into flat 16x16 PNGs, then
+// packed into ONE image, SCENE.atlas (previewer.atlas), a tile per face. A machine that resolved its
+// structure is drawn as ONE nearest-filtered cube PER constituent block (SCENE.blocks), not a single
+// stretched box - so coils, glass, hatch faces, and the internal structure stay visible (principle
+// 6). A machine with no committed doc, or whose blocks did not bake, keeps its flat colour
+// placeholder box.
+//
+// One image makes one material for every block face and every textured pipe, so a merged layer is a
+// single draw call; a material per texture made it one per texture (680 draw calls a frame on
+// ev-nitrobenzene, 97 with the atlas).
+// Each face finds its own tile through its UVs (tileUV).
+//
+// A face whose sprite did not bake reads the atlas's MISSING tile: Minecraft's own missing-texture
+// checkerboard, magenta and black, instead of a neutral grey. Grey was actively misleading: a great
+// many GT casings ARE plain grey, so an unresolved sprite was indistinguishable from a correctly
+// rendered one and the gap stayed invisible in the very view meant to reveal it (GitHub #98 asks for
+// gaps to be loud, not silent). The CLI still names every unskinned block; this is the same signal.
+//
+// Where a face's running skin differs, SCENE.atlas.active is the same image with those tiles pasted
+// over, so the #stateToggle control swaps one texture on the one material. The default is idle.
+const ATLAS = SCENE.atlas || null;
 function loadTex(uri) {
   const tex = new THREE.TextureLoader().load(uri, requestRender);   // decoded after the first frame
   tex.magFilter = THREE.NearestFilter;    // crisp pixel art, no bilinear smear
@@ -528,59 +529,23 @@ function loadTex(uri) {
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
-function faceTexture(key) {
-  if (!key) return null;
-  if (key in _texCache) return _texCache[key];
-  const uri = TEXTURES[key];
-  _texCache[key] = uri ? loadTex(uri) : null;
-  return _texCache[key];
-}
-function faceTextureActive(key) {
-  if (!key || !(key in TEXTURES_ACTIVE)) return null;   // no distinct running skin for this face
-  if (key in _texCacheActive) return _texCacheActive[key];
-  _texCacheActive[key] = loadTex(TEXTURES_ACTIVE[key]);
-  return _texCacheActive[key];
+const atlasIdle = ATLAS ? loadTex(ATLAS.image) : null;
+const atlasActive = ATLAS && ATLAS.active ? loadTex(ATLAS.active) : null;
+const atlasMaterial = ATLAS
+  ? new THREE.MeshStandardMaterial({ map: atlasIdle, roughness: 0.8, metalness: 0.03 })
+  : null;
+// A face's tile as a UV window [u0, v0, u1, v1], or the missing tile when the face did not bake. The
+// atlas lays its tiles out in pixels from the top-left corner; three.js flips an image as it uploads
+// it, so v counts up from the bottom row.
+function tileUV(key) {
+  const [x, y, w, h] = (key && ATLAS.tiles[key]) || ATLAS.missing;
+  const [W, H] = ATLAS.size;
+  return [x / W, 1 - (y + h) / H, (x + w) / W, 1 - y / H];
 }
 function flatMaterial(m) {
   const mm = new THREE.MeshStandardMaterial({ color: m.color, roughness: 0.6, metalness: 0.1 });
   if (m.role === 'source') { mm.emissive = new THREE.Color(m.color); mm.emissiveIntensity = 0.45; }
   return mm;
-}
-// A block face's material, from its baked-face pool key. A face with no baked texture gets
-// Minecraft's own missing-texture checkerboard - magenta and black, 2x2 -
-// instead of a neutral grey. Grey was actively misleading: a great many GT casings ARE plain grey,
-// so an unresolved sprite was indistinguishable from a correctly rendered one and the gap stayed
-// invisible in the very view meant to reveal it (GitHub #98 asks for gaps to be loud, not silent).
-// The CLI still names every unskinned block; this is the same signal in the render.
-const _MISSING = (() => {
-  const S = 16, cnv = document.createElement('canvas');   // one sprite-sized tile, nearest-filtered
-  cnv.width = S; cnv.height = S;
-  const ctx = cnv.getContext('2d');
-  ctx.fillStyle = '#000000';
-  ctx.fillRect(0, 0, S, S);
-  ctx.fillStyle = '#f800f8';                              // MC's missing-texture magenta
-  ctx.fillRect(0, 0, S / 2, S / 2);
-  ctx.fillRect(S / 2, S / 2, S / 2, S / 2);
-  const tex = new THREE.CanvasTexture(cnv);
-  tex.magFilter = THREE.NearestFilter;
-  tex.minFilter = THREE.NearestFilter;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, metalness: 0.05 });
-})();
-// ONE material per texture, shared by every face that shows it. A casing covers hundreds of blocks,
-// and a material per face made 15,050 of them on ev-nitrobenzene; sharing is also what lets a
-// merged layer be a few groups rather than one per face.
-const _blockMats = {};
-function blockMaterial(key) {
-  const tex = faceTexture(key);
-  if (!tex) return _MISSING;
-  if (!(key in _blockMats)) {
-    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8, metalness: 0.03 });
-    const active = faceTextureActive(key);
-    if (active) stateMaterials.push({ mat, idle: tex, active });   // swappable by #stateToggle
-    _blockMats[key] = mat;
-  }
-  return _blockMats[key];
 }
 
 const centerById = {}, sizeById = {}, expandedById = {};
@@ -634,12 +599,13 @@ for (const m of SCENE.machines) {
 // previewer.scene.block_face_cover) drops the two faces in three that sit against another block.
 // A top or bottom face against the next layer is a CAP: hidden while every layer shows, but the lid
 // a layer needs once the slider isolates it, so each layer keeps its caps in a second mesh that
-// only an isolated layer shows. A block with no `cover` is drawn whole.
+// only an isolated layer shows. A block with no `cover` is drawn whole. Blocks always arrive with an
+// atlas to skin them (previewer.atlas packs one whenever there are blocks).
 const FACE_COVERED = 1, FACE_CAP = 2;   // previewer.scene's FACE_* values
 const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
 const blockLayers = new Map();   // y -> { main: Batch, caps: Batch }
 const machineOwner = {};         // machine id -> the hover owner every one of its faces shares
-for (const b of (SCENE.blocks || [])) {
+for (const b of (ATLAS ? SCENE.blocks || [] : [])) {
   const y = b.cell[1];
   let lb = blockLayers.get(y);
   if (!lb) { lb = { main: new Batch(), caps: new Batch() }; blockLayers.set(y, lb); }
@@ -649,7 +615,7 @@ for (const b of (SCENE.blocks || [])) {
     const cover = b.cover ? b.cover[f] : 0;
     if (cover === FACE_COVERED) continue;
     (cover === FACE_CAP ? lb.caps : lb.main)
-      .face(UNIT_BOX, f, at, blockMaterial(b.texture[f]), machineOwner[b.machine]);
+      .face(UNIT_BOX, f, at, atlasMaterial, machineOwner[b.machine], tileUV(b.texture[f]));
   }
 }
 for (const [y, lb] of blockLayers) {
@@ -694,10 +660,12 @@ for (const r of SCENE.routes) {
     const owner = { route: r, cell: e.cell };
     for (const b of e.boxes) {
       const geo = new THREE.BoxGeometry(b.size[0], b.size[1], b.size[2]);
-      const faces = pipeFaces(e.tex, b.open);
-      if (faces) gtBlockUVs(geo, b.center, e.cell);   // sample the sprite the way Minecraft does
-      for (let f = 0; f < 6; f++)
-        byLayer.get(y).face(geo, f, b.center, faces ? faces[f] : routeFlat(r.color), owner);
+      const tiles = pipeFaces(e.tex, b.open);
+      if (tiles) gtBlockUVs(geo, b.center, e.cell);   // sample the sprite the way Minecraft does
+      for (let f = 0; f < 6; f++) {
+        if (tiles) byLayer.get(y).face(geo, f, b.center, atlasMaterial, owner, tiles[f]);
+        else byLayer.get(y).face(geo, f, b.center, routeFlat(r.color), owner);
+      }
       geo.dispose();
     }
   }
@@ -781,11 +749,12 @@ function applyLayer() {
 layer.addEventListener('input', applyLayer);
 document.getElementById('reset').addEventListener('click', resetCamera);
 
-// Idle <-> running skin toggle. Only faces with a distinct active bake are registered, so the swap
-// touches those materials alone; a layout with none (every machine identical at rest and running)
-// disables the control rather than showing a dead no-op button.
+// Idle <-> running skin toggle: swap the one atlas material between the idle image and the running
+// one, which differs only in the tiles of faces whose running skin does. A layout with no such face
+// (every machine identical at rest and running) has no running image, and the control is disabled
+// rather than left as a dead no-op button.
 const stateToggle = document.getElementById('stateToggle');
-if (stateMaterials.length === 0) {
+if (!atlasActive) {
   stateToggle.disabled = true;
   stateToggle.title = 'no running-state textures in this layout';
 } else {
@@ -793,7 +762,8 @@ if (stateMaterials.length === 0) {
   stateToggle.addEventListener('click', () => {
     running = !running;
     stateToggle.textContent = 'state: ' + (running ? 'running' : 'idle');
-    for (const s of stateMaterials) { s.mat.map = running ? s.active : s.idle; s.mat.needsUpdate = true; }
+    atlasMaterial.map = running ? atlasActive : atlasIdle;
+    atlasMaterial.needsUpdate = true;
     requestRender();
   });
 }

@@ -16,6 +16,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+import gtnh_solver.previewer as previewer_package
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.ir import (
     AutoConnection,
@@ -669,7 +670,7 @@ def test_render_html_shows_system_io_panel_with_rate_toggle() -> None:
 def test_render_html_wires_the_active_idle_state_toggle() -> None:
     # The idle/running skin toggle: builders can switch every machine between its at-rest and running
     # texture where the two differ. Assert the stable control id is wired into the page (one coarse
-    # marker), not the JS that swaps the materials - the running faces ride scene.texturesActive.
+    # marker), not the JS that swaps the atlas - the running tiles ride scene.atlas.active.
     assert 'id="stateToggle"' in render_html(_sand_scene())
 
 
@@ -804,3 +805,50 @@ def test_write_preview_makes_its_parent(
     out = write_preview(ir, layout, tmp_path / "out" / "nested" / "view.html", textures=False)
     assert out.is_file()
     assert "gtnh-solve preview" in out.read_text(encoding="utf-8")
+
+
+def _written_scene(path: Path) -> dict[str, Any]:
+    scene: dict[str, Any] = json.loads(_inlined_scene_json(path.read_text(encoding="utf-8")))
+    return scene
+
+
+def test_write_preview_ships_the_atlas_not_the_pool(
+    tmp_path: Path, solved_sand: tuple[InputIR, LayoutResult], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The page draws every face from one packed image (previewer.atlas), so the per-face pool the
+    # texture pass writes must not ship beside it: that would put every texture on the page twice.
+    # The pass itself is stood in for, since what is under test is what write_preview does after it.
+    def texturized(scene: dict[str, Any], **_: Any) -> None:
+        machine = scene["machines"][0]
+        machine["expanded"] = True
+        scene["blocks"] = [
+            {"cell": machine["cell"], "machine": machine["id"], "texture": [None] * 6}
+        ]
+        scene["textures"] = {}
+        scene["texturesActive"] = {}
+
+    monkeypatch.setattr(previewer_package, "texturize_scene", texturized)
+    ir, layout = solved_sand
+    scene = _written_scene(write_preview(ir, layout, tmp_path / "view.html"))
+    assert "textures" not in scene
+    assert "texturesActive" not in scene
+    assert scene["atlas"]["missing"], "a block with no baked face still draws the checkerboard"
+
+
+def test_a_texture_pass_that_fails_part_way_leaves_plain_boxes(
+    tmp_path: Path, solved_sand: tuple[InputIR, LayoutResult], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The pass flags a machine expanded before it stores that machine's blocks, so a failure in
+    # between used to leave a machine that skipped its box and had no blocks to draw instead: an
+    # invisible machine. The fallback takes every trace of the pass back out.
+    def half_done(scene: dict[str, Any], **_: Any) -> None:
+        scene["machines"][0]["expanded"] = True
+        raise RuntimeError("the jar went away")
+
+    monkeypatch.setattr(previewer_package, "texturize_scene", half_done)
+    ir, layout = solved_sand
+    scene = _written_scene(write_preview(ir, layout, tmp_path / "view.html"))
+    assert not any(m.get("expanded") for m in scene["machines"])
+    assert scene["blocks"] == []
+    assert scene["atlas"] is None
+    assert all(cell.get("tex") is None for r in scene["routes"] for cell in r["cells"])
