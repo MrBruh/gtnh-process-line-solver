@@ -66,6 +66,7 @@ from gtnh_solver.router import route
 from gtnh_solver.schematic import read_schematic
 from gtnh_solver.schematic.core import FORGE_DIRECTION
 from gtnh_solver.schematic.read import TileEntity
+from gtnh_solver.solver._structure import structure_quality
 from gtnh_solver.solver.core import _assemble
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
@@ -430,6 +431,16 @@ def test_the_solver_lays_the_proven_placement_as_it_was_built(
     assert len(cells(routed.routes, power=True)) == 3
     assert cells(routed.routes, power=False) == cells(layout.routes, power=False)
     assert cells(routed.routes, power=True) == cells(layout.routes, power=True)
+
+
+def test_the_ranking_counts_the_builds_pipes_as_well_as_its_cable(
+    proven_build: tuple[InputIR, LayoutResult],
+) -> None:
+    # The solver keeps the attempt that ranks best on this key: floor area, then every route cell,
+    # then volume. The build's 12 pipe blocks count alongside its 3 cable blocks, since the builder
+    # places both; ranking on cable alone let a layout of the same floor lay any number of pipes.
+    problem, layout = proven_build
+    assert structure_quality(problem, layout.placements, layout.routes, "footprint") == (12, 15, 36)
 
 
 def test_the_crowding_gate_does_not_turn_the_proven_placement_away(

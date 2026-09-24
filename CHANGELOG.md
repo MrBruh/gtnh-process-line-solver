@@ -460,6 +460,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **The solver ranks attempts on pipe blocks as well as cable (`solver/_structure.py`).** Of two
+  attempts with the same floor area, it kept the one with less cable however many pipes each
+  laid. It now counts every route cell, because the builder places a pipe block as surely as a
+  cable block. The power-source repair pass ranks on the same key, but there the pipes are fixed
+  while each source pose is tried, so none of its choices change. On sand, nitrobenzene and
+  ev-nitrobenzene it picked the same layouts as before.
+
 - **The preview draws every texture from one image.** Each baked face used to ship as a data URI
   of its own (500 on `ev-nitrobenzene`) and become a material of its own, and since three.js makes a
   draw call per material, a merged layer still cost one draw call per texture on it: 680 a frame on

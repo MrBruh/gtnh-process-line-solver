@@ -37,7 +37,7 @@ is also where layout *quality* is judged: cheap placement-time proxies cannot se
 shared cable taps, so the real per-segment cable cost is only knowable on a routed layout. The
 loop is a bounded **multi-start grid** - SA weight modes x seeds - where every attempt is fully
 routed + validated and the best VALID layout by the requested objective's quality ranking
-(compactness metric, then real power cable cells, then the other metric) is kept, not
+(compactness metric, then real route cells - pipes and cable - then the other metric) is kept, not
 first-valid-wins. The footprint weighting always participates as the explorer: it generates the
 stacked, cable-dense candidates whose routed structure often wins the volume/balanced rankings
 too. If an attempt leaves nets unrouted - or lands a machine so far from its power source that

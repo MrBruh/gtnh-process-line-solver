@@ -154,10 +154,11 @@ doc as intent and reconcile.
    a penalty back to perturb placement. The estimate must be ~O(1) per SA move.
    *Built: the feedback loop - `solve()` runs a bounded **multi-start grid** (SA weight modes x
    seeds), fully routes + validates every attempt, and keeps the best VALID layout by a quality
-   ranking (the objective's compactness metric, then real power-cable cells, then the other
-   compactness metric); a pass's unrouted nets - plus the power net of any machine the validator
-   proves **starved**, whose shortfall is distance-driven and so is exactly what re-placing fixes -
-   are penalized so the next placement pulls them tighter (`solver/core.py`). This replaced the
+   ranking (the objective's compactness metric, then real route cells, pipes and cable alike,
+   then the other compactness metric); a pass's unrouted nets - plus the power net of any machine
+   the validator proves **starved**, whose shortfall is distance-driven and so is exactly what
+   re-placing fixes - are penalized so the next placement pulls them tighter (`solver/core.py`).
+   This replaced the
    earlier first-valid-wins, coarse penalize-and-re-place behaviour: cheap placement-time proxies
    cannot see dock faces or shared cable taps, so a layout's real quality is only knowable once it
    is routed, hence ranking fully routed attempts rather than stopping at the first valid one.
