@@ -32,8 +32,10 @@ identify a block at a time (#240, keyed on ``netId``: a power route names no res
 system's boundary inputs, outputs, and power (``scene.io``), with a per-tick / per-second rate
 toggle; a flow whose commodity rides ME (``--me``) is marked "via ME" there and in a storage's
 hover tag, because no pipe and no ME block is drawn for it, and an unconnected chest otherwise
-reads as a missing pipe. The view frames the layout's *actual* extent (``scene.bounds``), not the
-solver's oversized search region.
+reads as a missing pipe. Each of the panel's sections (machines, routes, nets, materials, system
+i/o) is a native ``<details>`` its heading folds, and a folded section stays folded when the legend
+is rebuilt for a rate toggle or a solo. The view frames the layout's *actual* extent
+(``scene.bounds``), not the solver's oversized search region.
 
 **The page is built for a phone as well as a desktop** (#237), because the preview is what a
 builder opens while standing at the build. The side panel is a *drawer* behind ``#legendToggle``,
@@ -164,6 +166,10 @@ _STYLE = """
   .net:hover { background: #262b33; }
   .net.on { background: #2f3742; border-color: #4a5464; }
   .net.clear { color: #8b94a0; }
+  /* Each legend section is a disclosure its heading folds. The heading keeps the weight and colour
+     the old bold headings had, so an open legend reads as it always did. */
+  .sec > summary { color: #aab2bd; font-weight: 600; cursor: pointer; }
+  .sec + .sec { margin-top: 6px; }
   #nametag { position: fixed; z-index: 20; left: 0; top: 0; display: none; pointer-events: none;
              transform: translate(-50%, -100%); background: rgba(20,22,28,0.92);
              border: 1px solid #3a4150; border-radius: 4px; padding: 2px 7px;
@@ -205,6 +211,8 @@ _STYLE = """
     /* Net rows are a LIST, and a 31-net build (ev-nitrobenzene) at 44px a row is a drawer you
        scroll forever. 34px still takes a thumb without turning the legend into a scroll bucket. */
     .net { min-height: 34px; padding: 4px 6px; }
+    /* A section heading is a tap target too, sized like a net row for the same reason. */
+    .sec > summary { padding: 7px 0; }
     #controls input[type=range] { height: 34px; }
   }
 """
@@ -802,24 +810,46 @@ function netRow(r) {
   });
   return button;
 }
+// Every legend section is a disclosure (<details>) that its heading folds, so a builder can put
+// away what they have already read. A long net list (31 on ev-nitrobenzene) stops burying the
+// system i/o, and on a phone the drawer shows only what they need. A native element needs no
+// handler to fold, reads as expandable to a screen reader, and works from the keyboard.
+//
+// The legend is rebuilt from scratch on every rate toggle and every solo, so the page remembers
+// which sections were folded and rebuilds those folded. Otherwise pressing a net row would reopen
+// every section the builder had just closed. All sections start open, which is the legend as it
+// always was.
+const folded = new Set();
+function section(panel, name, heading = name) {
+  const d = el('details');
+  d.className = 'sec';
+  d.open = !folded.has(name);
+  d.addEventListener('toggle', () => { if (d.open) folded.delete(name); else folded.add(name); });
+  d.append(el('summary', heading));
+  panel.append(d);
+  return d;
+}
 function renderLegend() {
   const panel = document.createDocumentFragment();
-  row(panel, el('b', 'machines'));
-  for (const e of SCENE.legend) row(panel, swatch(e.color), e.label);
-  row(panel, el('b', 'routes'));
-  for (const k of ['item', 'fluid', 'power']) row(panel, swatch(COMMODITY[k]), k);
-  row(panel, swatch('#00e5ff'), 'auto-output');
+  const machines = section(panel, 'machines');
+  for (const e of SCENE.legend) row(machines, swatch(e.color), e.label);
+  const routes = section(panel, 'routes');
+  for (const k of ['item', 'fluid', 'power']) row(routes, swatch(COMMODITY[k]), k);
+  row(routes, swatch('#00e5ff'), 'auto-output');
   // The net inventory, which the page did not have at all: what nets exist, what each carries and
   // at what rate, and a click to see one of them by itself.
   if (SCENE.routes.length) {
-    row(panel, el('b', 'nets'));
+    // While a net is soloed its heading says so. Fold the section mid-solo and the heading is the
+    // only thing left on screen that explains why every other route has disappeared.
+    const nets = section(panel, 'nets',
+      solo === null ? 'nets' : 'nets (1 of ' + SCENE.routes.length + ' shown)');
     if (solo !== null) {
       const clear = el('button', 'show all nets');
       clear.className = 'net clear';
       clear.addEventListener('click', () => { solo = null; applyLayer(); renderLegend(); });
-      panel.append(clear);
+      nets.append(clear);
     }
-    for (const r of netsByReadingOrder()) panel.append(netRow(r));
+    for (const r of netsByReadingOrder()) nets.append(netRow(r));
   }
   // Which cable/pipe material the routes above are DRAWN as, and - the point of the line - that the
   // choice is representative. GT ships several cables per voltage tier and the solver sizes by
@@ -829,37 +859,37 @@ function renderLegend() {
   for (const r of SCENE.routes)
     if (r.material) mats.set(r.material.material + '|' + (r.material.tier || ''), r.material);
   if (mats.size) {
-    row(panel, el('b', 'materials'));
+    const materials = section(panel, 'materials');
     let anyStandIn = false;
     for (const m of mats.values()) {
       anyStandIn = anyStandIn || m.standIn;
-      row(panel, m.material + (m.tier ? ' (' + m.tier + ')' : '') + (m.standIn ? ' *' : ''));
+      row(materials, m.material + (m.tier ? ' (' + m.tier + ')' : '') + (m.standIn ? ' *' : ''));
     }
     if (anyStandIn) {
       const note = el('span', '* representative stand-in, not a spec');
       note.id = 'standin';
-      row(panel, note);
+      row(materials, note);
     }
   }
   if (SCENE.io) {
     const io = SCENE.io, sfx = perSecond ? '/s' : '/t';
-    row(panel, el('b', 'system i/o'));
+    const sys = section(panel, 'system i/o');
     for (const i of io.inputs)
-      row(panel, 'in: ' + i.resource + (i.rate != null ? ' (' + rateText(i.rate) + ' ' + i.unit + sfx + ')' : '') + viaMe(i));
+      row(sys, 'in: ' + i.resource + (i.rate != null ? ' (' + rateText(i.rate) + ' ' + i.unit + sfx + ')' : '') + viaMe(i));
     for (const o of io.outputs)
-      row(panel, 'out: ' + o.resource + (o.rate != null ? ' (' + rateText(o.rate) + ' ' + o.unit + sfx + ')' : '') + viaMe(o));
+      row(sys, 'out: ' + o.resource + (o.rate != null ? ' (' + rateText(o.rate) + ' ' + o.unit + sfx + ')' : '') + viaMe(o));
     // Power: total EU/t supplied plus the per-tier feed spec, the full tier voltage x amps to
     // supply (how a GT source is fed). The total is that feed (tier voltage x amps), so it matches
     // the breakdown, e.g. 'power: 96 EU/t (LV 32V x 3A)' where 96 = 32 x 3.
     const tiers = Object.keys(io.power.byTier);
     const feed = tiers.map((t) => t + ' ' + io.power.byTier[t].volts + 'V x ' + io.power.byTier[t].amps + 'A').join(', ');
-    row(panel, 'power: ' + rateText(io.power.total) + ' EU' + sfx + (tiers.length ? ' (' + feed + ')' : '') + viaMe(io.power));
+    row(sys, 'power: ' + rateText(io.power.total) + ' EU' + sfx + (tiers.length ? ' (' + feed + ')' : '') + viaMe(io.power));
     // A commodity left to ME (--me) is routed by nothing here and its ME interface is not placed
     // yet, so say that once rather than let the missing pipes read as a broken layout.
     if ([...io.inputs, ...io.outputs, io.power].some((f) => f.me)) {
       const note = el('span', 'via ME: no ME interface is drawn; add it in game');
       note.id = 'menote';
-      row(panel, note);
+      row(sys, note);
     }
   }
   document.getElementById('legend').replaceChildren(panel);

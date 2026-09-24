@@ -7,6 +7,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Every section of the preview's legend folds.** The side panel lists machines, routes, nets,
+  materials and system i/o one after another, and on a big line the net list alone is 31 rows
+  (ev-nitrobenzene), which pushes the system i/o, the part a builder comes back to, below the fold.
+  Each section is now a dropdown: click its heading to fold or unfold it. It is a native
+  `<details>`, so it works from the keyboard and a screen reader announces it as expandable. The
+  legend is rebuilt whenever the rate unit changes or a net is soloed, and a folded section stays
+  folded through that. Everything starts open, so the legend first looks exactly as before. While
+  a net is soloed, its heading reads `nets (1 of N shown)`, so folding it mid-solo still leaves
+  something on screen that says why the other routes are hidden.
 - **The 3D preview can show one net by itself (#240).** #155 made it answer "which one is this?":
   hover or tap a pipe and its tag names the resource, the commodity and the rate. It could not
   answer the other half. On a line with crossing fluid pipes you could identify any single block
