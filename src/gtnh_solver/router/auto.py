@@ -41,7 +41,7 @@ The validator independently re-derives every rule enforced here (docs/ARCHITECTU
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 
 from gtnh_solver.ir import (
@@ -75,7 +75,8 @@ class AutoAssignment:
 
     connections: tuple[AutoConnection, ...] = ()
     covered: frozenset[str] = frozenset()
-    claimed: Mapping[str, frozenset[Cell]] = MappingProxyType({})
+    # A factory, not a plain default: 3.11 rejects an unhashable default at class creation (#255).
+    claimed: Mapping[str, frozenset[Cell]] = field(default_factory=lambda: MappingProxyType({}))
 
 
 def assign_auto_outputs(problem: InputIR, placements: Sequence[Placement]) -> AutoAssignment:

@@ -62,7 +62,7 @@ re-checks every auto-connection, and enforces the one-route-per-cell cap on the 
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import pairwise
 from types import MappingProxyType
 from typing import TypeVar
@@ -144,7 +144,8 @@ class RouteResult:
     infeasibility: Infeasibility | None = None
     failed_nets: tuple[str, ...] = ()
     auto_connections: tuple[AutoConnection, ...] = ()
-    claimed: Mapping[str, frozenset[Cell]] = MappingProxyType({})
+    # A factory, not a plain default: 3.11 rejects an unhashable default at class creation (#255).
+    claimed: Mapping[str, frozenset[Cell]] = field(default_factory=lambda: MappingProxyType({}))
 
     @property
     def ok(self) -> bool:
