@@ -27,9 +27,12 @@ from gtnh_solver.ir import (
     MachineFaceRef,
     Net,
     PlacedHatch,
+    Placement,
     Port,
+    Route,
+    Terminal,
 )
-from gtnh_solver.router import assign_auto_outputs, place_hatches, route
+from gtnh_solver.router import assign_auto_outputs, place_hatches, route, vent_cells
 from gtnh_solver.solver import solve
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
@@ -148,6 +151,44 @@ def test_a_free_auto_output_still_places_its_two_hatches() -> None:
     assert by_machine["dst"].facing is Facing.WEST  # receives on its own front, facing back
 
 
+def test_a_free_connection_that_lost_its_cells_is_reported_and_the_rest_are_still_placed() -> None:
+    # The solver can no longer reach this (#131 fixed its cause), so the terminal squatting on the
+    # connection's cell is written by hand. It stays a loud floor, and it must stop only its own two
+    # hatches: the upkeep hatches after it are still placed (#228).
+    source = _multi(
+        "src",
+        [Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)],
+        [_slot(2, 1, 1, "OutputBus"), _slot(0, 1, 1, "Maintenance")],
+    )
+    sink = _multi(
+        "dst",
+        [Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT)],
+        [_slot(0, 1, 1, "InputBus")],
+    )
+    problem = InputIR(
+        bounding_region=_REGION,
+        machines=[source, sink],
+        nets=[_item_net("src", "out", "dst", "in")],
+    )
+    placements = [at("src", 2, 0, 2), at("dst", 5, 0, 2)]
+    squatter = Route(
+        net_id="other",
+        commodity=Commodity.ITEM,
+        terminals=[
+            Terminal(
+                machine_id="src", port_id="out", face=Facing.EAST, cell=CellCoord(x=5, y=1, z=3)
+            )
+        ],
+    )
+    plan = place_hatches(
+        problem, placements, [squatter], assign_auto_outputs(problem, placements).connections
+    )
+
+    assert not plan.ok
+    assert "auto-output" in plan.shortfalls[0].detail
+    assert ("src", "Maintenance") in {(h.machine_id, h.kind) for h in plan.hatches}
+
+
 def test_two_touching_bodies_are_not_enough_when_neither_cell_takes_a_hatch() -> None:
     # The tightening. The machines are flush, but the cells that meet are plain casing, so GT has
     # nothing to eject from and the net has to be piped after all.
@@ -217,6 +258,11 @@ def test_a_muffler_needs_empty_air_in_front_and_says_so_when_it_has_none() -> No
     assert blocked.infeasibility is not None
     assert blocked.infeasibility.constraint == "hatch_budget"
     assert "vent" in blocked.infeasibility.detail
+    assert "(1, 2, 3)" in blocked.infeasibility.detail  # the cell to clear
+    # The casing budget did not run out, so the message must not send the reader after it (#228).
+    assert "spent" not in blocked.infeasibility.detail
+    # And the machine keeps the maintenance hatch it was given before the muffler fell short.
+    assert [h.kind for h in blocked.hatches] == ["Maintenance"]
 
 
 def test_a_machine_out_of_casing_cells_is_an_infeasibility_not_a_retry() -> None:
@@ -239,6 +285,96 @@ def test_a_machine_out_of_casing_cells_is_an_infeasibility_not_a_retry() -> None
     assert plan.infeasibility is not None
     assert plan.infeasibility.constraint == "hatch_budget"
     assert "Maintenance" in plan.infeasibility.detail
+
+
+def _starved_line(*also_short: str) -> tuple[InputIR, list[Placement]]:
+    """Machine ``a`` has one casing cell and its input bus takes it, so it has no room for its
+    maintenance hatch; ``b`` (and every id in ``also_short``) sorts after it and has room."""
+    a = _multi(
+        "a",
+        [Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT)],
+        [_slot(0, 1, 1, "InputBus", "Maintenance")],
+    )
+    b = _multi("b", [], [_slot(0, 1, 1, "Maintenance")])
+    short = [_multi(mid, [], [_slot(1, 1, 1, "Maintenance")]) for mid in also_short]  # interior
+    problem = InputIR(
+        bounding_region=_REGION,
+        machines=[_single("feeder", IODirection.OUTPUT), a, b, *short],
+        nets=[_item_net("feeder", "p", "a", "in")],
+    )
+    placements = [at("feeder", 0, 1, 3), at("a", 2, 0, 2), at("b", 8, 0, 2)]
+    placements += [at(mid, 2, 0, 8 + 4 * i) for i, mid in enumerate(also_short)]
+    return problem, placements
+
+
+def test_one_machine_short_of_a_hatch_does_not_cost_the_next_its_hatches() -> None:
+    # The early return this replaces gave every machine after the first shortfall no upkeep hatch
+    # at all, so on platline two real shortfalls read as 52 missing maintenance hatches (#228).
+    problem, placements = _starved_line()
+    routing = route(problem, placements)
+    plan = place_hatches(problem, placements, routing.routes, routing.auto_connections)
+
+    assert not plan.ok
+    assert len(plan.shortfalls) == 1
+    assert "'a'" in plan.shortfalls[0].detail
+    assert plan.infeasibility == plan.shortfalls[0]  # one shortfall is reported as it is
+    assert ("b", "Maintenance") in {(h.machine_id, h.kind) for h in plan.hatches}
+
+
+def test_every_shortfall_is_kept_and_the_layout_reason_counts_the_rest() -> None:
+    # "c" records its maintenance cell only in the middle of its body, which has no outward face.
+    problem, placements = _starved_line("c")
+    routing = route(problem, placements)
+    plan = place_hatches(problem, placements, routing.routes, routing.auto_connections)
+
+    assert [s.detail.split()[1] for s in plan.shortfalls] == ["'a'", "'c'"]
+    assert plan.infeasibility is not None
+    assert plan.infeasibility.detail.startswith(plan.shortfalls[0].detail)
+    assert plan.infeasibility.detail.endswith("(and 1 more hatch shortfall(s))")
+    assert ("b", "Maintenance") in {(h.machine_id, h.kind) for h in plan.hatches}
+
+
+# ------------------------------------------------------------------ keeping a forced vent clear
+
+
+def _top_vented(mid: str = "m") -> Machine:
+    """An Electric Blast Furnace in miniature: its one muffler cell is the top centre, whose only
+    outward face is up (GT ``MTEElectricBlastFurnace.java:88``), plus an input bus beside it."""
+    return _multi(
+        mid,
+        [Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT)],
+        [_slot(0, 2, 1, "InputBus"), _slot(1, 2, 1, "Muffler")],
+    )
+
+
+def test_a_muffler_with_one_way_to_vent_reserves_that_cell_and_one_with_several_does_not() -> None:
+    placement = at("m", 2, 0, 2)
+    assert vent_cells([placement], {"m": _top_vented()}) == {(3, 3, 3)}
+
+    # A top-edge cell faces both west and up, so routing may take either; the placer picks later.
+    edge = _multi("m", [], [_slot(0, 2, 1, "Muffler")])
+    assert vent_cells([placement], {"m": edge}) == set()
+    assert vent_cells([placement], {"m": _multi("m", [], [_slot(0, 2, 1, "Maintenance")])}) == set()
+
+
+def test_a_pipe_is_not_laid_over_a_mufflers_only_vent() -> None:
+    # The feeder sits on the roof one cell east of the vent, so the shortest pipe runs straight
+    # through it: feeder -> (3,3,3) -> the bus's dock at (2,3,3). That is what an EBF on platline
+    # got, and the hatch placer then found its muffler with nowhere to vent (#228).
+    problem = InputIR(
+        bounding_region=_REGION,
+        machines=[_single("feeder", IODirection.OUTPUT), _top_vented()],
+        nets=[_item_net("feeder", "p", "m", "in")],
+    )
+    placements = [at("feeder", 4, 3, 3), at("m", 2, 0, 2)]
+    routing = route(problem, placements)
+    assert routing.ok
+    assert all((3, 3, 3) not in r.cells() for r in routing.routes)
+
+    plan = place_hatches(problem, placements, routing.routes, routing.auto_connections)
+    assert plan.ok
+    muffler = next(h for h in plan.hatches if h.kind == "Muffler")
+    assert (muffler.cell.as_tuple(), muffler.facing) == ((3, 2, 3), Facing.UP)
 
 
 # --------------------------------------------------------------- the validator's own muffler rules

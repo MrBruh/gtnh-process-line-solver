@@ -3,8 +3,8 @@
 Obstacle building, terminal docking on a usable (non-front) machine face, and the multi-goal A*
 the power router grows its trunk with all live here, so ``router.core`` (with ``router.steiner``)
 and ``router.power`` route over the *same* grid model and docking rules. The conventions (front face = placement orientation carries no
-I/O; machine + reserved cells are obstacles; the validator independently re-checks every
-terminal) are unchanged from the original crude router.
+I/O; machine + reserved cells are obstacles, and so is a muffler's only vent; the validator
+independently re-checks every terminal) are unchanged from the original crude router.
 """
 
 from __future__ import annotations
@@ -41,9 +41,10 @@ _UNREACHABLE = 1 << 30
 
 
 def obstacle_cells(
-    problem: InputIR, placements: Sequence[Placement], machines: dict[str, Machine]
+    problem: InputIR, placements: Sequence[Placement], machines: Mapping[str, Machine]
 ) -> set[Cell]:
-    """Cells a route must avoid: reserved cells plus every placed machine's body."""
+    """Cells a route must avoid: reserved cells, every placed machine's body, and the one cell
+    each muffler that has no other choice must vent into (:func:`vent_cells`)."""
     obstacles: set[Cell] = {(c.x, c.y, c.z) for c in problem.reserved_cells}
     for placement in placements:
         machine = machines.get(placement.machine_id)
@@ -51,7 +52,57 @@ def obstacle_cells(
             obstacles.update(
                 occupied_cells(placement.cell, machine.footprint, placement.orientation)
             )
-    return obstacles
+    return obstacles | vent_cells(placements, machines)
+
+
+def vent_cells(placements: Sequence[Placement], machines: Mapping[str, Machine]) -> set[Cell]:
+    """The cell in front of a muffler, for every machine whose muffler can face only one way.
+
+    A muffler vents through literal air or not at all (``MTEHatchMuffler.polluteEnvironment``
+    calls ``getAirAtSide`` on its front), and the hatches are placed last, after every pipe and
+    cable is laid. So a route over the only cell a muffler can vent into leaves the machine unable
+    to vent, which is how an Electric Blast Furnace, whose one muffler cell is the top centre with
+    one outward face (GT ``MTEElectricBlastFurnace.java:88``), lost its muffler to a pipe laid
+    straight over it (#228). Keeping that cell out of routing up front is the same move as keeping
+    a power dock free.
+
+    Only a **forced** vent is kept clear. A machine with several places to vent costs routing
+    nothing, and the hatch placer picks whichever is still open once the routes are down.
+    """
+    vents: set[Cell] = set()
+    for placement in placements:
+        machine = machines.get(placement.machine_id)
+        if machine is None or not any("Muffler" in s.kinds for s in machine.hatch_slots):
+            continue
+        outward = {vent for _, _, vent in hatch_faces(placement, machine, "Muffler")}
+        if len(outward) == 1:
+            vents |= outward
+    return vents
+
+
+def hatch_faces(
+    placement: Placement, machine: Machine, kind: str
+) -> list[tuple[Cell, Facing, Cell]]:
+    """Every ``(casing cell, facing, outward cell)`` a ``kind`` hatch could take, in order.
+
+    The cell must record the kind, and the facing must point out of the structure and not through
+    the controller's front: a hatch facing into its own structure moves nothing, so an interior
+    casing cell offers no face at all. ``FACE_ORDER`` then ascending cell, the same total order
+    docking uses, so whichever option a caller takes first is reproducible.
+    """
+    body = set(occupied_cells(placement.cell, machine.footprint, placement.orientation))
+    slots = [s for s in machine.hatch_slots if kind in s.kinds]
+    hosts = host_cells(placement, machine, slots)
+    faces: list[tuple[Cell, Facing, Cell]] = []
+    for face in FACE_ORDER:
+        if face is placement.orientation:
+            continue
+        dx, dy, dz = FACE_DELTAS[face]
+        for cell in hosts:
+            outward = (cell[0] + dx, cell[1] + dy, cell[2] + dz)
+            if outward not in body:
+                faces.append((cell, face, outward))
+    return faces
 
 
 def body_cell(terminal: Terminal) -> Cell:

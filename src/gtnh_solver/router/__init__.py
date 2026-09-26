@@ -23,7 +23,7 @@ beyond size-or-reject. The validator independently certifies routes either way.
 
 from __future__ import annotations
 
-from ._grid import claims_by_machine
+from ._grid import claims_by_machine, vent_cells
 from .auto import AutoAssignment, assign_auto_outputs, auto_output_possible
 from .core import RouteResult, route
 from .hatches import HatchPlan, place_hatches
@@ -40,4 +40,5 @@ __all__ = [
     "place_hatches",
     "route",
     "route_power",
+    "vent_cells",
 ]

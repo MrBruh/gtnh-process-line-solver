@@ -13,7 +13,8 @@ front of it) and which nets ended up on a free auto-output rather than a pipe.
     the machine -> one maintenance hatch, and one muffler if its structure accepts one
                        |
                        v
-                   LayoutResult.hatches   (+ an Infeasibility if a machine has no room left)
+                   LayoutResult.hatches   (+ an Infeasibility per hatch with no room left;
+                                           the rest are still placed)
 
 Three rules decide whether a cell may hold a given hatch, all of them ours to enforce because GT
 checks none of them (``IStructureElement.check`` takes no facing and every hatch returns
@@ -43,7 +44,6 @@ from dataclasses import dataclass
 
 from gtnh_solver.ir import (
     AutoConnection,
-    Facing,
     Infeasibility,
     InputIR,
     Machine,
@@ -52,10 +52,10 @@ from gtnh_solver.ir import (
     Route,
     Terminal,
 )
-from gtnh_solver.ir.geometry import FACE_DELTAS, Cell, occupied_cells, rotated_slot
+from gtnh_solver.ir.geometry import FACE_DELTAS, Cell, rotated_slot
 from gtnh_solver.ir.nets import placement_index
 
-from ._grid import FACE_ORDER, body_cell, coord, host_cells
+from ._grid import body_cell, coord, hatch_faces, host_cells
 
 #: The hatches a multiblock needs that serve no net. A machine wants one of each kind its own
 #: structure records a cell for: GT only offers the ``Muffler`` element on a controller that
@@ -72,14 +72,26 @@ _UNKNOWN_KIND = "Unknown"
 
 @dataclass(frozen=True)
 class HatchPlan:
-    """Every hatch the build needs, or why one machine could not be given the hatches it needs."""
+    """Every hatch the build needs, and every hatch it could not be given."""
 
     hatches: tuple[PlacedHatch, ...] = ()
-    infeasibility: Infeasibility | None = None
+    shortfalls: tuple[Infeasibility, ...] = ()
 
     @property
     def ok(self) -> bool:
-        return self.infeasibility is None
+        return not self.shortfalls
+
+    @property
+    def infeasibility(self) -> Infeasibility | None:
+        """The first shortfall, counting the rest: a ``LayoutResult`` has room for one reason."""
+        if not self.shortfalls:
+            return None
+        first, more = self.shortfalls[0], len(self.shortfalls) - 1
+        if not more:
+            return first
+        return first.model_copy(
+            update={"detail": f"{first.detail} (and {more} more hatch shortfall(s))"}
+        )
 
 
 def place_hatches(
@@ -95,7 +107,14 @@ def place_hatches(
     hatch that cares, because GT refuses to vent through anything but literal air
     (``MTEHatchMuffler.polluteEnvironment`` calls ``getAirAtSide``), and a machine that cannot vent
     stops with ``POLLUTION_FAIL``. So the cell in front of a muffler is a **keep-out**: pick a
-    facing whose outward cell is empty, or report the machine.
+    facing whose outward cell is empty, or report the machine. (Routing already kept a muffler's
+    only vent clear, ``_grid.vent_cells``; this is where a muffler with several finds out which of
+    them the routes left open.)
+
+    **A shortfall stops nothing but its own hatch.** Every machine is still given every hatch it
+    has room for, and every shortfall is reported. Stopping at the first one used to leave every
+    later machine with no upkeep hatch at all, so on platline two real muffler shortfalls read as
+    52 missing maintenance hatches and 11 missing mufflers (#228).
 
     Deterministic throughout: routed and auto hatches take the cells routing already chose, and the
     upkeep hatches take the first free legal cell in ``FACE_ORDER``-then-ascending-cell order.
@@ -105,6 +124,7 @@ def place_hatches(
     port_of_auto = _auto_ports(problem)
 
     hatches: list[PlacedHatch] = []
+    shortfalls: list[Infeasibility] = []
     claimed: dict[str, set[Cell]] = {}
 
     for terminal in _terminals(routes):
@@ -115,7 +135,7 @@ def place_hatches(
     for auto in autos:
         auto_hatches, dropped = _auto_hatches(auto, port_of_auto, machines, by_machine, claimed)
         if dropped is not None:
-            return HatchPlan(hatches=tuple(hatches), infeasibility=dropped)
+            shortfalls.append(dropped)
         hatches.extend(auto_hatches)
 
     blocked = set(occupied) | {h.cell.as_tuple() for h in hatches}
@@ -123,11 +143,10 @@ def place_hatches(
         machine, placement = machines.get(machine_id), by_machine.get(machine_id)
         if machine is None or placement is None or not machine.hatch_slots:
             continue
-        upkeep, shortfall = _upkeep_hatches(machine, placement, claimed, blocked, problem)
-        if shortfall is not None:
-            return HatchPlan(hatches=tuple(hatches), infeasibility=shortfall)
+        upkeep, short = _upkeep_hatches(machine, placement, claimed, blocked, problem)
         hatches.extend(upkeep)
-    return HatchPlan(hatches=tuple(hatches))
+        shortfalls.extend(short)
+    return HatchPlan(hatches=tuple(hatches), shortfalls=tuple(shortfalls))
 
 
 def _terminals(routes: Iterable[Route]) -> list[Terminal]:
@@ -274,7 +293,7 @@ def _upkeep_hatches(
     claimed: dict[str, set[Cell]],
     blocked: set[Cell],
     problem: InputIR,
-) -> tuple[list[PlacedHatch], Infeasibility | None]:
+) -> tuple[list[PlacedHatch], list[Infeasibility]]:
     """One maintenance hatch, and one muffler where the structure records one.
 
     They belong to no net and have no route, which is why ``LayoutResult`` needed a place to put
@@ -287,57 +306,34 @@ def _upkeep_hatches(
     ``polluteEnvironment`` return false and the machine shuts down with ``POLLUTION_FAIL``. Its
     outward cell is therefore required to be empty. A maintenance hatch has no such rule, but still
     needs an outward face like every hatch: an interior casing cell can host nothing.
+
+    One kind falling short does not cost the other: a machine with no air for its muffler keeps
+    the maintenance hatch it was already given, and says why it has no muffler.
     """
     out: list[PlacedHatch] = []
+    shortfalls: list[Infeasibility] = []
     recorded = {kind for slot in machine.hatch_slots for kind in slot.kinds}
+    reserved = {c.as_tuple() for c in problem.reserved_cells}
     for kind in UPKEEP_KINDS:
         if kind not in recorded:
             continue  # this structure does not take one, so it does not need one
-        spot = _free_face(
-            machine, placement, kind, claimed, blocked, problem, air=kind == "Muffler"
-        )
-        if spot is None:
-            return out, _no_room(machine, kind)
-        cell, face = spot
+        taken = claimed.get(machine.id, set())
+        options = [o for o in hatch_faces(placement, machine, kind) if o[0] not in taken]
+        if kind == "Muffler":
+            # A muffler vents through literal air or not at all.
+            vents = [o for o in options if o[2] not in blocked and o[2] not in reserved]
+            if options and not vents:
+                shortfalls.append(_no_vent(machine, [vent for _, _, vent in options]))
+                continue
+            options = vents
+        if not options:
+            shortfalls.append(_no_room(machine, kind))
+            continue
+        cell, face, _ = options[0]
         claimed.setdefault(machine.id, set()).add(cell)
         blocked.add(cell)
         out.append(PlacedHatch(machine_id=machine.id, kind=kind, cell=coord(cell), facing=face))
-    return out, None
-
-
-def _free_face(
-    machine: Machine,
-    placement: Placement,
-    kind: str,
-    claimed: Mapping[str, Collection[Cell]],
-    blocked: Collection[Cell],
-    problem: InputIR,
-    *,
-    air: bool,
-) -> tuple[Cell, Facing] | None:
-    """The first unclaimed casing cell accepting ``kind`` that has an outward face, if any.
-
-    ``FACE_ORDER`` then ascending cell, the same total order docking uses, so the choice is
-    reproducible. ``air`` additionally demands that the outward cell be empty - the muffler's vent
-    rule - where an ordinary hatch only needs the face to point out of its own structure.
-    """
-    body = set(occupied_cells(placement.cell, machine.footprint, placement.orientation))
-    slots = [s for s in machine.hatch_slots if kind in s.kinds]
-    taken = claimed.get(machine.id, ())
-    hosts = [c for c in host_cells(placement, machine, slots) if c not in taken]
-    reserved = {c.as_tuple() for c in problem.reserved_cells}
-    for face in FACE_ORDER:
-        if face is placement.orientation:
-            continue
-        dx, dy, dz = FACE_DELTAS[face]
-        for cell in hosts:
-            outward = (cell[0] + dx, cell[1] + dy, cell[2] + dz)
-            if outward in body:
-                continue  # facing into its own structure: it would move nothing
-            if air and (outward in blocked or outward in reserved):
-                continue  # a muffler vents through literal air or not at all
-            return cell, face
-    return None
+    return out, shortfalls
 
 
 def port_cells(placement: Placement, machine: Machine, port_id: str) -> list[Cell]:
@@ -395,17 +391,38 @@ def _no_auto_pair(auto: AutoConnection) -> Infeasibility:
 
 
 def _no_room(machine: Machine, kind: str) -> Infeasibility:
+    """Every casing cell that takes ``kind`` already hosts another hatch."""
     return Infeasibility(
         constraint="hatch_budget",
         detail=(
             f"machine {machine.id!r} ({machine.type}) has no casing cell left for its {kind} "
             f"hatch: its {len(machine.hatch_slots)} hatch cell(s) are all spent on its "
             f"{len(machine.faces.ports)} connection(s)"
-            + (", or none has empty air in front to vent through" if kind == "Muffler" else "")
         ),
         suggested_relaxation=(
-            "leave routing gaps around the machine so a face stays clear"
-            if kind == "Muffler"
-            else "reduce the machine's connections, or split the recipe over more machines"
+            "reduce the machine's connections, or split the recipe over more machines"
+        ),
+    )
+
+
+def _no_vent(machine: Machine, vents: Sequence[Cell]) -> Infeasibility:
+    """A muffler cell is free, but every cell it could vent into is solid.
+
+    Worded apart from :func:`_no_room` because the casing budget is not what ran out, and blaming
+    it sent the reader after the wrong fix (#228): the cure is clearing the air in front of the
+    muffler, not dropping connections.
+    """
+    listed = ", ".join(str(v) for v in sorted(set(vents))[:3])
+    more = len(set(vents)) - 3
+    return Infeasibility(
+        constraint="hatch_budget",
+        detail=(
+            f"machine {machine.id!r} ({machine.type}) has nowhere to vent its Muffler hatch: a "
+            f"muffler vents only into air, and a pipe, cable, hatch or machine fills every cell "
+            f"it could face ({listed}{f' and {more} more' if more > 0 else ''})"
+        ),
+        suggested_relaxation=(
+            "keep the cell in front of the machine's muffler clear, for example by not stacking "
+            "another machine on it"
         ),
     )

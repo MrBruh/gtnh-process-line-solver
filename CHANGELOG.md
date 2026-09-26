@@ -115,6 +115,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **One hatch shortfall no longer hides every hatch after it (#228).** `place_hatches` returned at
+  the first machine it could not give a hatch, so every machine after it was left with no
+  maintenance hatch and no muffler, and the machine that fell short lost the maintenance hatch it
+  had already been given. On a platline solve that turned two real muffler shortfalls into 52
+  `maintenance_missing` and 11 `muffler_missing`. Every machine now gets every hatch it has room
+  for. Every shortfall is kept, and the layout's reason names the first and counts the rest.
+
+  The two real ones were Electric Blast Furnaces whose only muffler cell, the top centre, faces up
+  with a pipe laid straight over it: the routers never knew a muffler needs air in front of it, and
+  the hatches are placed after routing. Where a muffler can face only one way, the cell in front of
+  it is now an obstacle to every pipe and cable from the start, and to the power sources the repair
+  pass moves. On platline that is the 6 Blast Furnaces, out of 13 polluting machines. A muffler
+  with several choices still takes whichever the routes left open. When one is walled in anyway
+  (a machine stacked on it), the message now says the muffler has nowhere to vent and names the
+  cell, instead of blaming a casing budget that was never short.
 - **The package imports on Python 3.11 again (#255).** `import gtnh_solver` failed there with
   `ValueError: mutable default <class 'mappingproxy'> for field claimed is not allowed`, so every
   entry point, `gtnh-solve` included, failed before doing anything. Two frozen dataclass fields
