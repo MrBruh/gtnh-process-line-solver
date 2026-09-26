@@ -1,9 +1,9 @@
 """solver._structure - what the builder actually erects, measured one way for every consumer.
 
-The feedback loop's compactness ranking, the metrics the previewer reports, and the power-source
-repair pass all need the same two answers: how big is this build, and how much cable does it cost.
-They share these helpers rather than each re-deriving the extents, so the loop cannot rank attempts
-on one measure while the repair improves them toward another.
+The solver's compactness ranking of its attempts, the metrics the previewer reports, and the
+power-source repair pass all need the same two answers: how big is this build, and how much cable
+does it cost. They share these helpers rather than each re-deriving the extents, so the solver
+cannot rank attempts on one measure while the repair improves them toward another.
 
 The *structure* is every machine cell plus every route cell - a trunk sprawling outside the machine
 block is something the builder erects, so it counts against the layout.

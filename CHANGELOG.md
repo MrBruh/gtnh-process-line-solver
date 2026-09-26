@@ -503,6 +503,24 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **A solve's attempts are independent, and a slow line runs them in parallel (`solver/core.py`,
+  `gtnh-solve --jobs`).** A solve anneals 8 placements and keeps the best one once routed. Each
+  attempt used to anneal under penalties the ones before it had built up (a net one attempt left
+  unrouted weighed more in the next, and a crowded machine was given more room), and the loop
+  stopped early when the same nets kept failing. Measured over 53 solves on five lines, their seeds
+  spaced so that no two solves share an attempt, that feedback was no better than none: without it
+  45 returned the same layout, 6 a better one and 2 a worse one. One of the worse two is the
+  default nitrobenzene solve (seed 0, what the CLI and the preview use): floor 91 to 105, route
+  blocks 22 to 41, the layout the feedback had happened to steer that seed to.
+
+  So the attempts are now independent, and once the first one shows the line is slow (it took over
+  a second), the rest run in a pool of processes: one per CPU by default, `--jobs N` to choose, and
+  `solve(jobs=N)` in the library, where the default is 1. The layout never depends on the number of
+  processes; on every seed measured, one and four gave byte-identical results. On a 4-core machine
+  `gtnh-nitrobenzene` solves in 6.5 s instead of 13.0 s and `ev-nitrobenzene` in 31.7 s instead of
+  56.5 s, while sand and parallel-sand stay in one process and take the time they did. A line whose
+  every attempt fails now runs all 8 before giving up, rather than stopping once the same nets fail
+  twice.
 - **The annealer can nudge a machine by one cell on a line of single blocks
   (`placement/search.py`).** Its small moves were relocate, swap and reorient, and relocate draws a
   cell anywhere in the region, which is accepted under 2% of the time, so the search had no way to

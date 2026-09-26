@@ -43,7 +43,7 @@ with the shared-amperage power net and the per-tick system I/O the line consumes
                                              │    (footprints, hatch slots, tiers, ME)
                                              ▼
                         placement (SA/LNS) ◄─routing-aware cost─► router (A*, 3D,
-                                  │            + feedback loop     per-commodity, power)
+                                  │            + multi-start       per-commodity, power)
                                   └──────────────┬─────────────────┘
                                                  ▼
                                      hatch placement (each connection

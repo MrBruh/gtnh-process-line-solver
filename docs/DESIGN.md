@@ -51,7 +51,7 @@ everything it did.
 and the learning payoff, accepting a slower path to a usable tool). A small integration
 spike de-risks the gtnh-factory-flow export boundary before the solver is built.
 
-The full set of engineering decisions (placement↔routing feedback loop, IR contract,
+The full set of engineering decisions (placement↔routing multi-start, IR contract,
 fork boundary, validator independence, free-form routing + realizability invariant,
 shared-amperage power model, etc.) lives in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
