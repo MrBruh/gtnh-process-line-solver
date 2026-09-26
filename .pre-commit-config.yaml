@@ -28,7 +28,7 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Must match the ruff pin in constraints-dev.txt, so the hook and a manual `ruff format .`
     # cannot disagree; tests/test_toolchain_pins.py fails the build if they drift apart.
-    rev: v0.16.7
+    rev: v0.16.8
     hooks:
       - id: ruff-check
         args: [--fix]
