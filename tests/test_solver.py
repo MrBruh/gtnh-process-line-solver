@@ -317,26 +317,28 @@ def _edge(nid: str, src: str, dst: str) -> Net:
 
 
 def test_feedback_loop_recovers_a_layout_a_single_attempt_leaves_partial() -> None:
-    # A tight single-layer fan-out graph where the seed-0 placement strands a net - the router
+    # A tight single-layer fan-out graph where the seed-1 placement strands a net - the router
     # cannot lay its pipe in the congested layout, so one assembly attempt is partial_invalid.
     # The place<->route feedback loop penalizes the failed net and re-places (next seed), and that
-    # placement routes cleanly: solve() returns VALID where a single attempt did not.
+    # placement routes cleanly: solve() returns VALID where a single attempt did not. (Seed 0 used
+    # to be the stranding one, until the LNS recreate learned to price compactness and its first
+    # attempt started routing on its own, #254.)
     edges = [("m0", "m2"), ("m0", "m3"), ("m1", "m3"), ("m1", "m4"), ("m2", "m5"), ("m4", "m5")]
     problem = InputIR(
         bounding_region=CellBox(sx=7, sy=1, sz=7),
         machines=[_io_machine(f"m{i}") for i in range(6)],
         nets=[_edge(f"e{k}", a, b) for k, (a, b) in enumerate(edges)],
     )
-    seed0 = optimize_placement(problem, seed=0)
-    single_attempt, failed = solver_core._assemble(problem, seed0.placements, 0)
+    first = optimize_placement(problem, seed=1)
+    single_attempt, failed = solver_core._assemble(problem, first.placements, 1)
     assert single_attempt.status is LayoutStatus.PARTIAL_INVALID  # one attempt cannot route it...
     assert failed  # ...and it names the net it could not lay (the feedback signal)
 
-    layout = solve(problem)
+    layout = solve(problem, seed=1)
     assert layout.status is LayoutStatus.VALID, layout.infeasibility  # ...but the loop recovers it
     assert validate(problem, layout).ok
-    assert layout.seed != 0  # it took a later attempt (different seed + penalty), not attempt 0
-    assert solve(problem) == solve(problem)  # still deterministic
+    assert layout.seed != 1  # it took a later attempt (different seed + penalty), not the first
+    assert solve(problem, seed=1) == solve(problem, seed=1)  # still deterministic
 
 
 def test_solve_fork_auto_outputs_one_and_pipes_the_other() -> None:

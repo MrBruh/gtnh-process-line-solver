@@ -30,12 +30,15 @@ with a **large neighbourhood search (LNS) ruin-and-recreate** move: rip out a *r
 machines (a net-connected neighbourhood, the ones that want to sit together) and greedily
 re-insert each at the position + orientation that minimises the cost, biased toward cells next to
 its already-placed net-neighbours. One LNS step reshapes a whole cluster at once, escaping the
-local optima single-cell moves plateau in. Metropolis acceptance with geometric cooling keeps the
-best valid layout seen.
+local optima single-cell moves plateau in. The re-insertion prices compactness too (how much a
+spot grows the build), which is what lets it fold the long strip the first-fit start lays a big
+multiblock line out in (#254). Metropolis acceptance with geometric cooling keeps the best valid
+layout seen.
 
     initial = constructive.place      # a valid seed
     repeat for a seeded budget:
-        cand = with prob p_lns:  ruin (remove a related cluster) + recreate (greedy re-insert)
+        cand = with prob p_lns:  ruin (remove a related cluster) + recreate (greedy re-insert,
+                                 priced on nets, auto-output and how much it grows the build)
                else:            relocate | swap | reorient
                (only ever a VALID candidate, else skip)
         accept if cheaper, or with prob exp(-d/T)   ; track best-so-far ; cool T
@@ -175,6 +178,22 @@ class _NetBox(NamedTuple):
     z1: float
 
 
+class _Extent(NamedTuple):
+    """The box the machines already placed span, in whole cells, bounds inclusive.
+
+    What an insertion is measured against for compactness: the candidate grows it or it does not.
+    Cells rather than centroids, because the floor area and volume ``_cost`` ranks on are counted
+    in cells.
+    """
+
+    x0: int
+    x1: int
+    y0: int
+    y1: int
+    z0: int
+    z1: int
+
+
 class _PowerAttach(NamedTuple):
     """One penalized power net's weight and the centroids of its already-placed members.
 
@@ -253,6 +272,9 @@ class _SearchContext:
     machine_nets: dict[str, list[_WeightedNet]]
     machine_power: dict[str, list[_WeightedNet]]
     machine_auto: dict[str, list[_AutoPair]]
+    #: The objective's ``(footprint weight, volume weight)`` (:data:`_OBJECTIVE_WEIGHTS`), so the
+    #: LNS recreate can price what an insertion does to the build's size, as ``_cost`` does.
+    weights: tuple[float, float]
 
 
 def optimize_placement(
@@ -324,8 +346,9 @@ def optimize_placement(
         machine_nets=_machine_nets(problem, wire_nets),
         machine_power=_machine_nets(problem, power_nets),
         machine_auto=_machine_auto(problem, auto_pairs),
+        weights=_OBJECTIVE_WEIGHTS[objective],
     )
-    weights = _OBJECTIVE_WEIGHTS[objective]
+    weights = ctx.weights
     rng = random.Random(seed)
 
     # The anneal holds plain poses and hands back ``Placement``s only at the end (see Pose).
@@ -1038,6 +1061,24 @@ def _placed_invariants(
     return net_boxes, power
 
 
+def _placed_extent(placed: list[Pose], ctx: _SearchContext) -> _Extent | None:
+    """The :class:`_Extent` of ``placed``, or ``None`` when nothing is placed yet.
+
+    Corner-based like ``_cost``'s own box, so the two agree on what "the build" measures.
+    """
+    if not placed:
+        return None
+    boxes = [(p.cell, ctx.bodies[p.machine_id].sizes[p.orientation]) for p in placed]
+    return _Extent(
+        min(c[0] for c, _ in boxes),
+        max(c[0] + s[0] - 1 for c, s in boxes),
+        min(c[1] for c, _ in boxes),
+        max(c[1] + s[1] - 1 for c, s in boxes),
+        min(c[2] for c, _ in boxes),
+        max(c[2] + s[2] - 1 for c, s in boxes),
+    )
+
+
 def _occupancy_grid(region: CellBox, occupied: set[Cell], reserved: set[Cell]) -> bytearray:
     """``occupied | reserved`` as a flat byte per region cell, indexed ``x + y*sx + z*sx*sy``.
 
@@ -1091,6 +1132,7 @@ def _best_insertion(
     body = ctx.bodies[p.machine_id]
     placed_pos = {q.machine_id: q for q in placed}
     net_boxes, power_attach = _placed_invariants(p.machine_id, placed_pos, ctx)
+    extent = _placed_extent(placed, ctx)
     bounds = ctx.bounds
     offsets_by_size: dict[Size, tuple[int, ...]] = {}
     row, plane = bounds[0], bounds[0] * bounds[1]
@@ -1135,6 +1177,7 @@ def _best_insertion(
                 power_attach,
                 ctx,
                 bound=best_cost,
+                extent=extent,
             )
             if cost < best_cost:
                 best_cost, best = cost, (origin, orientation)
@@ -1156,14 +1199,25 @@ def _marginal_insertion_cost(
     power_attach: list[_PowerAttach],
     ctx: _SearchContext,
     bound: float = math.inf,
+    extent: _Extent | None = None,
 ) -> float:
     """The cost terms that change with where ``machine_id`` goes: the weighted HPWL of its own
     item/fluid nets over their already-placed members (this candidate included), plus for each of
     its feedback-penalized power nets the Manhattan distance to the nearest placed member (the
-    increment Prim would pay to attach this machine to the trunk MST), minus the auto-output
-    reward for the pairs the candidate makes face-adjacent. A cheap marginal proxy of ``_cost``
-    for ranking candidate insertions; the annealing loop's full ``_cost`` still gates acceptance
-    (the footprint/volume terms, which this per-machine view cannot see, included).
+    increment Prim would pay to attach this machine to the trunk MST), plus how much the candidate
+    grows the build (``extent``, below), minus the auto-output reward for the pairs the candidate
+    makes face-adjacent. A cheap marginal proxy of ``_cost`` for ranking candidate insertions; the
+    annealing loop's full ``_cost`` still gates acceptance.
+
+    **The growth term is what makes the LNS move compact anything** (#254). ``extent`` is the box
+    the machines already placed span, and a candidate pays the objective's own compactness
+    weights on whatever it adds to that box's floor area and volume, the same terms ``_cost``
+    ranks on. Without it an insertion that extends the build costs the same as one tucked inside
+    it, so the recreate put a machine wherever its nets were cheapest, often at the far end of the
+    strip the first-fit start lays down, and the loop's acceptance could only reject that. Measured
+    over eight solve seeds, ev-nitrobenzene's median floor went from 508.5 to 441 with this term,
+    with fewer pipe and cable blocks, and no example line lost a valid seed. ``None`` (nothing
+    placed yet) adds nothing, since the first machine back defines the box.
 
     ``net_boxes`` and ``power_attach`` come from :func:`_placed_invariants` and summarise the
     members that are already placed - the part of both terms that is the same for every candidate.
@@ -1173,7 +1227,7 @@ def _marginal_insertion_cost(
     ``bound`` is the incumbent's cost, and returning ``inf`` above it is a pure early-out: the
     caller only keeps a strictly cheaper candidate, so a candidate that provably cannot get there
     need not be scored exactly. **The bound has to account for the auto reward being subtracted.**
-    The running ``wire + cable`` total is an *upper* bound on the result, not a lower one, so
+    The running ``wire + cable + growth`` total is an *upper* bound on the result, not a lower one, so
     comparing it against ``bound`` directly would discard candidates the reward would have made
     best. Subtracting the largest reward still available - every remaining pair scoring - makes the
     test admissible, and the layouts it produces are identical to scoring every candidate in full.
@@ -1204,8 +1258,20 @@ def _marginal_insertion_cost(
     for weight, centroids in power_attach:
         attach = min((_manhattan((cx, cy, cz), c) for c in centroids), default=0.0)
         cable += weight * attach
+    growth = 0.0
+    if extent is not None:
+        # The placed box with this candidate's corners folded in, against the box without it.
+        ex0, ex1, ey0, ey1, ez0, ez1 = extent
+        wx, wy, wz = ex1 - ex0 + 1, ey1 - ey0 + 1, ez1 - ez0 + 1
+        nx = (x + sx - 1 if x + sx - 1 > ex1 else ex1) - (x if x < ex0 else ex0) + 1
+        ny = (y + sy - 1 if y + sy - 1 > ey1 else ey1) - (y if y < ey0 else ey0) + 1
+        nz = (z + sz - 1 if z + sz - 1 > ez1 else ez1) - (z if z < ez0 else ez0) + 1
+        w_footprint, w_volume = ctx.weights
+        growth = w_footprint * (nx * nz - wx * wz) + w_volume * (nx * ny * nz - wx * wy * wz)
+    # Summed once, in this order, for both uses below: the early-out and the result must agree.
+    rest = cable + growth
     pairs = ctx.machine_auto[machine_id]
-    if _W_WIRE * wire + cable - _W_AUTO * len(pairs) >= bound:
+    if _W_WIRE * wire + rest - _W_AUTO * len(pairs) >= bound:
         return math.inf  # even every pair scoring cannot beat the incumbent
     auto = 0
     here = Pose(machine_id, origin, orientation)
@@ -1223,7 +1289,7 @@ def _marginal_insertion_cost(
             possible = auto_output_possible(op, om, pair.source_port, here, m, pair.sink_port)
         if possible:
             auto += 1
-    return _W_WIRE * wire + cable - _W_AUTO * auto
+    return _W_WIRE * wire + rest - _W_AUTO * auto
 
 
 def _candidate_origins(

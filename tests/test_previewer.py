@@ -250,16 +250,32 @@ def test_scene_route_carries_the_resource_it_moves_and_at_what_rate(
 ) -> None:
     """What a hovered pipe has to answer (GitHub #155). The scene carried the commodity, the net id
     and the colour, and nothing that said *what* - so a bundle of crossing fluid pipes was eight
-    identical blue noodles. Nitrobenzene is the fixture because it is the only shipped line that
-    lays actual pipes; sand's item chain all auto-outputs, leaving power alone.
+    identical blue noodles. Nitrobenzene is the fixture because its nets carry real fluids at real
+    rates; sand's item chain all auto-outputs, leaving power alone.
+
+    The routes are laid by hand, one per fluid net and one power trunk, because what is under test
+    is what the scene says about a route, not which pipes a solve lays. Without the dataset the
+    fixture's solve is partial (a 1x1x1 machine has too few faces for its ports), and which of its
+    pipes the router's collision-free fallback keeps changes whenever placement does (#254).
     """
-    problem, layout = solved_nitrobenzene
+    problem, _ = solved_nitrobenzene
+    hop = [Segment(start=CellCoord(x=0, y=0, z=0), end=CellCoord(x=1, y=0, z=0), channel=0)]
+    routes = [
+        Route(net_id=n.id, commodity=Commodity.FLUID, segments=hop)
+        for n in problem.nets
+        if n.commodity is Commodity.FLUID
+    ]
+    trunk = next(n for n in problem.nets if n.commodity is Commodity.POWER)
+    routes.append(
+        Route(net_id=trunk.id, commodity=Commodity.POWER, segments=hop, thickness_per_segment=[1])
+    )
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, routes=routes)
     scene = build_scene(problem, layout)
     resource_of = {n.id: n.fluid_or_item for n in problem.nets}
     rate_of = {n.id: n.throughput for n in problem.nets}
 
     fluids = [r for r in scene["routes"] if r["commodity"] == "fluid"]
-    assert fluids, "the nitrobenzene line pipes fluids; that is what it is the fixture for"
+    assert fluids, "the nitrobenzene line carries fluids; that is what it is the fixture for"
     for route in fluids:
         # Verbatim, exactly the id the plan carries - no display name invented here (#155).
         assert route["resource"] == resource_of[route["netId"]]
