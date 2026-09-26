@@ -89,7 +89,10 @@ Two more bind the machine at **runtime**, where a structure that formed perfectl
 - **A muffler needs literal air in front of it.** `MTEHatchMuffler` tests `getAirAtSide(front)`, so
   a cable, a pipe, a casing or a neighbouring machine in that cell makes `polluteEnvironment` fail
   and stops the machine with `POLLUTION_FAIL`. The cell in front of a muffler is therefore a routing
-  **keep-out** (`MUFFLER_BLOCKED`), a constraint class nothing else in the solver has. GT offers the
+  **keep-out** (`MUFFLER_BLOCKED`), a constraint class nothing else in the solver has. Where the
+  muffler can face only one way (an Electric Blast Furnace's is the top centre, facing up), the
+  routers treat that cell as an obstacle from the start; a muffler with several choices takes
+  whichever the finished routes left open (#228). GT offers the
   muffler element only to a controller that pollutes, so "the dump records a `Muffler`-capable cell"
   is the usable proxy for "this machine needs one" (`MUFFLER_MISSING`) - it over-places on the few
   that accept one without asserting it, which is the safe direction: a spare muffler costs a casing

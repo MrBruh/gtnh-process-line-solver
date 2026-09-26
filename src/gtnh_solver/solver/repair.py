@@ -54,7 +54,7 @@ from gtnh_solver.ir import CellBox, CellCoord, Commodity, Facing, InputIR, Machi
 from gtnh_solver.ir.geometry import Cell, occupied_cells, rotated_footprint
 from gtnh_solver.ir.nets import net_sources_sinks, port_direction_map
 from gtnh_solver.placement import Objective
-from gtnh_solver.router import PowerRouteResult, route_power
+from gtnh_solver.router import PowerRouteResult, route_power, vent_cells
 
 from ._structure import structure_quality
 
@@ -117,7 +117,9 @@ def repair_power_sources(
 
     machines = {m.id: m for m in problem.machines}
     loads = _power_loads_by_source(problem)
-    reserved = {(c.x, c.y, c.z) for c in problem.reserved_cells}
+    # A muffler's only vent is ground no source may stand on: the cable router already keeps off
+    # it, and a source moved there would leave the machine nothing to vent into (#228).
+    reserved = {(c.x, c.y, c.z) for c in problem.reserved_cells} | vent_cells(current, machines)
     occupied = {
         c
         for p in current
