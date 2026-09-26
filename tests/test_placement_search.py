@@ -48,6 +48,7 @@ from gtnh_solver.placement.search import (
     _dockable_cells,
     _Extent,
     _marginal_insertion_cost,
+    _nudge,
     _occupancy_grid,
     _placed_extent,
     _placed_invariants,
@@ -900,3 +901,77 @@ def test_a_body_reads_the_machine_as_placement_sees_it() -> None:
             assert body.sizes[facing] == (box.sx, box.sy, box.sz)
     assert _body(source).is_power_source
     assert _body(wide).sizes[Facing.EAST] == (1, 1, 3)
+
+
+# ------------------------------------------------------------------ the one-cell nudge
+
+
+def test_a_nudge_moves_one_machine_by_one_cell_and_stays_valid() -> None:
+    # Every nudge the search could make on a star with a power source: exactly one machine moves,
+    # by exactly one cell, the layout stays validator-clean (the source's feed face included), and
+    # the occupied set the move borrows comes back as it was.
+    problem = _star(4)
+    problem = problem.model_copy(
+        update={
+            "machines": [
+                *problem.machines,
+                power_source(
+                    "src", orientations=[Facing.NORTH, Facing.EAST, Facing.SOUTH, Facing.WEST]
+                ),
+            ]
+        }
+    )
+    ctx = _fit_ctx(problem.bounding_region, list(problem.machines))
+    placed = [pose_of(p) for p in place(problem).placements]
+    occupied = {c for p in placed for c in _pose_cells(p, ctx.bodies[p.machine_id].machine)}
+    before = set(occupied)
+    moved = 0
+    for seed in range(200):
+        cand = _nudge(placed, ctx, occupied, random.Random(seed))
+        assert occupied == before, "the move must restore what it borrowed"
+        if cand is None:
+            continue
+        changed = [(a, b) for a, b in zip(placed, cand, strict=True) if a != b]
+        assert len(changed) == 1
+        [(a, b)] = changed
+        assert sum(abs(i - j) for i, j in zip(a.cell, b.cell, strict=True)) == 1
+        assert _validates(problem, tuple(_placement(p) for p in cand))
+        moved += 1
+    assert moved > 0
+
+
+def test_a_machine_boxed_in_on_every_side_cannot_be_nudged() -> None:
+    # A 3x1x1 region filled by three blocks: every step runs into a neighbour or off the region.
+    machines = [_spoke(f"s{i}") for i in range(3)]
+    ctx = _fit_ctx(CellBox(sx=3, sy=1, sz=1), machines)
+    placed = [Pose(f"s{i}", (i, 0, 0), Facing.NORTH) for i in range(3)]
+    occupied = {(0, 0, 0), (1, 0, 0), (2, 0, 0)}
+    for seed in range(20):
+        assert _nudge(placed, ctx, occupied, random.Random(seed)) is None
+    assert occupied == {(0, 0, 0), (1, 0, 0), (2, 0, 0)}
+
+
+def test_only_a_line_of_single_blocks_is_nudged(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The nudge measured as noise at best on multiblock lines, so any multiblock turns it off and
+    # the search there is exactly what it was; a line of single blocks gets it.
+    import gtnh_solver.placement.search as search_module
+
+    calls = 0
+    real = search_module._nudge
+
+    def counting(*args: object, **kwargs: object) -> list[Pose] | None:
+        nonlocal calls
+        calls += 1
+        return real(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(search_module, "_nudge", counting)
+    optimize_placement(_star(4), seed=0)
+    assert calls > 0
+
+    calls = 0
+    with_multiblock = _star(4)
+    with_multiblock = with_multiblock.model_copy(
+        update={"machines": [*with_multiblock.machines, _wide()]}
+    )
+    optimize_placement(with_multiblock, seed=0)
+    assert calls == 0

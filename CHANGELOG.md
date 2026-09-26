@@ -503,6 +503,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **The annealer can nudge a machine by one cell on a line of single blocks
+  (`placement/search.py`).** Its small moves were relocate, swap and reorient, and relocate draws a
+  cell anywhere in the region, which is accepted under 2% of the time, so the search had no way to
+  slide a machine along a wall or tuck it into a gap beside its neighbours. On a line where every
+  machine is a single block, half of relocate's share now goes to a one-cell nudge.
+
+  On `examples/gtnh-parallel-sand.json` with its bank template switched off, which stands in for
+  single-block lines the template does not cover, 15 of 16 solves come out smaller: median box 120
+  to 96 and route blocks 58 to 40.5, in the same time (seeds 0 to 120, spaced 8 apart so that no
+  two solves share an attempt). A line with any multiblock keeps the old move mix and solves
+  exactly as before: there the nudge measured as noise, and nudging every machine cost
+  `gtnh-nitrobenzene` its valid layout on one seed in eight. `gtnh-parallel-sand` with its template
+  still returns the build that ran in game. `gtnh-sand` moves both ways: of 16 seeds, 10 are
+  unchanged, 3 better and 3 worse, and the median layout is the same (floor 4, box 12). Its default
+  seed 0 keeps its floor and route blocks and stacks one layer taller (box 12 to 16).
 - **Breaking: Python 3.14 is now required (#256).** `requires-python` is `>=3.14` (it was
   `>=3.10`) and CI tests 3.14 alone. Installing on 3.10 to 3.13 now stops at `pip install`; rebuild
   the venv on a 3.14 interpreter (`py -3.14 -m venv .venv` on Windows). The gain is the local test
