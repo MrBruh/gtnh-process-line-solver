@@ -39,9 +39,18 @@ layout seen.
     repeat for a seeded budget:
         cand = with prob p_lns:  ruin (remove a related cluster) + recreate (greedy re-insert,
                                  priced on nets, auto-output and how much it grows the build)
-               else:            relocate | swap | reorient
+               else:            relocate | nudge (single-block lines only) | swap | reorient
                (only ever a VALID candidate, else skip)
         accept if cheaper, or with prob exp(-d/T)   ; track best-so-far ; cool T
+
+**The nudge** shifts one machine by one cell. Relocate draws a cell anywhere in the region, which
+almost never lands anywhere useful (under 2% of relocates are accepted), so without a nudge the
+search has no way to slide a machine along a wall or tuck it into a gap beside its neighbours. On a
+line of single blocks the nudge takes half of relocate's share, and on parallel-sand with the bank
+template off it improves 15 of 16 solves (median box 128 to 92). On a line with any multiblock it
+is left out and the mix is exactly as it was: there it measured as noise at best, and nudging every
+machine cost nitrobenzene a valid layout on one seed in eight (#246 saw the same on
+ev-nitrobenzene).
 
 Every accepted state is overlap/bounds/reserved-clean (moves build only valid candidates, and
 recreate falls back to a machine's freed origin), so the validator still independently certifies
@@ -152,6 +161,9 @@ _MAX_CANDIDATES = 16
 # exact values are load-bearing for per-seed determinism, so keep them if you retune the split.
 _P_RELOCATE = 0.34
 _P_SWAP = 0.67
+#: On a line of single blocks only, relocate keeps the draws below this and the one-cell nudge
+#: takes the rest of its share, up to ``_P_RELOCATE`` (module docstring). Half of relocate's share.
+_P_RELOCATE_WHEN_NUDGING = 0.17
 
 
 #: A routed net as the placement cost sees it: ``(member machine ids, weight)``. Item/fluid nets
@@ -275,6 +287,9 @@ class _SearchContext:
     #: The objective's ``(footprint weight, volume weight)`` (:data:`_OBJECTIVE_WEIGHTS`), so the
     #: LNS recreate can price what an insertion does to the build's size, as ``_cost`` does.
     weights: tuple[float, float]
+    #: Whether the small moves include the one-cell nudge: only when every machine is a single
+    #: block (module docstring).
+    nudges: bool = False
 
 
 def optimize_placement(
@@ -347,6 +362,7 @@ def optimize_placement(
         machine_power=_machine_nets(problem, power_nets),
         machine_auto=_machine_auto(problem, auto_pairs),
         weights=_OBJECTIVE_WEIGHTS[objective],
+        nudges=all(body.sizes[Facing.NORTH] == (1, 1, 1) for body in bodies.values()),
     )
     weights = ctx.weights
     rng = random.Random(seed)
@@ -805,6 +821,8 @@ def _move(
     single incrementally-maintained copy."""
     roll = rng.random()
     if roll < _P_RELOCATE:
+        if ctx.nudges and roll >= _P_RELOCATE_WHEN_NUDGING:
+            return _nudge(placements, ctx, occupied, rng)
         return _relocate(placements, ctx, occupied, rng)
     if roll < _P_SWAP:
         return _swap(placements, ctx, occupied, rng)
@@ -839,6 +857,50 @@ def _relocate(
             size = body.sizes[orientation]
             if not box_within(origin, size, ctx.bounds):
                 continue  # the body would hang off the region: cheaper to reject than to expand
+            cells = list(box_cells(origin, size))
+            if ctx.reserved.isdisjoint(cells) and occupied.isdisjoint(cells):
+                new = list(placements)
+                new[i] = Pose(p.machine_id, origin, orientation)
+                return new
+        return None
+    finally:
+        occupied.update(own)
+
+
+#: The six one-cell steps a nudge may take, in ``FACE_DELTAS`` order (the nudge shuffles them).
+_NUDGE_STEPS = tuple(FACE_DELTAS.values())
+
+
+def _nudge(
+    placements: list[Pose],
+    ctx: _SearchContext,
+    occupied: set[Cell],
+    rng: random.Random,
+) -> list[Pose] | None:
+    """Shift one machine by one cell, trying the six directions in a random order.
+
+    The local move relocate is not (module docstring). The machine keeps its orientation, except
+    that a power source turns back onto the boundary the way relocate turns it; the first direction
+    that fits wins, and a machine boxed in on every side yields ``None``.
+    """
+    i = rng.randrange(len(placements))
+    p = placements[i]
+    body = ctx.bodies[p.machine_id]
+    # As in _relocate: lift the machine's own cells so it may step into one it covers now.
+    own = set(_cells(p, body))
+    occupied.difference_update(own)
+    try:
+        steps = list(_NUDGE_STEPS)
+        rng.shuffle(steps)
+        x, y, z = p.cell
+        for dx, dy, dz in steps:
+            origin = (x + dx, y + dy, z + dz)
+            orientation = _feed_orientation(body, origin, p.orientation, ctx.bounds)
+            if orientation is None:
+                continue  # a source stepped off the boundary with no feed-legal facing there
+            size = body.sizes[orientation]
+            if not box_within(origin, size, ctx.bounds):
+                continue
             cells = list(box_cells(origin, size))
             if ctx.reserved.isdisjoint(cells) and occupied.isdisjoint(cells):
                 new = list(placements)

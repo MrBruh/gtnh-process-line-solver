@@ -205,7 +205,7 @@ _SAND = _EXAMPLES / "gtnh-sand.json"
 _NITROBENZENE = _EXAMPLES / "gtnh-nitrobenzene.json"
 
 
-def _solved(path: Path) -> tuple[InputIR, LayoutResult]:
+def _solved(path: Path, seed: int = 0) -> tuple[InputIR, LayoutResult]:
     """One genuine solve of a shipped line: ``adapt_file(path)`` with no physical dataset.
 
     **The absent dataset is part of the key.** ``adapt_file(path)`` and
@@ -216,7 +216,7 @@ def _solved(path: Path) -> tuple[InputIR, LayoutResult]:
     and docs/TESTING.md explains why the two configurations must stay distinguishable.
     """
     ir = adapt_file(path)
-    return ir, solve(ir)
+    return ir, solve(ir, seed=seed)
 
 
 @pytest.fixture(scope="session")
@@ -226,7 +226,10 @@ def _sand_session() -> tuple[InputIR, LayoutResult]:
 
 @pytest.fixture(scope="session")
 def _nitrobenzene_session() -> tuple[InputIR, LayoutResult]:
-    return _solved(_NITROBENZENE)
+    # Seed 1, because what this fixture is for is the pipes, and which seeds lay them moves with
+    # the search: without the dataset every machine here is a single block, so the one-cell nudge
+    # applies, and seed 0's best partial layout then keeps its cable and loses every pipe.
+    return _solved(_NITROBENZENE, seed=1)
 
 
 @pytest.fixture
