@@ -46,8 +46,10 @@ from gtnh_solver.placement.search import (
     _body,
     _box_offsets,
     _dockable_cells,
+    _Extent,
     _marginal_insertion_cost,
     _occupancy_grid,
+    _placed_extent,
     _placed_invariants,
     _placement,
     _relocate,
@@ -439,6 +441,7 @@ def _fit_ctx(
         machine_nets={},
         machine_power={},
         machine_auto={},
+        weights=(1.0, 0.02),
     )
 
 
@@ -524,10 +527,17 @@ def _cost_ctx(machines: list[Machine], region: CellBox) -> _SearchContext:
             ids[1]: [],
             ids[2]: [],
         },
+        weights=(1.0, 0.02),
     )
 
 
-def test_the_pruning_bound_never_changes_which_cost_is_reported() -> None:
+#: No extent, and the one ``b`` at (4,0,0) and ``c`` at (0,0,4) span, so candidates on the far row and
+#: column of the 6x6 region grow it and the growth term is inside what the bound has to admit.
+_EXTENTS = [None, _Extent(0, 4, 0, 0, 0, 4)]
+
+
+@pytest.mark.parametrize("extent", _EXTENTS)
+def test_the_pruning_bound_never_changes_which_cost_is_reported(extent: _Extent | None) -> None:
     """``bound`` is an early-out, not an approximation: below it the exact cost still comes back.
 
     The auto reward is *subtracted*, so the running ``wire + cable`` total is an upper bound on the
@@ -547,18 +557,19 @@ def test_the_pruning_bound_never_changes_which_cost_is_reported() -> None:
     for x in range(region.sx):
         for z in range(region.sz):
             args = ((x, 0, z), Facing.NORTH, body, placed_pos, net_boxes, power_attach, ctx)
-            exact = _marginal_insertion_cost("a", *args)
+            exact = _marginal_insertion_cost("a", *args, extent=extent)
             assert math.isfinite(exact)
             # A bound above the true cost must not perturb it...
-            assert _marginal_insertion_cost("a", *args, bound=exact + 1e-9) == exact
+            assert _marginal_insertion_cost("a", *args, bound=exact + 1e-9, extent=extent) == exact
             # ...and one at or below it may only ever abstain, never report a different number.
-            pruned = _marginal_insertion_cost("a", *args, bound=exact)
+            pruned = _marginal_insertion_cost("a", *args, bound=exact, extent=extent)
             assert pruned == exact or pruned == math.inf
             checked += 1
     assert checked == region.sx * region.sz
 
 
-def test_the_pruning_bound_matches_an_unbounded_scan() -> None:
+@pytest.mark.parametrize("extent", _EXTENTS)
+def test_the_pruning_bound_matches_an_unbounded_scan(extent: _Extent | None) -> None:
     """End to end on the loop's own contract: pruning picks the same winner as scoring everything.
 
     ``_best_insertion`` keeps a candidate only on a strict ``<``, so an admissible bound cannot
@@ -584,12 +595,69 @@ def test_the_pruning_bound_matches_an_unbounded_scan() -> None:
                     power_attach,
                     ctx,
                     bound=best_cost if use_bound else math.inf,
+                    extent=extent,
                 )
                 if cost < best_cost:
                     best_cost, best = cost, (x, 0, z)
         return best_cost, best
 
     assert scan(use_bound=True) == scan(use_bound=False)
+
+
+def _netless_ctx(
+    machines: list[Machine], region: CellBox, weights: tuple[float, float]
+) -> _SearchContext:
+    """No nets, no power, no auto pairs: an insertion's cost is its growth of the build alone."""
+    return _SearchContext(
+        bodies={m.id: _body(m) for m in machines},
+        region=region,
+        bounds=(region.sx, region.sy, region.sz),
+        reserved=set(),
+        adjacency={},
+        machine_nets={m.id: [] for m in machines},
+        machine_power={m.id: [] for m in machines},
+        machine_auto={m.id: [] for m in machines},
+        weights=weights,
+    )
+
+
+@pytest.mark.parametrize(
+    ("origin", "weights", "growth"),
+    [
+        ((2, 0, 0), (1.0, 0.02), 0.0),  # between the two: the build does not grow
+        ((6, 0, 0), (1.0, 0.02), 2 + 0.02 * 2),  # past the end: floor 5 -> 7, volume 5 -> 7
+        ((2, 0, 1), (1.0, 0.02), 5 + 0.02 * 5),  # beside the row: floor 5 -> 10, volume 5 -> 10
+        ((2, 1, 0), (1.0, 0.02), 0.02 * 5),  # on top: the floor is free, only volume grows
+        ((2, 1, 0), (0.0, 1.0), 5.0),  # ...which the volume objective prices in full
+    ],
+)
+def test_an_insertion_pays_the_objectives_weights_on_what_it_adds_to_the_build(
+    origin: Cell, weights: tuple[float, float], growth: float
+) -> None:
+    """The LNS recreate prices compactness (#254). It used to rank spots on nets and auto-output
+    alone, so a machine landing past the end of the build cost the same as one tucked inside it,
+    and the move could never fold the strip the first-fit start lays a big line out in."""
+    machines = [_hub("a"), _hub("b"), _hub("c")]
+    ctx = _netless_ctx(machines, CellBox(sx=8, sy=2, sz=8), weights)
+    placed = [pose_of(at("b", 0, 0, 0)), pose_of(at("c", 4, 0, 0))]
+    extent = _placed_extent(placed, ctx)
+    assert extent == _Extent(0, 4, 0, 0, 0, 0)
+
+    placed_pos = {q.machine_id: q for q in placed}
+
+    def cost(extent: _Extent | None) -> float:
+        body = ctx.bodies["a"]
+        return _marginal_insertion_cost(
+            "a", origin, Facing.NORTH, body, placed_pos, [], [], ctx, extent=extent
+        )
+
+    assert cost(extent) == pytest.approx(growth)
+    assert cost(None) == 0.0  # nothing placed yet: there is no box to grow
+
+
+def test_placed_extent_is_none_with_nothing_placed() -> None:
+    ctx = _netless_ctx([_hub("a")], CellBox(sx=4, sy=1, sz=4), (1.0, 0.02))
+    assert _placed_extent([], ctx) is None
 
 
 def test_placed_invariants_summarise_only_the_placed_members() -> None:

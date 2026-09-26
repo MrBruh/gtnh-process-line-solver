@@ -115,6 +115,25 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **A multiblock line no longer sprawls into a long strip (#254).** The placement search starts from
+  a first-fit that fills the floor row by row across the whole region, which for ev-nitrobenzene is
+  a strip 68 wide. Its large move rips out a cluster of machines and re-inserts them, and it chose
+  each spot on the machine's nets and auto-output alone. So a machine landing past the end of the
+  strip cost the same as one tucked inside it, and the search had no move that folded the strip.
+  Re-insertion now also pays the objective's own compactness weights (floor area, and volume) on
+  whatever a spot adds to the build.
+
+  Measured over eight solve seeds against `main`, with the physical dataset:
+
+  | line | median floor | worst floor | route blocks (median) | valid |
+  |---|---|---|---|---|
+  | ev-nitrobenzene | 508.5 to 441 | 616 to 504 | 458 to 367 | 8/8 to 8/8 |
+  | nitrobenzene | 105 to 94.5 | 120 to 112 | 58.5 to 49 | 8/8 to 8/8 |
+  | sand | 5 to 4 | 5 to 4 | 3 to 3 | 8/8 to 8/8 |
+  | parallel-sand | 12 to 12 (the build that ran in game, every seed) | | 15 to 15 | 8/8 to 8/8 |
+
+  ev-nitrobenzene and nitrobenzene also solve in about 12% and 19% less CPU; the sand lines, well
+  under a few seconds each, are unchanged.
 - **One hatch shortfall no longer hides every hatch after it (#228).** `place_hatches` returned at
   the first machine it could not give a hatch, so every machine after it was left with no
   maintenance hatch and no muffler, and the machine that fell short lost the maintenance hatch it
