@@ -9,6 +9,7 @@ non-VALID-with-an-explicit-infeasibility.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -316,13 +317,13 @@ def _edge(nid: str, src: str, dst: str) -> Net:
     )
 
 
-def test_feedback_loop_recovers_a_layout_a_single_attempt_leaves_partial() -> None:
+def test_the_multi_start_recovers_a_layout_a_single_attempt_leaves_partial() -> None:
     # A tight single-layer fan-out graph where the seed-0 placement strands a net - the router
     # cannot lay its pipe in the congested layout, so one assembly attempt is partial_invalid.
-    # The place<->route feedback loop penalizes the failed net and re-places (next seed), and that
-    # placement routes cleanly: solve() returns VALID where a single attempt did not. (The seed is
-    # whichever one the annealer happens to strand: it was seed 1 while the LNS recreate priced
-    # compactness without the one-cell nudge, #254, and is seed 0 again with both.)
+    # Another seed of the multi-start places it differently and routes cleanly: solve() returns
+    # VALID where a single attempt did not. (The seed is whichever one the annealer happens to
+    # strand: it was seed 1 while the LNS recreate priced compactness without the one-cell nudge,
+    # #254, and is seed 0 again with both.)
     edges = [("m0", "m2"), ("m0", "m3"), ("m1", "m3"), ("m1", "m4"), ("m2", "m5"), ("m4", "m5")]
     problem = InputIR(
         bounding_region=CellBox(sx=7, sy=1, sz=7),
@@ -332,12 +333,12 @@ def test_feedback_loop_recovers_a_layout_a_single_attempt_leaves_partial() -> No
     first = optimize_placement(problem, seed=0)
     single_attempt, failed = solver_core._assemble(problem, first.placements, 0)
     assert single_attempt.status is LayoutStatus.PARTIAL_INVALID  # one attempt cannot route it...
-    assert failed  # ...and it names the net it could not lay (the feedback signal)
+    assert failed  # ...and it names the net it could not lay
 
     layout = solve(problem)
-    assert layout.status is LayoutStatus.VALID, layout.infeasibility  # ...but the loop recovers it
+    assert layout.status is LayoutStatus.VALID, layout.infeasibility  # ...another attempt does
     assert validate(problem, layout).ok
-    assert layout.seed != 0  # it took a later attempt (different seed + penalty), not attempt 0
+    assert layout.seed != 0  # it took a later attempt, not attempt 0
     assert solve(problem) == solve(problem)  # still deterministic
 
 
@@ -404,14 +405,13 @@ def test_solve_downgrades_when_assembled_layout_fails_validation(
     assert validate(problem, layout).ok is False  # the bad route is preserved, not silently dropped
 
 
-def test_solve_gives_up_when_the_same_net_fails_every_attempt(
+def test_solve_returns_an_explicit_partial_when_every_attempt_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The give-up path of the never-silently-invalid promise. The machines place fine, but the
-    # router is rigged to fail the SAME net on every attempt. The feedback loop must notice the
-    # failed-net set repeating (re-placing is making no progress), STOP instead of spinning the
-    # whole multi-start grid, and return an explicit non-VALID layout that carries the
-    # infeasibility - never a silently-invalid result.
+    # router is rigged to fail the same net on every attempt. Every attempt of the grid runs (they
+    # are independent, so there is no failed-net history to stop on), and the result is an
+    # explicit non-VALID layout that carries the infeasibility - never a silently-invalid one.
     problem = InputIR(
         bounding_region=CellBox(sx=8, sy=4, sz=8),
         machines=[producer("m0"), consumer("m1")],
@@ -440,19 +440,18 @@ def test_solve_gives_up_when_the_same_net_fails_every_attempt(
     ) -> PlacementResult:
         nonlocal attempts
         attempts += 1
-        return optimize_placement(
-            problem, seed=seed, net_penalties=net_penalties, objective=objective
-        )
+        assert not net_penalties  # every attempt anneals on its own...
+        assert not face_penalties  # ...with nothing carried over from another
+        return optimize_placement(problem, seed=seed, objective=objective)
 
     monkeypatch.setattr(solver_core, "optimize_placement", counting_optimize)
 
     layout = solve(problem)
-    assert layout.status is LayoutStatus.PARTIAL_INVALID  # not VALID, and not a spin
+    assert layout.status is LayoutStatus.PARTIAL_INVALID  # not VALID
     assert layout.infeasibility is not None
     assert layout.infeasibility.constraint == "routing"  # the router's reason is surfaced...
     assert validate(problem, layout).ok is False  # ...and the stalled net is never certified valid
-    # It broke on the second attempt's repeated failed-net set, not after exhausting the full grid.
-    assert 1 < attempts < solver_core._MAX_FEEDBACK_PASSES
+    assert attempts == solver_core._ATTEMPTS
 
 
 # ------------------------------------------------- a starved machine is a PLACEMENT defect (#106)
@@ -541,29 +540,27 @@ def test_a_starved_power_net_is_named_failed_as_power_supply() -> None:
     assert layout.infeasibility.constraint == "power_supply"
 
 
-def test_the_loop_penalizes_a_starved_power_net_and_re_places(
+def test_an_attempt_that_starves_a_machine_loses_to_one_that_places_it_nearer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # The recovery the constraint wants: attempt 0 strands the machine 24 blocks out, the loop
-    # penalizes its power net, and the next placement pulls it in. The placer is stubbed rather
-    # than annealed so the test pins the STEERING, not whatever SA happens to do spatially - the
-    # dependency that rotted the original nitrobenzene reproduction of this bug.
+    # Attempt 0 strands the machine 24 blocks out and starves it; the next attempt places it near.
+    # The starved layout ranks as one that left its power net unrouted, so the near one wins. The
+    # placer is stubbed rather than annealed so the test pins the ranking, not whatever SA happens
+    # to do spatially. No attempt is told about another's failure: they are independent.
     problem, far, near = _starving_power_line()
-    seen: list[dict[str, float]] = []
+    penalties_seen: list[object] = []
 
     def stub_placer(prob: InputIR, **kwargs: object) -> PlacementResult:
-        penalties = kwargs.get("net_penalties") or {}
-        assert isinstance(penalties, dict)
-        seen.append(dict(penalties))  # snapshot: solve() mutates one dict across attempts
-        return PlacementResult(placements=far if len(seen) == 1 else near)
+        penalties_seen.append(kwargs.get("net_penalties"))
+        return PlacementResult(placements=far if len(penalties_seen) == 1 else near)
 
     monkeypatch.setattr(solver_core, "optimize_placement", stub_placer)
 
     layout = solve(problem)
     assert layout.status is LayoutStatus.VALID, layout.infeasibility
     assert validate(problem, layout).ok
-    assert seen[0] == {}  # attempt 0 starts clean...
-    assert seen[1]["power:LV"] > 0  # ...and attempt 1 is told which net to pull tighter
+    assert {p.machine_id: p.cell for p in layout.placements}["m"] == near[1].cell
+    assert not any(penalties_seen)
 
 
 def test_a_starve_alongside_a_real_bug_still_steers_nothing(
@@ -586,3 +583,75 @@ def test_a_starve_alongside_a_real_bug_still_steers_nothing(
     assert failed == ()
     assert layout.infeasibility is not None
     assert layout.infeasibility.constraint == "validation"
+
+
+# ------------------------------------------------ the attempts may run in a pool of processes
+
+
+class _RecordingPool:
+    """Stands in for ``ProcessPoolExecutor``: runs each submitted call at once, in this process,
+    and records which attempt seeds it was handed."""
+
+    created: ClassVar[list[_RecordingPool]] = []
+
+    def __init__(self, max_workers: int) -> None:
+        self.max_workers = max_workers
+        self.seeds: list[int] = []
+        _RecordingPool.created.append(self)
+
+    def __enter__(self) -> _RecordingPool:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def submit(self, fn: object, *args: object) -> object:
+        assert callable(fn)
+        self.seeds.append(args[2])  # type: ignore[arg-type]
+        result = fn(*args)
+
+        class _Done:
+            def result(self) -> object:
+                return result
+
+        return _Done()
+
+
+def test_the_pool_runs_every_attempt_after_the_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    _RecordingPool.created = []
+    monkeypatch.setattr(solver_core, "ProcessPoolExecutor", _RecordingPool)
+    monkeypatch.setattr(solver_core, "_POOL_AFTER_S", 0.0)  # any attempt is slow enough
+    ir = adapt_file(_SAND)
+    pooled = solve(ir, seed=3, jobs=4)
+    assert len(_RecordingPool.created) == 1
+    pool = _RecordingPool.created[0]
+    assert pool.max_workers == 4
+    assert pool.seeds == list(range(4, 3 + solver_core._ATTEMPTS))  # attempt 0 ran here
+    assert pooled == solve(ir, seed=3)  # the same layout as every attempt in one process
+
+
+def test_one_job_never_starts_a_pool(monkeypatch: pytest.MonkeyPatch) -> None:
+    _RecordingPool.created = []
+    monkeypatch.setattr(solver_core, "ProcessPoolExecutor", _RecordingPool)
+    monkeypatch.setattr(solver_core, "_POOL_AFTER_S", 0.0)
+    solve(adapt_file(_SAND), jobs=1)
+    assert _RecordingPool.created == []
+
+
+def test_a_quick_first_attempt_never_starts_a_pool(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Starting processes costs more than a quick line's remaining attempts, so it stays here.
+    _RecordingPool.created = []
+    monkeypatch.setattr(solver_core, "ProcessPoolExecutor", _RecordingPool)
+    monkeypatch.setattr(solver_core, "_POOL_AFTER_S", float("inf"))
+    solve(adapt_file(_SAND), jobs=4)
+    assert _RecordingPool.created == []
+
+
+def test_a_real_pool_returns_the_same_layout_as_one_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The attempts really cross a process boundary here (pickled out and back), and the layout is
+    # still the one a single process finds: the number of jobs never changes the answer.
+    monkeypatch.setattr(solver_core, "_POOL_AFTER_S", 0.0)
+    ir = adapt_file(_SAND)
+    assert solve(ir, seed=1, jobs=2) == solve(ir, seed=1, jobs=1)

@@ -125,8 +125,8 @@ class RouteResult:
     ``auto_connections`` are the nets the router satisfied with GT's free auto-output instead of
     a pipe (the router owns that decision); ``routes`` are the pipes for the rest (never power:
     ``router.power`` lays cable). ``failed_nets`` lists the item/fluid nets left unrouted (empty
-    when ``ok``), in problem order, so the solver's place<->route feedback loop can penalize
-    exactly those nets and re-place.
+    when ``ok``), in problem order, so the solver can rank a partial layout by how much it left
+    unrouted.
 
     ``claimed`` is the casing cells those free connections reserved, per machine. It has to travel
     with the result because a free connection spends a hatch cell on each side while owning no
@@ -354,8 +354,8 @@ def _negotiate(
     if not converged:
         # Out of rounds, or proven stuck: keep a collision-free subset, power first (every machine
         # on the line needs it, and its cable is laid after the pipes, in what they leave), then in
-        # problem order. The rest are genuine congestion, reported so the feedback loop can
-        # penalize them.
+        # problem order. The rest are genuine congestion, reported as the nets this layout left
+        # unrouted.
         taken: set[int] = set()
         taken_keys: set[Key] = set()
         salvaged = []

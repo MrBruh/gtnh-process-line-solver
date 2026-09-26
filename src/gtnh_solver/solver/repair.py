@@ -14,8 +14,8 @@ higher. Re-measured 2026-09-03 at four weights down to 0.1, sand's cable went UP
 So this judges cable where it IS knowable, on a routed layout, exactly as that decision says to.
 After the pipes are laid, each source is offered the poses nearest the load it serves, every one is
 **really routed** with :func:`router.route_power`, and the best is ranked by the same key the
-feedback loop ranks whole attempts on (``_structure.structure_quality``). A candidate is adopted
-only if it is strictly better on that key, so the repair can never cost the loop a layout it would
+solver ranks whole attempts on (``_structure.structure_quality``). A candidate is adopted
+only if it is strictly better on that key, so the repair can never cost the solver a layout it would
 have preferred - it either improves the structure or leaves it exactly alone.
 
     placements -> route items/fluids -> for each source: aim at its first trunk branch (or its
@@ -106,13 +106,10 @@ def repair_power_sources(
     if problem.me_toggles.toggled(Commodity.POWER):
         return current, best_result  # power rides the ME network; there is no cable to shorten
     if best_result.failed_nets or best_result.infeasibility is not None:
-        # This placement cannot carry its power at all, so the caller is about to hand it to the
-        # feedback loop as a *diagnosis*: these nets failed, penalize them and re-place. Shuffling
-        # sources first would change which nets fail and hand the loop a different story each
-        # time - and the loop stops early when a failed-net set repeats, so the extra churn cost
-        # nitrobenzene/balanced its valid layout entirely (it broke off after three attempts
-        # instead of eight). Improve layouts that work; never edit the evidence from one that
-        # does not.
+        # This placement cannot carry its power at all, so the caller ranks it by the nets that
+        # failed. Shuffling sources first would change which nets fail and rank the same
+        # placement differently depending on where the shuffle happened to land. Improve layouts
+        # that work; never edit the evidence from one that does not.
         return current, best_result
 
     machines = {m.id: m for m in problem.machines}
