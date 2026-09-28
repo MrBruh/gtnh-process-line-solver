@@ -45,6 +45,9 @@ disagree, the doc is the intent - fix one of them and say which.
 
 - Framework: **pytest**, plus **hypothesis** for property tests.
 - Run: `pytest`  ·  lint: `ruff check .`  ·  types: `mypy`.
+- **The suite tests correctness, not layout quality.** Every solve in it is `minimal` (one short
+  attempt); tests that judge layout quality are marked `full_solve` and run only with
+  `pytest --full-solve`, when benchmarking or chasing an unexpected quality drop.
 - **Tests ship with the code**, not as a follow-up. 100% path coverage is the target.
 - The validator is the only *automated* correctness gate (there is no headless GT
   simulator). Property tests must prove: any input → a valid layout OR an explicit

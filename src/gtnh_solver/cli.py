@@ -11,6 +11,7 @@ solved layout out::
     gtnh-solve --dataset-coverage                 # what the local dataset cannot draw, ranked
     gtnh-solve plan.json --seed 3                 # pick the solver seed
     gtnh-solve plan.json --fast                   # skip optimization (instant, constructive)
+    gtnh-solve plan.json --effort minimal         # one short attempt: a quick preview or check
     gtnh-solve plan.json --objective volume       # what "compact" means: footprint|volume|balanced
     gtnh-solve plan.json --jobs 1                 # keep every attempt in one process
     gtnh-solve plan.json --me items --me fluids   # leave those to ME: no pipes laid for them
@@ -47,7 +48,7 @@ import sys
 import traceback
 import zipfile
 from pathlib import Path
-from typing import Final
+from typing import Final, get_args
 
 from pydantic import ValidationError
 
@@ -73,7 +74,7 @@ from gtnh_solver.previewer import write_preview
 from gtnh_solver.previewer.jar import cached_jar
 from gtnh_solver.previewer.textures import TextureManifest
 from gtnh_solver.schematic import SchematicError, read_schematic, write_schematic
-from gtnh_solver.solver import solve
+from gtnh_solver.solver import Effort, solve
 from gtnh_solver.validator import validate
 
 #: Every GT machine, cable and pipe is a meta of this one block; an mID IS its meta.
@@ -129,6 +130,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--fast",
         action="store_true",
         help="skip placement optimization: a near-instant constructive layout (no SA/LNS)",
+    )
+    parser.add_argument(
+        "--effort",
+        choices=get_args(Effort),
+        help=(
+            "how hard the optimizer works: full (the default) anneals 8 placements and keeps the "
+            "best; minimal routes one short anneal, quick but a worse layout, for a preview or a "
+            "check that the line solves; ignored with --fast"
+        ),
     )
     parser.add_argument(
         "--jobs",
@@ -740,6 +750,8 @@ def main(argv: list[str] | None = None) -> int:
             optimize=not args.fast,
             objective=args.objective,
             jobs=args.jobs,
+            # None when not given, so the solver's own default applies (solver.DEFAULT_EFFORT).
+            effort=args.effort,
         )
         _warn_unmeasured_power_intake(problem, layout)
         # Serialized inside the guard: a layout the contract cannot dump is a bug in this program,

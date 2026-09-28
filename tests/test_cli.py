@@ -177,6 +177,33 @@ def test_cli_rejects_an_unknown_objective(
     assert not solve_calls  # rejected at parse time, before any solving work
 
 
+def test_cli_effort_reaches_the_solver(
+    capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    assert main([_SAND, "--effort", "minimal"]) == 0
+    _published(capsys.readouterr().out)
+    assert solve_calls[-1]["effort"] == "minimal"
+
+
+def test_cli_effort_left_unset_is_the_solvers_to_decide(
+    capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    # None rather than "full", so the solver's own default applies: it is full for a user and
+    # minimal under this suite (tests/conftest.py), and the CLI must not pin either.
+    assert main([_SAND]) == 0
+    _published(capsys.readouterr().out)
+    assert solve_calls[-1]["effort"] is None
+
+
+def test_cli_rejects_an_unknown_effort(
+    capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    with pytest.raises(SystemExit):
+        main([_SAND, "--effort", "extreme"])
+    assert "--effort" in capsys.readouterr().err
+    assert not solve_calls  # rejected at parse time, before any solving work
+
+
 def test_cli_jobs_reaches_the_solver(
     capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
 ) -> None:

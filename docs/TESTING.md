@@ -1,6 +1,43 @@
 # Testing
 
-Goal: **100% path coverage, tests shipped with the code.** Framework: `pytest` + `hypothesis`.
+Goal: **100% path coverage, tests shipped with the code.** Framework: `pytest` + `hypothesis`, on
+**Python 3.14 only**: it is the one version CI runs, so run the suite from a `.venv` built with a
+3.14 interpreter (`py -3.14 -m venv .venv` on Windows) and no other.
+
+## The suite tests correctness, not layout quality
+
+Every solve in the suite is a **minimal** one (`solve(effort="minimal")`, `gtnh-solve --effort
+minimal`): one attempt instead of eight, an anneal capped at 250 iterations, and the router's
+negotiation capped at 8 rounds instead of 32. Every stage still runs (anneal, route, negotiate,
+salvage, power, hatches, validate), so a minimal solve proves the code works end to end and that
+its answer is valid or explicitly infeasible. What it does not do is look hard for a *good* layout,
+which is what a full solve spends its time on: a full nitrobenzene solve is ~18 s of CPU, a minimal
+one ~1.7 s. `tests/conftest.py::_minimal_solves` sets this for the whole session by pointing
+`solver.core.DEFAULT_EFFORT` at `minimal`, the same way the dataset pin works below, so a test (or
+a CLI run inside one) that names no effort gets the minimal one.
+
+Layout **quality** is a separate tier, `full_solve`. Its tests hold the search to a bar (the
+hand-built sand targets, the parallel line reaching VALID, the repair pass finding the 3-cable
+trunk), solve at full effort, and are **skipped unless the run passes `--full-solve`**:
+
+```bash
+pytest --full-solve -m full_solve   # the quality tier alone
+```
+
+Run it when benchmarking, or when a change seems to have cost layout quality it should not have.
+**A small drop is expected, not a failure**: as more of GT's rules land and more components are
+placed so that a line runs as it does in game, the search has less room, and a layout can get a
+little bigger. Nothing in CI runs this tier.
+
+Two kinds of test sit between the tiers, and the rule for each:
+
+- **A test of the multi-start itself** (the ranking of attempts, the process pool, determinism
+  across ties) passes `effort="full"` explicitly and stays in the everyday run, since one attempt
+  has nothing to rank and a pool is never started for it. They run on small lines, so they are
+  cheap.
+- **A test that uses a session solve fixture** (`solved_sand`, `solved_nitrobenzene`) gets a
+  minimal layout. A `full_solve` test must solve for itself, because those fixtures were built
+  before its marker could apply.
 
 ## The core constraint: no headless GT simulator
 
@@ -55,7 +92,8 @@ during the Assignment - v1's only contact with actual GT behavior.
 - **cli** - parse an export, solve, print the layout as JSON that round-trips through
   `LayoutResult` (valid and infeasible runs alike, and nothing on stdout but that JSON, whatever
   the run warns about), or with `--preview` / `--schematic` write the artifact and keep stdout
-  empty; honor `--fast` / `--seed` / `--objective`, surface infeasibility via exit code.
+  empty; honor `--fast` / `--seed` / `--objective` / `--effort`, surface infeasibility via exit
+  code.
 
 ## Edge cases that must have tests
 
@@ -164,10 +202,13 @@ nothing at all.
 The priority drop is the dial doing most of the work, which is why it is the one left on by
 default: it costs no wall clock on an idle machine and still lets the foreground preempt the run.
 
-**`solve()` is the suite.** A probe over a serial run puts 53.0s of 73.5s (72%) inside `solve()`
-across 592 calls, against 0.10s in `adapt_file` - parsing an export is free, annealing a layout is
-not. Two things dominate, and each has a lever below: the hypothesis property tests (500 generated
-solves) and the shipped example lines. A nitrobenzene solve is ~5.6s against sand's ~0.6s.
+**`solve()` is the suite.** A probe over a serial run once put 53.0s of 73.5s (72%) inside
+`solve()` across 592 calls, against 0.10s in `adapt_file` - parsing an export is free, annealing
+and routing a layout is not. That is why every solve is now minimal (above), and most of what a
+minimal solve still costs is the router: on a placement it cannot route, each negotiation round
+re-searches the contested nets, which is what the 8-round cap bounds. Two things dominate what is
+left, and each has a lever below: the hypothesis property tests (500 generated solves) and the
+shipped example lines. A minimal nitrobenzene solve is ~1.7s of CPU against sand's ~0.06s.
 
 ### Reuse a shipped-line solve; do not re-run one
 
@@ -200,15 +241,15 @@ whenever `CI` is set, a quarter of it locally (200/50/300 becomes 50/12/75). Eve
 held to the full space; only local iteration is cheaper. The ratio between the three budgets is
 preserved, because they are not interchangeable - the largest one fuzzes `validate`, not `solve`.
 
-Run `GTNH_TEST_HYPOTHESIS_FRACTION=1.0 pytest` before pushing a change to the solver or the
-validator, and read the outcome mix with `--hypothesis-show-statistics` as the section above says:
-a reduced budget reaches a smaller slice of the generated space, so a local green is weaker
-evidence than a CI green.
+Before opening a PR on a change to the solver or the validator, run the property tests at the full
+budget, `GTNH_TEST_HYPOTHESIS_FRACTION=1.0 pytest tests/test_solver_properties.py`, and read the
+outcome mix with `--hypothesis-show-statistics` as the section above says: a reduced budget reaches
+a smaller slice of the generated space, so a local green is weaker evidence than a CI green.
 
-**Coverage is a 3x multiplier**, and `addopts` enables it: serial, the suite is 73s at `--no-cov`
-and 282s with `--cov`. Pass `--no-cov` while iterating; `COVERAGE_CORE=sysmon` does not help,
-because `sys.monitoring` cannot measure branches before Python 3.14 and coverage silently falls
-back to its tracer.
+**Coverage is cheap on 3.14**, and `addopts` enables it. Coverage.py measures through
+`sys.monitoring` there, branches included, which costs about 7% of a run (it cost 3x under the old
+tracer, before the project required 3.14). Pass `--no-cov` anyway on a partial run, so that the
+report does not print every module the run never imported as uncovered.
 
 ### Property tests have no per-example deadline
 
@@ -223,12 +264,15 @@ wins for what it names, so the `property_examples()` budgets are unaffected.
 ## Commands
 
 ```bash
-pytest                    # all tests
-pytest --no-cov           # ~3x faster; coverage is on by default via addopts
+pytest                    # all tests (every solve minimal; the full_solve tier skipped)
+pytest --no-cov           # no coverage report; coverage is on by default via addopts
 pytest -q tests/golden    # the corpus
 ruff check .              # lint
 mypy                      # types
 
-# the full property-test space, as CI runs it - before pushing solver/validator work
-GTNH_TEST_HYPOTHESIS_FRACTION=1.0 pytest --hypothesis-show-statistics
+# the full property-test space, as CI runs it - before opening a PR on solver/validator work
+GTNH_TEST_HYPOTHESIS_FRACTION=1.0 pytest tests/test_solver_properties.py --hypothesis-show-statistics
+
+# layout quality at full effort - when benchmarking, or chasing an unexpected quality drop
+pytest --full-solve -m full_solve
 ```

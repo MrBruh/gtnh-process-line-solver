@@ -68,6 +68,17 @@ candidate and the loop is exactly the grid.
 ``solve(..., optimize=False)`` is the **fast** path: a single constructive placement with no
 annealing and no multi-start (near-instant, simpler layout), still validated. The two modes are
 the "optimize or not" choice the planned unified site exposes to the builder.
+
+**Effort** sets how hard the optimized path works, not what it does. ``full`` (the default) is the
+search described above, the one layout quality is judged on. ``minimal`` runs every stage once on
+small budgets: one attempt, a short anneal, and a cap on the router's negotiation rounds, which are
+what a line that cannot route spends its time on (about a second a round on nitrobenzene). It is
+for checking that a line solves, the test suite's default, and a quick preview; its layouts are
+worse, and just as validated::
+
+    effort    attempts   anneal iterations       negotiation rounds
+    full      8          the schedule (by size)  the router's backstop (32)
+    minimal   1          at most 250             at most 8
 """
 
 from __future__ import annotations
@@ -75,6 +86,7 @@ from __future__ import annotations
 import time
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from typing import Literal
 
 from gtnh_solver.ir import (
     Commodity,
@@ -104,8 +116,29 @@ from gtnh_solver.validator import ValidationReport, ViolationCode, validate
 from ._structure import footprint_and_layers, structure_cells, structure_quality
 from .repair import repair_power_sources
 
-#: Attempts per solve: the multi-start grid (weighting modes x seeds, module docstring).
-_ATTEMPTS = 8
+#: How hard the optimized path works (module docstring): ``full`` searches for the best layout,
+#: ``minimal`` checks that the line solves.
+Effort = Literal["minimal", "full"]
+
+DEFAULT_EFFORT: Effort = "full"
+"""The effort a caller that names none gets. Read at call time rather than bound as a default, so
+the test suite can make every solve ``minimal`` for a session (tests/conftest.py), the way it pins
+``dataset.roots.DEFAULT_DATA``."""
+
+
+@dataclass(frozen=True)
+class _Budget:
+    """What an effort buys. ``None`` leaves a stage to its own schedule."""
+
+    attempts: int  # of the multi-start grid (weighting modes x seeds)
+    anneal_iterations: int | None  # a cap on each attempt's annealing schedule
+    negotiation_rounds: int | None  # a cap on the router's rounds
+
+
+_BUDGETS: dict[Effort, _Budget] = {
+    "full": _Budget(attempts=8, anneal_iterations=None, negotiation_rounds=None),
+    "minimal": _Budget(attempts=1, anneal_iterations=250, negotiation_rounds=8),
+}
 
 #: How long attempt 0 has to take before the rest are worth a process pool. Starting one costs
 #: about a second on the maintainer's 4-core machine, since each process imports the solver afresh.
@@ -122,6 +155,7 @@ def solve(
     optimize: bool = True,
     objective: Objective = "footprint",
     jobs: int = 1,
+    effort: Effort | None = None,
 ) -> LayoutResult:
     """Produce a layout for ``problem``; deterministic for a given ``problem`` + ``seed``.
 
@@ -145,9 +179,14 @@ def solve(
 
     ``jobs`` is how many processes the attempts may run in (module docstring). It changes how long
     a solve takes, never what it returns; ``1`` runs every attempt in this process.
+
+    ``effort`` sets the optimized path's budgets (module docstring): ``full`` searches for the best
+    layout, ``minimal`` runs every stage once on small budgets. None takes :data:`DEFAULT_EFFORT`.
+    The fast path ignores it, having only the one attempt.
     """
     if not optimize:
         return _solve_fast(problem, seed, objective)
+    budget = _BUDGETS[effort or DEFAULT_EFFORT]
     # The first placement the gate turned away, kept as a parachute. The gate is a heuristic about
     # geometry and the routers are the authority, so it is only ever allowed to pick BETTER
     # attempts - never to declare a line unsolvable that the routers would in fact have solved.
@@ -160,7 +199,9 @@ def solve(
     # annealed placement, and a partial one would only compete with the attempts for last place.
     columns = bank_columns(problem)
     if columns is not None and not crowded_machines(problem, columns):
-        layout, _ = _assemble(problem, columns, seed, objective)
+        layout, _ = _assemble(
+            problem, columns, seed, objective, max_rounds=budget.negotiation_rounds
+        )
         if layout.status is LayoutStatus.VALID:
             best_valid, best_quality = layout, _quality(problem, layout, objective)
     # The multi-start grid: SA weight modes x seeds, always ranked by the REQUESTED objective's
@@ -168,13 +209,15 @@ def solve(
     # dense candidates, whose routed structure often wins the volume/balanced rankings too (a
     # pure-volume weighting minimises the machine box and cannot reach them, because the cable
     # space they save is invisible until routing). For the footprint objective the two coincide,
-    # so all attempts go to its own weighting across more seeds.
+    # so all attempts go to its own weighting across more seeds. A budget smaller than one seed of
+    # every mode (minimal's single attempt) keeps the requested objective's own weighting.
     sa_modes: tuple[Objective, ...] = (
         ("footprint",) if objective == "footprint" else (objective, "footprint")
     )
-    grid = [(mode, seed + i) for i in range(_ATTEMPTS // len(sa_modes)) for mode in sa_modes]
+    seeds = -(-budget.attempts // len(sa_modes))  # ceiling division
+    grid = [(mode, seed + i) for i in range(seeds) for mode in sa_modes][: budget.attempts]
     # Read in grid order, whichever process ran what, so ties keep the earliest attempt.
-    for attempt in _run_attempts(problem, grid, objective, jobs):
+    for attempt in _run_attempts(problem, grid, objective, jobs, budget):
         if attempt.infeasibility is not None:
             # The machines do not fit the region at all - seed-independent, so no attempt can.
             return LayoutResult(
@@ -204,7 +247,7 @@ def solve(
         # (face_reachability, routing or congestion). The gate has then cost an attempt and
         # changed nothing else.
         assert gated is not None  # the only path that skips every attempt sets it
-        layout, _ = _assemble(problem, gated, seed, objective)
+        layout, _ = _assemble(problem, gated, seed, objective, max_rounds=budget.negotiation_rounds)
         return layout
     return best_partial
 
@@ -222,13 +265,17 @@ class _Attempt:
 
 
 def _attempt(
-    problem: InputIR, sa_mode: Objective, attempt_seed: int, objective: Objective
+    problem: InputIR, sa_mode: Objective, attempt_seed: int, objective: Objective, budget: _Budget
 ) -> _Attempt:
     """One attempt of the grid: anneal, gate, and if the gate lets it through, route and validate.
 
-    A function of its arguments alone, so it returns the same thing in a pool process as here.
+    A function of its arguments alone, so it returns the same thing in a pool process as here. The
+    budget is one of them rather than read from :data:`DEFAULT_EFFORT`, which a pool process
+    imports afresh.
     """
-    placement = optimize_placement(problem, seed=attempt_seed, objective=sa_mode)
+    placement = optimize_placement(
+        problem, seed=attempt_seed, objective=sa_mode, max_iterations=budget.anneal_iterations
+    )
     if not placement.ok:
         return _Attempt(attempt_seed, infeasibility=placement.infeasibility)
     # Can every machine dock every connection it carries? Checked before routing, naming a machine
@@ -236,12 +283,22 @@ def _attempt(
     # net lose the race for the last free face costs an attempt and reports the wrong machine (#76).
     if crowded_machines(problem, placement.placements):
         return _Attempt(attempt_seed, gated=placement.placements)
-    layout, failed_nets = _assemble(problem, placement.placements, attempt_seed, objective)
+    layout, failed_nets = _assemble(
+        problem,
+        placement.placements,
+        attempt_seed,
+        objective,
+        max_rounds=budget.negotiation_rounds,
+    )
     return _Attempt(attempt_seed, layout=layout, failed_nets=failed_nets)
 
 
 def _run_attempts(
-    problem: InputIR, grid: list[tuple[Objective, int]], objective: Objective, jobs: int
+    problem: InputIR,
+    grid: list[tuple[Objective, int]],
+    objective: Objective,
+    jobs: int,
+    budget: _Budget,
 ) -> list[_Attempt]:
     """Every attempt of ``grid``, in grid order (module docstring).
 
@@ -252,14 +309,16 @@ def _run_attempts(
     """
     (first_mode, first_seed), rest = grid[0], grid[1:]
     started = time.perf_counter()
-    first = _attempt(problem, first_mode, first_seed, objective)
+    first = _attempt(problem, first_mode, first_seed, objective, budget)
     if first.infeasibility is not None or not rest:
         return [first]
     if jobs > 1 and time.perf_counter() - started > _POOL_AFTER_S:
         with ProcessPoolExecutor(max_workers=min(jobs, len(rest))) as pool:
-            futures = [pool.submit(_attempt, problem, mode, s, objective) for mode, s in rest]
+            futures = [
+                pool.submit(_attempt, problem, mode, s, objective, budget) for mode, s in rest
+            ]
             return [first, *(future.result() for future in futures)]
-    return [first, *(_attempt(problem, mode, s, objective) for mode, s in rest)]
+    return [first, *(_attempt(problem, mode, s, objective, budget) for mode, s in rest)]
 
 
 def _layout_metrics(
@@ -308,8 +367,11 @@ def _assemble(
     objective: Objective = "footprint",
     *,
     repair: bool = True,
+    max_rounds: int | None = None,
 ) -> tuple[LayoutResult, tuple[str, ...]]:
     """Route, validate, and compose the layout; return it plus the unrouted net ids.
+
+    ``max_rounds`` is the router's negotiation cap (``router.route``); None keeps its backstop.
 
     The router owns the auto-output vs pipe decision (router.auto), so its result carries both
     the auto-connections and the pipes. The unrouted ids rank a partial layout against the other
@@ -330,7 +392,7 @@ def _assemble(
     """
     # Auto-output, then every other net negotiated together: the pipes, and a tree per power net
     # that keeps them off the space its cable needs (router.core, #164).
-    routing = route(problem, placements)
+    routing = route(problem, placements, max_rounds=max_rounds)
     autos = list(routing.auto_connections)
     # Power cables route around the item/fluid pipes already laid, so no cell carries two routes
     # (the crude single-channel capacity the validator enforces). docs/ARCHITECTURE.md #7 - and

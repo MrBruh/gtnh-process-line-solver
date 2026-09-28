@@ -300,8 +300,13 @@ def optimize_placement(
     net_penalties: dict[str, float] | None = None,
     face_penalties: dict[str, float] | None = None,
     objective: Objective = "footprint",
+    max_iterations: int | None = None,
 ) -> PlacementResult:
     """Anneal the constructive placement toward a lower routing-aware cost (seeded, validated).
+
+    ``max_iterations`` caps the annealing schedule (which scales with the machine count); None runs
+    the whole schedule. The solver's ``minimal`` effort passes a small cap: a shorter anneal cools
+    less far and so places worse, but every move still only ever builds a valid candidate.
 
         ``net_penalties`` (net id -> extra weight) boosts a net's wirelength term so its machines pull
         tighter, so a caller that re-places after a failed routing can cluster the nets the router
@@ -389,6 +394,8 @@ def optimize_placement(
     )
     best, best_cost = current, current_cost
     iters = min(_MAX_ITERS, max(_MIN_ITERS, _PER_MACHINE * len(current)))
+    if max_iterations is not None:
+        iters = min(iters, max_iterations)
     temp = _T0
     for _ in range(iters):
         if rng.random() < _P_LNS:

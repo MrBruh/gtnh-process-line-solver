@@ -112,6 +112,11 @@ testpaths = ["tests"]
 # it parallelizes cleanly (local gate ~155s -> ~60s; CI legs see the same). Coverage is measured
 # by default locally; CI gates it on ONE matrix leg and runs the rest with --no-cov (ci.yml).
 addopts = "-n auto --cov=gtnh_solver --cov-report=term-missing"
+# Every solve in the suite is a `minimal` one unless a test is marked (tests/conftest.py); the
+# marked tests judge layout quality and are skipped unless the run passes --full-solve.
+markers = [
+    "full_solve: judges layout quality on full-effort solves; skipped unless run with --full-solve",
+]
 
 [tool.coverage.run]
 branch = true

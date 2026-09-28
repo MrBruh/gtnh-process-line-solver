@@ -1,11 +1,14 @@
 """Session-wide test setup: what the suite resolves, and how much of the machine it takes.
 
-Four things live here. **The dataset pin** (``_pinned_dataset_root``) fixes the one input that
-otherwise varies per machine, so ``pytest`` answers the same question everywhere. **The shipped
-example solves** (``solved_sand``, ``solved_nitrobenzene``) are run once per session and handed out
-as private copies. **The two resource dials** below bound how much of the box a run holds; they
-change nothing about *what* is tested. **The hypothesis profile** (``HYPOTHESIS_PROFILE``, at the
-bottom) keeps a contended box from failing a property test on wall clock alone.
+Five things live here. **The dataset pin** (``_pinned_dataset_root``) fixes the one input that
+otherwise varies per machine, so ``pytest`` answers the same question everywhere. **The solve
+effort** (``_minimal_solves``) makes every solve a ``minimal`` one, since the suite checks that the
+code is correct and not how good its layouts are; tests marked ``full_solve`` judge that, and only
+run with ``--full-solve``. **The shipped example solves** (``solved_sand``, ``solved_nitrobenzene``)
+are run once per session and handed out as private copies. **The two resource dials** below bound
+how much of the box a run holds; they change nothing about *what* is tested. **The hypothesis
+profile** (``HYPOTHESIS_PROFILE``, at the bottom) keeps a contended box from failing a property test
+on wall clock alone.
 
 ``pyproject.toml`` runs the suite under ``-n auto`` because it is CPU-bound and every test is
 independent (see the ``addopts`` comment). ``auto`` means *every* core, so a local ``pytest`` pins
@@ -42,6 +45,7 @@ from hypothesis import settings
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.dataset import roots
 from gtnh_solver.ir import InputIR, LayoutResult
+from gtnh_solver.solver import core as solver_core
 from gtnh_solver.solver import solve
 
 _DEFAULT_CPU_FRACTION = 1.0
@@ -198,6 +202,60 @@ def _pinned_dataset_root(tmp_path_factory: pytest.TempPathFactory) -> Iterator[P
         yield root
 
 
+# --------------------------------------------------------------- how hard the suite solves
+
+_FULL_SOLVE = "full_solve"
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--full-solve",
+        action="store_true",
+        help="also run the full_solve tests, which judge layout quality on full-effort solves",
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Skip the ``full_solve`` tests unless the run asked for them."""
+    if config.getoption("--full-solve"):
+        return
+    skip = pytest.mark.skip(reason="judges layout quality on a full solve; run with --full-solve")
+    for item in items:
+        if item.get_closest_marker(_FULL_SOLVE) is not None:
+            item.add_marker(skip)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _minimal_solves() -> Iterator[None]:
+    """Make every solve in the session ``minimal``: one short attempt instead of eight long ones.
+
+    The suite's job is correctness: every stage runs, and whatever comes out is valid or explicitly
+    infeasible. A ``minimal`` solve does all of that on small budgets (``solver.core``), while a
+    full one spends most of its time searching for a *better* layout, which is a question about
+    quality. Quality is what the ``full_solve`` tests ask, and only when benchmarking or chasing a
+    drop in it; a small drop is expected as more of GT's rules land, so it is not a failure of the
+    everyday run. Session-scoped, like the dataset pin, so the session fixtures below solve
+    ``minimal`` too; a test that needs the multi-start itself passes ``effort="full"``.
+    """
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(solver_core, "DEFAULT_EFFORT", "minimal")
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _full_solves_when_marked(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Restore the full default for a ``full_solve`` test, for that test alone.
+
+    It has to solve inside the test: a session fixture was built under the minimal default.
+    """
+    if request.node.get_closest_marker(_FULL_SOLVE) is None:
+        yield
+        return
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(solver_core, "DEFAULT_EFFORT", "full")
+        yield
+
+
 # --------------------------------------------------------------- the shipped example lines
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
@@ -228,7 +286,8 @@ def _sand_session() -> tuple[InputIR, LayoutResult]:
 def _nitrobenzene_session() -> tuple[InputIR, LayoutResult]:
     # Seed 1, because what this fixture is for is the pipes, and which seeds lay them moves with
     # the search: without the dataset every machine here is a single block, so the one-cell nudge
-    # applies, and seed 0's best partial layout then keeps its cable and loses every pipe.
+    # applies, and seed 0's partial layout then keeps its cable and loses every pipe. That holds for
+    # the session's minimal solve as it did for the full one.
     return _solved(_NITROBENZENE, seed=1)
 
 
@@ -246,8 +305,11 @@ def solved_sand(_sand_session: tuple[InputIR, LayoutResult]) -> tuple[InputIR, L
 
     The copy is not paranoia about a specific test: ``InputIR`` and ``LayoutResult`` are
     ``StrictModel``, so they are mutable, and a session-scoped object that one test edits is a
-    failure the *next* test reports. A deep copy costs ~0.4ms against a ~570ms solve (~1:1350),
-    so the safe thing is also the free thing.
+    failure the *next* test reports. A deep copy costs ~0.4ms against a ~60ms minimal solve, so
+    the safe thing is also the free thing.
+
+    Like every solve in the suite it is ``minimal`` (``_minimal_solves``), so a ``full_solve``
+    test cannot take it: it has to solve for itself.
     """
     ir, layout = _sand_session
     return ir.model_copy(deep=True), layout.model_copy(deep=True)
@@ -259,8 +321,9 @@ def solved_nitrobenzene(
 ) -> tuple[InputIR, LayoutResult]:
     """The nitrobenzene line, same contract as :func:`solved_sand` - and the one that pays.
 
-    A nitrobenzene solve is ~5.6s against sand's ~0.6s, and it was being run from scratch by
-    every module that wanted a realistic layout with actual pipes in it.
+    Even minimal, a nitrobenzene solve is ~1.7s of CPU against sand's ~0.06s (a full one is ~18s),
+    and it was being run from scratch by every module that wanted a realistic layout with actual
+    pipes in it.
     """
     ir, layout = _nitrobenzene_session
     return ir.model_copy(deep=True), layout.model_copy(deep=True)
