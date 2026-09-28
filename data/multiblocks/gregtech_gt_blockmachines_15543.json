@@ -10,7 +10,7 @@
   "variants": [
     {
       "trigger_stack_size": 1,
-      "channels": {"gt_no_hatch": 1},
+      "channels": {},
       "blocks": [
         {"d": [-4, -1, -1], "block": "miscutils:miscutils.blockcasings", "meta": 1},
         {"d": [-3, -1, -1], "block": "miscutils:miscutils.blockcasings", "meta": 1},

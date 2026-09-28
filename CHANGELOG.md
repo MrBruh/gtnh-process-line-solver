@@ -202,8 +202,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - **Names that were lang keys (#231).** On a dedicated server whose run folder had booted before,
     GT named six controllers, both Large Sifters among them, by their untranslated lang key, so a
     plan could never find them. The dump now reads their English name from GT's own
-    `GregTech.lang` and lists them in `_meta.json`'s new `untranslated_names`. Loading an older dump that still carries a key no longer indexes it as a
-    name, and warns naming each such controller.
+    `GregTech.lang` and lists them in `_meta.json`'s new `untranslated_names`. Loading an older
+    dump that still carries a key no longer indexes it as a name, and warns naming each such
+    controller.
+
+  The committed example fixtures are re-derived from the new dump. The Distillation Tower now takes
+  energy hatches on every ring layer, and the ExxonMobil Chemical Plant, which the old dump gave no
+  energy cell at all, on all 92 of its hatch cells; the Dangote Distillus keeps its muffler on the
+  top layer. Over eight solve seeds spaced eight apart against the 2.9 dump, both nitrobenzene
+  lines stay 8/8 VALID with the same median floor (ev-nitrobenzene 440.5, nitrobenzene 104.5). 3 of
+  8 ev-nitrobenzene layouts and 6 of 8 nitrobenzene ones move: median route cells 359.5 to 355.5 on
+  ev-nitrobenzene, median volume 1045 to 1010 on nitrobenzene.
 - **A multiblock line no longer sprawls into a long strip (#254).** The placement search starts from
   a first-fit that fills the floor row by row across the whole region, which for ev-nitrobenzene is
   a strip 68 wide. Its large move rips out a cluster of machines and re-inserts them, and it chose

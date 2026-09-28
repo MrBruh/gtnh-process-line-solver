@@ -92,9 +92,9 @@ HatchSlot { offset: CellCoord, kinds: [str] }
   Machine.hatch_slots_for(port_id) applies that in three levels, and the third is load-bearing:
         no slots recorded at all      -> None; every body cell stays a candidate
         some slot names the kind      -> exactly those slots
-        no slot names the kind        -> ALL of them (the dump is silent, not prohibiting; the
-                                         Chemical Plant records zero Energy cells and must still
-                                         be powerable)
+        no slot names the kind        -> ALL of them (the dump is silent, not prohibiting; a
+                                         dump taken before #227 records the Chemical Plant with
+                                         zero Energy cells, and it must still be powerable)
 
 FaceSpec     { ports: [Port] }      # catalog of required I/O; the physical face is a solver choice
 Port
