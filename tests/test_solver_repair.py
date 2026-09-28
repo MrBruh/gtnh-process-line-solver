@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.ir import (
     CellBox,
@@ -322,11 +324,13 @@ def test_repair_reaches_a_load_that_touches_no_wall() -> None:
     assert cable < baseline, f"cable did not improve ({baseline} -> {cable})"
 
 
+@pytest.mark.full_solve
 def test_repair_recovers_the_sand_layout_from_a_bad_start() -> None:
     # The real sand line, with its source deliberately parked mid-row. The hand-built optimum puts
     # it past the END of the machine row (above the boundary chest) so the trunk runs straight over
     # the hammers and they tap it through their top faces - a cell no sink is adjacent to, which is
     # why an adjacency shell could only reach 4 cable cells here. Aiming at the trunk gets all 3.
+    # A full solve, because the hand-built trunk needs the row the full search lays.
     ir = adapt_file(str(_SAND))
     layout = solve(ir, seed=0)
     src_id = next(m.id for m in ir.machines if m.is_power_source)

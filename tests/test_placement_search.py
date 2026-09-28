@@ -337,6 +337,20 @@ def test_optimize_respects_reserved_and_bounds() -> None:
     assert _validates(problem, result.placements)
 
 
+def test_optimize_max_iterations_caps_the_schedule() -> None:
+    # No iteration leaves the constructive seed as the best seen; a short cap is still a real anneal
+    # (minimal effort's), and one that runs past the schedule's own length changes nothing.
+    problem = _star(4)
+    assert optimize_placement(problem, seed=0, max_iterations=0).placements == (
+        place(problem).placements
+    )
+    capped = optimize_placement(problem, seed=0, max_iterations=50)
+    assert _validates(problem, capped.placements)
+    assert optimize_placement(problem, seed=0, max_iterations=10**6) == optimize_placement(
+        problem, seed=0
+    )
+
+
 def test_optimize_single_machine_returns_constructive_seed() -> None:
     problem = InputIR(bounding_region=CellBox(sx=4, sy=2, sz=4), machines=[_hub("only")], nets=[])
     assert optimize_placement(problem, seed=0).placements == place(problem).placements

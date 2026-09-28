@@ -70,6 +70,7 @@ gtnh-solve plan.json > layout.json        # ...which is how it goes to a file
 gtnh-solve plan.json --preview view.html  # ...or a double-clickable 3D preview (three.js)
 gtnh-solve plan.json --schematic line.schematic   # ...or a Schematica build ghost (1.7.10)
 gtnh-solve plan.json --fast               # skip optimization: a near-instant constructive layout
+gtnh-solve plan.json --effort minimal     # one short optimizing attempt: a quick, rougher layout
 gtnh-solve plan.json --seed 3             # pick the solver seed (deterministic per seed)
 gtnh-solve plan.json --objective volume   # what "compact" means: footprint|volume|balanced
 gtnh-solve plan.json --me items           # leave items to ME (AE2): no pipes laid; repeatable

@@ -7,6 +7,24 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`gtnh-solve --effort minimal` runs one short attempt instead of the full search.** A full solve
+  anneals 8 placements and routes every one to keep the best, which is right for a layout you will
+  build and more than a preview or a check that the line solves needs. `--effort minimal`
+  (`solve(effort="minimal")`) runs every stage once on small budgets: one attempt, an anneal capped
+  at 250 iterations, and the router's negotiation capped at 8 rounds instead of 32. The rounds are
+  most of the saving: on a placement the router cannot route, each round re-searches the contested
+  nets, about a second a round on nitrobenzene. A minimal nitrobenzene solve takes ~1.7 s of CPU
+  against ~18 s, and its layout is worse and just as validated. `full` stays the default, and
+  `--fast` (no anneal at all) ignores the flag.
+
+  **The test suite now solves `minimal` throughout.** It is there to prove the code correct, that
+  every stage runs and the answer is valid or explicitly infeasible, and a full solve spent most of
+  its time looking for a better layout. The tests that hold the search to a quality bar (the
+  hand-built sand targets, the parallel line, the repair pass's 3-cable trunk) are marked
+  `full_solve` and run only with `pytest --full-solve`, when benchmarking or chasing a quality drop.
+  On 4 cores the solve-heavy test files went from 60 s to about 33 s, most of what is left being
+  the local-only 2.9 acceptance module, and their slowest test from 27 s to under 3 s. See
+  docs/TESTING.md.
 - **Every section of the preview's legend folds.** The side panel lists machines, routes, nets,
   materials and system i/o one after another, and on a big line the net list alone is 31 rows
   (ev-nitrobenzene), which pushes the system i/o, the part a builder comes back to, below the fold.

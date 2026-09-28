@@ -27,6 +27,12 @@ mypy                 # type-check
 `pre-commit install` is the one-time step that makes your local commits run the same
 checks CI does. To run them all on demand: `pre-commit run --all-files`.
 
+**The tests check correctness, not layout quality.** Every solve in the suite is a quick `minimal`
+one; the tests that hold the search to a quality bar are marked `full_solve` and skipped unless you
+pass `--full-solve`. Run them (`pytest --full-solve -m full_solve`) when benchmarking or when a
+change seems to have cost layout quality; a small drop as more GT rules land is expected. See
+[`docs/TESTING.md`](docs/TESTING.md).
+
 **Use the `-c constraints-dev.txt`.** It pins the tools whose version alone decides whether the
 checks pass - ruff, mypy, the pytest stack, pydantic - so your run, a teammate's and CI all judge
 the same code the same way. Without it pip floats to whatever is newest that day, which is how

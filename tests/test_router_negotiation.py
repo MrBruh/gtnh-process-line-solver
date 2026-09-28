@@ -10,6 +10,8 @@ stopping rule ever turns into an invalid layout.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -196,12 +198,7 @@ def test_counting_a_resource_down_to_zero_forgets_it() -> None:
     assert counter == {7: 1}
 
 
-def test_parallel_openings_exhaust_the_rounds_and_salvage(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Three nets and two gaps in a wall: any one net can take either gap, so no gap is ever forced
-    # on two nets and the congestion proof never fires, yet three cannot fit through two. The
-    # rounds run out, a collision-free subset is kept in problem order, and the rest fail
-    # explicitly as congestion rather than as an overlapping layout.
-    monkeypatch.setattr(core, "_MAX_ROUNDS", 12)
+def _three_nets_through_two_gaps() -> tuple[InputIR, list[Placement]]:
     wall = [CellCoord(x=x, y=0, z=2) for x in range(7) if x not in (2, 4)]
     problem = InputIR(
         bounding_region=CellBox(sx=7, sy=1, sz=5),
@@ -224,6 +221,16 @@ def test_parallel_openings_exhaust_the_rounds_and_salvage(monkeypatch: pytest.Mo
         at("e", 5, 0, 0),
         at("f", 5, 0, 4),
     ]
+    return problem, placements
+
+
+def test_parallel_openings_exhaust_the_rounds_and_salvage(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Three nets and two gaps in a wall: any one net can take either gap, so no gap is ever forced
+    # on two nets and the congestion proof never fires, yet three cannot fit through two. The
+    # rounds run out, a collision-free subset is kept in problem order, and the rest fail
+    # explicitly as congestion rather than as an overlapping layout.
+    monkeypatch.setattr(core, "_MAX_ROUNDS", 12)
+    problem, placements = _three_nets_through_two_gaps()
     result = route(problem, placements)
 
     assert not result.ok
@@ -233,6 +240,26 @@ def test_parallel_openings_exhaust_the_rounds_and_salvage(monkeypatch: pytest.Mo
     assert len(result.routes) == 2
     first, second = (r.cells() for r in result.routes)
     assert first.isdisjoint(second)
+
+
+def test_a_caller_can_cap_the_rounds_below_the_backstop(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The solver's minimal effort passes a cap. One round routes each net alone and stops there, so
+    # every net is searched exactly once, and the overlap it leaves is salvaged the same way.
+    problem, placements = _three_nets_through_two_gaps()
+    searches = 0
+
+    def counting(*args: Any, **kwargs: Any) -> steiner.Tree | None:
+        nonlocal searches
+        searches += 1
+        return steiner.route_tree(*args, **kwargs)
+
+    monkeypatch.setattr(core, "route_tree", counting)
+    result = route(problem, placements, max_rounds=1)
+
+    assert searches == 3
+    assert result.infeasibility is not None
+    assert result.infeasibility.constraint == "congestion"
+    assert len(result.routes) == 2
 
 
 def test_a_walled_off_net_fails_without_holding_anything() -> None:

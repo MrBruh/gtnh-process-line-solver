@@ -99,7 +99,9 @@ from .steiner import Endpoint, Grid, Key, Tree, route_tree
 #: parallel-sand placements this router exists for need up to 28; the backstop only bites under
 #: congestion the early-out cannot prove, where the salvage step then keeps a collision-free subset
 #: and fails the rest explicitly. It is what those stuck negotiations cost: on 16 parallel-sand
-#: seeds, dropping it to 24 saves 0.4 s a seed and loses two of the tight placements.
+#: seeds, dropping it to 24 saves 0.4 s a seed and loses two of the tight placements. A caller may
+#: pass a lower cap (``route(max_rounds=)``): the solver's ``minimal`` effort does, since a round on
+#: a large region costs about a second and correctness does not depend on how many run.
 _MAX_ROUNDS = 32
 
 #: Rounds the over-used set must stay *identical* before we test whether the remaining contention is
@@ -149,7 +151,9 @@ class RouteResult:
         return self.infeasibility is None
 
 
-def route(problem: InputIR, placements: Sequence[Placement]) -> RouteResult:
+def route(
+    problem: InputIR, placements: Sequence[Placement], *, max_rounds: int | None = None
+) -> RouteResult:
     """Connect each non-ME net of ``problem`` over the given placements: auto-output, then pipes.
 
     The router first decides, from the final placements + orientations, which nets a free
@@ -158,6 +162,10 @@ def route(problem: InputIR, placements: Sequence[Placement]) -> RouteResult:
     is a reservation that keeps the pipes off the cable's space, and ``router.power`` lays the
     cable. What still fails is real: an undockable endpoint, a walled-off path, or congestion the
     negotiation could not price apart (then a collision-free subset is kept and the rest reported).
+
+    ``max_rounds`` caps the negotiation below its own backstop (``_MAX_ROUNDS``, used when None). A
+    lower cap can only turn a late-converging placement into salvaged congestion, never into an
+    overlapping layout.
     """
     assignment = assign_auto_outputs(problem, placements)
     nets = [
@@ -168,7 +176,13 @@ def route(problem: InputIR, placements: Sequence[Placement]) -> RouteResult:
     ]
     # A free connection still costs its two machines a casing cell each (an output hatch ejects
     # through its own front face), so no terminal may dock onto one of those blocks.
-    trees, failures = _negotiate(problem, placements, nets, assignment.claimed)
+    trees, failures = _negotiate(
+        problem,
+        placements,
+        nets,
+        assignment.claimed,
+        _MAX_ROUNDS if max_rounds is None else max_rounds,
+    )
     machines = {m.id: m for m in problem.machines}
     routes = tuple(
         _as_route(net, trees[net.id], machines)
@@ -264,10 +278,11 @@ def _negotiate(
     placements: Sequence[Placement],
     nets: Sequence[Net],
     spent: Mapping[str, Collection[Cell]],
+    max_rounds: int,
 ) -> tuple[dict[str, _Laid], dict[str, Infeasibility]]:
     """Negotiate every net's tree; return ``({net_id: its tree}, {net_id: why it failed})``.
 
-    Round 1 routes every net alone. Each later round rips up and re-routes only the nets on an
+    Round 1 routes every net alone, and at most ``max_rounds`` rounds run in all. Each later round rips up and re-routes only the nets on an
     over-used cell or casing key, against prices that grow with how contested each one has been
     (module docstring, and the constants above). A net that has a tree from an earlier round keeps
     to the start that tree grew from plus its two cheapest (``steiner.LATE_STARTS``), since the
@@ -303,7 +318,7 @@ def _negotiate(
     prev_over: tuple[frozenset[int], frozenset[Key]] | None = None
     stall = 0
     converged = False
-    for _ in range(_MAX_ROUNDS):
+    for _ in range(max_rounds):
         contested, contested_keys = set(over), set(over_keys)
         for net in list(active):
             eps = eps_by_net[net.id]

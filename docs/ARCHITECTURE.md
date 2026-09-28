@@ -199,7 +199,10 @@ doc as intent and reconcile.
    (`solve(jobs=...)`, `gtnh-solve --jobs`, one per CPU by default) once the first one shows the
    line is slow enough to pay for starting them: on 4 cores, nitrobenzene solves in 6.5 s instead
    of 13.0 s and ev-nitrobenzene in 31.7 s instead of 56.5 s, and the layout is the same whatever
-   the number of processes. The other half of this target is per-iteration
+   the number of processes. `solve(effort="minimal")` (`gtnh-solve --effort minimal`) runs one
+   attempt on small budgets instead (a 250-iteration anneal, 8 negotiation rounds), for the test
+   suite and quick previews, which need a line to solve, not its best layout; on nitrobenzene it
+   is ~1.7 s of CPU against ~18 s. The other half of this target is per-iteration
    cost, which tracks machine **volume**, not machine count: box-arithmetic geometry (see Spatial
    model, issue #110) brought a 23-machine solve from 86.5 s to 22.3 s.)*
 7. **Routing topology - free-form + realizability invariant.** Free-form capacitated routing

@@ -4,10 +4,16 @@ Headline: solving the real sand line yields a fully valid layout whose item chai
 with zero pipes** and whose synthesized power net is cabled as a shared-amperage trunk. Plus the
 invariants: the result is always either VALID-and-validator-clean or
 non-VALID-with-an-explicit-infeasibility.
+
+Every solve here is ``minimal`` unless it says otherwise (``tests/conftest.py``). The tests that
+hold the search to a quality bar (the hand-built sand targets, the parallel line) are marked
+``full_solve`` and run only with ``--full-solve``; the ones that test the multi-start itself (the
+ranking, the pool) pass ``effort="full"``, since one attempt has nothing to rank.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import ClassVar
 
@@ -35,9 +41,9 @@ from gtnh_solver.ir import (
     Segment,
 )
 from gtnh_solver.placement import Objective, PlacementResult, optimize_placement, place
-from gtnh_solver.router import RouteResult, assign_auto_outputs
+from gtnh_solver.router import RouteResult, assign_auto_outputs, route
+from gtnh_solver.solver import Effort, solve
 from gtnh_solver.solver import core as solver_core
-from gtnh_solver.solver import solve
 from gtnh_solver.validator import ValidationReport, Violation, ViolationCode, validate
 from tests._helpers import at, consumer, net, power_source, producer
 
@@ -47,10 +53,10 @@ _NITROBENZENE = _EXAMPLES / "gtnh-nitrobenzene.json"
 _PARALLEL_SAND = _EXAMPLES / "gtnh-parallel-sand.json"
 
 
-def test_solve_sand_items_auto_feed_and_power_is_cabled(
-    solved_sand: tuple[InputIR, LayoutResult],
-) -> None:
-    ir, layout = solved_sand
+@pytest.mark.full_solve
+def test_solve_sand_items_auto_feed_and_power_is_cabled() -> None:
+    ir = adapt_file(_SAND)
+    layout = solve(ir)
     assert layout.status is LayoutStatus.VALID
     assert validate(ir, layout).ok
     item_nets = [n for n in ir.nets if n.commodity is Commodity.ITEM]
@@ -78,21 +84,21 @@ def _structure_metrics(layout: LayoutResult) -> tuple[int, int, int]:
     return footprint, volume, len(power_cells)
 
 
-def test_solve_sand_optimized_matches_or_beats_the_hand_built_target(
-    solved_sand: tuple[InputIR, LayoutResult],
-) -> None:
+@pytest.mark.full_solve
+def test_solve_sand_optimized_matches_or_beats_the_hand_built_target() -> None:
     # The acceptance target (docs/ROADMAP.md lane C): the maintainer hand-builds the sand line in
     # a 3x2x2 volume with 3 power cables, so the optimizer must find that or better - VALID, the
     # whole built structure (machines + routes) on a floor area <= 3x2 = 6 cells, and <= 3 power
     # cable cells. The quality-driven feedback loop is what finds it: it routes every attempt and
     # keeps the best by (footprint, cable cells, volume) instead of returning the first valid.
-    _, layout = solved_sand
+    layout = solve(adapt_file(_SAND))
     assert layout.status is LayoutStatus.VALID
     footprint, _, cables = _structure_metrics(layout)
     assert footprint <= 6, f"structure footprint {footprint} exceeds the hand-built 3x2"
     assert cables <= 3, f"{cables} power cable cells exceed the hand-built 3"
 
 
+@pytest.mark.full_solve
 def test_solve_sand_volume_objective_stays_within_the_hand_built_box() -> None:
     # objective="volume" minimizes the enclosing box instead of the floor area: a flatter,
     # larger-floor layout is acceptable, but the structure must fit the hand-built 3x2x2 = 12
@@ -105,6 +111,7 @@ def test_solve_sand_volume_objective_stays_within_the_hand_built_box() -> None:
     assert cables <= 3, f"{cables} power cable cells exceed the hand-built 3"
 
 
+@pytest.mark.full_solve
 def test_solve_sand_balanced_objective_is_valid_and_low_wire() -> None:
     # objective="balanced" weighs floor area and enclosing box together; it must still produce a
     # fully valid sand layout within the hand-built compactness and wire budget on both metrics.
@@ -117,6 +124,7 @@ def test_solve_sand_balanced_objective_is_valid_and_low_wire() -> None:
     assert cables <= 3
 
 
+@pytest.mark.full_solve
 def test_solve_the_parallel_line_reaches_a_valid_layout() -> None:
     """The acceptance case for #76: three nodes at three instances each, nine machines, VALID.
 
@@ -174,6 +182,7 @@ def test_fast_mode_passes_through_infeasibility() -> None:
     assert layout.infeasibility is not None
 
 
+@pytest.mark.full_solve
 def test_optimize_recovers_a_congested_line_fast_mode_leaves_partial() -> None:
     # A tight single-layer fan-out that the constructive placement cannot route in one shot. The
     # optimizer's SA/LNS + place<->route feedback loop recovers a VALID layout; fast mode, with no
@@ -335,11 +344,11 @@ def test_the_multi_start_recovers_a_layout_a_single_attempt_leaves_partial() -> 
     assert single_attempt.status is LayoutStatus.PARTIAL_INVALID  # one attempt cannot route it...
     assert failed  # ...and it names the net it could not lay
 
-    layout = solve(problem)
+    layout = solve(problem, effort="full")
     assert layout.status is LayoutStatus.VALID, layout.infeasibility  # ...another attempt does
     assert validate(problem, layout).ok
     assert layout.seed != 0  # it took a later attempt, not attempt 0
-    assert solve(problem) == solve(problem)  # still deterministic
+    assert solve(problem, effort="full") == layout  # still deterministic
 
 
 def test_solve_fork_auto_outputs_one_and_pipes_the_other() -> None:
@@ -420,7 +429,7 @@ def test_solve_returns_an_explicit_partial_when_every_attempt_fails(
     stuck = Infeasibility(constraint="routing", detail="rigged: net n never routes")
 
     def always_fails_the_same_net(
-        prob: InputIR, placements: object, *, reserved: object = ()
+        prob: InputIR, placements: object, *, max_rounds: int | None = None
     ) -> RouteResult:
         return RouteResult(infeasibility=stuck, failed_nets=("n",))
 
@@ -437,21 +446,24 @@ def test_solve_returns_an_explicit_partial_when_every_attempt_fails(
         net_penalties: dict[str, float] | None = None,
         face_penalties: dict[str, float] | None = None,
         objective: Objective = "footprint",
+        max_iterations: int | None = None,
     ) -> PlacementResult:
         nonlocal attempts
         attempts += 1
         assert not net_penalties  # every attempt anneals on its own...
         assert not face_penalties  # ...with nothing carried over from another
-        return optimize_placement(problem, seed=seed, objective=objective)
+        return optimize_placement(
+            problem, seed=seed, objective=objective, max_iterations=max_iterations
+        )
 
     monkeypatch.setattr(solver_core, "optimize_placement", counting_optimize)
 
-    layout = solve(problem)
+    layout = solve(problem, effort="full")
     assert layout.status is LayoutStatus.PARTIAL_INVALID  # not VALID
     assert layout.infeasibility is not None
     assert layout.infeasibility.constraint == "routing"  # the router's reason is surfaced...
     assert validate(problem, layout).ok is False  # ...and the stalled net is never certified valid
-    assert attempts == solver_core._ATTEMPTS
+    assert attempts == solver_core._BUDGETS["full"].attempts
 
 
 # ------------------------------------------------- a starved machine is a PLACEMENT defect (#106)
@@ -556,7 +568,7 @@ def test_an_attempt_that_starves_a_machine_loses_to_one_that_places_it_nearer(
 
     monkeypatch.setattr(solver_core, "optimize_placement", stub_placer)
 
-    layout = solve(problem)
+    layout = solve(problem, effort="full")
     assert layout.status is LayoutStatus.VALID, layout.infeasibility
     assert validate(problem, layout).ok
     assert {p.machine_id: p.cell for p in layout.placements}["m"] == near[1].cell
@@ -622,19 +634,30 @@ def test_the_pool_runs_every_attempt_after_the_first(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(solver_core, "ProcessPoolExecutor", _RecordingPool)
     monkeypatch.setattr(solver_core, "_POOL_AFTER_S", 0.0)  # any attempt is slow enough
     ir = adapt_file(_SAND)
-    pooled = solve(ir, seed=3, jobs=4)
+    pooled = solve(ir, seed=3, jobs=4, effort="full")
     assert len(_RecordingPool.created) == 1
     pool = _RecordingPool.created[0]
     assert pool.max_workers == 4
-    assert pool.seeds == list(range(4, 3 + solver_core._ATTEMPTS))  # attempt 0 ran here
-    assert pooled == solve(ir, seed=3)  # the same layout as every attempt in one process
+    attempts = solver_core._BUDGETS["full"].attempts
+    assert pool.seeds == list(range(4, 3 + attempts))  # attempt 0 ran here
+    # The same layout as every attempt in one process.
+    assert pooled == solve(ir, seed=3, effort="full")
 
 
 def test_one_job_never_starts_a_pool(monkeypatch: pytest.MonkeyPatch) -> None:
     _RecordingPool.created = []
     monkeypatch.setattr(solver_core, "ProcessPoolExecutor", _RecordingPool)
     monkeypatch.setattr(solver_core, "_POOL_AFTER_S", 0.0)
-    solve(adapt_file(_SAND), jobs=1)
+    solve(adapt_file(_SAND), jobs=1, effort="full")
+    assert _RecordingPool.created == []
+
+
+def test_a_single_attempt_never_starts_a_pool(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A minimal solve is one attempt, and attempt 0 always runs here: nothing is left for a pool.
+    _RecordingPool.created = []
+    monkeypatch.setattr(solver_core, "ProcessPoolExecutor", _RecordingPool)
+    monkeypatch.setattr(solver_core, "_POOL_AFTER_S", 0.0)
+    solve(adapt_file(_SAND), jobs=4, effort="minimal")
     assert _RecordingPool.created == []
 
 
@@ -643,7 +666,7 @@ def test_a_quick_first_attempt_never_starts_a_pool(monkeypatch: pytest.MonkeyPat
     _RecordingPool.created = []
     monkeypatch.setattr(solver_core, "ProcessPoolExecutor", _RecordingPool)
     monkeypatch.setattr(solver_core, "_POOL_AFTER_S", float("inf"))
-    solve(adapt_file(_SAND), jobs=4)
+    solve(adapt_file(_SAND), jobs=4, effort="full")
     assert _RecordingPool.created == []
 
 
@@ -654,4 +677,84 @@ def test_a_real_pool_returns_the_same_layout_as_one_process(
     # still the one a single process finds: the number of jobs never changes the answer.
     monkeypatch.setattr(solver_core, "_POOL_AFTER_S", 0.0)
     ir = adapt_file(_SAND)
-    assert solve(ir, seed=1, jobs=2) == solve(ir, seed=1, jobs=1)
+    assert solve(ir, seed=1, jobs=2, effort="full") == solve(ir, seed=1, jobs=1, effort="full")
+
+
+# ------------------------------------------------ effort: how hard the optimized path works
+
+
+def _record_budgets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[list[tuple[Objective, int, int | None]], list[int | None]]:
+    """Record each attempt's ``(weighting, seed, anneal cap)`` and each routing's round cap."""
+    anneals: list[tuple[Objective, int, int | None]] = []
+    rounds: list[int | None] = []
+
+    def recording_optimize(
+        problem: InputIR,
+        *,
+        seed: int = 0,
+        net_penalties: dict[str, float] | None = None,
+        face_penalties: dict[str, float] | None = None,
+        objective: Objective = "footprint",
+        max_iterations: int | None = None,
+    ) -> PlacementResult:
+        anneals.append((objective, seed, max_iterations))
+        return optimize_placement(
+            problem, seed=seed, objective=objective, max_iterations=max_iterations
+        )
+
+    def recording_route(
+        problem: InputIR, placements: Sequence[Placement], *, max_rounds: int | None = None
+    ) -> RouteResult:
+        rounds.append(max_rounds)
+        return route(problem, placements, max_rounds=max_rounds)
+
+    monkeypatch.setattr(solver_core, "optimize_placement", recording_optimize)
+    monkeypatch.setattr(solver_core, "route", recording_route)
+    return anneals, rounds
+
+
+def test_minimal_effort_runs_one_short_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
+    anneals, rounds = _record_budgets(monkeypatch)
+    solve(adapt_file(_SAND), seed=5, effort="minimal")
+    assert anneals == [("footprint", 5, 250)]
+    assert rounds == [8]
+
+
+def test_full_effort_runs_the_whole_grid_on_the_stages_own_schedules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    anneals, rounds = _record_budgets(monkeypatch)
+    solve(adapt_file(_SAND), seed=5, effort="full")
+    assert anneals == [("footprint", s, None) for s in range(5, 13)]
+    assert rounds
+    assert set(rounds) == {None}
+
+
+@pytest.mark.parametrize(
+    ("effort", "grid"),
+    [
+        ("minimal", [("volume", 0)]),
+        ("full", [(mode, s) for s in range(4) for mode in ("volume", "footprint")]),
+    ],
+)
+def test_a_budget_below_one_seed_per_weighting_keeps_the_objectives_own(
+    monkeypatch: pytest.MonkeyPatch, effort: Effort, grid: list[tuple[Objective, int]]
+) -> None:
+    # A volume solve alternates its own weighting with the footprint explorer, own first. The one
+    # attempt a minimal solve has is the objective's own, not the explorer's.
+    anneals, _ = _record_budgets(monkeypatch)
+    solve(adapt_file(_SAND), objective="volume", effort=effort)
+    assert [(mode, seed) for mode, seed, _ in anneals] == grid
+
+
+def test_no_effort_named_takes_the_default_when_solve_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Read at call time, which is what lets tests/conftest.py make the whole suite minimal.
+    anneals, _ = _record_budgets(monkeypatch)
+    ir = adapt_file(_SAND)
+    solve(ir)
+    assert len(anneals) == 1  # the suite's default
+    monkeypatch.setattr(solver_core, "DEFAULT_EFFORT", "full")
+    solve(ir)
+    assert len(anneals) == 1 + 8

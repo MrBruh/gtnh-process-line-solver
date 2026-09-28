@@ -10,11 +10,12 @@ than stopping at the first valid one (placement-time proxies cannot see the rout
 quality is only knowable after routing). No attempt depends on another, so a slow line runs them in
 a pool of processes. Deterministic: bounded attempts keyed off ``seed``, and the same layout
 whatever the number of processes. Phase 2 layers a wall-clock anytime budget on top (return the best
-valid layout on timeout, never hang).
+valid layout on timeout, never hang). An :data:`Effort` of ``minimal`` runs every stage once on
+small budgets instead, to check that a line solves rather than to find its best layout.
 """
 
 from __future__ import annotations
 
-from .core import solve
+from .core import Effort, solve
 
-__all__ = ["solve"]
+__all__ = ["Effort", "solve"]

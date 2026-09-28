@@ -19,7 +19,7 @@ import gtnh_solver.cli as cli_module
 from gtnh_solver.cli import _me_toggles, _note_me_toggles, build_parser, main
 from gtnh_solver.ir import Commodity, InputIR, LayoutResult, LayoutStatus, METoggles
 from gtnh_solver.placement import Objective
-from gtnh_solver.solver import solve
+from gtnh_solver.solver import Effort, solve
 from gtnh_solver.validator import validate
 
 _SAND = str(Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json")
@@ -144,9 +144,17 @@ def test_sand_with_items_on_me_solves_valid_with_no_item_routing(
     solved: list[tuple[InputIR, LayoutResult]] = []
 
     def real_solve(
-        problem: InputIR, *, seed: int, optimize: bool, objective: Objective, jobs: int
+        problem: InputIR,
+        *,
+        seed: int,
+        optimize: bool,
+        objective: Objective,
+        jobs: int,
+        effort: Effort | None,
     ) -> LayoutResult:
-        layout = solve(problem, seed=seed, optimize=optimize, objective=objective, jobs=jobs)
+        layout = solve(
+            problem, seed=seed, optimize=optimize, objective=objective, jobs=jobs, effort=effort
+        )
         solved.append((problem, layout))
         return layout
 

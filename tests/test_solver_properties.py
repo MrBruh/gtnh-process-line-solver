@@ -266,7 +266,8 @@ def test_solve_is_valid_or_explicitly_infeasible(
 
     Asserted on both paths the site exposes: the annealed feedback loop and ``--fast``. They
     assemble layouts differently (``_solve_fast`` places constructively and repairs nothing), so a
-    promise that held on one of them would be half a promise.
+    promise that held on one of them would be half a promise. The annealed path runs at the
+    suite's ``minimal`` effort: the promise is made per attempt, and holds at any budget.
     """
     layout = solve(problem, seed=seed, optimize=optimize)
     event(f"status={layout.status.value}")
@@ -297,9 +298,10 @@ def test_solve_is_deterministic_for_a_given_problem_and_seed(problem: InputIR, s
     partial layout ranked against another partial, a tie between two equal-quality attempts -
     where an unstable iteration order would actually show. Deliberately the cheapest budget in
     the file (two solves per example), since it is the invariant's guard rail, not the invariant.
+    A full solve, because that corner needs several attempts to rank and a minimal one has one.
     """
-    first = solve(problem, seed=seed)
-    second = solve(problem, seed=seed)
+    first = solve(problem, seed=seed, effort="full")
+    second = solve(problem, seed=seed, effort="full")
     assert first.model_dump() == second.model_dump()
 
 
