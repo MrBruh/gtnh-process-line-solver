@@ -50,11 +50,15 @@ import gregtech.api.interfaces.ITexture;
 import gregtech.api.interfaces.metatileentity.IConnectable;
 import gregtech.api.interfaces.metatileentity.IMetaTileEntity;
 import gregtech.api.interfaces.tileentity.IGregTechTileEntity;
+import gregtech.api.interfaces.tileentity.RecipeMapWorkable;
 import gregtech.api.metatileentity.BaseMetaTileEntity;
 import gregtech.api.metatileentity.MetaPipeEntity;
+import gregtech.api.metatileentity.MetaTileEntity;
 import gregtech.api.metatileentity.implementations.MTEBasicMachine;
 import gregtech.api.metatileentity.implementations.MTECable;
 import gregtech.api.metatileentity.implementations.MTEItemPipe;
+import gregtech.api.metatileentity.implementations.MTETieredMachineBlock;
+import gregtech.api.recipe.RecipeMap;
 
 /**
  * The texture pass, v2 (lane 6 v2, issue #79). Emits the <b>layered</b> texture manifest (plan
@@ -276,6 +280,16 @@ final class TextureDumper {
         // 12-15 and BaseMetaPipeEntity for 4-11 - so a .schematic (#96) that writes the wrong
         // nibble reconstructs a cable as a machine. Null for a block with no MTE behind it.
         Byte teBaseType;
+        // What a plan's machine is joined on (#232). A plan names a single-block machine by its
+        // RECIPE MAP ("Ore Washer"), which is often not the machine's name ("Basic Ore Washing
+        // Plant"), and two maps can even share one localized name (the Furnace and the Microwave).
+        // So: the map's unlocalized id (RecipeMapWorkable.getRecipeMap(), "gt.recipe.orewasher"),
+        // the voltage tier (MTETieredMachineBlock.mTier), and whether it runs on EU
+        // (MetaTileEntity.isElectric()) - false for a steam machine, which shares both the map and
+        // the tier number with the LV electric one. Each is null where GT states none.
+        String recipeMap;
+        Integer tier;
+        Boolean electric;
 
         Entry(String kind, String displayName, String sourceClass) {
             this.kind = kind;
@@ -530,6 +544,7 @@ final class TextureDumper {
 
         Entry entry = new Entry("mte", safeName(imte), imte.getClass().getName());
         entry.teBaseType = teBaseType(imte);
+        recordRecipeJoin(imte, entry);
         boolean basic = imte instanceof MTEBasicMachine;
         // Non-basic MTEs (hulls/hatches) read their layers off a live getTexture, so place ONCE and
         // reuse the base TE for all 12 side/state queries instead of re-placing per query.
@@ -1458,6 +1473,30 @@ final class TextureDumper {
             return imte.getTileEntityBaseType();
         } catch (Throwable ignored) {
             return null;
+        }
+    }
+
+    /**
+     * Record the recipe map, voltage tier and electric flag GT states for {@code imte} (#232).
+     *
+     * <p>Read off the registered prototype, which is all three need: the map is a constructor
+     * argument and the tier a final field. Best-effort like {@link #teBaseType}: a throw leaves the
+     * field unstated, which costs the previewer one exact join rather than costing the dump.
+     */
+    private static void recordRecipeJoin(IMetaTileEntity imte, Entry entry) {
+        try {
+            if (imte instanceof RecipeMapWorkable) {
+                RecipeMap<?> map = ((RecipeMapWorkable) imte).getRecipeMap();
+                entry.recipeMap = map != null ? map.unlocalizedName : null;
+            }
+            if (imte instanceof MTETieredMachineBlock) {
+                entry.tier = (int) ((MTETieredMachineBlock) imte).mTier;
+            }
+            if (imte instanceof MetaTileEntity) {
+                entry.electric = ((MetaTileEntity) imte).isElectric();
+            }
+        } catch (Throwable ignored) {
+            // whatever was read before the throw stays; the rest is unstated
         }
     }
 
@@ -2716,6 +2755,15 @@ final class TextureDumper {
             }
             if (entry.sourceClass != null) {
                 bj.addProperty("source_class", entry.sourceClass);
+            }
+            if (entry.recipeMap != null) {
+                bj.addProperty("recipe_map", entry.recipeMap);
+            }
+            if (entry.tier != null) {
+                bj.addProperty("tier", entry.tier);
+            }
+            if (entry.electric != null) {
+                bj.addProperty("electric", entry.electric);
             }
             JsonObject sidesJson = new JsonObject();
             for (Map.Entry<String, Map<String, List<Layer>>> side : entry.sides.entrySet()) {
