@@ -1,4 +1,4 @@
-"""solver.core - the place<->route feedback loop that yields a LayoutResult.
+"""solver.core - the multi-start of place-and-route attempts that yields a LayoutResult.
 
 One *attempt* assembles a layout (docs/ROADMAP.md):
   1. place the machines (simulated annealing over a routing-aware cost, seeded from the
@@ -25,28 +25,39 @@ One attempt, as ``_assemble`` runs it::
       |  place_hatches  a hatch per connection, plus maintenance and muffler
       |  validate       VALID, or downgraded to partial_invalid
       v
-    the layout, and the nets it names as failed (the feedback loop's signal)
+    the layout, and the nets it names as failed (how a partial layout is ranked)
 
 There is no second pass. Power used to route after the pipes with one dock cell held per energy
 port, and a pipe could wall that cell into a pocket, so a failed power net got a power-first
 recovery pass (#226). The power nets now take part in the pipes' negotiation, which leaves their
 cable room, and the recovery never rescued an attempt after that (#164), so it is gone.
 
-``solve`` wraps that in the **place<->route feedback loop** (docs/ARCHITECTURE.md #1, #6), which
-is also where layout *quality* is judged: cheap placement-time proxies cannot see dock faces or
-shared cable taps, so the real per-segment cable cost is only knowable on a routed layout. The
-loop is a bounded **multi-start grid** - SA weight modes x seeds - where every attempt is fully
-routed + validated and the best VALID layout by the requested objective's quality ranking
-(compactness metric, then real route cells - pipes and cable - then the other metric) is kept, not
-first-valid-wins. The footprint weighting always participates as the explorer: it generates the
-stacked, cable-dense candidates whose routed structure often wins the volume/balanced rankings
-too. If an attempt leaves nets unrouted - or lands a machine so far from its power source that
-validation proves it starved - it penalizes exactly those nets (so the next placement pulls their
-machines tighter - shorter routes, adjacency that auto-outputs, or an MST pull for a failed or
-starved power trunk); with no valid layout yet in hand, it stops early when re-placing cannot
-help (a non-routing defect, or the same nets failing again). It is **deterministic** (a bounded
-grid keyed off ``seed`` + the penalties, no wall-clock), so a given input always yields the same
-layout.
+``solve`` wraps that in a bounded **multi-start** (docs/ARCHITECTURE.md #1, #6), which is also
+where layout *quality* is judged: cheap placement-time proxies cannot see dock faces or shared cable
+taps, so the real per-segment cable cost is only knowable on a routed layout. The attempts form a
+grid - SA weight modes x seeds - where every attempt is fully routed + validated and the best VALID
+layout by the requested objective's quality ranking (compactness metric, then real route cells -
+pipes and cable - then the other metric) is kept, not first-valid-wins. The footprint weighting
+always participates as the explorer: it generates the stacked, cable-dense candidates whose routed
+structure often wins the volume/balanced rankings too.
+
+The attempts are **independent**: each anneals under its own seed and nothing one attempt learns
+reaches another. They used to feed each other - a net one attempt left unrouted was penalized in
+every later attempt's cost, and the loop stopped early when the same nets kept failing - but that
+feedback measured as no better than none: over 53 solves on five lines, their seeds spaced so that
+no two solves share an attempt, 45 returned the same layout without it, 6 a better one and 2 a
+worse one. Dropping it is what lets the attempts run side by side::
+
+    the grid of (weighting, seed) attempts         each one: anneal -> gate -> _assemble
+      attempt 0, in this process, timed
+      the rest: in a pool of ``jobs`` processes when attempt 0 took longer than a pool takes to
+                start (_POOL_AFTER_S), else in turn, in this process
+    rank in grid order: the best VALID layout, else the fewest unrouted nets, else lay the first
+    placement the gate turned away
+
+An attempt returns the same thing whichever process runs it, and the ranking reads the attempts in
+grid order, so a given input and ``seed`` yields the same layout whatever ``jobs`` is and however
+the timing falls. The clock only decides whether a pool is worth starting.
 
 One candidate comes from outside the grid. A line that is one chain of banks of parallel single
 blocks has a compact layout the annealer does not reach, each bank a column and each pair of stages
@@ -55,11 +66,15 @@ so it wins only where the routed structure really is smaller; on any other line 
 candidate and the loop is exactly the grid.
 
 ``solve(..., optimize=False)`` is the **fast** path: a single constructive placement with no
-annealing and no feedback loop (near-instant, simpler layout), still validated. The two modes are
+annealing and no multi-start (near-instant, simpler layout), still validated. The two modes are
 the "optimize or not" choice the planned unified site exposes to the builder.
 """
 
 from __future__ import annotations
+
+import time
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass
 
 from gtnh_solver.ir import (
     Commodity,
@@ -89,15 +104,15 @@ from gtnh_solver.validator import ValidationReport, ViolationCode, validate
 from ._structure import footprint_and_layers, structure_cells, structure_quality
 from .repair import repair_power_sources
 
-# Feedback loop bounds. Cycle detection on the failed-net set usually stops sooner when nothing
-# routes; this caps the work. The penalty step adds to a net's weight each time it fails to route.
-_MAX_FEEDBACK_PASSES = 8
-_PENALTY_STEP = 2.0
+#: Attempts per solve: the multi-start grid (weighting modes x seeds, module docstring).
+_ATTEMPTS = 8
 
-#: Added to a machine's own face-term weight each time the crowding gate finds it with nowhere to
-#: put a connection. Per machine on purpose: a global dial re-weights the whole search between
-#: attempts, which makes the multi-start's seeds incomparable and lets the most distorted one win.
-_FACE_PENALTY_STEP = 2.0
+#: How long attempt 0 has to take before the rest are worth a process pool. Starting one costs
+#: about a second on the maintainer's 4-core machine, since each process imports the solver afresh.
+#: A pool of 4 started for every solve made parallel-sand's (attempts of about 0.4 s) 1.5x slower
+#: and nitrobenzene's (1 to 2 s) 2.4x faster. With this threshold, parallel-sand and sand never start
+#: one, and nitrobenzene and ev-nitrobenzene solve 2.0x and 1.8x faster than one attempt at a time.
+_POOL_AFTER_S = 1.0
 
 
 def solve(
@@ -106,34 +121,33 @@ def solve(
     seed: int = 0,
     optimize: bool = True,
     objective: Objective = "footprint",
+    jobs: int = 1,
 ) -> LayoutResult:
     """Produce a layout for ``problem``; deterministic for a given ``problem`` + ``seed``.
 
     ``optimize`` selects how hard to work (the site's "optimize or not" control):
 
-    - ``True`` (default): the annealed placer (SA + LNS) inside the place<->route feedback loop.
-      Every bounded attempt is fully routed, and the best VALID layout by the ``objective``'s
-      quality ranking is returned - tighter, lower-wire layouts at the cost of seconds of CPU. If
-      no attempt is fully valid, the best partial is returned.
+    - ``True`` (default): the annealed placer (SA + LNS) in a multi-start of independent
+      attempts. Every bounded attempt is fully routed, and the best VALID layout by the
+      ``objective``'s quality ranking is returned - tighter, lower-wire layouts at the cost of
+      seconds of CPU. If no attempt is fully valid, the best partial is returned.
     - ``False`` (**fast**): a single constructive first-fit placement, no optimization and no
-      feedback loop - near-instant and simple. Its layout is still validated, so it is VALID or an
+      multi-start - near-instant and simple. Its layout is still validated, so it is VALID or an
       explicit partial/infeasibility, never silently invalid; but it will not cluster machines for
-      auto-output, relocate a power source onto shorter cable, or re-place to rescue an unroutable
-      net the way the optimizer can.
+      auto-output, relocate a power source onto shorter cable, or try another placement for an
+      unroutable net the way the optimizer can.
 
     ``objective`` selects what "compact" means (the site's *second* control, next to optimize or
     not): ``footprint`` (default) minimizes the floor area and stacks tall, ``volume`` minimizes
     the enclosing box and stays flat/cubic, ``balanced`` weighs both. It drives the placement
     cost and the quality ranking; the fast path ignores it (constructive placement is floor-first
     by construction).
+
+    ``jobs`` is how many processes the attempts may run in (module docstring). It changes how long
+    a solve takes, never what it returns; ``1`` runs every attempt in this process.
     """
     if not optimize:
         return _solve_fast(problem, seed, objective)
-    penalties: dict[str, float] = {}
-    seen_failed: set[frozenset[str]] = set()
-    crowding: Infeasibility | None = None
-    # Machines the gate found no room for, and how hard to lean on each next time.
-    face_penalties: dict[str, float] = {}
     # The first placement the gate turned away, kept as a parachute. The gate is a heuristic about
     # geometry and the routers are the authority, so it is only ever allowed to pick BETTER
     # attempts - never to declare a line unsolvable that the routers would in fact have solved.
@@ -143,7 +157,7 @@ def solve(
     best_partial: LayoutResult | None = None
     best_failures = -1
     # The bank-column candidate (module docstring). Only a VALID result is kept: it is not an
-    # annealed placement, so its failures are no evidence about the nets the penalties steer.
+    # annealed placement, and a partial one would only compete with the attempts for last place.
     columns = bank_columns(problem)
     if columns is not None and not crowded_machines(problem, columns):
         layout, _ = _assemble(problem, columns, seed, objective)
@@ -154,68 +168,31 @@ def solve(
     # dense candidates, whose routed structure often wins the volume/balanced rankings too (a
     # pure-volume weighting minimises the machine box and cannot reach them, because the cable
     # space they save is invisible until routing). For the footprint objective the two coincide,
-    # so all passes go to its own weighting across more seeds.
+    # so all attempts go to its own weighting across more seeds.
     sa_modes: tuple[Objective, ...] = (
         ("footprint",) if objective == "footprint" else (objective, "footprint")
     )
-    grid = [
-        (mode, seed + i) for i in range(_MAX_FEEDBACK_PASSES // len(sa_modes)) for mode in sa_modes
-    ]
-    for sa_mode, attempt_seed in grid:
-        placement = optimize_placement(
-            problem,
-            seed=attempt_seed,
-            net_penalties=penalties,
-            face_penalties=face_penalties,
-            objective=sa_mode,
-        )
-        if not placement.ok:
-            # The machines do not fit the region at all - seed-independent, so retrying is futile.
+    grid = [(mode, seed + i) for i in range(_ATTEMPTS // len(sa_modes)) for mode in sa_modes]
+    # Read in grid order, whichever process ran what, so ties keep the earliest attempt.
+    for attempt in _run_attempts(problem, grid, objective, jobs):
+        if attempt.infeasibility is not None:
+            # The machines do not fit the region at all - seed-independent, so no attempt can.
             return LayoutResult(
                 status=LayoutStatus.INFEASIBLE,
-                seed=attempt_seed,
-                infeasibility=placement.infeasibility,
+                seed=attempt.seed,
+                infeasibility=attempt.infeasibility,
             )
-
-        # Can every machine dock every connection it carries? Checked before routing, naming a
-        # machine only on proof: a crowded placement cannot route, and routing it only to watch an
-        # arbitrary net lose the race for the last free face costs an attempt and reports the
-        # wrong machine (#76).
-        crowded = crowded_machines(problem, placement.placements)
-        if crowded:
-            # Lean on the named machines, never on the search as a whole: the attempts are
-            # independent seeds ranked against one objective, so a global dial makes them
-            # incomparable and lets the most distorted one win (see optimize_placement).
-            if crowding is None:
-                crowding, gated = _crowding_infeasibility(crowded), placement.placements
-            for machine_id in crowded:
-                face_penalties[machine_id] = (
-                    face_penalties.get(machine_id, 0.0) + _FACE_PENALTY_STEP
-                )
+        if attempt.layout is None:
+            gated = gated or attempt.gated
             continue
-
-        layout, failed_nets = _assemble(problem, placement.placements, attempt_seed, objective)
-        if layout.status is LayoutStatus.VALID:
-            # Valid, but maybe not the best the remaining seeds can do: rank it on the real,
-            # routed structure and keep exploring (ties keep the earliest attempt).
-            quality = _quality(problem, layout, objective)
+        if attempt.layout.status is LayoutStatus.VALID:
+            # Valid, but maybe not the best the other seeds found: rank it on the real, routed
+            # structure (ties keep the earliest attempt).
+            quality = _quality(problem, attempt.layout, objective)
             if best_quality is None or quality < best_quality:
-                best_valid, best_quality = layout, quality
-            continue
-        if best_partial is None or len(failed_nets) < best_failures:
-            best_partial, best_failures = layout, len(failed_nets)  # fewest-unrouted so far
-
-        if best_valid is None:
-            # No valid layout in hand: stop early when re-placing cannot possibly help. (Once one
-            # exists the remaining attempts are pure multi-start exploration, so keep going.)
-            if not failed_nets:
-                break  # a non-routing defect (independent validation) - re-placing cannot help
-            key = frozenset(failed_nets)
-            if key in seen_failed:
-                break  # the same nets keep failing - the feedback is not making progress
-            seen_failed.add(key)
-        for net_id in failed_nets:
-            penalties[net_id] = penalties.get(net_id, 0.0) + _PENALTY_STEP
+                best_valid, best_quality = attempt.layout, quality
+        elif best_partial is None or len(attempt.failed_nets) < best_failures:
+            best_partial, best_failures = attempt.layout, len(attempt.failed_nets)
 
     if best_valid is not None:
         return best_valid
@@ -226,10 +203,63 @@ def solve(
         # they are the authority, and a real shortage still surfaces as their own infeasibility
         # (face_reachability, routing or congestion). The gate has then cost an attempt and
         # changed nothing else.
-        assert gated is not None  # the only path that skips every attempt sets both
+        assert gated is not None  # the only path that skips every attempt sets it
         layout, _ = _assemble(problem, gated, seed, objective)
         return layout
     return best_partial
+
+
+@dataclass(frozen=True)
+class _Attempt:
+    """What one attempt came to. At most one of the three is set: the machines did not fit the
+    region, the crowding gate turned the placement away before routing, or it was routed."""
+
+    seed: int
+    infeasibility: Infeasibility | None = None
+    gated: tuple[Placement, ...] | None = None
+    layout: LayoutResult | None = None
+    failed_nets: tuple[str, ...] = ()
+
+
+def _attempt(
+    problem: InputIR, sa_mode: Objective, attempt_seed: int, objective: Objective
+) -> _Attempt:
+    """One attempt of the grid: anneal, gate, and if the gate lets it through, route and validate.
+
+    A function of its arguments alone, so it returns the same thing in a pool process as here.
+    """
+    placement = optimize_placement(problem, seed=attempt_seed, objective=sa_mode)
+    if not placement.ok:
+        return _Attempt(attempt_seed, infeasibility=placement.infeasibility)
+    # Can every machine dock every connection it carries? Checked before routing, naming a machine
+    # only on proof: a crowded placement cannot route, and routing it only to watch an arbitrary
+    # net lose the race for the last free face costs an attempt and reports the wrong machine (#76).
+    if crowded_machines(problem, placement.placements):
+        return _Attempt(attempt_seed, gated=placement.placements)
+    layout, failed_nets = _assemble(problem, placement.placements, attempt_seed, objective)
+    return _Attempt(attempt_seed, layout=layout, failed_nets=failed_nets)
+
+
+def _run_attempts(
+    problem: InputIR, grid: list[tuple[Objective, int]], objective: Objective, jobs: int
+) -> list[_Attempt]:
+    """Every attempt of ``grid``, in grid order (module docstring).
+
+    Attempt 0 runs here and is timed. When it took longer than a pool takes to start
+    (``_POOL_AFTER_S``) and ``jobs`` allows, the rest run in a pool of up to ``jobs`` processes;
+    otherwise they run here in turn. A line whose machines do not fit the region stops at attempt 0,
+    since every seed starts from the same constructive placement.
+    """
+    (first_mode, first_seed), rest = grid[0], grid[1:]
+    started = time.perf_counter()
+    first = _attempt(problem, first_mode, first_seed, objective)
+    if first.infeasibility is not None or not rest:
+        return [first]
+    if jobs > 1 and time.perf_counter() - started > _POOL_AFTER_S:
+        with ProcessPoolExecutor(max_workers=min(jobs, len(rest))) as pool:
+            futures = [pool.submit(_attempt, problem, mode, s, objective) for mode, s in rest]
+            return [first, *(future.result() for future in futures)]
+    return [first, *(_attempt(problem, mode, s, objective) for mode, s in rest)]
 
 
 def _layout_metrics(
@@ -248,7 +278,7 @@ def _layout_metrics(
 
 
 def _quality(problem: InputIR, layout: LayoutResult, objective: Objective) -> tuple[int, int, int]:
-    """Rank a VALID layout for the feedback loop; smaller-lexicographic is better
+    """Rank a VALID layout for the multi-start; smaller-lexicographic is better
     (``_structure.structure_quality`` - the same key the power-source repair pass ranks its own
     candidates on, so the two cannot pull against each other)."""
     return structure_quality(problem, layout.placements, layout.routes, objective)
@@ -257,9 +287,9 @@ def _quality(problem: InputIR, layout: LayoutResult, objective: Objective) -> tu
 def _solve_fast(problem: InputIR, seed: int, objective: Objective) -> LayoutResult:
     """One deterministic attempt over the constructive placement - the fast (no-optimize) path.
 
-    Constructive placement is seed-independent, so there is no annealing to run and no point re-
-    placing (the feedback loop would just get the same layout back); a single assemble+validate is
-    the whole job. The result is validated like any other, so it is VALID, an explicit
+    Constructive placement is seed-independent, so there is no annealing to run and no point in
+    more attempts (every one would get the same layout back); a single assemble+validate is the
+    whole job. The result is validated like any other, so it is VALID, an explicit
     partial_invalid, or an explicit infeasibility.
     """
     placement = place(problem)
@@ -282,10 +312,10 @@ def _assemble(
     """Route, validate, and compose the layout; return it plus the unrouted net ids.
 
     The router owns the auto-output vs pipe decision (router.auto), so its result carries both
-    the auto-connections and the pipes. The unrouted ids are the feedback signal (empty when
-    fully routed). A layout that routes everything yet fails independent validation returns
-    ``partial_invalid`` with *no* failed nets: that is a solver/router bug, not a routability
-    problem, so re-placing would not help.
+    the auto-connections and the pipes. The unrouted ids rank a partial layout against the other
+    attempts' (empty when fully routed). A layout that routes everything yet fails independent
+    validation returns ``partial_invalid`` with *no* failed nets: that is a solver/router bug, not a
+    routability problem.
 
     The placements it returns are not always the ones handed in: with ``repair`` (the optimize
     path) laying power is the repair pass (solver.repair), which may relocate a power source onto
@@ -294,8 +324,9 @@ def _assemble(
 
     **One violation is the exception** (:func:`_starved_machines`): a machine too far from its
     power source to take in its draw is a *placement* defect, not a bug - every cable is correctly
-    thick and only the distance is wrong - so its power net is named as a failed net and the loop
-    re-places it nearer, which is precisely the fix the constraint wants.
+    thick and only the distance is wrong - so its power net is named as a failed net, and the
+    layout ranks as one that left that net unrouted, which another attempt placing the machine
+    nearer can beat.
     """
     # Auto-output, then every other net negotiated together: the pipes, and a tree per power net
     # that keeps them off the space its cable needs (router.core, #164).
@@ -385,8 +416,8 @@ def _assemble(
             hatches=list(plan.hatches),
             metrics=metrics,
         )
-        # A starved machine is steerable: hand back the power nets it sits on so the loop
-        # penalizes them and the next placement pulls it toward its source.
+        # A starved machine is a placement defect: hand back the power nets it sits on, so this
+        # layout ranks as one that left them unrouted and an attempt placing it nearer can win.
         return downgraded, tuple(
             n.id
             for n in problem.nets
@@ -396,27 +427,14 @@ def _assemble(
     return layout, ()
 
 
-def _crowding_infeasibility(crowded: tuple[str, ...]) -> Infeasibility:
-    """Why a placement was rejected before routing: machines with nowhere to put a connection."""
-    listed = ", ".join(repr(m) for m in crowded[:3])
-    more = f" (and {len(crowded) - 3} more)" if len(crowded) > 3 else ""
-    return Infeasibility(
-        constraint="face_crowding",
-        detail=f"{len(crowded)} machine(s) cannot dock all their connections on the free cells "
-        f"around them at any placement this search reached: {listed}{more}",
-        suggested_relaxation="enlarge the bounding region, or reduce connections per machine "
-        "(fewer parallel machines on one net, or an ME/auto-output connection instead of a pipe)",
-    )
-
-
 def _starved_machines(report: ValidationReport) -> tuple[str, ...]:
     """The machines ``report`` proves starved of power - but only when that is ALL it proves.
 
     A starve is distance-driven: the cable loss over the run this placement implied leaves the
     machine's hatches unable to take in its ``eut``, though every segment is correctly thick. So
-    penalizing its power net and re-placing it nearer its source is the fix. Any *other* violation
-    alongside it is a genuine placer/router bug, where re-placing cannot help - so a mixed report
-    steers nothing and takes the empty-failed-nets short circuit, as before.
+    a placement with the machine nearer its source is the fix, and the attempt ranks as having left
+    its power net unrouted. Any *other* violation alongside it is a genuine placer/router bug,
+    which no placement fixes - so a mixed report names no net, as before.
     """
     starved = tuple(
         v.machine_id
@@ -430,14 +448,14 @@ def _validation_infeasibility(report: ValidationReport, starved: tuple[str, ...]
     """An Infeasibility describing why our own assembled layout failed independent validation."""
     if starved:
         # Nothing else is wrong with this layout: the machines are simply too far from their power
-        # source. The loop has already re-placed them and could not close the gap, so the advice is
-        # about the geometry the input allows, not about reporting a bug.
+        # source. No attempt placed them close enough, so the advice is about the geometry the
+        # input allows, not about reporting a bug.
         return Infeasibility(
             constraint="power_supply",
             detail="; ".join(v.message for v in report.violations),
             suggested_relaxation=(
                 "shorten the power run - a smaller bounding region, or a power source nearer the "
-                "load; re-placing alone could not bring these machines close enough"
+                "load; no attempt could place these machines close enough"
             ),
         )
     codes = ", ".join(v.code.value for v in report.violations)

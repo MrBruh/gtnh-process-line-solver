@@ -34,7 +34,8 @@ so a heavy machine's draw spreads over several 2 A energy hatches and as many ca
 **physical multiblock dataset** (a schema-v2 loader and the Electric Blast Furnace / Vacuum
 Freezer footprints, wired into the solve path) plus the **Java extractor** (`tools/gtnh-extractor/`)
 that regenerates the full dump locally on demand (the dump is local-only: never committed, no CI;
-lane B); the **place<->route feedback loop** as a multi-start grid (`solver/core.py`); the
+lane B); the place<->route **multi-start** of independent attempts, in parallel when slow
+(`solver/core.py`); the
 summed-amperage + voltage-drop half of the validator's power checks, plus the hatch-cell ceiling on
 a machine's connections and the does-enough-power-actually-arrive check (lane E); and real GT
 **textures in the previewer** (sprite resolution now covers every block the two shipped example
@@ -102,8 +103,9 @@ is demonstrably valid-but-bad (too large, unroutable, ugly). This is the recorde
   rip-up/reroute across tiers.
   Ahead: the **channels-per-edge realizability invariant**, cell->block realizability fed back
   into search, ME-toggle endpoint placement, pluggable multi-channel backends.
-- **solver** - the **place<->route feedback loop** (built: a multi-start grid in
-  `solver/core.py` that routes + validates every attempt and keeps the best VALID by quality)
+- **solver** - the place<->route **multi-start** (built: a grid of independent attempts in
+  `solver/core.py`, run in a pool of processes when slow, that routes + validates every attempt
+  and keeps the best VALID by quality)
   plus the anytime wall-clock budget (still queued: today's grid is deterministic + bounded,
   not a wall-clock timeout).
 - **power** - shared-amperage optimization (Steiner-like summing, thickness sizing, the 16x

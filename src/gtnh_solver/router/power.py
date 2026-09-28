@@ -99,9 +99,9 @@ class PowerRouteResult:
     """Power router output: all power routes, or a partial set plus why it stalled.
 
     ``failed_nets`` lists every power net still unrouted after the failed-first rip-up/reroute
-    retry (empty when ``ok``), in problem order, so the solver's place<->route feedback loop can
-    penalize them all and re-place (helps a dock/path failure; an amperage/tier failure is not
-    placement-fixable, but the loop's cycle detection stops quickly). ``infeasibility`` carries the
+    retry (empty when ``ok``), in problem order, so the solver can rank a partial layout by how much
+    it left unrouted (another attempt's placement can rescue a dock/path failure; an amperage/tier
+    failure is not placement-fixable). ``infeasibility`` carries the
     first one's specific reason, matching the item router's reporting shape.
     """
 
@@ -139,8 +139,8 @@ def route_power(
     bounded retry the item router once used): route a pass, and if any net
     failed, rip every trunk up and retry with the failed nets first, until a pass is clean or the
     failed-net set repeats (a genuine infeasibility, not a tier-ordering accident). This keeps the
-    solver's feedback loop from getting a false infeasibility on power that it would not get on
-    pipes. When routing genuinely stalls, ALL still-failing nets are reported (#40), not just the
+    solver from ranking an attempt down for a power failure that is only a routing-order accident,
+    which it would not do on pipes. When routing genuinely stalls, ALL still-failing nets are reported (#40), not just the
     first.
 
     ``claimed_cells`` are the **casing** cells per machine that the item/fluid pipes already spent
@@ -161,7 +161,7 @@ def route_power(
         return PowerRouteResult(routes=tuple(routes))
 
     # Exhausted: report the first net still failing (in problem order), with its specific reason,
-    # plus every still-failing net so the solver's feedback loop can penalize them all.
+    # plus every still-failing net, which is what the solver ranks a partial layout by.
     still_failing = tuple(net.id for net in power_nets if net.id in failures)
     return PowerRouteResult(
         routes=tuple(routes),

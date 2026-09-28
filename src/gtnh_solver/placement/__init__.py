@@ -9,7 +9,7 @@ large-neighbourhood ruin-and-recreate move that reshuffles net-connected cluster
 placer remains the SA seed (and a simple fallback). :func:`bank_columns` (``banks``) is a third,
 narrow constructor: a line that is one chain of banks of parallel single blocks gets them laid as
 columns sharing straight pipe runs, a candidate the solver routes alongside its annealed attempts.
-The place<->route feedback loop that re-places on unrouted nets lives in ``solver.core``.
+The multi-start that routes and ranks the annealed attempts lives in ``solver.core``.
 """
 
 from __future__ import annotations

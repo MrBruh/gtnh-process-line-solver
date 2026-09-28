@@ -12,6 +12,7 @@ solved layout out::
     gtnh-solve plan.json --seed 3                 # pick the solver seed
     gtnh-solve plan.json --fast                   # skip optimization (instant, constructive)
     gtnh-solve plan.json --objective volume       # what "compact" means: footprint|volume|balanced
+    gtnh-solve plan.json --jobs 1                 # keep every attempt in one process
     gtnh-solve plan.json --me items --me fluids   # leave those to ME: no pipes laid for them
 
 It loads + adapts the export, solves (place -> auto-output -> item/fluid + power route ->
@@ -41,6 +42,7 @@ import argparse
 import contextlib
 import json
 import logging
+import os
 import sys
 import traceback
 import zipfile
@@ -103,6 +105,14 @@ _ME_COMMODITIES: Final = tuple(METoggles.model_fields)
 INTERNAL_ERROR_EXIT: Final = 3
 
 
+def _positive_int(text: str) -> int:
+    """An argparse type for a count that has to be at least 1 (``--jobs``)."""
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
+    return value
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="gtnh-solve",
@@ -119,6 +129,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--fast",
         action="store_true",
         help="skip placement optimization: a near-instant constructive layout (no SA/LNS)",
+    )
+    parser.add_argument(
+        "--jobs",
+        type=_positive_int,
+        default=os.cpu_count() or 1,
+        metavar="N",
+        help=(
+            "how many processes the optimizer's attempts may run in (default: one per CPU). "
+            "A line whose attempts are quick stays in one process whatever N is, and N never "
+            "changes the layout, only how long it takes"
+        ),
     )
     parser.add_argument(
         "--me",
@@ -713,7 +734,13 @@ def main(argv: list[str] | None = None) -> int:
     _note_me_toggles(problem.me_toggles)
 
     try:
-        layout = solve(problem, seed=args.seed, optimize=not args.fast, objective=args.objective)
+        layout = solve(
+            problem,
+            seed=args.seed,
+            optimize=not args.fast,
+            objective=args.objective,
+            jobs=args.jobs,
+        )
         _warn_unmeasured_power_intake(problem, layout)
         # Serialized inside the guard: a layout the contract cannot dump is a bug in this program,
         # not a verdict about the plan.

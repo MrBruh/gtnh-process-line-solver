@@ -144,9 +144,9 @@ def test_sand_with_items_on_me_solves_valid_with_no_item_routing(
     solved: list[tuple[InputIR, LayoutResult]] = []
 
     def real_solve(
-        problem: InputIR, *, seed: int, optimize: bool, objective: Objective
+        problem: InputIR, *, seed: int, optimize: bool, objective: Objective, jobs: int
     ) -> LayoutResult:
-        layout = solve(problem, seed=seed, optimize=optimize, objective=objective)
+        layout = solve(problem, seed=seed, optimize=optimize, objective=objective, jobs=jobs)
         solved.append((problem, layout))
         return layout
 

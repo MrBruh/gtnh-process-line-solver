@@ -2,7 +2,7 @@
 
 The cost function in ``search`` prices *crowding* cheaply, because it runs once per annealing
 step and cannot afford to be precise. This module asks the precise question, once per candidate
-layout, which is where the solver's feedback loop calls it: before routing, since a placement that
+layout, which is where each of the solver's attempts calls it: before routing, since a placement that
 cannot host its connections will not route and there is no point paying for the attempt to find
 out. The question is
 

@@ -27,14 +27,14 @@ doc as intent and reconcile.
    └─────────────────────┘         ▼
             ┌──────────────────────┴───────────────────┐
             ▼          routing-aware cost (cheap)        ▼
-     ┌────────────┐  ◄──── feedback (penalty) ───── ┌────────────┐
+     ┌────────────┐                                 ┌────────────┐
      │ Placement  │                                 │  Router    │
      │ SA/LNS,    │ ───────── placed cells ───────► │ negotiated │
      │ orientation│                                 │ docks+paths│
      └─────┬──────┘                                 │ + power    │
-           │            place↔route↔retry           └─────┬──────┘
+           │        each attempt: place → route     └─────┬──────┘
            └──────────────────┬─────────────────────────┘
-                              ▼  (multi-start grid: best VALID by quality; wall-clock timeout = Phase 2)
+                              ▼  (independent attempts, in a pool when slow: best VALID by quality)
                        ┌────────────┐
                        │  Validator │  independent logic, shared rule DATA
                        └─────┬──────┘
@@ -79,8 +79,8 @@ doc as intent and reconcile.
   + an **objective-weighted compactness** term (floor footprint and/or bounding-box volume, the
   weights set by the selected objective). There is deliberately **no** per-layer / flat-build
   bias: height is paid only through the volume term. Power nets carry no base wirelength term; a
-  failed *or starved* power net enters the cost as an MST trunk-length pull only once the
-  feedback penalizes it. *(Phase 2, lane C: SA + LNS are in; the cheaper incremental
+  caller can switch on an MST trunk-length pull for a power net by penalizing it, though the
+  solver no longer does (its attempts are independent, decision 1). *(Phase 2, lane C: SA + LNS are in; the cheaper incremental
   routing/congestion estimate the cost is meant to grow into is still ahead.)* One narrow
   constructor sits beside the annealer (`placement/banks.py`): a line that is one chain of
   **banks** of parallel single blocks (a plan node's `machineCount` copies) is laid as columns,
@@ -106,11 +106,12 @@ doc as intent and reconcile.
   (`dataset/pipe_capacity.py`, docs/DOMAIN.md; #165). *(Phase 2, lane D: the
   margin→channels-per-edge cap + cell→block realizability, and power optimization beyond
   size-or-reject.)*
-- **solver/** - orchestrates the place↔route feedback loop (built: a bounded **multi-start grid**
-  - SA weight modes x seeds - that fully routes + validates every attempt and keeps the best
-  VALID layout by a quality ranking, penalizing the nets a pass leaves unrouted - and the power
-  net of any machine validation proves starved of power, which is a placement defect, not a bug -
-  so the next placement pulls them tighter - `solver/core.py`). A bank-column layout, where the
+- **solver/** - orchestrates a multi-start of independent place↔route attempts (built: a
+  bounded **grid** - SA weight modes x seeds - that fully routes + validates every attempt and
+  keeps the best VALID layout by a quality ranking, a partial one ranked by the nets it left
+  unrouted, counting the power net of any machine validation proves starved of power, which is a
+  placement defect rather than a bug. No attempt depends on another, so a slow line runs them in
+  a pool of processes - `solver/core.py`). A bank-column layout, where the
   line has one, is routed first and ranked with the grid's attempts: a candidate, never a
   verdict. It also owns the **power-source
   repair pass** (`solver/repair.py`): the annealer has no gradient on a source (a 1x1x1 block
@@ -159,16 +160,19 @@ doc as intent and reconcile.
 1. **Placement↔routing - routing-aware + feedback loop.** Placement scores with a cheap
    incremental routing estimate; a full route runs on the feedback pass; unroutable nets feed
    a penalty back to perturb placement. The estimate must be ~O(1) per SA move.
-   *Built: the feedback loop - `solve()` runs a bounded **multi-start grid** (SA weight modes x
-   seeds), fully routes + validates every attempt, and keeps the best VALID layout by a quality
-   ranking (the objective's compactness metric, then real route cells, pipes and cable alike,
-   then the other compactness metric); a pass's unrouted nets - plus the power net of any machine
-   the validator proves **starved**, whose shortfall is distance-driven and so is exactly what
-   re-placing fixes - are penalized so the next placement pulls them tighter (`solver/core.py`).
-   This replaced the
-   earlier first-valid-wins, coarse penalize-and-re-place behaviour: cheap placement-time proxies
-   cannot see dock faces or shared cable taps, so a layout's real quality is only knowable once it
-   is routed, hence ranking fully routed attempts rather than stopping at the first valid one.
+   *Built: `solve()` runs a bounded **multi-start grid** (SA weight modes x seeds), fully routes
+   + validates every attempt, and keeps the best VALID layout by a quality ranking (the
+   objective's compactness metric, then real route cells, pipes and cable alike, then the other
+   compactness metric). This replaced the earlier first-valid-wins behaviour: cheap placement-time
+   proxies cannot see dock faces or shared cable taps, so a layout's real quality is only knowable
+   once it is routed, hence ranking fully routed attempts rather than stopping at the first valid
+   one. **The feedback half of this decision was dropped on 2026-09-26.** A pass's unrouted nets
+   (and the power net of a machine the validator proved starved) used to be penalized so the next
+   attempt's placement pulled them tighter, and the loop stopped early when the same nets kept
+   failing. Measured on seeds spaced so that no two solves shared an attempt, that feedback was
+   no better than none (of 53 solves on five lines, 45 returned the same layout without it, 6 a
+   better one and 2 a worse one), and it chained every attempt to the ones before it. The attempts are now
+   independent, which is what lets them run in parallel (decision 6).
    Phase 2: the O(1) incremental routing estimate - today the SA cost is per-net HPWL + an
    objective-weighted compactness term + an auto-output reward (no per-move routing/congestion
    term, and deliberately no per-layer bias - height is paid only through the volume term).*
@@ -191,7 +195,11 @@ doc as intent and reconcile.
    stops as soon as no unexplored dock cell can serve its endpoints more cheaply.
    *(Phase 2: the wall-clock/timeout budget. `solve()` already returns the best VALID layout by
    its quality ranking, but over a **deterministic bounded** multi-start grid keyed off the seed,
-   not a wall-clock timeout - see `solver/core.py`. The other half of this target is per-iteration
+   not a wall-clock timeout - see `solver/core.py`. Its attempts run in a pool of processes
+   (`solve(jobs=...)`, `gtnh-solve --jobs`, one per CPU by default) once the first one shows the
+   line is slow enough to pay for starting them: on 4 cores, nitrobenzene solves in 6.5 s instead
+   of 13.0 s and ev-nitrobenzene in 31.7 s instead of 56.5 s, and the layout is the same whatever
+   the number of processes. The other half of this target is per-iteration
    cost, which tracks machine **volume**, not machine count: box-arithmetic geometry (see Spatial
    model, issue #110) brought a 23-machine solve from 86.5 s to 22.3 s.)*
 7. **Routing topology - free-form + realizability invariant.** Free-form capacitated routing
@@ -233,9 +241,9 @@ doc as intent and reconcile.
     that are all thick enough and still not take in its `eut`; nothing else catches that, and a
     machine that cannot take in its draw does not run the recipe the plan balanced, so the
     validator flags it (`POWER_SUPPLY_INSUFFICIENT`). That verdict is the one the solver acts on
-    rather than merely reports: the shortfall is set by how far the cable ran, so the loop
-    penalizes the machine's power net and re-places it nearer its source before giving up
-    (decision 1). The reverse, a cable offering a hatch more amps than it accepts, is deliberately
+    rather than merely reports: the shortfall is set by how far the cable ran, so the solver
+    ranks such a layout as one that left the machine's power net unrouted, and an attempt that
+    places the machine nearer its source wins (decision 1). The reverse, a cable offering a hatch more amps than it accepts, is deliberately
     **not** an error: the hatch just takes its 2 A and nothing burns (only a cable over its *own*
     rating does, which the thickness check already covers), so flagging it would reject layouts
     that work in game. *Temporary:* a machine that would need more than three hatches is supplied
@@ -300,8 +308,8 @@ against the cell walk they replace.
 
 "Compact" is ambiguous - stacking a layer shrinks the floor but can grow the enclosing box - so
 what the optimizer targets is **user-selectable** (`gtnh-solve --objective`, `solve(...,
-objective=...)`). The choice sets both the placement cost's compactness weights and the feedback
-loop's quality ranking of routed layouts (`placement/search.py`, `solver/core.py`):
+objective=...)`). The choice sets both the placement cost's compactness weights and the
+solver's quality ranking of routed layouts (`placement/search.py`, `solver/core.py`):
 
 - **`footprint` (v1 default)** - minimize the floor area (x-span by z-span) and stack tall; the
   maintainer's target.

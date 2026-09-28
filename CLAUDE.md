@@ -24,7 +24,7 @@ disagree, the doc is the intent - fix one of them and say which.
 | `src/gtnh_solver/dataset/` | Physical-rules data + loader (footprints, faces, tiers, ME) |
 | `src/gtnh_solver/placement/` | SA/LNS placement with routing-aware cost |
 | `src/gtnh_solver/router/` | Free-form per-commodity A* routing + shared-amperage power |
-| `src/gtnh_solver/solver/` | place↔route feedback loop, anytime budget |
+| `src/gtnh_solver/solver/` | multi-start of independent place↔route attempts (parallel when slow), anytime budget |
 | `src/gtnh_solver/validator/` | Independent geometric + rule checks (the safety net) |
 | `src/gtnh_solver/previewer/` | three.js previewer (a self-contained, double-clickable `.html`) |
 | `src/gtnh_solver/schematic/` | Schematica `.schematic` export **and** reading one back (`read_schematic`) |

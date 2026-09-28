@@ -17,13 +17,14 @@ dock faces or shared cable taps, and measurably steer AWAY from low-cable layout
 sitting on top of a machine row scores nearer its sinks than one whose dock cell the sinks can
 tap, yet needs more cable). Re-measured under #123 at weights down to 0.1, the shipped sand line's
 cable still went UP at every one (3 -> 4..6 cells), so this stands. The real per-segment cable cost
-is judged where it is knowable, on a routed layout: the solver's feedback loop routes each
-candidate placement and keeps the best by (footprint, cable cells, volume), and its
+is judged where it is knowable, on a routed layout: the solver routes each candidate placement
+and keeps the best by (footprint, cable cells, volume), and its
 ``solver.repair`` pass relocates each power source by really routing every candidate cell around
 the sinks it feeds - which is how a source gets positioned without a proxy having to guess.
-What remains here is the rescue path - a power net the router could NOT lay gets a feedback
-penalty, which switches on a minimum-spanning-tree pull over the net's members (a shared-amperage
-trunk is a tree) until it routes.
+What remains here is a rescue path for a caller that re-places: a power net given a penalty
+(``net_penalties``) switches on a minimum-spanning-tree pull over the net's members (a
+shared-amperage trunk is a tree). The solver itself no longer passes penalties: its attempts are
+independent (``solver.core``).
 
 The neighbourhood mixes small moves (relocate / swap / reorient; orientation is a search variable)
 with a **large neighbourhood search (LNS) ruin-and-recreate** move: rip out a *related* cluster of
@@ -57,8 +58,8 @@ recreate falls back to a machine's freed origin), so the validator still indepen
 the output. A **power source** keeps its front face - the reserved external-feed face - flush on
 the region boundary through every move (relocate/swap re-orient it back onto a wall when they
 can, reorient only offers wall-facing options), the same hard constraint the constructive seed
-satisfies and the validator enforces. Deterministic for a given ``seed``. A true place<->route
-feedback loop lives in ``solver.core`` (docs/ROADMAP.md lane C + solver).
+satisfies and the validator enforces. Deterministic for a given ``seed``. The multi-start that
+routes and ranks these placements lives in ``solver.core`` (docs/ROADMAP.md lane C + solver).
 """
 
 from __future__ import annotations
@@ -303,15 +304,16 @@ def optimize_placement(
     """Anneal the constructive placement toward a lower routing-aware cost (seeded, validated).
 
         ``net_penalties`` (net id -> extra weight) boosts a net's wirelength term so its machines pull
-        tighter - the place<->route feedback signal: the solver penalizes the nets the router could
-        not lay, so the next placement clusters them (shorter routes, or adjacency that auto-outputs).
+        tighter, so a caller that re-places after a failed routing can cluster the nets the router
+        could not lay (shorter routes, or adjacency that auto-outputs). The solver used to; its
+        attempts are now independent and pass no penalties (``solver.core``).
         ``objective`` selects what "compact" means (:data:`Objective`): minimum floor area
         (``footprint``, the default - stack tall), minimum enclosing box (``volume`` - stay flat), or
         ``balanced`` (both weighted).
 
-    ``face_penalties`` (machine id -> extra weight) is the same signal for crowding: the machines
-        the solver's crowding gate found nowhere to put a connection, weighted so the next attempt
-        gives *them* room.
+    ``face_penalties`` (machine id -> extra weight) is the same signal for crowding: machines the
+        crowding gate found nowhere to put a connection, weighted so the next placement gives
+        *them* room.
 
         Per machine, and emphatically not a global dial. An earlier version scaled the whole face term
         up on every rejection, which quietly broke the multi-start: the attempts are independent seeds

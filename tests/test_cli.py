@@ -177,6 +177,33 @@ def test_cli_rejects_an_unknown_objective(
     assert not solve_calls  # rejected at parse time, before any solving work
 
 
+def test_cli_jobs_reaches_the_solver(
+    capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    # --jobs only changes how long a solve takes, never its layout, so nothing downstream would
+    # notice it being dropped: pin the value the CLI hands the solver.
+    assert main([_SAND, "--jobs", "3"]) == 0
+    _published(capsys.readouterr().out)
+    assert solve_calls[-1]["jobs"] == 3
+
+
+def test_cli_jobs_defaults_to_one_per_cpu(
+    capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    assert main([_SAND]) == 0
+    _published(capsys.readouterr().out)
+    assert solve_calls[-1]["jobs"] == (os.cpu_count() or 1)
+
+
+def test_cli_rejects_fewer_than_one_job(
+    capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    with pytest.raises(SystemExit):
+        main([_SAND, "--jobs", "0"])
+    assert "--jobs" in capsys.readouterr().err
+    assert not solve_calls  # rejected at parse time, before any solving work
+
+
 def test_cli_preview_writes_self_contained_html(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
 ) -> None:
