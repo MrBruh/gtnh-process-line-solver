@@ -71,7 +71,7 @@ from dataclasses import dataclass
 
 from gtnh_solver.ir import Facing, InputIR, Placement
 from gtnh_solver.ir.geometry import Cell
-from gtnh_solver.ir.nets import placement_index
+from gtnh_solver.ir.nets import connection_counts, placement_index
 from gtnh_solver.router._grid import dock_candidates, obstacle_cells
 from gtnh_solver.router.auto import assign_auto_outputs
 
@@ -168,12 +168,7 @@ def single_block_shortfalls(problem: InputIR) -> dict[str, int]:
     solver's model, not of the game: GT lets some outputs share a face, which the solver does not
     model.
     """
-    connections: dict[str, int] = {}
-    for net in problem.nets:
-        if problem.me_toggles.toggled(net.commodity):
-            continue
-        for endpoint in net.endpoints:
-            connections[endpoint.machine_id] = connections.get(endpoint.machine_id, 0) + 1
+    connections = connection_counts(problem.nets, problem.me_toggles)
     return {
         machine.id: connections[machine.id]
         for machine in problem.machines

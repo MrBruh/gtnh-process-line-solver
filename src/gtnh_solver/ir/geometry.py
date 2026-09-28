@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from pydantic import Field
 
 from ._base import FrozenModel
-from .enums import Facing
+from .enums import Facing, RelativeFace
 
 if TYPE_CHECKING:
     from .output import Placement  # output imports this module, so only the annotation may
@@ -267,6 +267,48 @@ OPPOSITE_FACE: dict[Facing, Facing] = {
     Facing.UP: Facing.DOWN,
     Facing.DOWN: Facing.UP,
 }
+
+
+#: The horizontal facings in clockwise order viewed from +Y, the order :data:`CW_STEPS` counts in.
+_CLOCKWISE: tuple[Facing, ...] = (Facing.NORTH, Facing.EAST, Facing.SOUTH, Facing.WEST)
+
+
+def absolute_face(orientation: Facing, relative: RelativeFace) -> Facing:
+    """The world face a machine facing ``orientation`` shows as ``relative``.
+
+    ``front`` is ``orientation`` itself and ``back`` its opposite. A machine's own right is one
+    quarter turn clockwise from its front (viewed from above) and its left one turn back, so a
+    machine facing NORTH has its right on EAST and its left on WEST. ``up`` and ``down`` do not
+    turn. ``orientation`` must be horizontal, as every machine front is (``Machine``'s own check).
+    """
+    if orientation not in CW_STEPS:
+        raise ValueError(f"a machine front faces a horizontal direction, not {orientation.value}")
+    if relative is RelativeFace.UP:
+        return Facing.UP
+    if relative is RelativeFace.DOWN:
+        return Facing.DOWN
+    turns = {
+        RelativeFace.FRONT: 0,
+        RelativeFace.RIGHT: 1,
+        RelativeFace.BACK: 2,
+        RelativeFace.LEFT: 3,
+    }[relative]
+    return _CLOCKWISE[(CW_STEPS[orientation] + turns) % 4]
+
+
+@cache
+def allowed_faces(pins: tuple[RelativeFace, ...] | None, orientation: Facing) -> frozenset[Facing]:
+    """The world faces a port may dock on, from its pins (``Port.faces``) and the machine's facing.
+
+    ``pins`` of None is the rule every unpinned port has always had: any face but the front, which
+    carries no I/O. Pins are mapped through :func:`absolute_face` and may name the front, which a
+    block like the Item Filter really does accept on. ``Machine.allowed_faces`` is the reading a
+    caller holding a machine uses; this plain form, memoized on hashable values, is what a hot loop
+    tabulates once per problem so the search never reads a pydantic model (#258).
+    """
+    if pins is None:
+        return frozenset(face for face in Facing if face is not orientation)
+    return frozenset(absolute_face(orientation, pin) for pin in pins)
 
 
 def front_on_boundary(

@@ -601,6 +601,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **InputIR v4 (breaking): a port may be pinned to some of its machine's faces, and an item net may
+  carry several items (#249).** `Port.faces` names the only faces a port may dock on, from the
+  machine's own point of view (front, back, left, right, up, down), so it turns with the machine;
+  unset, it is the old rule, any face but the front. `Machine.allowed_faces(port_id, orientation)`
+  is now the one reading of that rule. `Net.items` lists what a merged item run carries (an item net
+  names `fluid_or_item` or `items`, never both), and `Machine.filter_items` what an Item Filter lets
+  through. These are what the adapter needs to send a single block's item outputs out of one face
+  and sort them with Item Filters. A v3 payload is refused on parse; re-adapt the plan.
 - **A solve's attempts are independent, and a slow line runs them in parallel (`solver/core.py`,
   `gtnh-solve --jobs`).** A solve anneals 8 placements and keeps the best one once routed. Each
   attempt used to anneal under penalties the ones before it had built up (a net one attempt left

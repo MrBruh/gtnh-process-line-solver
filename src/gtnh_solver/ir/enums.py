@@ -71,6 +71,24 @@ class Facing(str, Enum):
     DOWN = "down"
 
 
+class RelativeFace(str, Enum):
+    """A block face named from the machine's own point of view, so it turns with the machine.
+
+    ``front`` is the face its ``orientation`` points at and ``back`` the one opposite. ``left`` and
+    ``right`` are the machine's own, as if it looked out of its front: a machine facing NORTH has
+    its left on the WEST face and its right on the EAST. ``up`` and ``down`` never turn, since a
+    machine only ever faces a horizontal direction. :func:`ir.geometry.absolute_face` maps one to a
+    :class:`Facing`; a ``Port`` pinned to some of these (``Port.faces``) may dock only there.
+    """
+
+    FRONT = "front"
+    BACK = "back"
+    LEFT = "left"
+    RIGHT = "right"
+    UP = "up"
+    DOWN = "down"
+
+
 class LayoutStatus(str, Enum):
     """Terminal status of a solve."""
 

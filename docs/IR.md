@@ -5,7 +5,7 @@ up front (minimal, not exhaustive) and grown with explicit version bumps. Implem
 typed schemas in `src/gtnh_solver/ir/` (Pydantic v2).
 
 > Status: **implemented** (Pydantic v2, `src/gtnh_solver/ir/`). The shapes below match the
-> code: `InputIR` is at **v3**, `LayoutResult` at **v2** (the contract changelog lives at the
+> code: `InputIR` is at **v4**, `LayoutResult` at **v3** (the contract changelog lives at the
 > bottom of `ir/__init__.py`). Bump the relevant `*_VERSION` on any breaking change.
 
 ## Input IR - the problem
@@ -48,7 +48,8 @@ Machine
                                     #  `voltage_tier` first. Null for storages, power sources
                                     #  and plans that do not state it. InputIR v3 (additive, #232).
   footprint: CellBox                # 1 cell (single-block, default) or NxMxK (multiblock bbox)
-  faces: FaceSpec                   # see DOMAIN.md: front (no I/O) + 5 usable
+  faces: FaceSpec                   # see DOMAIN.md: front (no I/O) + 5 usable, unless a port
+                                    #  is pinned (Port.faces)
   voltage_tier: str                 # LV/MV/HV/... - sets cable voltage rating
   orientation_options: [Facing]     # solver picks one (front-face direction); >= 1
                                     # one instance per Machine; `count` was dropped in v1 -
@@ -69,6 +70,13 @@ Machine
                                     #  controllers that record no slots). Added in InputIR v3
                                     #  (additive - an empty tuple reads exactly as the old
                                     #  behaviour did, so no bump).
+  filter_items: [str]               # the items an Item Filter lets through (its nine slots in
+                                    #  game); empty for every other machine. InputIR v4 (#249).
+
+  Machine.allowed_faces(port_id, orientation) -> set[Facing] is the ONE reading of the face
+  rule, shared by the router, placement, the crowding gate and the validator: an unpinned port
+  may dock on any face but the front, a pinned port on exactly its Port.faces turned with the
+  machine (ir.geometry.absolute_face).
 
 HatchSlot { offset: CellCoord, kinds: [str] }
   offset  from the machine's UNROTATED minimum corner (the corner Placement.cell names), so a
@@ -118,11 +126,23 @@ Port
                                     #  unmeasurable, and the validator reports that rather than
                                     #  certifying it (ValidationReport.unverified_power_intake).
                                     #  Added in InputIR v3 (additive)
+  faces: [RelativeFace] | null      # the only faces this port may dock on, from the machine's
+                                    #  point of view: front | back | left | right | up | down
+                                    #  (left/right are the machine's own, looking out of its
+                                    #  front: facing north, left is west). null = any face but
+                                    #  the front (every port before v4). An Item Filter's output
+                                    #  is (back,), its input (front, left, right, up, down).
+                                    #  Non-empty, no repeats. InputIR v4 (BREAKING, #249)
 
 Net
   id: str
   commodity: "item" | "fluid" | "power"
-  fluid_or_item: str | null         # which fluid/item (null for power; required otherwise)
+  fluid_or_item: str | null         # which fluid/item (null for power and for a merged run)
+  items: [str]                      # the items a MERGED run carries: one pipe from a single
+                                    #  block's one output face to the Item Filters that sort
+                                    #  them. An item net names fluid_or_item OR items, exactly
+                                    #  one; fluid and power nets never name items. Net.resources
+                                    #  reads either. InputIR v4 (BREAKING, #249)
   throughput: float                 # TYPED rate: mB/t (fluid), items/t (item), EU/t (power); >= 0
   endpoints: [MachineFaceRef]       # machine ports this net connects; >= 1
 
@@ -155,6 +175,16 @@ a rate or none do (a partly rated machine would leave part of its draw unsized),
 ones must sum to `eut`. What it does **not** decide is how many hatches a machine gets (the
 adapter, from the draw and the tier) or whether its structure can host them (the validator,
 against `hatch_cells`).
+
+**A single block's item outputs may share one face (InputIR v4).** A single block has five faces
+that can carry a connection, one per connection. A machine with several item outputs that runs out
+of faces (an Ore Washer: item in, fluid in, three item outputs, power) is built in GT with one output
+face, one pipe, and an Item Filter per item sorting them. The adapter synthesizes exactly that as
+ordinary IR: the machine gets one `output:items` port on a trunk net whose `items` lists what it
+carries, and each item gets a `Machine` of type "Ultra Low Voltage Item Filter" whose `filter_items`
+names it, whose input port takes the trunk on any face but its back and whose output port is pinned
+to its back, where it sources that item's downstream net. Nothing downstream needs a filter concept:
+the pins (`Port.faces`) say where each port docks, and the validator checks the sorting.
 
 ## Output layout schema - the solution
 

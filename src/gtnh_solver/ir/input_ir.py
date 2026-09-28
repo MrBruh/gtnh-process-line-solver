@@ -21,20 +21,21 @@ import math
 from pydantic import Field, field_validator, model_validator
 
 from ._base import FrozenModel, StrictModel, check_contract_version
-from .enums import HORIZONTAL_FACINGS, Commodity, Facing, IODirection
-from .geometry import CellBox, CellCoord
+from .enums import HORIZONTAL_FACINGS, Commodity, Facing, IODirection, RelativeFace
+from .geometry import CellBox, CellCoord, allowed_faces
 
 #: Bump on any breaking change to the input contract; record it in ``ir/__init__.py``.
-INPUT_IR_VERSION = 3
+INPUT_IR_VERSION = 4
 
 
 class Port(StrictModel):
-    """One required I/O point the solver must expose on a usable (non-front) machine face.
+    """One required I/O point the solver must expose on a usable machine face.
 
     The *physical* face is chosen by the solver (placement + orientation); this only states
-    the requirement. Whether a port is satisfied by auto-output is a **solver decision**, not a
-    problem input - it is recorded in the output's ``AutoConnection`` (and the validator enforces
-    one auto-output per machine there), so it is deliberately not a field here.
+    the requirement, and which faces are usable (:attr:`faces`, read through
+    :meth:`Machine.allowed_faces`). Whether a port is satisfied by auto-output is a **solver
+    decision**, not a problem input - it is recorded in the output's ``AutoConnection`` (and the
+    validator enforces one auto-output per machine there), so it is deliberately not a field here.
     """
 
     id: str = Field(min_length=1)
@@ -64,13 +65,34 @@ class Port(StrictModel):
     #: treats the machine's intake as unmeasurable and reports it
     #: (``ValidationReport.unverified_power_intake``).
     max_amps: float | None = Field(default=None, gt=0.0)
+    #: The only faces this port may dock on, named from the machine's point of view so they turn
+    #: with it (InputIR v4). ``None``, the default, is the rule every machine has always had: any
+    #: face but the front, which carries no I/O. A pin states a block whose faces do fixed jobs: an
+    #: Item Filter takes items on every face but its back (its front included) and pushes them out
+    #: of its back and nowhere else (``MTEBuffer``), so its output port is pinned to ``(back,)``.
+    #: Read it through :meth:`Machine.allowed_faces`, never directly, so there is one reading of it.
+    faces: tuple[RelativeFace, ...] | None = None
+
+    @field_validator("faces")
+    @classmethod
+    def _check_faces(
+        cls, value: tuple[RelativeFace, ...] | None
+    ) -> tuple[RelativeFace, ...] | None:
+        if value is None:
+            return value
+        if not value:
+            raise ValueError("a pinned port names at least one face (None means unpinned)")
+        if len(value) != len(set(value)):
+            raise ValueError("a port's faces must not repeat")
+        return value
 
 
 class FaceSpec(StrictModel):
-    """The catalog of I/O ports a machine needs across its five usable faces.
+    """The catalog of I/O ports a machine needs across its usable faces.
 
-    Not a fixed face->port map: face assignment is a solver decision. The front face
-    (set by orientation) carries no I/O and is never listed here.
+    Not a fixed face->port map: face assignment is a solver decision, within whatever faces a port
+    is pinned to (``Port.faces``). An unpinned port never takes the front face (set by
+    orientation), which carries no I/O.
     """
 
     ports: list[Port] = Field(default_factory=list)
@@ -180,6 +202,35 @@ class Machine(StrictModel):
     #: ``len(hatch_slots)`` agrees with :attr:`hatch_cells` whenever both are present; the count
     #: exists separately because it survived a dump that recorded no offsets.
     hatch_slots: tuple[HatchSlot, ...] = ()
+    #: The items this block lets through, when it is an Item Filter the adapter placed to sort a
+    #: single block's merged item outputs (InputIR v4). Empty for every other machine. It is what
+    #: the filter's nine slots are set to in game (``MTEFilter.allowPutStack`` refuses anything
+    #: else), so the validator checks the filter's output against it and a builder reads it to
+    #: configure the block.
+    filter_items: tuple[str, ...] = ()
+
+    @field_validator("filter_items")
+    @classmethod
+    def _check_filter_items(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if any(not item for item in value):
+            raise ValueError("a filter item must name something")
+        if len(value) != len(set(value)):
+            raise ValueError("a filter's items must not repeat")
+        return value
+
+    def allowed_faces(self, port_id: str, orientation: Facing) -> frozenset[Facing]:
+        """The world faces ``port_id`` may dock on while this machine faces ``orientation``.
+
+        The ONE reading of the face rule, which the router, the placement search, the crowding gate
+        and the validator all take from here: an unpinned port may use any face but the front
+        (which carries no I/O), and a pinned one exactly the faces ``Port.faces`` names, turned with
+        the machine (``ir.geometry.allowed_faces``). An unknown ``port_id`` gets the unpinned rule,
+        the permissive reading the rest of this model gives a port it does not know.
+        """
+        for port in self.faces.ports:
+            if port.id == port_id:
+                return allowed_faces(port.faces, orientation)
+        return allowed_faces(None, orientation)
 
     @property
     def is_power_source(self) -> bool:
@@ -298,15 +349,40 @@ class Net(StrictModel):
 
     id: str = Field(min_length=1)
     commodity: Commodity
-    fluid_or_item: str | None = None  # which fluid/item; None for power
+    fluid_or_item: str | None = None  # which fluid/item; None for power and for a merged run
+    #: The items a **merged run** carries (InputIR v4): one pipe taking every item a single
+    #: block ejects through one face to the Item Filters that sort them. An item net names what it
+    #: carries in exactly one of the two fields, ``fluid_or_item`` for one item and this for a merged
+    #: run, and never both; a fluid or power net never names ``items`` (GT has no fluid filter
+    #: block). Read what any net carries through :attr:`resources`.
+    items: tuple[str, ...] = ()
     throughput: float = Field(ge=0.0)
     endpoints: list[MachineFaceRef] = Field(min_length=1)
+
+    @property
+    def resources(self) -> tuple[str, ...]:
+        """Every fluid or item this net carries: its ``items``, else its one ``fluid_or_item``,
+        else nothing (a power net)."""
+        if self.items:
+            return self.items
+        return (self.fluid_or_item,) if self.fluid_or_item else ()
 
     @model_validator(mode="after")
     def _check(self) -> Net:
         if self.commodity is Commodity.POWER:
+            if self.fluid_or_item is not None or self.items:
+                raise ValueError("power nets must not name a fluid_or_item or items")
+        elif self.items:
+            if self.commodity is not Commodity.ITEM:
+                raise ValueError(
+                    f"only an item net may carry items; this is {self.commodity.value}"
+                )
             if self.fluid_or_item is not None:
-                raise ValueError("power nets must not name a fluid_or_item")
+                raise ValueError("an item net names fluid_or_item or items, not both")
+            if any(not item for item in self.items):
+                raise ValueError("a merged run's items must each name something")
+            if len(self.items) != len(set(self.items)):
+                raise ValueError("a merged run's items must not repeat")
         elif not self.fluid_or_item:
             raise ValueError(f"{self.commodity.value} net must name a fluid_or_item")
         return self
