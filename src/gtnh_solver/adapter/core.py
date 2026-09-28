@@ -68,6 +68,36 @@ a line that shares only storages lays out exactly as before. A single-block mach
 is left unmerged too: it has no hatch to disagree about, and whether it should merge is a separate
 question this does not settle.
 
+**A single block short of faces sends its items out of one face, sorted by Item Filters** (#249,
+:func:`_merge_item_outputs`). A single block has five faces that can carry a connection, one each,
+so an Ore Washer with an item in, a fluid in, three item outputs and power cannot be built as the
+plan draws it. In GT its items leave through one output face into one pipe, and an Item Filter per
+item (a block that takes items on every face but its back and pushes the ones in its slots out of
+its back) sorts them onto their own nets. The adapter builds exactly that, as ordinary IR, after
+the power synthesis and before the region is sized::
+
+    Washer  # 1 out:a --A--> Sink A         Washer#1 out:items --trunk#1 (a,b,c)--> F1a, F1b, F1c
+    Washer  # 1 out:b --B--> Sink B   ==>   F1a out (back) --A--> Sink A
+    Washer  # 1 out:c --C--> Sink C         F1b out (back) --B--> Sink B   (F1c likewise)
+
+It merges only what needs it and only what is safe to merge:
+
+- the machine is short of faces by the count ``placement.single_block_shortfalls`` reports from
+  (``ir.nets.connection_counts``), and has two or more item outputs; all of them merge, since a
+  basic machine with item auto-output ejects every item slot through its output face;
+- it is **proven** a single block: its handler says ``kind: "single"``, or a census dump for the
+  plan's own pack misses it. A 1x1x1 node is more often a multiblock whose structure is missing,
+  and filters on one would be nonsense, so a structure record, a ``multiblock`` handler or no
+  evidence at all leaves it unmerged and the solver reports it short of faces;
+- each machine of a parallel node gets its own trunk and filters. One trunk shared by three washers
+  would carry nine streams through one pipe, and on 2.9 (where a basic machine's output face also
+  accepts recipe inputs) the siblings would take each other's outputs.
+
+Nets that end up sourced by the same filter fold into one (the #213 treatment): the filter's back
+feeds one pipe. **One census gap reads wrong here.** A controller whose extraction failed is absent
+from a census that otherwise lists every multiblock (2.8.4 ``gt.blockmachines@14003``; 2.9 ``14003``
+and ``15755``), so a handler-less node naming one reads as a single block and would be merged.
+
 Still crude-on-purpose for Phase 1 (docs/ROADMAP.md): all four horizontal orientations for every
 machine, non-square bases included (``occupied_cells`` rotates the reserved box); and hint-derived
 face constraints stay on the dataset record. The InputIR's own referential-integrity check is the
@@ -95,8 +125,11 @@ from gtnh_solver.ir import (
     METoggles,
     Net,
     Port,
+    RelativeFace,
 )
 from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
+from gtnh_solver.ir.nets import connection_counts
+from gtnh_solver.placement import SINGLE_BLOCK_IO_FACES
 
 from ._errors import AdapterError, AdapterWarning
 from .plan import (
@@ -130,6 +163,25 @@ _PARALLEL_CONTROL = "machineParallel"
 #: count keyed "slice-1" upward (both forks).
 _SLICES_CONTROL = "cokeOvenSlices"
 _SLICE_KEY = re.compile(r"slice-([1-9][0-9]*)")
+#: The Item Filter the adapter places to sort a merged run (:func:`_merge_item_outputs`), by its
+#: exact GT name and block. The ULV tier: the cheapest, and a filter needs no power (``MTEBuffer``
+#: ticks with no energy gate). The exact name matters, since "Item Filter" alone would resolve to
+#: the LV one (``@9241``) wherever a consumer joins on the name.
+_FILTER_TYPE = "Ultra Low Voltage Item Filter"
+_FILTER_BLOCK_KEY = "gregtech:gt.blockmachines@9240"
+_FILTER_TIER = "ULV"
+#: An Item Filter takes items on every face but its back, its front included, and pushes them out
+#: of its back and nowhere else (``MTEBuffer.allowPutStack`` / ``moveItems``).
+_FILTER_INPUT_FACES = (
+    RelativeFace.FRONT,
+    RelativeFace.LEFT,
+    RelativeFace.RIGHT,
+    RelativeFace.UP,
+    RelativeFace.DOWN,
+)
+_FILTER_OUTPUT_FACES = (RelativeFace.BACK,)
+#: The resource part of the one output port a merged machine keeps (``output:items``).
+_MERGED_ITEMS = "items"
 
 
 def load_plan(path: str | Path) -> Plan:
@@ -313,6 +365,15 @@ def to_input_ir(
     identifies_single_blocks = physical is not None and physical.identifies_single_blocks
     # Machines whose I/O rides hatches, so a port of theirs is one hatch and one net (#213).
     multiblock_ids: set[str] = set()
+    # Machines PROVEN single blocks, the only ones whose item outputs may merge through Item
+    # Filters (#249). A census miss is proof only against the plan's own pack: names move between
+    # packs, so another pack's census missing a machine says nothing about this one.
+    proven_single_ids: set[str] = set()
+    census_for_plan = (
+        physical is not None
+        and physical.meta.census
+        and physical.meta.pack_version == plan_pack_version(plan)
+    )
     for node in plan.nodes:
         recipe = recipes.get(node.recipe_id)
         if recipe is None:
@@ -342,6 +403,8 @@ def to_input_ir(
             _classify_census_miss(recipe, node, single_block_ids)
         if _is_multiblock(recipe, node, record):
             multiblock_ids.update(_instance_ids(node))
+        if _proven_single(recipe, node, record, census_for_plan=census_for_plan):
+            proven_single_ids.update(_instance_ids(node))
         # Every machine of a parallel node is the same build with the same ports and draw; they
         # differ only in id and, later, in where the placer puts them.
         machines.extend(
@@ -408,13 +471,12 @@ def to_input_ir(
         allow_retier=resolved_producer is not PlanProducer.ARODOID_V1,
     )
     _check_resolved_power(plan, nets)
+    toggles = me_toggles if me_toggles is not None else METoggles()
+    # After the power synthesis, so a machine's power connection counts toward its faces, and before
+    # the region is sized, so the filters it places are inside it.
+    machines, nets = _merge_item_outputs(machines, nets, frozenset(proven_single_ids), toggles)
     region = _bounding_region([m.footprint for m in machines])
-    return InputIR(
-        bounding_region=region,
-        machines=machines,
-        nets=nets,
-        me_toggles=me_toggles if me_toggles is not None else METoggles(),
-    )
+    return InputIR(bounding_region=region, machines=machines, nets=nets, me_toggles=toggles)
 
 
 def _synthesized_eut(recipe: Recipe, node: Node) -> float:
@@ -539,6 +601,33 @@ def _is_multiblock(recipe: Recipe, node: Node, record: MachinePhysical | None) -
         return True
     handler = _effective_handler(recipe, node)
     return handler is not None and handler.kind == "multiblock"
+
+
+def _proven_single(
+    recipe: Recipe, node: Node, record: MachinePhysical | None, *, census_for_plan: bool
+) -> bool:
+    """Whether this node's machines are PROVEN single blocks, so their item outputs may merge.
+
+    Stricter than "not known to be a multiblock" (:func:`_is_multiblock`), because the two errors
+    cost differently: Item Filters on a multiblock whose structure the dataset lacks would be a
+    build that makes no sense, while leaving an unproven machine unmerged only keeps the solver's
+    "short of faces" report. So:
+
+    - a structure record, or a ``multiblock`` handler, disproves it (the dump holds only
+      multiblock controllers);
+    - a ``single`` handler proves it;
+    - otherwise only a **census** miss proves it, and only a census of the plan's own pack
+      (``census_for_plan``), the same reading :func:`_classify_census_miss` gives a miss. No
+      handler and no such census is no evidence, and no evidence never merges.
+    """
+    if record is not None:
+        return False
+    handler = _effective_handler(recipe, node)
+    if handler is not None and handler.kind == "multiblock":
+        return False
+    if handler is not None and handler.kind == "single":
+        return True
+    return census_for_plan
 
 
 def _matched_variant(recipe: Recipe, node: Node) -> RuntimeVariant | None:
@@ -995,6 +1084,231 @@ def _add_output_buffers(
             )
         )
     return machines + buffers, nets + buffer_nets
+
+
+def _merge_item_outputs(
+    machines: list[Machine],
+    nets: list[Net],
+    proven_single: frozenset[str],
+    me_toggles: METoggles,
+) -> tuple[list[Machine], list[Net]]:
+    """Send each flagged single block's item outputs out of one face, sorted by Item Filters (#249).
+
+    See the module docstring for when a machine merges and why. For each machine ``M`` that does:
+
+    - ``M`` loses its item output ports and gains one, ``output:items``, rated at their sum;
+    - one Item Filter per item, ``item-filter:{M}:{item}``, taking the trunk on its input port (any
+      face but its back) and passing that one item out of its back (``Port.faces`` pins both);
+    - a trunk net ``item-trunk:{M}`` from ``output:items`` to every filter's input, naming its
+      items in ``Net.items``;
+    - every net that ``M`` sourced an item on is sourced by that item's filter instead, the
+      unconsumed-output buffers included, and nets left sourced by one filter fold into one
+      (:func:`_fold_nets`).
+
+    Each filter follows its machine in the returned list, and the trunks follow the other nets, so a
+    line that merges nothing comes back exactly as it went in.
+    """
+    counts = connection_counts(nets, me_toggles)
+    out_machines: list[Machine] = []
+    trunks: list[Net] = []
+    #: (M, output:item) -> (filter, output:item): where each merged output's nets are now sourced.
+    moved: dict[MachineFaceRef, MachineFaceRef] = {}
+    for machine in machines:
+        outputs = _mergeable_outputs(machine, counts, proven_single)
+        if not outputs:
+            out_machines.append(machine)
+            continue
+        merged_pid = _port_id(IODirection.OUTPUT, _MERGED_ITEMS)
+        total = sum(port.rate or 0.0 for port in outputs)
+        merged_ids = {port.id for port in outputs}
+        kept = [port for port in machine.faces.ports if port.id not in merged_ids]
+        out_machines.append(
+            machine.model_copy(
+                update={
+                    "faces": FaceSpec(
+                        ports=[
+                            *kept,
+                            Port(
+                                id=merged_pid,
+                                commodity=Commodity.ITEM,
+                                direction=IODirection.OUTPUT,
+                                rate=total,
+                            ),
+                        ]
+                    )
+                }
+            )
+        )
+        trunk_ends = [MachineFaceRef(machine_id=machine.id, port_id=merged_pid)]
+        for port in sorted(outputs, key=lambda p: _port_resource(p.id)):
+            item = _port_resource(port.id)
+            item_filter = _item_filter(machine.id, item, port.rate)
+            out_machines.append(item_filter)
+            trunk_ends.append(
+                MachineFaceRef(machine_id=item_filter.id, port_id=_port_id(IODirection.INPUT, item))
+            )
+            moved[MachineFaceRef(machine_id=machine.id, port_id=port.id)] = MachineFaceRef(
+                machine_id=item_filter.id, port_id=port.id
+            )
+        trunks.append(
+            Net(
+                id=f"item-trunk:{machine.id}",
+                commodity=Commodity.ITEM,
+                items=tuple(sorted(_port_resource(port.id) for port in outputs)),
+                throughput=total,
+                endpoints=trunk_ends,
+            )
+        )
+    if not moved:
+        return machines, nets
+    resourced = [
+        net.model_copy(update={"endpoints": [moved.get(ep, ep) for ep in net.endpoints]})
+        for net in nets
+    ]
+    return out_machines, [*_fold_nets(resourced, set(moved.values()), out_machines), *trunks]
+
+
+def _mergeable_outputs(
+    machine: Machine, counts: dict[str, int], proven_single: frozenset[str]
+) -> list[Port]:
+    """The item output ports :func:`_merge_item_outputs` merges on ``machine``, or none.
+
+    A machine merges when it is a single block short of faces by the very count
+    ``placement.single_block_shortfalls`` reports from, is proven a single block, and has two or
+    more item outputs (one needs no sorting). All of them merge: a basic machine with item
+    auto-output on ejects every item slot through its output face, so there is no merging some.
+    """
+    if machine.id not in proven_single or machine.footprint.volume != 1:
+        return []
+    if counts.get(machine.id, 0) <= SINGLE_BLOCK_IO_FACES:
+        return []
+    outputs = [
+        port
+        for port in machine.faces.ports
+        if port.commodity is Commodity.ITEM and port.direction is IODirection.OUTPUT
+    ]
+    if len(outputs) < 2:
+        return []
+    merged_pid = _port_id(IODirection.OUTPUT, _MERGED_ITEMS)
+    if any(port.id == merged_pid for port in outputs):
+        return outputs  # an item named "items": its old port goes, so the id is free again
+    if any(port.id == merged_pid for port in machine.faces.ports):
+        # Only a FLUID output literally named "items" could hold the id; no GT fluid is, but a
+        # silent clash would wire the trunk to the fluid, so the machine stays as it is.
+        warnings.warn(
+            f"machine {machine.id!r} already has a port {merged_pid!r} that is not an item "
+            f"output, so its item outputs cannot merge into one; it keeps one face per output",
+            AdapterWarning,
+            stacklevel=4,
+        )
+        return []
+    return outputs
+
+
+def _item_filter(machine_id: str, item: str, rate: float | None) -> Machine:
+    """The Item Filter passing ``item`` off ``machine_id``'s trunk (:func:`_merge_item_outputs`).
+
+    Unpowered (``eut`` 0), so the power synthesis, which has already run, owes it nothing. It turns
+    to any horizontal facing like every machine, which is also why a filter can only ever push
+    sideways: the IR has no vertical facings.
+    """
+    return Machine(
+        id=f"item-filter:{machine_id}:{item}",
+        type=_FILTER_TYPE,
+        block_key=_FILTER_BLOCK_KEY,
+        footprint=_DEFAULT_FOOTPRINT,
+        faces=FaceSpec(
+            ports=[
+                Port(
+                    id=_port_id(IODirection.INPUT, item),
+                    commodity=Commodity.ITEM,
+                    direction=IODirection.INPUT,
+                    rate=rate,
+                    faces=_FILTER_INPUT_FACES,
+                ),
+                Port(
+                    id=_port_id(IODirection.OUTPUT, item),
+                    commodity=Commodity.ITEM,
+                    direction=IODirection.OUTPUT,
+                    rate=rate,
+                    faces=_FILTER_OUTPUT_FACES,
+                ),
+            ]
+        ),
+        voltage_tier=_FILTER_TIER,
+        orientation_options=list(_DEFAULT_ORIENTATIONS),
+        filter_items=(item,),
+    )
+
+
+def _fold_nets(
+    nets: list[Net], filter_outputs: set[MachineFaceRef], machines: list[Machine]
+) -> list[Net]:
+    """Fold the nets that share a filter's output into one, the #213 treatment for a filter's back.
+
+    A plan draws an edge per consumer, so an output feeding two machines was two nets off one port.
+    That was fine on a single block's own output (a face each), but a filter pushes out of its back
+    alone, into one pipe, so the nets it now sources are one net. Grouped by transitive closure over
+    the ``filter_outputs`` endpoints they share:
+
+    - **id**: the member ids joined with ``+``, in net order;
+    - **endpoints**: every producer, then every consumer, each once and in net order;
+    - **throughput**: each distinct producer's port rate counted once, which for a fan-out off
+      three washers' filters is the three filters' rates, the same figure each member carried. It
+      falls back to the largest member's throughput if a producer's rate is unknown.
+
+    A net sharing nothing is returned unchanged, in place; a folded net takes its first member's.
+    """
+    parent = list(range(len(nets)))
+
+    def root(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]  # path halving
+            index = parent[index]
+        return index
+
+    first_net_at: dict[MachineFaceRef, int] = {}
+    for index, net in enumerate(nets):
+        for ref in net.endpoints:
+            if ref not in filter_outputs:
+                continue
+            here, there = root(index), root(first_net_at.setdefault(ref, index))
+            parent[max(here, there)] = min(here, there)
+    groups: dict[int, list[Net]] = {}
+    for index, net in enumerate(nets):
+        groups.setdefault(root(index), []).append(net)
+
+    ports = {(m.id, p.id): p for m in machines for p in m.faces.ports}
+    folded: list[Net] = []
+    for members in groups.values():
+        if len(members) == 1:
+            folded.append(members[0])
+            continue
+        producers: list[MachineFaceRef] = []
+        consumers: list[MachineFaceRef] = []
+        for member in members:
+            for ref in member.endpoints:
+                port = ports[(ref.machine_id, ref.port_id)]
+                side = producers if port.direction is IODirection.OUTPUT else consumers
+                if ref not in side:
+                    side.append(ref)
+        rates = [ports[(ref.machine_id, ref.port_id)].rate for ref in producers]
+        throughput = (
+            sum(rate for rate in rates if rate is not None)
+            if all(rate is not None for rate in rates)
+            else max(member.throughput for member in members)
+        )
+        first = members[0]
+        folded.append(
+            first.model_copy(
+                update={
+                    "id": "+".join(member.id for member in members),
+                    "throughput": throughput,
+                    "endpoints": [*producers, *consumers],
+                }
+            )
+        )
+    return folded
 
 
 def _edge_sides(
