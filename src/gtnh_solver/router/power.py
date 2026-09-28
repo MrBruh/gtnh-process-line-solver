@@ -506,6 +506,9 @@ def _malformed(net_id: str) -> Infeasibility:
 def _no_dock(net_id: str) -> Infeasibility:
     return Infeasibility(
         constraint="face_reachability",
-        detail=f"power net {net_id!r} could not dock a terminal (no free non-front face cell)",
+        detail=(
+            f"power net {net_id!r} could not dock a terminal "
+            f"(no free cell on a face its port may use)"
+        ),
         suggested_relaxation="free up adjacent cells, or leave routing gaps around machines",
     )
