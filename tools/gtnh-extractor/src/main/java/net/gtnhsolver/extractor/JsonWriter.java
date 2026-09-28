@@ -101,7 +101,8 @@ final class JsonWriter {
 
     /** Write the run summary to {@code <out>/multiblocks/_meta.json}. */
     void writeMeta(File multiblocksDir, String packVersion, Map<String, String> modVersions, String generatedAt,
-        String extractorSha, int controllerCount, List<DumpModel.Failure> failures) throws IOException {
+        String extractorSha, int controllerCount, List<DumpModel.Failure> failures,
+        List<DumpModel.UntranslatedName> untranslated) throws IOException {
         JsonObject root = new JsonObject();
         root.addProperty("schema", SCHEMA_VERSION);
         root.addProperty("pack_version", packVersion);
@@ -126,6 +127,18 @@ final class JsonWriter {
                 failureArray.add(fj);
             });
         root.add("failures", failureArray);
+
+        JsonArray untranslatedArray = new JsonArray();
+        untranslated.stream()
+            .sorted(Comparator.comparing((DumpModel.UntranslatedName u) -> u.registryName))
+            .forEach(u -> {
+                JsonObject uj = new JsonObject();
+                uj.addProperty("registry_name", u.registryName);
+                uj.addProperty("lang_key", u.langKey);
+                uj.addProperty("display_name", u.displayName);
+                untranslatedArray.add(uj);
+            });
+        root.add("untranslated_names", untranslatedArray);
 
         write(new File(multiblocksDir, "_meta.json"), root);
     }

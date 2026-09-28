@@ -38,8 +38,8 @@ an empty or partial run fails loudly instead of producing a silent dataset.
 
 ### StructureDumper: the structure loop
 Iterates `GregTechAPI.METATILEENTITIES`, keeps the ones that are `IConstructable`, and dumps each
-into a scratch region high in the void world (origin `8, 210, 8`, controller facing NORTH). Per
-controller:
+into a scratch region halfway up the world (origin `8, 128, 8`, controller facing NORTH; it was
+`8, 210, 8` until #175 showed tall machines losing their top to the world ceiling). Per controller:
 
 - **Two-pass build, per variant.**
   1. *Hint pass*: `construct(trigger, hintsOnly=true)` to read the hologram's hatch dots. The
@@ -47,10 +47,15 @@ controller:
      dumper reflectively (a) swaps a `RecordingProxy` into StructureLib's static `proxy` field to
      capture the hint particles and (b) flips `world.isRemote` true for the pass. Best-effort: it
      can abort early on client-only icon rendering, keeping whatever dots it captured so far.
-  2. *Block pass*: `construct(trigger, hintsOnly=false)` with the `gt_no_hatch` channel set, so no
-     real hatch tile entity is auto-placed and the scan sees the casing shell plus its hint slots.
+  2. *Block pass*: `construct(trigger, hintsOnly=false)`. GT's hatch element places nothing
+     (`HatchElementBuilder.placeBlock` is a `// TODO`), so the scan sees the casing shell plus its
+     hint slots; a real hatch in the scan fails the controller (#177). It used to set the
+     `gt_no_hatch` channel for this, which GT 2.9 removed.
 - **Scan** the affected cube into `{ [dx,dy,dz], block, meta }` relative to the controller; a
-  `fallbackBlocksFromHints` recovers the shell when the void-world build placed nothing.
+  `fallbackBlocksFromHints` recovers the shell when the void-world build placed nothing. A build
+  lying on a face of the cube is rebuilt on a wider one; a face that cannot widen (the world's
+  height, `MAX_SCAN_DIM`) or a hologram cell outside the cube marks the form **clipped** (#175),
+  fatal for a controller's first form and the end of its sweep for a later one.
 - **Trigger-stack sweep (size variants).** Build for stack sizes `1..N` and collapse by an
   *occupied-cell signature* that ignores block identity: a stack size that changes the *shape*
   yields a new variant; one that only swaps a tiered block collapses. The sweep stops when the

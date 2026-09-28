@@ -33,6 +33,8 @@ import gregtech.api.GregTechAPI;
 import gregtech.api.interfaces.IHeatingCoil;
 import gregtech.api.interfaces.metatileentity.IMetaTileEntity;
 import gregtech.api.metatileentity.BaseMetaTileEntity;
+import gregtech.api.metatileentity.implementations.MTEHatch;
+import gregtech.api.util.GTLanguageManager;
 import gregtech.common.misc.GTStructureChannels;
 
 /**
@@ -57,9 +59,14 @@ import gregtech.common.misc.GTStructureChannels;
  *        |
  *        v
  *   BLOCK pass : construct(trigger, hintsOnly=false) -> real casing shell into the world
- *        |       (hatch slots fall back to their chained casing; gt_no_hatch keeps real hatches out)
+ *        |       (hatch slots fall back to their chained casing: GT's hatch element places nothing)
  *        v
  *   scan the affected cube -> {d:[dx,dy,dz], block, meta} relative to the controller, plus bbox
+ *        |       build lies on a cube face? widen that face, wipe, rebuild, rescan. A face that
+ *        |       cannot widen (world height, MAX_SCAN_DIM), or a hologram cell outside the cube,
+ *        |       means the form is clipped: fatal for the first form, the end of the sweep later
+ *        v
+ *   hatch slots: ask each visited element which hatch kinds it takes (HatchProbe)
  *        |
  *        v
  *   sweep trigger stack 1..N, stop when the occupied cell set stops changing -> one Variant per
@@ -84,7 +91,7 @@ import gregtech.common.misc.GTStructureChannels;
  * diffs the built blocks against the default build:
  *
  * <pre>
- *   for each GT channel (skip gt_no_hatch, which is always applied):
+ *   for each distinct GT channel name (skip gt_hatch, see HATCH_CHANNEL, and coil, swept below):
  *     set channel = 2..N, rebuild, compare occupied cells + block identity to the default build
  *       occupied cells changed  -> shape-changing channel: already a size variant above, skip here
  *       only block identity moved -> identity-only channel: record {channel_value, block, meta} for
@@ -114,16 +121,28 @@ final class StructureDumper {
 
     private static final Logger LOG = LogManager.getLogger(DumperMod.MODID);
 
-    /** StructureLib channel that keeps auto-placed hatches out, leaving the casing shell + hints. */
-    private static final String NO_HATCH_CHANNEL = "gt_no_hatch";
+    /**
+     * GT's opt-in hatch placement channel ({@code GTStructureChannels.HATCH} since 2.9, which replaced the
+     * opt-out {@code gt_no_hatch} this dump used to set). Never probed: GT's hatch element does not place a
+     * hatch yet ({@code HatchElementBuilder.placeBlock} is a {@code // TODO} returning false), so sweeping it
+     * finds nothing today, and on a GT that implements that TODO it would record real hatches as a
+     * plausible, wrong substitution table. Named by string, not by the enum constant, so the tool still
+     * compiles against a pack that predates it. The guard in {@link #scanBlocks} is what notices a GT that
+     * starts placing hatches in the block pass itself.
+     */
+    private static final String HATCH_CHANNEL = "gt_hatch";
 
     /** The GT heating-coil channel name; coils are swept by stack size, so it is skipped in the loop. */
     private static final String COIL_CHANNEL = GTStructureChannels.HEATING_COIL.get();
 
-    // Fixed scratch origin: high in the spawn chunks, well above terrain, so the region is empty
-    // air we can build into and wipe freely. Offsets in the JSON are world deltas from here.
+    // Fixed scratch origin: in the spawn chunks, halfway up the world, so a structure has 127 blocks of
+    // room above the controller and 128 below. It was 210, well clear of terrain but only 45 blocks
+    // under the world ceiling: a taller structure lost its top to world.setBlock no-ops above y=255
+    // and validated cleanly anyway (GitHub #175). At 128 the default scan cube still clears normal
+    // terrain, and a build that dips into it is wiped clear before the block pass. Offsets in the JSON
+    // are world deltas from here.
     private static final int OX = 8;
-    private static final int OY = 210;
+    private static final int OY = 128;
     private static final int OZ = 8;
 
     // Hard caps (plan risk 9.2): bound the trigger-stack sweep and the per-controller variant count
@@ -141,8 +160,14 @@ final class StructureDumper {
     private static final int MAX_STACK_SWEEP = 16;
     private static final int MAX_VARIANTS = MAX_STACK_SWEEP;
     private static final int MAX_CELLS = 20000;
-    private static final int MAX_SCAN_DIM = 80;
+    // The widest the scan cube may grow on any axis: the world's own height, so height is only ever
+    // bounded by the world. It was 80, which cut the Large Hadron Collider (125 long) short with no
+    // complaint (GitHub #175). A structure that reaches past it now fails loudly (checkClipped).
+    private static final int MAX_SCAN_DIM = 256;
     private static final int DEFAULT_SCAN_RADIUS = 12;
+    // How far a scan-cube face moves when the build reaches it (buildVariant): enough that a
+    // structure the hint pass under-reported converges in a few rebuilds.
+    private static final int SCAN_GROWTH = 8;
 
     // Lane 3 caps: bound the per-channel value sweep (14 coil tiers + margin) and the total number of
     // substitution entries a controller may emit, so a controller with a pathological channel space
@@ -152,6 +177,8 @@ final class StructureDumper {
 
     private final World world;
     private final ErrorCollector errors = new ErrorCollector();
+    /** Controllers whose GT name came back as its untranslated lang key, for {@code _meta.json}. */
+    private final List<DumpModel.UntranslatedName> untranslated = new ArrayList<>();
     private final Block hintBlock = StructureLibAPI.getBlockHint();
     /** Built lazily on first use (needs GT's MTE registry populated); null until then. */
     private HatchProbe hatchProbe;
@@ -191,9 +218,21 @@ final class StructureDumper {
     }
 
     /** Signals a controller could not be dumped; carries the one-line reason for the failure list. */
-    private static final class DumpException extends Exception {
+    private static class DumpException extends Exception {
 
         DumpException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * A build reached past what the scan could read (the world's height, or {@link #MAX_SCAN_DIM}), so
+     * the scanned form is a fragment. Fatal for a controller's first form; for a later one it ends the
+     * sweep, keeping the smaller forms, which were read whole.
+     */
+    private static final class ClippedException extends DumpException {
+
+        ClippedException(String message) {
             super(message);
         }
     }
@@ -246,8 +285,15 @@ final class StructureDumper {
 
         String generatedAt = java.time.Instant.now()
             .toString();
-        writer
-            .writeMeta(multiblocksDir, packVersion, modVersions, generatedAt, extractorSha, written, errors.failures());
+        writer.writeMeta(
+            multiblocksDir,
+            packVersion,
+            modVersions,
+            generatedAt,
+            extractorSha,
+            written,
+            errors.failures(),
+            untranslated);
 
         LOG.info(
             "gtnh-extractor: {} constructable controllers considered, {} dumped, {} failed.",
@@ -263,11 +309,14 @@ final class StructureDumper {
      * mid-dump runs terrain decoration, and a shared biome decorator re-entered that way throws
      * {@code "Already decorating!!"} - which, once a controller's many probe builds provoke it, would
      * corrupt later controllers too. Loading every working chunk here (each lands in the loaded map
-     * even if its own one-time decoration throws, and the scratch region sits at Y=210 above any
-     * decoration) keeps the whole dump reading only already-resident chunks.
+     * even if its own one-time decoration throws) keeps the whole dump reading only already-resident
+     * chunks.
      */
     private void preloadRegion() {
-        int radius = 6; // chunks around the origin: covers the widest structure plus scan/wipe margins
+        // Chunks around the origin: every scan cube contains the origin and spans at most MAX_SCAN_DIM,
+        // so no cell it can reach lies further than that, plus one chunk of margin. A fixed 6 used to
+        // stop 96 blocks out, short of the Large Hadron Collider's far end (GitHub #175).
+        int radius = MAX_SCAN_DIM / 16 + 1;
         int ocx = OX >> 4;
         int ocz = OZ >> 4;
         int loaded = 0;
@@ -297,7 +346,11 @@ final class StructureDumper {
         }
         Object nameObj = Block.blockRegistry.getNameForObject(machineBlock);
         String registryName = nameObj != null ? nameObj.toString() : "unknown";
-        String displayName = displayName(imte);
+        String displayName = displayName(imte, registryName + "#" + id);
+        HatchProbe probe = hatchProbe();
+        if (probe != null) {
+            probe.forgetCheckedElements(); // what a structure check accepts is asked once per controller
+        }
         String facingConvention = "controller front = NORTH (-Z), ExtendedFacing "
             + ExtendedFacing.of(ForgeDirection.NORTH)
             + "; offsets d = [dx,dy,dz] world-space deltas from the controller block";
@@ -319,7 +372,21 @@ final class StructureDumper {
         // Control Node 4..18 - leaves this false, and what we dumped is a PREFIX of the real family.
         boolean stabilised = false;
         for (int n = 1; n <= MAX_STACK_SWEEP; n++) {
-            DumpModel.Variant variant = buildVariant(imte, id, machineBlock, registryName, n);
+            DumpModel.Variant variant;
+            try {
+                variant = buildVariant(imte, id, machineBlock, registryName, n);
+            } catch (ClippedException e) {
+                if (n == 1) {
+                    throw e; // not even the smallest form fits: nothing whole to record
+                }
+                // The smaller forms were read whole, so keep them, but say the family goes on: a
+                // consumer taking "the largest form" must not believe it found the real maximum.
+                doc.failures.add(
+                    "variant family truncated: the form at trigger stack " + n + " was clipped ("
+                        + e.getMessage() + "), so forms from " + n + " on were not recorded");
+                stabilised = true;
+                break;
+            }
             if (variant.blocks.size() < 2) {
                 if (n == 1) {
                     throw new DumpException("empty scan (no structure built in the void world)");
@@ -371,48 +438,123 @@ final class StructureDumper {
      */
     private DumpModel.Variant buildVariant(IMetaTileEntity imte, int id, Block machineBlock, String registryName, int n)
         throws DumpException {
-        // Hint pass runs with a plain trigger so the hologram shows its dots.
-        //
-        // The block pass sets gt_no_hatch, but NOT because it suppresses hatch placement: GT's hatch
-        // element returns an unconditional false from placeBlock (HatchElementBuilder$2), so
-        // construct(...) never places a hatch either way, and the channel is read only by the
-        // player-driven survival autobuild path. The casing shell we scan is what construct always
-        // builds. It stays set so the recorded channel state matches what a survival build of the
-        // same shape would use, and so a future GT that does place hatches here cannot silently
-        // change what this dump means.
-        ItemStack hintTrigger = imte.getStackForm(n);
-        if (hintTrigger == null) {
-            hintTrigger = imte.getStackForm(1);
+        // Both passes use the plain trigger, and no channel is set. The block pass used to set
+        // gt_no_hatch "to keep hatches out", but GT 2.9 removed that channel (GitHub #177), and it
+        // never did anything here anyway: GT's hatch element returns an unconditional false from
+        // placeBlock (HatchElementBuilder, a // TODO), so construct(...) places no hatch and the casing
+        // shell is what we scan. scanBlocks fails the controller if a GT ever starts placing one.
+        ItemStack trigger = imte.getStackForm(n);
+        if (trigger == null) {
+            trigger = imte.getStackForm(1);
         }
-        ItemStack blockTrigger = hintTrigger.copy();
-        ChannelDataAccessor.setChannelData(blockTrigger, NO_HATCH_CHANNEL, 1);
 
         int[] cube = defaultCube();
         try {
             IConstructable controller = placeController(imte, id);
 
-            List<Particle> particles = hintPass(controller, hintTrigger);
+            List<Particle> particles = hintPass(controller, trigger);
             cube = scanCube(particles);
             if (id == debugMeta) {
                 logHintDiagnostics(id, n, particles);
             }
 
-            safeWipe(cube);
-            controller = placeController(imte, id);
-            ElementRecorder recorder = instrumentedConstruct(controller, blockTrigger);
-
-            DumpModel.Variant variant = new DumpModel.Variant(n);
-            variant.channels.put(NO_HATCH_CHANNEL, 1);
-            scanBlocks(cube, machineBlock, id, variant);
+            // The block pass, run again on a wider cube while the build reaches a face of the cube it
+            // was read from. The cube is sized from the hint pass, which can stop short (it aborts on
+            // client-only icon code), and a build that runs past the cube it is read from comes back as
+            // a plausible fragment. Stops when the scan has a clear margin all round, or a face can
+            // grow no further, which checkClipped then reports.
+            DumpModel.Variant variant;
+            ElementRecorder recorder;
+            while (true) {
+                safeWipe(cube);
+                controller = placeController(imte, id);
+                recorder = instrumentedConstruct(controller, trigger);
+                variant = new DumpModel.Variant(n);
+                scanBlocks(cube, machineBlock, id, variant);
+                int[] grown = grownCube(cube, variant);
+                if (grown == null) {
+                    break;
+                }
+                safeWipe(cube);
+                cube = grown;
+            }
             if (variant.blocks.size() < 2) {
                 fallbackBlocksFromHints(particles, registryName, variant);
             }
+            checkClipped(cube, variant, particles);
             collectHints(particles, variant);
-            collectHatchSlots(recorder, controller, blockTrigger, cube, variant);
+            collectHatchSlots(recorder, controller, trigger, cube, variant);
             computeBbox(variant);
             return variant;
         } finally {
             safeWipe(cube);
+        }
+    }
+
+    /**
+     * {@code cube} widened on every face the scanned build reaches, or {@code null} if it reaches none
+     * that can still move. A face stops at the world's height and at {@link #MAX_SCAN_DIM}.
+     */
+    private int[] grownCube(int[] cube, DumpModel.Variant variant) {
+        boolean[] touched = touchedFaces(cube, variant);
+        int[] grown = cube.clone();
+        for (int axis = 0; axis < 3; axis++) {
+            int floor = axis == 1 ? 0 : Integer.MIN_VALUE;
+            int ceiling = axis == 1 ? 255 : Integer.MAX_VALUE;
+            if (touched[axis]) {
+                grown[axis] = Math.max(Math.max(cube[axis] - SCAN_GROWTH, floor), cube[axis + 3] - MAX_SCAN_DIM + 1);
+            }
+            if (touched[axis + 3]) {
+                grown[axis + 3] = Math
+                    .min(Math.min(cube[axis + 3] + SCAN_GROWTH, ceiling), grown[axis] + MAX_SCAN_DIM - 1);
+            }
+        }
+        return java.util.Arrays.equals(grown, cube) ? null : grown;
+    }
+
+    /**
+     * Which faces of {@code cube} the scanned build lies on, indexed like the cube itself
+     * ({@code minX, minY, minZ, maxX, maxY, maxZ}). A build lying on a face may go on past it.
+     */
+    private boolean[] touchedFaces(int[] cube, DumpModel.Variant variant) {
+        boolean[] touched = new boolean[6];
+        for (DumpModel.PlacedBlock b : variant.blocks) {
+            int[] at = { OX + b.dx, OY + b.dy, OZ + b.dz };
+            for (int axis = 0; axis < 3; axis++) {
+                touched[axis] |= at[axis] <= cube[axis];
+                touched[axis + 3] |= at[axis] >= cube[axis + 3];
+            }
+        }
+        return touched;
+    }
+
+    /**
+     * Refuse a scan that cannot be the whole build: one that still lies on a face of its cube (which
+     * {@link #grownCube} could not move, so the world's height or {@link #MAX_SCAN_DIM} stopped it), or
+     * a hologram cell outside the cube (the hint pass sees the whole structure, and has no height
+     * limit). Without this a clipped build validated cleanly, because its bbox is derived from the
+     * same surviving blocks the adapter cross-checks it against (GitHub #175).
+     */
+    private void checkClipped(int[] cube, DumpModel.Variant variant, List<Particle> particles)
+        throws ClippedException {
+        String[] faces = { "west", "bottom", "north", "east", "top", "south" };
+        boolean[] touched = touchedFaces(cube, variant);
+        for (int face = 0; face < 6; face++) {
+            if (touched[face]) {
+                throw new ClippedException(
+                    "the build reaches the " + faces[face] + " face of a scan cube that can grow no further "
+                        + java.util.Arrays.toString(cube));
+            }
+        }
+        int outside = 0;
+        for (Particle p : particles) {
+            if (p.x < cube[0] || p.y < cube[1] || p.z < cube[2] || p.x > cube[3] || p.y > cube[4] || p.z > cube[5]) {
+                outside++;
+            }
+        }
+        if (outside > 0) {
+            throw new ClippedException(
+                outside + " hologram cells lie outside the scan cube " + java.util.Arrays.toString(cube));
         }
     }
 
@@ -551,7 +693,6 @@ final class StructureDumper {
         if (baseTrigger == null) {
             return; // no item form to carry channel data; the base variant is already recorded
         }
-        ChannelDataAccessor.setChannelData(baseTrigger, NO_HATCH_CHANNEL, 1);
         int[] cube = probeCube(base);
         Map<Long, Cell> baseline = buildBlockMap(imte, id, baseTrigger, cube);
         if (baseline == null || baseline.size() < 2) {
@@ -567,10 +708,14 @@ final class StructureDumper {
             doc.substitutions.put(COIL_CHANNEL, coils);
             totalEntries += coils.size();
         }
+        // Channel NAMES, not constants: several GTStructureChannels share one (METAL_MACHINE_CASING,
+        // TIER_CASING and ALCHEMICAL_CASING are all "casing"), and StructureLib keys the trigger's
+        // channel data by name, so each name is one channel and is probed once (GitHub #177).
+        Set<String> probed = new LinkedHashSet<>();
         for (GTStructureChannels channel : GTStructureChannels.values()) {
             String name = channel.get();
-            if (name == null || name.equals(NO_HATCH_CHANNEL) || name.equals(COIL_CHANNEL)) {
-                continue; // gt_no_hatch is always applied; coils are handled by the stack-size sweep
+            if (name == null || name.equals(HATCH_CHANNEL) || name.equals(COIL_CHANNEL) || !probed.add(name)) {
+                continue; // hatches are never placed (HATCH_CHANNEL); coils have their own sweep
             }
             List<DumpModel.Substitution> entries = probeChannel(imte, id, name, baseTrigger, baseline, baseCells, cube);
             if (entries.isEmpty()) {
@@ -616,7 +761,6 @@ final class StructureDumper {
             if (trigger == null) {
                 break;
             }
-            ChannelDataAccessor.setChannelData(trigger, NO_HATCH_CHANNEL, 1);
             Map<Long, Cell> map = buildBlockMap(imte, id, trigger, cube);
             if (map == null) {
                 break;
@@ -970,8 +1114,17 @@ final class StructureDumper {
             OX + DEFAULT_SCAN_RADIUS, OY + DEFAULT_SCAN_RADIUS, OZ + DEFAULT_SCAN_RADIUS };
     }
 
-    /** Read every non-air block in the cube into the variant, controller-relative; force the origin. */
-    private void scanBlocks(int[] cube, Block machineBlock, int machineMeta, DumpModel.Variant variant) {
+    /**
+     * Read every non-air block in the cube into the variant, controller-relative; force the origin.
+     *
+     * <p>
+     * Fails the controller if the build holds a real hatch. GT's hatch element places none today
+     * ({@code HatchElementBuilder.placeBlock} is a {@code // TODO} returning false), which is the whole
+     * premise of "casing shell plus hatch slots". A GT that implements it would put hatches in the scan
+     * as ordinary blocks, and the dump would read on as if nothing had changed (GitHub #177).
+     */
+    private void scanBlocks(int[] cube, Block machineBlock, int machineMeta, DumpModel.Variant variant)
+        throws DumpException {
         for (int x = cube[0]; x <= cube[3]; x++) {
             for (int y = cube[1]; y <= cube[4]; y++) {
                 for (int z = cube[2]; z <= cube[5]; z++) {
@@ -986,13 +1139,17 @@ final class StructureDumper {
                     if (name == null) {
                         continue;
                     }
-                    variant.blocks.add(
-                        new DumpModel.PlacedBlock(
-                            x - OX,
-                            y - OY,
-                            z - OZ,
-                            name.toString(),
-                            world.getBlockMetadata(x, y, z)));
+                    int meta = world.getBlockMetadata(x, y, z);
+                    if (block.hasTileEntity(meta)) {
+                        TileEntity te = world.getTileEntity(x, y, z);
+                        if (te instanceof BaseMetaTileEntity
+                            && ((BaseMetaTileEntity) te).getMetaTileEntity() instanceof MTEHatch) {
+                            throw new DumpException(
+                                "the block pass placed a real hatch at d=[" + (x - OX) + "," + (y - OY) + "," + (z - OZ)
+                                    + "]: GT now places hatches in construct, so the scan is no longer a casing shell");
+                        }
+                    }
+                    variant.blocks.add(new DumpModel.PlacedBlock(x - OX, y - OY, z - OZ, name.toString(), meta));
                 }
             }
         }
@@ -1135,7 +1292,57 @@ final class StructureDumper {
         return ((long) (x & 0x1FFFFF) << 42) | ((long) (y & 0x1FFFFF) << 21) | (z & 0x1FFFFF);
     }
 
-    private static String displayName(IMetaTileEntity imte) {
+    /**
+     * The name a plan knows this controller by: GT's localized name, else its meta name, else its class.
+     *
+     * <p>
+     * On this dedicated server GT's translation of a few controllers' names does not resolve, and
+     * {@code getLocalName()} hands back the lang key itself ({@code gt.blockmachines.<name>.name}): six
+     * at 2.9, both Large Sifters among them (GitHub #231). A plan can never name a machine that way. The
+     * English name GT registered is still in the {@code GregTech.lang} it writes on boot, so that is read
+     * instead, and every controller that needed it is listed in {@code _meta.json}. The name stays the key
+     * when that file has no entry either; the Python loader then declines to index it by name.
+     */
+    private String displayName(IMetaTileEntity imte, String registryName) {
+        String name = localizedName(imte);
+        String key = null;
+        try {
+            key = imte.getLocalNameKey();
+        } catch (Throwable ignored) {
+            // no key to compare against: nothing marks the name as untranslated
+        }
+        if (key == null || !key.equals(name)) {
+            return name;
+        }
+        String english = gregTechLangEntry(key);
+        String recorded = english != null ? english : name;
+        untranslated.add(new DumpModel.UntranslatedName(registryName, key, recorded));
+        return recorded;
+    }
+
+    /**
+     * {@code key}'s entry in GT's own {@code GregTech.lang}, which records the English name every
+     * {@code addStringLocalization} call registered, or {@code null} if it has none. Read without
+     * creating an entry: {@code Configuration.get} with a default would write one.
+     */
+    private static String gregTechLangEntry(String key) {
+        try {
+            net.minecraftforge.common.config.Configuration lang = GTLanguageManager.sEnglishFile;
+            // Forge lower-cases category names; GT writes its entries under "LanguageFile".
+            if (lang == null || !lang.hasKey("languagefile", key)) {
+                return null;
+            }
+            String value = lang.getCategory("languagefile")
+                .get(key)
+                .getString();
+            return value == null || value.trim()
+                .isEmpty() ? null : value;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static String localizedName(IMetaTileEntity imte) {
         String name = null;
         try {
             name = imte.getLocalName();

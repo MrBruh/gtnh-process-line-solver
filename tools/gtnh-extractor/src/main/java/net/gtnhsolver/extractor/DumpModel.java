@@ -165,4 +165,22 @@ final class DumpModel {
             this.reason = reason;
         }
     }
+
+    /**
+     * A controller whose GT localized name came back as its own untranslated lang key, for the
+     * {@code _meta.json} list: the key, and the display name the dump recorded instead (GT's
+     * {@code GregTech.lang} entry, or the key itself when that has none).
+     */
+    static final class UntranslatedName {
+
+        final String registryName;
+        final String langKey;
+        final String displayName;
+
+        UntranslatedName(String registryName, String langKey, String displayName) {
+            this.registryName = registryName;
+            this.langKey = langKey;
+            this.displayName = displayName;
+        }
+    }
 }
