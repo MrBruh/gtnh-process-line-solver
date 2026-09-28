@@ -24,9 +24,9 @@ from gtnh_solver.ir import (
     Placement,
     Port,
 )
-from gtnh_solver.placement import crowded_machines
+from gtnh_solver.placement import SINGLE_BLOCK_IO_FACES, crowded_machines, single_block_shortfalls
 from gtnh_solver.router import route
-from tests._helpers import at, consumer, machine, net, power_source, producer
+from tests._helpers import at, consumer, hub_line, machine, net, power_source, producer
 
 
 def _power_net(nid: str, source: str, *sinks: str) -> Net:
@@ -343,3 +343,34 @@ def test_power_on_the_me_network_needs_no_dock_cell() -> None:
     )
     # Face to face with no free cell anywhere in the region.
     assert crowded_machines(problem, [at("src", 0, 0, 0), at("a", 1, 0, 0)]) == ()
+
+
+# -------------------------------------------- a single block with more connections than faces
+
+
+def test_a_single_block_takes_as_many_connections_as_it_has_io_faces() -> None:
+    assert SINGLE_BLOCK_IO_FACES == 5  # six faces, and the front carries no I/O
+    assert single_block_shortfalls(hub_line(5)) == {}
+
+
+def test_one_connection_more_names_the_block_with_its_count() -> None:
+    # Each connection takes a face of its own, so no placement seats a sixth. Only the hub is
+    # named: every consumer carries one connection.
+    assert single_block_shortfalls(hub_line(6)) == {"hub": 6}
+
+
+def test_the_gate_names_the_same_block_in_a_roomy_placement() -> None:
+    # The bound claims what the gate would find on every placement, so the two must agree: the hub
+    # floats in open space with all five non-front faces free and is still one face short.
+    placements = [at("hub", 6, 1, 6), *(at(f"c{i}", 0, 0, 2 * i) for i in range(6))]
+    assert crowded_machines(hub_line(6), placements) == ("hub",)
+
+
+def test_a_structure_is_not_held_to_a_single_blocks_faces() -> None:
+    # A real multiblock has casing cells to spare; whether a placement leaves enough of them free is
+    # the gate's question, asked per placement.
+    assert single_block_shortfalls(hub_line(7, footprint=CellBox(sx=3, sy=3, sz=3))) == {}
+
+
+def test_a_commodity_on_the_me_network_takes_no_face() -> None:
+    assert single_block_shortfalls(hub_line(7, me_toggles=METoggles(fluids=True))) == {}

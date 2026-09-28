@@ -149,6 +149,18 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **A single block with more connections than faces is named as the reason a line cannot solve.**
+  The solver gives each connection a face of its own, and a single block has 5 that can carry one,
+  so a machine with more fits in no placement. Mostly that is a multiblock the dataset has no
+  structure for, placed as a 1x1x1 box: the nitrobenzene lines' Distillation Tower (7 connections)
+  and Chemical Plant (6) on a clone without their structures. The routers reported it by whichever
+  net lost the last free face, typically as `congestion` with "enlarge the bounding region or
+  spread the machines apart", which no amount of room fixes. A partial layout now says
+  `single_block_faces`, names each such machine with its count, keeps the routers' own reason
+  after it, and suggests loading the machine's structure (or moving a commodity to ME). The layout
+  itself is unchanged. GT lets some outputs share a face, which the solver does not model yet, so
+  this is a limit of the solver, and the message says so. `placement.single_block_shortfalls` is
+  the bound; the pre-routing crowding gate names the same machines on every placement.
 - **A multiblock line no longer sprawls into a long strip (#254).** The placement search starts from
   a first-fit that fills the floor row by row across the whole region, which for ev-nitrobenzene is
   a strip 68 wide. Its large move rips out a cluster of machines and re-inserts them, and it chose

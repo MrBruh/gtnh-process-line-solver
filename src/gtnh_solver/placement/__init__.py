@@ -16,14 +16,16 @@ from __future__ import annotations
 
 from .banks import bank_columns
 from .constructive import PlacementResult, place
-from .feasibility import crowded_machines
+from .feasibility import SINGLE_BLOCK_IO_FACES, crowded_machines, single_block_shortfalls
 from .search import Objective, optimize_placement
 
 __all__ = [
+    "SINGLE_BLOCK_IO_FACES",
     "Objective",
     "PlacementResult",
     "bank_columns",
     "crowded_machines",
     "optimize_placement",
     "place",
+    "single_block_shortfalls",
 ]

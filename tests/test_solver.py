@@ -45,7 +45,7 @@ from gtnh_solver.router import RouteResult, assign_auto_outputs, route
 from gtnh_solver.solver import Effort, solve
 from gtnh_solver.solver import core as solver_core
 from gtnh_solver.validator import ValidationReport, Violation, ViolationCode, validate
-from tests._helpers import at, consumer, net, power_source, producer
+from tests._helpers import at, consumer, hub_line, net, power_source, producer
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 _SAND = _EXAMPLES / "gtnh-sand.json"
@@ -215,6 +215,32 @@ def test_solve_infeasible_when_machines_do_not_fit() -> None:
     assert layout.status is LayoutStatus.INFEASIBLE
     assert layout.infeasibility is not None
     assert layout.metrics.footprint is None  # nothing placed -> no measurable build to report
+
+
+@pytest.mark.parametrize("optimize", [True, False], ids=["optimized", "fast"])
+def test_a_partial_layout_names_a_single_block_with_more_connections_than_faces(
+    optimize: bool,
+) -> None:
+    # Left to the routers, the reason is whichever net lost the last free face, as congestion or an
+    # undockable terminal, with advice about room that no amount of room satisfies. The cause is
+    # the hub's sixth connection, so the reason names it and keeps the routers' own words after it.
+    layout = solve(hub_line(6), optimize=optimize)
+    assert layout.status is LayoutStatus.PARTIAL_INVALID
+    assert layout.placements, "still the laid partial layout: only its reason is restated"
+    assert layout.infeasibility is not None
+    assert layout.infeasibility.constraint == "single_block_faces"
+    assert "'hub' (t, 6)" in layout.infeasibility.detail
+    assert "The routers stopped at: " in layout.infeasibility.detail
+    assert layout.infeasibility.suggested_relaxation is not None
+    assert "structure" in layout.infeasibility.suggested_relaxation
+
+
+def test_machines_that_do_not_fit_keep_their_own_reason() -> None:
+    # The hub is one face short as well, but nothing was placed: the region is the first problem.
+    layout = solve(hub_line(6, region=CellBox(sx=2, sy=1, sz=2)))
+    assert layout.status is LayoutStatus.INFEASIBLE
+    assert layout.infeasibility is not None
+    assert layout.infeasibility.constraint != "single_block_faces"
 
 
 def test_solve_populates_footprint_and_layer_metrics(

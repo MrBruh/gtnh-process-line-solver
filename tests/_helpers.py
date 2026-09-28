@@ -31,9 +31,11 @@ from gtnh_solver.ir import (
     Commodity,
     FaceSpec,
     Facing,
+    InputIR,
     IODirection,
     Machine,
     MachineFaceRef,
+    METoggles,
     Net,
     Placement,
     Port,
@@ -105,6 +107,48 @@ def net(
 def at(mid: str, x: int, y: int, z: int, *, orientation: Facing = Facing.NORTH) -> Placement:
     """Place ``mid`` at ``(x, y, z)`` with front facing ``orientation``."""
     return Placement(machine_id=mid, cell=CellCoord(x=x, y=y, z=z), orientation=orientation)
+
+
+def hub_line(
+    connections: int,
+    *,
+    footprint: CellBox | None = None,
+    me_toggles: METoggles | None = None,
+    region: CellBox | None = None,
+) -> InputIR:
+    """A ``hub`` whose ``connections`` fluid outputs each feed a consumer ``c<i>`` of their own.
+
+    One net per output, so the hub carries ``connections`` connections and every consumer one. A
+    single block has five faces to carry them (the front carries none), which is what the line is
+    for: one output more than that, and no placement lays it.
+    """
+    hub = machine(
+        "hub",
+        [
+            Port(id=f"out{i}", commodity=Commodity.FLUID, direction=IODirection.OUTPUT)
+            for i in range(connections)
+        ],
+    )
+    if footprint is not None:
+        hub = hub.model_copy(update={"footprint": footprint})
+    return InputIR(
+        bounding_region=region if region is not None else CellBox(sx=12, sy=4, sz=12),
+        machines=[hub, *(consumer(f"c{i}", commodity=Commodity.FLUID) for i in range(connections))],
+        nets=[
+            Net(
+                id=f"n{i}",
+                commodity=Commodity.FLUID,
+                fluid_or_item=f"f{i}",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="hub", port_id=f"out{i}"),
+                    MachineFaceRef(machine_id=f"c{i}", port_id="in"),
+                ],
+            )
+            for i in range(connections)
+        ],
+        me_toggles=me_toggles if me_toggles is not None else METoggles(),
+    )
 
 
 def power_source(
