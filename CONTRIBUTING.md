@@ -6,14 +6,16 @@ work now is Phase 2 quality, organized as the **Build lanes** below.
 
 ## Setup
 
-Requires **Python 3.14+** (`pyproject.toml` pins `requires-python = ">=3.14"`). If your default
-`python` is older, `pip install` fails opaquely, so create the venv with an explicit 3.14
-interpreter - e.g. `py -3.14` on Windows.
+Use **Python 3.14, and only 3.14.** It is the one version CI tests, so it is the one a local run
+means anything on. `pyproject.toml` sets it as the floor (`requires-python = ">=3.14"`), but nothing
+newer is tested yet. If your default `python` is another version, `pip install` fails opaquely or
+installs into an interpreter CI never runs, so create the venv with an explicit 3.14 interpreter -
+e.g. `py -3.14` on Windows.
 
 ```bash
 git clone <repo>
 cd gtnh-process-line-solver
-python -m venv .venv && . .venv/bin/activate   # Windows: py -3.14 -m venv .venv; .venv\Scripts\activate
+python3.14 -m venv .venv && . .venv/bin/activate   # Windows: py -3.14 -m venv .venv; .venv\Scripts\activate
 pip install -e ".[dev]" -c constraints-dev.txt
 pre-commit install   # wire the git hooks (lint, format, types, commit-msg)
 pytest               # run tests (with coverage)
@@ -86,7 +88,7 @@ One logical change per branch/PR, whether or not there's an issue behind it.
 
 Enforced by CI and the pre-commit hooks - none of this is hand-policed:
 
-- **Python ≥ 3.14**, `src/` layout, **fully typed** under `mypy --strict` (the Pydantic
+- **Python 3.14** (only; see Setup), `src/` layout, **fully typed** under `mypy --strict` (the Pydantic
   mypy plugin checks the IR models). No `# type: ignore` without a reason comment.
 - **Formatting is `ruff format`** (line length 100). Let the tool fix formatting automatically.
 - **Lint is `ruff check`** with a curated rule set (pycodestyle, pyflakes, isort, naming,
@@ -137,8 +139,8 @@ prefix the description with its number: `fix/17-validator-overlap`.
 - One logical change per PR; fill in the PR template.
 - If the PR resolves an issue, link it in the description with a closing keyword (`Closes #123`,
   `Fixes #123`) so the issue closes automatically on merge. No issue is fine too.
-- Green CI is required: the `static` job (ruff lint + format + `mypy`) and the `test` matrix
-  (pytest on the floor and latest Python; coverage is gated once, on the latest leg). The Conventional-Commits check is **advisory** -
+- Green CI is required: the `static` job (ruff lint + format + `mypy`) and the `test` job
+  (pytest on Python 3.14, with the coverage gate). The Conventional-Commits check is **advisory** -
   it flags non-conforming messages in the logs but does not block the merge; the local
   `commit-msg` hook is the real nudge.
 - Describe what changed and which doc/decision (or issue) it implements.

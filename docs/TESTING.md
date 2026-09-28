@@ -1,6 +1,8 @@
 # Testing
 
-Goal: **100% path coverage, tests shipped with the code.** Framework: `pytest` + `hypothesis`.
+Goal: **100% path coverage, tests shipped with the code.** Framework: `pytest` + `hypothesis`, on
+**Python 3.14 only**: it is the one version CI runs, so run the suite from a `.venv` built with a
+3.14 interpreter (`py -3.14 -m venv .venv` on Windows) and no other.
 
 ## The core constraint: no headless GT simulator
 
@@ -205,10 +207,10 @@ validator, and read the outcome mix with `--hypothesis-show-statistics` as the s
 a reduced budget reaches a smaller slice of the generated space, so a local green is weaker
 evidence than a CI green.
 
-**Coverage is a 3x multiplier**, and `addopts` enables it: serial, the suite is 73s at `--no-cov`
-and 282s with `--cov`. Pass `--no-cov` while iterating; `COVERAGE_CORE=sysmon` does not help,
-because `sys.monitoring` cannot measure branches before Python 3.14 and coverage silently falls
-back to its tracer.
+**Coverage is cheap on 3.14**, and `addopts` enables it. Coverage.py measures through
+`sys.monitoring` there, branches included, which costs about 7% of a run (it cost 3x under the old
+tracer, before the project required 3.14). Pass `--no-cov` anyway on a partial run, so that the
+report does not print every module the run never imported as uncovered.
 
 ### Property tests have no per-example deadline
 
@@ -224,7 +226,7 @@ wins for what it names, so the `property_examples()` budgets are unaffected.
 
 ```bash
 pytest                    # all tests
-pytest --no-cov           # ~3x faster; coverage is on by default via addopts
+pytest --no-cov           # no coverage report; coverage is on by default via addopts
 pytest -q tests/golden    # the corpus
 ruff check .              # lint
 mypy                      # types
