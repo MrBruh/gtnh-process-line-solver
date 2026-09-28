@@ -24,6 +24,7 @@ import com.gtnewhorizon.structurelib.structure.IStructureElementChain;
 import gregtech.api.GregTechAPI;
 import gregtech.api.enums.HatchElement;
 import gregtech.api.interfaces.metatileentity.IMetaTileEntity;
+import gregtech.api.interfaces.tileentity.IGregTechTileEntity;
 import gregtech.api.metatileentity.BaseMetaTileEntity;
 import gregtech.api.metatileentity.implementations.MTEBasicHull;
 
@@ -65,8 +66,10 @@ import gregtech.api.metatileentity.implementations.MTEBasicHull;
  * The check probe is guarded by a control: a plain machine hull goes in first, and an element whose
  * check accepts that too takes any GT tile rather than a hatch, so it is recorded as taking none. It
  * runs once per element per controller ({@link #forgetCheckedElements}), since what a bare adder
- * accepts does not depend on the cell, and restores the cell's block afterwards. Every probe is
- * wrapped: a throwing element or predicate degrades to "no kinds", never to a failed dump.
+ * accepts does not depend on the cell, restores the cell's block afterwards, and checks against a
+ * throwaway copy of the controller so the filter probe never sees a hatch it added (see
+ * {@link #accepts}). Every probe is wrapped: a throwing element or predicate degrades to "no kinds",
+ * never to a failed dump.
  */
 final class HatchProbe {
 
@@ -214,13 +217,37 @@ final class HatchProbe {
         return kinds;
     }
 
-    /** Whether {@code leaf}'s structure check passes with {@code probe}'s hatch standing at the cell. */
+    /**
+     * Whether {@code leaf}'s structure check passes with {@code probe}'s hatch standing at the cell.
+     *
+     * <p>
+     * Asked of a throwaway copy of the controller, never the built one. A check that passes adds the
+     * hatch to the controller's hatch lists, and GT's hatch filter hides a kind once the controller
+     * holds one ({@code HatchElementBuilder.atLeast} filters on {@code count(t) < limit}), so checking
+     * against the built controller would blind every filter probe that came after it. The copy is
+     * attached to the controller's base tile for the check, and the built controller put back after.
+     */
     private static boolean accepts(IStructureElement<Object> leaf, Object controller, World world, int x, int y,
         int z, Probe probe) {
+        if (!(controller instanceof IMetaTileEntity)) {
+            return false;
+        }
+        IMetaTileEntity built = (IMetaTileEntity) controller;
+        IGregTechTileEntity base = built.getBaseMetaTileEntity();
+        if (base == null) {
+            return false;
+        }
         try {
-            return place(world, x, y, z, probe) && leaf.check(controller, world, x, y, z);
+            IMetaTileEntity scratch = built.newMetaEntity(base);
+            if (scratch == null) {
+                return false;
+            }
+            scratch.setBaseMetaTileEntity(base);
+            return place(world, x, y, z, probe) && leaf.check(scratch, world, x, y, z);
         } catch (Exception | LinkageError e) {
             return false; // an adder that throws on a stranger's hatch does not take it
+        } finally {
+            built.setBaseMetaTileEntity(base);
         }
     }
 
