@@ -300,6 +300,9 @@ final class StructureDumper {
             considered,
             written,
             errors.count());
+        if (hatchProbe != null) {
+            LOG.info("gtnh-extractor: hatch probe: {}", hatchProbe.summary());
+        }
         return written;
     }
 
@@ -617,6 +620,7 @@ final class StructureDumper {
         if (probe == null) {
             return;
         }
+        probe.beginVariant(); // a new built form, so its own structure check is taken afresh
         for (int x = cube[0]; x <= cube[3]; x++) {
             for (int y = cube[1]; y <= cube[4]; y++) {
                 for (int z = cube[2]; z <= cube[5]; z++) {

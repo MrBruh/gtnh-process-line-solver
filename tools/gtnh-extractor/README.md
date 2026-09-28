@@ -65,7 +65,11 @@ schema-v2 dataset:
   kinds it accepts, so a slot carries its `HatchElement` names (this is what schema v2 added:
   `variants[].hatch_slots`). An element whose item filter names no kind, such as a hatch adder
   built from a bare method reference, is asked through its own structure check instead, with a
-  real hatch of each kind standing in the cell (#227: the Distillation Tower ring's energy hatches); `JsonWriter` serialises the raw facts to schema-v2 JSON (Gson,
+  real hatch of each kind standing in the cell (#227: the Distillation Tower ring's energy hatches).
+  A kind found that way is kept only if the machine's own `checkMachine`, run over the whole shell
+  with the hatch in place, counts the hatch as that kind and reports no kind of error the bare shell
+  did not already have: a muffler on a Dangote Distillus ring passes the element's check but ends
+  the tower at that layer, and the machine check is what says so; `JsonWriter` serialises the raw facts to schema-v2 JSON (Gson,
   stable key + variant ordering); `ErrorCollector` sends any exception,
   non-terminating/explosive sweep, or empty scan to `_meta.json.failures` so one broken
   multiblock never kills the run.
@@ -145,6 +149,7 @@ actually touches:
 | `IMetaTileEntity` | `gregtech.api.interfaces.metatileentity` | Element type of that array; `getStackForm`, `newMetaEntity`, `setBaseMetaTileEntity`, `getLocalName`/`getLocalNameKey`/`getMetaName` filter, place, and name the controller. |
 | `BaseMetaTileEntity` | `gregtech.api.metatileentity` | The tile entity the controller (and each probe hatch) is placed into: `setMetaTileID`, `setMetaTileEntity`, `setFrontFacing`. |
 | `MTEHatch`, `MTEBasicHull` | `gregtech.api.metatileentity.implementations` | `MTEHatch` marks a real hatch found in the block pass (a failure, see #177); a hull is `HatchProbe`'s control, since an element whose check takes a hull takes any GT tile rather than a hatch. |
+| `MTEMultiBlockBase` (`newMetaEntity`, `clearHatches`, `checkMachine(base, stack, errors)`) + `StructureError` / `TranslatableStructureError` | `gregtech.api.metatileentity.implementations`, `gregtech.api.structure.error` | `HatchProbe` asks a throwaway copy of the controller, and confirms a bare adder's kind with the machine's own whole-structure check, comparing the kinds of error it reports (#227). |
 | `GTLanguageManager.sEnglishFile` | `gregtech.api.util` | GT's `GregTech.lang`, read (never written) for the English name of a controller whose translation does not resolve on the server (#231). |
 | `IConstructable` | `com.gtnewhorizon.structurelib.alignment.constructable` | Filter + the build call `construct(ItemStack trigger, boolean hintsOnly)` (hint pass and block pass). |
 | `ChannelDataAccessor` | `com.gtnewhorizon.structurelib.alignment.constructable` | `setChannelData(trigger, channel, value)` to probe each tier channel (lane 3). |
@@ -153,7 +158,7 @@ actually touches:
 | `IAlignment` / `ExtendedFacing` | `com.gtnewhorizon.structurelib.alignment[.enumerable]` | Point the controller front at a fixed direction so the offset frame is deterministic. |
 | `StructureLibAPI.getBlockHint()`, `enableInstrument()` / `disableInstrument()` | `com.gtnewhorizon.structurelib` | Identify hint-block dots while scanning (a hatch/DOF slot vs. a solid casing cell); the instrument brackets a build so `StructureEvent` reports which element visited each cell. |
 | `IStructureElement` / `IStructureElementChain` (+ `StructureEvent`) | `com.gtnewhorizon.structurelib[.structure]` | `ElementRecorder` maps cell -> visiting element; `HatchProbe` flattens a chain and asks `getBlocksToPlace` what each leaf accepts, falling back to the leaf's own `check` when its filter names no hatch kind, which is where a slot's hatch kinds come from. |
-| `HatchElement` (+ `mteClasses()`) | `gregtech.api.enums` | The GT hatch-kind enum whose names a slot's `kinds` list holds (`InputBus`, `OutputHatch`, ...). One probe per kind (the first registered MTE of the classes the kind declares) is tested against the element's predicate, or placed for its check, so a GT bump that renumbers hatches is picked up automatically. |
+| `HatchElement` (+ `mteClasses()`, `count()`) | `gregtech.api.enums` | The GT hatch-kind enum whose names a slot's `kinds` list holds (`InputBus`, `OutputHatch`, ...). One probe per kind (the first registered MTE of the classes the kind declares) is tested against the element's predicate, or placed for its check, so a GT bump that renumbers hatches is picked up automatically; `count()` says whether a placed probe registered as its kind. |
 | `StructureLib.proxy` (reflected) + `CommonProxy` (subclassed) | `com.gtnewhorizon.structurelib` | Temporarily swap in `RecordingProxy` to capture hint particles headlessly (the server's proxy no-ops them). The one reflective touch of a StructureLib internal; a bump that moves it fails loudly and locally. |
 
 One extra reflective touch, on the Minecraft side: StructureLib's hint walk is client-only

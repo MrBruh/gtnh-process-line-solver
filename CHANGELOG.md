@@ -184,7 +184,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     Tower's ring recorded output hatches but not the energy hatches GT accepts there. An element
     whose filter names no kind is now asked through its own structure check, with a real hatch of
     each kind standing in the cell; a machine hull goes in first as a control, so an element that
-    takes any GT tile is not mistaken for a hatch slot.
+    takes any GT tile is not mistaken for a hatch slot. A kind found that way is kept only if the
+    machine's own `checkMachine`, over the whole built shell, counts the hatch as that kind and
+    reports no new kind of error: an element's check alone would put a muffler on every Dangote
+    Distillus ring, where GT reads it as the top of the tower.
   - **Clipped structures (#175).** Structures were built at y=210, 45 blocks under the world
     ceiling, and scanned in a cube capped at 80 blocks, so the Mega Distillation Tower lost its top
     and the Large Hadron Collider its far end, and both validated cleanly. The build now sits at
