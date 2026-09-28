@@ -138,4 +138,4 @@ def test_the_2_9_acceptance_fixture_stays_out_of_the_committed_manifest(
         shutil.copyfile(source, examples / name)
     monkeypatch.setattr(tool, "REPO", tmp_path)
 
-    assert tool._example_types_and_tiers() == (set(), set())
+    assert tool._example_machines() == []

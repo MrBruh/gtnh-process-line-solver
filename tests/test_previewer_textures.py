@@ -663,6 +663,112 @@ def test_mte_block_flavor_prefixed_name_resolves() -> None:
     assert m.mte_block("eactor") is None  # a mid-word suffix must not count (whole word only)
 
 
+# --------------------------------------------- the exact join: recipe map and tier (#232)
+
+
+def _by_recipe(*machines: tuple[str, str, int | None, bool]) -> TextureManifest:
+    """A manifest of MTEs stating ``(name, recipe map, tier, electric)``, as a #232 dump does.
+
+    Each is its own block at meta 800 upward, in argument order.
+    """
+    blocks: dict[str, Any] = {}
+    for i, (name, recipe_map, tier, electric) in enumerate(machines):
+        entry: dict[str, Any] = {"kind": "mte", "display_name": name, "sides": {}}
+        entry.update({"recipe_map": recipe_map, "electric": electric})
+        if tier is not None:
+            entry["tier"] = tier
+        blocks[f"gregtech:gt.blockmachines|{800 + i}"] = entry
+    return TextureManifest({"blocks": blocks, "icons": {}})
+
+
+def _meta(found: tuple[str, int] | None) -> int | None:
+    return None if found is None else found[1]
+
+
+def test_a_recipe_map_reaches_the_machine_its_localized_name_never_names() -> None:
+    # The plan says "Ore Washer", its map's localized name; GT calls the machine "Basic Ore Washing
+    # Plant", which no tier prefix reaches, and GT++ calls a MULTIBLOCK plain "Ore Washing Plant".
+    m = _by_recipe(
+        ("Basic Ore Washing Plant", "gt.recipe.orewasher", 1, True),
+        ("Advanced Ore Washing Plant", "gt.recipe.orewasher", 2, True),
+        ("Ore Washing Plant", "gt.recipe.orewasher", None, True),  # GT++'s: no tier
+    )
+    assert _meta(m.mte_block("Ore Washer", "LV", "gt.recipe.orewasher")) == 800
+    assert _meta(m.mte_block("Ore Washer", "MV", "gt.recipe.orewasher")) == 801
+    assert m.mte_block("Ore Washer", "LV") is None, "by name alone it never joins"
+
+
+def test_the_join_passes_over_a_steam_machine_on_the_same_map_and_tier() -> None:
+    # A bronze steam machine is tier 1 on the hammer map, exactly like the LV electric one.
+    m = _by_recipe(
+        ("Steam Forge Hammer", "gt.recipe.hammer", 1, False),
+        ("Basic Forge Hammer", "gt.recipe.hammer", 1, True),
+    )
+    assert _meta(m.mte_block("Forge Hammer", "LV", "gt.recipe.hammer")) == 801
+
+
+def test_two_maps_sharing_a_localized_name_are_told_apart() -> None:
+    # GT localizes both the furnace's map and the microwave's as "Furnace", so the name ladder
+    # sends a microwave recipe to the Steam Furnace; the ids name them apart.
+    m = _by_recipe(
+        ("Steam Furnace", "gt.recipe.furnace", 1, False),
+        ("Basic Electric Furnace", "gt.recipe.furnace", 1, True),
+        ("Basic Microwave", "gt.recipe.microwave", 1, True),
+    )
+    assert _meta(m.mte_block("Furnace", "LV", "gt.recipe.furnace")) == 801
+    assert _meta(m.mte_block("Furnace", "LV", "gt.recipe.microwave")) == 802
+
+
+def test_a_map_two_machines_run_draws_the_one_gt_registered_first() -> None:
+    # At 2.9 the Fluid Canner (meta 431) runs the canner map beside the Canning Machine (231). The
+    # plan names only the map, whose localized "Canner" reads like the wrong one; the machine the
+    # map was made for is the lower meta, and it is the one with the two input slots a canning
+    # recipe may need. Listed in reverse, so the answer cannot be the listing order.
+    blocks = {
+        "gregtech:gt.blockmachines|431": {
+            "kind": "mte",
+            "display_name": "Basic Fluid Canner",
+            "recipe_map": "gt.recipe.canner",
+            "tier": 1,
+            "electric": True,
+        },
+        "gregtech:gt.blockmachines|231": {
+            "kind": "mte",
+            "display_name": "Basic Canning Machine",
+            "recipe_map": "gt.recipe.canner",
+            "tier": 1,
+            "electric": True,
+        },
+    }
+    m = TextureManifest({"blocks": blocks, "icons": {}})
+    assert _meta(m.mte_block("Canner", "LV", "gt.recipe.canner")) == 231
+
+
+def test_the_join_draws_the_machine_of_the_tier_the_line_runs_at() -> None:
+    # The name ladder knows prefixes only for LV and MV and draws every higher tier as Basic.
+    m = _by_recipe(
+        ("Basic Macerator", "gt.recipe.macerator", 1, True),
+        ("Advanced Macerator", "gt.recipe.macerator", 2, True),
+        ("Advanced Macerator II", "gt.recipe.macerator", 3, True),
+    )
+    assert _meta(m.mte_block("Macerator", "HV", "gt.recipe.macerator")) == 802
+
+
+def test_a_manifest_without_recipe_maps_answers_by_name_as_before() -> None:
+    # A dump from before #232 states no maps: the join finds nothing and the ladder answers.
+    m = TextureManifest(_manifest_dict())
+    assert m.mte_block("Test Hammer", "LV", "gt.recipe.hammer") == m.mte_block("Test Hammer", "LV")
+    assert m.mte_block("Test Hammer", "LV") is not None
+
+
+def test_a_tier_the_map_has_no_machine_at_falls_back_to_the_name() -> None:
+    m = _by_recipe(
+        ("Basic Forge Hammer", "gt.recipe.hammer", 1, True),
+        ("Advanced Forge Hammer", "gt.recipe.hammer", 2, True),
+    )
+    assert _meta(m.mte_block("Forge Hammer", "ZPM", "gt.recipe.hammer")) == 800  # the Basic skin
+
+
 def test_mte_block_flavor_prefix_picks_shortest() -> None:
     """When several flavor-prefixed names share the suffix, the shortest (fewest extra words) wins."""
     m = _mte_names("Industrial Coke Oven", "Super Duper Industrial Coke Oven")

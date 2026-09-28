@@ -149,6 +149,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **A single-block machine is drawn and exported as the machine it is, at the tier it runs (#232).**
+  A plan names a machine by its recipe map's localized name, and the previewer and the
+  `.schematic` export matched that name against GT's machine names. For 9 of GT's 41 recipe maps
+  with basic machines that failed: an Ore Washer, Matter Amplifier, Polarizer or Slicer resolved to
+  nothing (a placeholder box, and a refused export that blamed a missing multiblock dump), and an
+  Assembler drew as a Circuit Assembler, a Canner as a Fluid Canner, a Furnace or a Microwave as a
+  Steam Furnace, and a Sifter as the Large Sifter multiblock. Every tier above MV also drew as the
+  Basic machine. The extractor now records each machine's recipe map id, tier and whether it is
+  electric (optional fields, no schema bump); the adapter carries the plan's map id, from
+  `rawRecipeId`, onto `Machine.recipe_map` (additive, InputIR stays v3); and both consumers join a
+  single block on map and tier first, falling back to names for a manifest dumped before this.
+  Where two machines run one map at one tier (the Canning Machine and the Fluid Canner at 2.9), the
+  one GT registered first wins, which is the one the map was made for. A single block the manifest
+  still cannot name is refused as that, not as a missing multiblock. Local manifests need a fresh
+  texture pass to carry the new fields; the committed one was regenerated.
 - **A single block with more connections than faces is named as the reason a line cannot solve.**
   The solver gives each connection a face of its own, and a single block has 5 that can carry one,
   so a machine with more fits in no placement. Mostly that is a multiblock the dataset has no

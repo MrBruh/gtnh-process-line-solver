@@ -43,6 +43,7 @@ from typing import Any
 from gtnh_solver.dataset.pipes import manifest_names
 from gtnh_solver.dataset.roots import extractor_hint, resolve_dataset_path
 from gtnh_solver.dataset.schema import MultiblockDoc, Variant, load_multiblock_doc
+from gtnh_solver.dataset.voltage import VOLTAGE_BY_TIER
 
 from .bake import BakeUnavailableError, bake_layers
 from .scene import block_face_cover
@@ -112,6 +113,10 @@ _FRONT_CW_STEPS = {"north": 0, "east": 1, "south": 2, "west": 3}
 #: preview stand-in because GT single-block skins are near identical across tiers.
 _TIER_PREFIX = {"LV": "Basic", "MV": "Advanced"}
 _FALLBACK_PREFIX = "Basic"
+
+#: A voltage tier's name -> GT's own number for it (``MTETieredMachineBlock.mTier``: ULV 0, LV 1,
+#: ...), which is how the extractor records a machine's tier (#232).
+_GT_TIER = {name: number for number, name in enumerate(VOLTAGE_BY_TIER)}
 
 #: The GT class behind each ``HatchElement`` kind the solver places, from that enum's own
 #: ``mteClasses()``. Joining on the class rather than the display name is what makes the lookup
@@ -290,6 +295,27 @@ class TextureManifest:
         self._mte_by_norm: dict[str, tuple[str, int]] = {}
         for name, block_meta in self._mte_by_name.items():
             self._mte_by_norm.setdefault(_normalize_name(name), block_meta)
+        # Recipe-map index: (recipe map id, GT tier number) -> the electric machines GT registers
+        # there, from the fields the extractor records per MTE (#232). The exact
+        # join for a single-block machine, which a plan names by its recipe map: that map's
+        # localized name is often not the machine's ("Ore Washer", "Basic Ore Washing Plant") and
+        # not even unique ("Furnace" is the furnace's and the microwave's). A steam machine shares
+        # both the map and the tier number with the LV one, so only an ``electric`` machine counts,
+        # and a multiblock states no tier. A manifest dumped before #232 records none of it, so the
+        # index is empty and the name ladder answers as it always did.
+        self._mte_by_recipe: dict[tuple[str, int], list[tuple[str, int]]] = {}
+        for key, entry in self._blocks.items():
+            recipe_map, tier = entry.get("recipe_map"), entry.get("tier")
+            if (
+                entry.get("kind") != "mte"
+                or entry.get("electric") is not True
+                or not isinstance(recipe_map, str)
+                or not isinstance(tier, int)
+                or "|" not in key
+            ):
+                continue
+            block, meta = key.rsplit("|", 1)
+            self._mte_by_recipe.setdefault((recipe_map, tier), []).append((block, int(meta)))
         # Hatch index: (HatchElement kind, tier) -> (block, meta). Keyed off the MTE's
         # ``source_class`` rather than its display name, because the names are not one shape -
         # "Input Bus (LV)" against "LV Energy Hatch" - while the class is exactly what
@@ -510,7 +536,9 @@ class TextureManifest:
         """The path inside the mod jar for ``icon`` (e.g. ``assets/gregtech/.../NAME.png``)."""
         return self._icons.get(icon)
 
-    def mte_block(self, display_name: str, tier: str | None = None) -> tuple[str, int] | None:
+    def mte_block(
+        self, display_name: str, tier: str | None = None, recipe_map: str | None = None
+    ) -> tuple[str, int] | None:
         """The ``(block, meta)`` of the single-block machine ``display_name`` (at ``tier``), or ``None``.
 
         Lets a machine type with no committed multiblock doc (a 1x1x1 machine whose whole structure
@@ -518,6 +546,10 @@ class TextureManifest:
         names such a machine generically ("Forge Hammer", "Super Tank", "Chemical Plant"), but the
         manifest keys it by its full in-game name. Resolution tries, in order:
 
+        0. the exact join, when the machine states its ``recipe_map`` id and the manifest records
+           machines' maps and tiers: the one electric machine GT registers for that map at that tier
+           (#232). Nothing below can tell "Ore Washer" is a "Basic Ore Washing Plant", or a
+           microwave from a furnace, and the ladder maps every tier above MV to its Basic machine;
         1. the exact name (a plan already carrying the full name still works);
         2. a normalized (case/punctuation/whitespace) match;
         3. the voltage-tier prefix plus a ``Basic`` fallback (``Basic Forge Hammer``, ``_TIER_PREFIX``);
@@ -526,6 +558,10 @@ class TextureManifest:
 
         A genuinely unknown machine returns ``None`` and keeps its placeholder box, never mis-mapped.
         """
+        if recipe_map is not None and tier in _GT_TIER:
+            joined = self._recipe_joined(recipe_map, _GT_TIER[tier])
+            if joined is not None:
+                return joined
         exact = self._mte_by_name.get(display_name)
         if exact is not None:
             return exact
@@ -541,6 +577,21 @@ class TextureManifest:
         if tiered is not None:
             return tiered
         return self._flavor_prefixed(query)
+
+    def _recipe_joined(self, recipe_map: str, tier: int) -> tuple[str, int] | None:
+        """The electric machine GT registers for ``recipe_map`` at ``tier``, or ``None`` if none.
+
+        Some maps have two at one tier. At 2.9 the Fluid Canner runs the canner map beside the
+        Canning Machine, the Plasma Arc Furnace the arc furnace's, and the Electric Oven the
+        furnace's, and the plan cannot say which it meant, since it names only the map. The machine
+        the map was made for wins, which is the one GT registered first: the lowest meta id, in
+        every one of 2.9's 29 shared pairs (Canning Machine 231, Fluid Canner 431). It is also the
+        safe call, because the later machine can be the narrower one: the Fluid Canner has one
+        input slot where a canning recipe may need two. Unlike the name ladder, this can only ever
+        pick a machine of the right map and tier, never a steam machine or a multiblock.
+        """
+        found = self._mte_by_recipe.get((recipe_map, tier))
+        return min(found) if found else None
 
     def _flavor_prefixed(self, query_norm: str) -> tuple[str, int] | None:
         """A manifest name of the form ``"<flavor> <query>"`` (the query as a whole-word suffix).
@@ -918,8 +969,8 @@ def machine_cubes(
     wrong machine without an error.
 
     A machine whose type has a dumped :class:`MultiblockDoc` expands to that structure. A genuine
-    single-block machine (a 1x1x1 footprint) is the trivial one-cube case, resolved by its plan name
-    plus voltage tier against the manifest's tier-prefixed keys (see :meth:`TextureManifest.mte_block`).
+    single-block machine (a 1x1x1 footprint) is the trivial one-cube case, resolved by its recipe map
+    and voltage tier, else its plan name and tier (see :meth:`TextureManifest.mte_block`).
     A doc-less MULTIblock (a bigger footprint whose structure failed extraction) must NOT collapse to
     a lone controller cube - it yields nothing and keeps its placeholder box, so its true reserved
     footprint still shows.
@@ -930,7 +981,9 @@ def machine_cubes(
     doc = docs.get(machine.get("block_key") or "") or docs.get(machine["type"])
     if doc is not None:
         return expand_machine(machine, doc, manifest)
-    single = manifest.mte_block(machine["type"], machine.get("voltage_tier"))
+    single = manifest.mte_block(
+        machine["type"], machine.get("voltage_tier"), machine.get("recipe_map")
+    )
     if single is not None and tuple(machine.get("size", (1, 1, 1))) == (1, 1, 1):
         block, meta = single
         cell = machine["cell"]

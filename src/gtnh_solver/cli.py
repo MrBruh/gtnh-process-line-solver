@@ -65,7 +65,7 @@ from gtnh_solver.adapter import (
     resolve_producer,
     to_input_ir,
 )
-from gtnh_solver.adapter.core import _effective_handler
+from gtnh_solver.adapter.core import _effective_handler, _recipe_map
 from gtnh_solver.dataset import PhysicalDataset, list_versions, load_physical_dataset
 from gtnh_solver.dataset.coverage import format_report, measure
 from gtnh_solver.dataset.roots import extractor_hint, resolve_dataset_path
@@ -332,12 +332,13 @@ _SINGLE_BLOCK_CLASS_MARKERS: Final = (".MTEBasicMachine", ".machines.steam.")
 
 
 def _manifest_says_single_block(
-    manifest: TextureManifest | None, machine_type: str, tier: str
+    manifest: TextureManifest | None, machine_type: str, tier: str, recipe_map: str | None = None
 ) -> bool:
     """Whether ``manifest`` records ``machine_type`` at ``tier`` as a single-block machine class.
 
     **A heuristic**, and the only one :func:`_warn_if_plan_pack_undumped` uses: the entry is found
-    the way the previewer finds a single-block machine (:meth:`TextureManifest.mte_block`), and its
+    the way the previewer finds a single-block machine (:meth:`TextureManifest.mte_block`, by its
+    recipe map and tier where the plan states the map, else by name), and its
     ``source_class`` is read for one of :data:`_SINGLE_BLOCK_CLASS_MARKERS`. Measured against the
     full local dumps, no class it accepts is a dumped multiblock controller: 509 accepted MTEs
     against 296 controllers at 2.9.0-beta-2, 525 against 208 at 2.8.4, overlap zero in both. It
@@ -346,7 +347,7 @@ def _manifest_says_single_block(
     """
     if manifest is None:
         return False
-    found = manifest.mte_block(machine_type, tier)
+    found = manifest.mte_block(machine_type, tier, recipe_map)
     if found is None:
         return False
     source_class = manifest.source_class(*found)
@@ -363,7 +364,9 @@ def _may_be_multiblock(recipe: Recipe, node: Node, manifest: TextureManifest | N
     handler = _effective_handler(recipe, node)
     if handler is not None and handler.kind in ("single", "multiblock"):
         return handler.kind == "multiblock"
-    return not _manifest_says_single_block(manifest, recipe.machine_type, node.overclock_tier)
+    return not _manifest_says_single_block(
+        manifest, recipe.machine_type, node.overclock_tier, _recipe_map(recipe)
+    )
 
 
 def _warn_if_plan_pack_undumped(

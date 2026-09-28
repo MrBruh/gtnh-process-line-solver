@@ -355,9 +355,20 @@ def _stand_in_cubes(machine: dict[str, Any], manifest: TextureManifest) -> list[
     Only the adapter's synthesized power source qualifies. It is our invention rather than a GT
     block, so nothing in the pack is named after it, and leaving its cell empty would put a hole
     in the export exactly where the builder has to feed the line. Anything else that fails to
-    resolve is a real gap and is refused.
+    resolve is a real gap and is refused, and the refusal says which gap: a machine reserved as a
+    single block is one the texture manifest cannot name, while a bigger one is a multiblock whose
+    structure was never dumped. Blaming the dump for the first sent #232's reader to the wrong fix.
     """
-    if not machine.get("role") == "source":
+    if machine.get("role") != "source":
+        if tuple(machine.get("size", (1, 1, 1))) == (1, 1, 1):
+            recipe_map = machine.get("recipe_map")
+            runs = f"recipe map {recipe_map!r}" if recipe_map else "no stated recipe map"
+            raise SchematicError(
+                f"{machine.get('type')!r} ({runs}, {machine.get('voltage_tier')}) matches no "
+                f"single-block machine in {manifest.origin()}, so it cannot be exported; a manifest "
+                "dumped before #232 records no recipe maps, so re-run the extractor's texture pass "
+                "for this pack (GitHub #232)"
+            )
         raise SchematicError(
             f"{machine.get('type')!r} resolves to no GT block, so it cannot be exported; it is "
             "most likely a multiblock whose structure was never dumped (GitHub #98)"

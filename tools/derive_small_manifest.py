@@ -25,6 +25,11 @@ kind at every voltage tier the examples use, ask the previewer's own
 function the previewer will ask is what guarantees the committed manifest holds precisely what a
 preview looks up, rather than a hand-kept list that drifts from it.
 
+**Single-block machines are kept by resolution too** (#232). A plan names one by its recipe map's
+localized name, which the machine's own name often lacks ("Ore Washer" runs in a "Basic Ore Washing
+Plant"), so the name rule alone drops it. For every example machine, the previewer's own
+``TextureManifest.mte_block`` is asked with the machine's recipe map and tier, and its answer is kept.
+
 Usage (from the repo root, in the dev venv)::
 
     python tools/derive_small_manifest.py [FULL_MANIFEST]
@@ -52,6 +57,7 @@ from gtnh_solver.dataset import (
     manifest_names,
     pipe_display_name,
 )
+from gtnh_solver.ir import Machine
 from gtnh_solver.previewer.textures import HATCH_KIND_BY_CLASS, TextureManifest
 
 REPO = Path.cwd()
@@ -92,16 +98,36 @@ def _scoped_examples() -> list[Path]:
     ]
 
 
-def _example_types_and_tiers() -> tuple[set[str], set[str]]:
-    """Normalized machine-type names and voltage tiers the shipped example lines reference."""
+def _example_machines() -> list[Machine]:
+    """Every machine of the scoped examples, adapted as the CLI would against the newest dump."""
     physical = load_physical_dataset()
-    types: set[str] = set()
-    tiers: set[str] = set()
-    for example in _scoped_examples():
-        for machine in adapt_file(str(example), physical=physical).machines:
-            types.add(_norm(machine.type))
-            tiers.add(machine.voltage_tier)
-    return types, tiers
+    return [
+        machine
+        for example in _scoped_examples()
+        for machine in adapt_file(str(example), physical=physical).machines
+    ]
+
+
+def _example_types_and_tiers(machines: list[Machine]) -> tuple[set[str], set[str]]:
+    """Normalized machine-type names and voltage tiers the shipped example lines reference."""
+    return {_norm(m.type) for m in machines}, {m.voltage_tier for m in machines}
+
+
+def _single_block_keys(full: dict[str, Any], machines: list[Machine]) -> set[str]:
+    """``"<block>|<meta>"`` of the block a preview draws for each example machine without a doc.
+
+    Asked of the previewer's own ``TextureManifest.mte_block``, with the machine's recipe map and
+    tier, for the reason ``_hatch_keys`` asks ``hatch_block``. The name rule at the call site keeps
+    only a machine whose name contains the plan's, and a plan names a machine by its recipe map:
+    "Ore Washer" runs in a "Basic Ore Washing Plant", which that rule never keeps (#232).
+    """
+    manifest = TextureManifest(full)
+    keys: set[str] = set()
+    for machine in machines:
+        found = manifest.mte_block(machine.type, machine.voltage_tier, machine.recipe_map)
+        if found is not None:
+            keys.add(f"{found[0]}|{found[1]}")
+    return keys
 
 
 def _example_controllers() -> set[str]:
@@ -245,14 +271,16 @@ def main() -> None:
     if not _is_full(full):
         raise SystemExit(f"{source} looks already pruned, not a full manifest")
 
-    types, tiers = _example_types_and_tiers()
+    machines = _example_machines()
+    types, tiers = _example_types_and_tiers(machines)
+    single_keys = _single_block_keys(full, machines)
     fixture_keys = _fixture_block_keys(_example_controllers())
     hatch_keys = _hatch_keys(full, tiers)
     route_keys = _route_keys(full, tiers)
     source_keys = _power_source_stand_in_keys(full)
     keep: dict[str, Any] = {}
     for key, entry in full["blocks"].items():
-        if key in hatch_keys or key in route_keys or key in source_keys:
+        if key in hatch_keys or key in route_keys or key in source_keys or key in single_keys:
             keep[key] = entry  # none matches a machine name; see the module docstring
         elif entry.get("kind") == "mte":
             name = _norm(entry.get("display_name") or "")

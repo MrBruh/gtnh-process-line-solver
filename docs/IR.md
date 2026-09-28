@@ -39,6 +39,14 @@ Machine
                                     #  none; a drawing lookup that misses falls back to `type`.
                                     #  Added in InputIR v2 (additive, #98); stamped from the
                                     #  resolved record since #205 (a clarification, no bump).
+  recipe_map: str | null            # unlocalized id of the GT recipe map the machine runs
+                                    #  ("gt.recipe.orewasher"), from the export's rawRecipeId.
+                                    #  `type` is that map's localized name, which a single
+                                    #  block's own name often lacks ("Basic Ore Washing Plant")
+                                    #  and two maps can share ("Furnace"), so the previewer and
+                                    #  .schematic export draw a single block by this and
+                                    #  `voltage_tier` first. Null for storages, power sources
+                                    #  and plans that do not state it. InputIR v3 (additive, #232).
   footprint: CellBox                # 1 cell (single-block, default) or NxMxK (multiblock bbox)
   faces: FaceSpec                   # see DOMAIN.md: front (no I/O) + 5 usable
   voltage_tier: str                 # LV/MV/HV/... - sets cable voltage rating

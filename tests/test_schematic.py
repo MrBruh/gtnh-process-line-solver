@@ -301,6 +301,30 @@ def test_a_stale_local_dump_shadows_the_committed_manifest_and_the_refusal_says_
     assert "#166" in message
 
 
+def test_a_single_block_the_manifest_cannot_name_is_not_blamed_on_the_structure_dump() -> None:
+    # #232: an Ore Washer resolved to nothing, and the refusal sent its reader to dump multiblocks
+    # for a machine that is one block. A single block's refusal says what it looked for and where.
+    manifest = TextureManifest({"blocks": {}, "icons": {}})
+    machine = {
+        "type": "Ore Washer",
+        "recipe_map": "gt.recipe.orewasher",
+        "voltage_tier": "LV",
+        "size": [1, 1, 1],
+        "cell": [0, 0, 0],
+        "role": "machine",
+    }
+    with pytest.raises(SchematicError) as caught:
+        schematic_core._stand_in_cubes(machine, manifest)
+    message = str(caught.value)
+    assert "matches no single-block machine" in message
+    assert "'gt.recipe.orewasher'" in message
+    assert "an in-memory manifest" in message, "it names the manifest it read"
+    assert "multiblock" not in message
+
+    with pytest.raises(SchematicError, match="multiblock whose structure was never dumped"):
+        schematic_core._stand_in_cubes({**machine, "size": [3, 3, 3]}, manifest)
+
+
 def test_a_pinned_version_with_no_manifest_is_refused_by_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -84,6 +84,12 @@ class RecipeSource(BaseModel):
     #: guessed (:func:`producer.plan_pack_version`). A top-level ``datasetVersionId`` exists only on
     #: the MrBruh fork, so the per-recipe field is the portable one.
     dataset_version_id: str = ""
+    #: The recipe's id in the exporter's GT recipe dump, ``"<recipe map>:<hash>"``
+    #: (``"gt.recipe.orewasher:efedc636a33541b2"``). Both forks emit it, and the part before the
+    #: colon is the GT recipe map's own unlocalized id: the exact name of the machine family the
+    #: recipe runs in, where the ``recipeMap`` beside it is only that map's localized name
+    #: (``core._recipe_map``, #232).
+    raw_recipe_id: str = ""
 
 
 class MachineConfigTier(BaseModel):

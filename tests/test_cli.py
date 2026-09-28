@@ -484,6 +484,30 @@ def test_the_single_block_class_heuristic(source_class: str, single: bool) -> No
     assert _manifest_says_single_block(None, "Thing", "LV") is False, "no manifest: unknown"
 
 
+def test_the_single_block_check_finds_a_machine_by_its_recipe_map() -> None:
+    # #232: "Ore Washer" is its map's localized name and names no machine, so by name the check
+    # cannot tell and the #207 warning would list it; the map and tier find the Basic Ore Washer.
+    manifest = TextureManifest(
+        {
+            "blocks": {
+                "gregtech:gt.blockmachines|391": {
+                    "kind": "mte",
+                    "display_name": "Basic Ore Washing Plant",
+                    "source_class": (
+                        "gregtech.api.metatileentity.implementations.MTEBasicMachineWithRecipe"
+                    ),
+                    "recipe_map": "gt.recipe.orewasher",
+                    "tier": 1,
+                    "electric": True,
+                    "sides": {},
+                }
+            }
+        }
+    )
+    assert _manifest_says_single_block(manifest, "Ore Washer", "LV", "gt.recipe.orewasher")
+    assert not _manifest_says_single_block(manifest, "Ore Washer", "LV"), "by name: unknown"
+
+
 def test_the_undumped_pack_warning_is_quiet_when_the_plans_dump_loaded(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

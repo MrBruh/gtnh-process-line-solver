@@ -7,7 +7,7 @@
       "GT5-Unofficial": "5.09.51.482",
       "StructureLib": "1.4.23"
     },
-    "generated_at": "2026-09-18T21:29:30.149Z",
+    "generated_at": "2026-09-28T17:59:16.748Z",
     "extractor_sha": "unknown",
     "note": "SMALL committed manifest: only the blocks the shipped example lines and the multiblock fixtures they resolve to need - plus every hatch kind at the tiers those lines use, the cables and pipes those tiers route, and the block that stands in for a synthesized power source, none of which matches a machine name - so `gtnh-solve --preview examples/*.json` skins out of the box. The full dump is local and version-namespaced (data/<version>/textures/manifest.json), never committed. Regenerate with tools/derive_small_manifest.py.",
     "coverage": {
@@ -17,10 +17,12 @@
       "gaps": 0
     },
     "extractor_checks": {
-      "pipes_checked": 1179,
+      "pipes_checked": 1184,
       "pipe_isotropy_failures": 0,
       "pipe_roles_differ": 558,
       "key_collisions": 0,
+      "physical_side": "SERVER",
+      "icon_injection": true,
       "cable_insulation_rgba": [
         64,
         64,
@@ -4174,6 +4176,9 @@
       "display_name": "Elite Forge Hammer",
       "te_base_type": 2,
       "source_class": "gregtech.api.metatileentity.implementations.MTEBasicMachineWithRecipe",
+      "recipe_map": "gt.recipe.hammer",
+      "tier": 6,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -4578,6 +4583,9 @@
       "display_name": "Elite Forge Hammer II",
       "te_base_type": 2,
       "source_class": "gregtech.api.metatileentity.implementations.MTEBasicMachineWithRecipe",
+      "recipe_map": "gt.recipe.hammer",
+      "tier": 7,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -4982,6 +4990,9 @@
       "display_name": "Steam Forge Hammer",
       "te_base_type": 1,
       "source_class": "gregtech.common.tileentities.machines.steam.MTESteamForgeHammerBronze",
+      "recipe_map": "gt.recipe.hammer",
+      "tier": 1,
+      "electric": false,
       "sides": {
         "DOWN": {
           "active": [
@@ -5386,6 +5397,8 @@
       "display_name": "Distillation Tower",
       "te_base_type": 2,
       "source_class": "gregtech.common.tileentities.machines.multi.MTEDistillationTower",
+      "recipe_map": "gt.recipe.distillationtower",
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -5590,6 +5603,9 @@
       "display_name": "High Pressure Steam Forge Hammer",
       "te_base_type": 1,
       "source_class": "gregtech.common.tileentities.machines.steam.MTESteamForgeHammerSteel",
+      "recipe_map": "gt.recipe.hammer",
+      "tier": 2,
+      "electric": false,
       "sides": {
         "DOWN": {
           "active": [
@@ -5994,6 +6010,8 @@
       "display_name": "Large Chemical Reactor",
       "te_base_type": 2,
       "source_class": "gregtech.common.tileentities.machines.multi.MTELargeChemicalReactor",
+      "recipe_map": "gt.recipe.largechemicalreactor",
+      "electric": true,
       "sides": {
         "NORTH": {
           "active": [
@@ -6360,6 +6378,8 @@
       "display_name": "Mega Distillation Tower",
       "te_base_type": 2,
       "source_class": "bartworks.common.tileentities.multis.mega.MTEMegaDistillTower",
+      "recipe_map": "gt.recipe.distillationtower",
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -6564,6 +6584,8 @@
       "display_name": "Super Tank I",
       "te_base_type": 1,
       "source_class": "gregtech.common.tileentities.storage.MTESuperTank",
+      "tier": 1,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -6788,6 +6810,8 @@
       "display_name": "Super Tank II",
       "te_base_type": 1,
       "source_class": "gregtech.common.tileentities.storage.MTESuperTank",
+      "tier": 2,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -7012,6 +7036,8 @@
       "display_name": "Super Tank III",
       "te_base_type": 1,
       "source_class": "gregtech.common.tileentities.storage.MTESuperTank",
+      "tier": 3,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -7236,6 +7262,8 @@
       "display_name": "Super Tank IV",
       "te_base_type": 1,
       "source_class": "gregtech.common.tileentities.storage.MTESuperTank",
+      "tier": 4,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -7460,6 +7488,8 @@
       "display_name": "Super Tank V",
       "te_base_type": 2,
       "source_class": "gregtech.common.tileentities.storage.MTESuperTank",
+      "tier": 5,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -7684,6 +7714,8 @@
       "display_name": "Super Chest I",
       "te_base_type": 1,
       "source_class": "gregtech.common.tileentities.storage.MTESuperChest",
+      "tier": 1,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -7888,6 +7920,8 @@
       "display_name": "Super Chest II",
       "te_base_type": 1,
       "source_class": "gregtech.common.tileentities.storage.MTESuperChest",
+      "tier": 2,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -8300,6 +8334,8 @@
       "display_name": "Super Chest III",
       "te_base_type": 1,
       "source_class": "gregtech.common.tileentities.storage.MTESuperChest",
+      "tier": 3,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -8608,6 +8644,8 @@
       "display_name": "Super Chest IV",
       "te_base_type": 1,
       "source_class": "gregtech.common.tileentities.storage.MTESuperChest",
+      "tier": 4,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -8812,6 +8850,8 @@
       "display_name": "Super Chest V",
       "te_base_type": 2,
       "source_class": "gregtech.common.tileentities.storage.MTESuperChest",
+      "tier": 5,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -9328,6 +9368,8 @@
       "display_name": "Debug Power Generator",
       "te_base_type": 3,
       "source_class": "tectech.thing.metaTileEntity.single.MTEDebugPowerGenerator",
+      "tier": 14,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -9592,6 +9634,8 @@
       "display_name": "LV Dynamo Hatch",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchDynamo",
+      "tier": 1,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -9776,6 +9820,8 @@
       "display_name": "MV Dynamo Hatch",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchDynamo",
+      "tier": 2,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -9960,6 +10006,8 @@
       "display_name": "HV Dynamo Hatch",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchDynamo",
+      "tier": 3,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -10144,6 +10192,8 @@
       "display_name": "LV Energy Hatch",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchEnergy",
+      "tier": 1,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -10328,6 +10378,8 @@
       "display_name": "MV Energy Hatch",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchEnergy",
+      "tier": 2,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -10512,6 +10564,8 @@
       "display_name": "HV Energy Hatch",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchEnergy",
+      "tier": 3,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -10696,6 +10750,8 @@
       "display_name": "Input Hatch (LV)",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchInput",
+      "tier": 1,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -10959,6 +11015,8 @@
       "display_name": "Input Hatch (MV)",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchInput",
+      "tier": 2,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -11183,6 +11241,8 @@
       "display_name": "Input Hatch (HV)",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchInput",
+      "tier": 3,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -11524,6 +11584,8 @@
       "display_name": "Output Hatch (LV)",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchOutput",
+      "tier": 1,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -11728,6 +11790,9 @@
       "display_name": "Basic Forge Hammer",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEBasicMachineWithRecipe",
+      "recipe_map": "gt.recipe.hammer",
+      "tier": 1,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -12132,6 +12197,9 @@
       "display_name": "Advanced Forge Hammer",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEBasicMachineWithRecipe",
+      "recipe_map": "gt.recipe.hammer",
+      "tier": 2,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -12536,6 +12604,9 @@
       "display_name": "Advanced Forge Hammer II",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEBasicMachineWithRecipe",
+      "recipe_map": "gt.recipe.hammer",
+      "tier": 3,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -12940,6 +13011,9 @@
       "display_name": "Advanced Forge Hammer III",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEBasicMachineWithRecipe",
+      "recipe_map": "gt.recipe.hammer",
+      "tier": 4,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -13344,6 +13418,9 @@
       "display_name": "Advanced Forge Hammer IV",
       "te_base_type": 2,
       "source_class": "gregtech.api.metatileentity.implementations.MTEBasicMachineWithRecipe",
+      "recipe_map": "gt.recipe.hammer",
+      "tier": 5,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -13748,6 +13825,8 @@
       "display_name": "Output Hatch (MV)",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchOutput",
+      "tier": 2,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -13952,6 +14031,8 @@
       "display_name": "Output Hatch (HV)",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchOutput",
+      "tier": 3,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -14156,6 +14237,8 @@
       "display_name": "Input Bus (LV)",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchInputBus",
+      "tier": 1,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -14380,6 +14463,8 @@
       "display_name": "Input Bus (MV)",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchInputBus",
+      "tier": 2,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -14604,6 +14689,8 @@
       "display_name": "Input Bus (HV)",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchInputBus",
+      "tier": 3,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -14828,6 +14915,8 @@
       "display_name": "Industrial Coke Oven",
       "te_base_type": 2,
       "source_class": "gtPlusPlus.xmod.gregtech.common.tileentities.machines.multi.processing.MTEIndustrialCokeOven",
+      "recipe_map": "gtpp.recipe.cokeoven",
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -15032,6 +15121,8 @@
       "display_name": "Output Bus (LV)",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchOutputBus",
+      "tier": 1,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -15236,6 +15327,8 @@
       "display_name": "Output Bus (MV)",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchOutputBus",
+      "tier": 2,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -15440,6 +15533,8 @@
       "display_name": "Output Bus (HV)",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchOutputBus",
+      "tier": 3,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -15644,6 +15739,8 @@
       "display_name": "Maintenance Hatch",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchMaintenance",
+      "tier": 1,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -15838,6 +15935,8 @@
       "display_name": "Muffler Hatch (LV)",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchMuffler",
+      "tier": 1,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -16022,6 +16121,8 @@
       "display_name": "Muffler Hatch (MV)",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchMuffler",
+      "tier": 2,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -16206,6 +16307,8 @@
       "display_name": "Muffler Hatch (HV)",
       "te_base_type": 1,
       "source_class": "gregtech.api.metatileentity.implementations.MTEHatchMuffler",
+      "tier": 3,
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
@@ -16390,6 +16493,8 @@
       "display_name": "ExxonMobil Chemical Plant",
       "te_base_type": 2,
       "source_class": "gtPlusPlus.xmod.gregtech.common.tileentities.machines.multi.production.chemplant.MTEChemicalPlant",
+      "recipe_map": "gtpp.recipe.fluidchemicaleactor",
+      "electric": true,
       "sides": {
         "DOWN": {
           "active": [
