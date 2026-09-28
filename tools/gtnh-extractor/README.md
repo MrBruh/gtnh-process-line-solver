@@ -174,6 +174,17 @@ via its `mTextures` (length 6 means sided, so pick this side), a rendered leaf r
 block-icon path. Shapes the flattener does not know are recorded in the manifest's `gaps` (with the
 offending instance's runtime field values), never guessed.
 
+Each MTE entry also states, where GT does, what a plan's machine is joined on (#232): `recipe_map`,
+the unlocalized id of the map it runs (`RecipeMapWorkable.getRecipeMap().unlocalizedName`,
+`"gt.recipe.orewasher"`); `tier`, GT's own voltage-tier number (`MTETieredMachineBlock.mTier`, LV
+is 1); and `electric` (`MetaTileEntity.isElectric()`). A plan names a single-block machine by its
+map's *localized* name, which is often not the machine's ("Ore Washer" for a "Basic Ore Washing
+Plant") and not even unique (the furnace's and the microwave's maps both read "Furnace"), so the
+previewer joins on the id and the tier instead. `electric` is there because a steam machine shares
+both with the LV one: a bronze Steam Forge Hammer is tier 1 on the hammer map. All three are
+optional and additive, so they did not bump the schema, and a manifest without them falls back to
+matching names.
+
 **How a sprite gets named.** Everything here is server-safe reflection: the icon register
 (`net.minecraft.client.renderer.texture.IIconRegister`) is a `@SideOnly(CLIENT)` class FML's
 `SideTransformer` refuses to load on a server, and `getTextureFile()` throws for the same reason, so

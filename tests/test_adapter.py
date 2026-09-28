@@ -22,6 +22,7 @@ from gtnh_solver.adapter import (
     Node,
     Plan,
     Recipe,
+    RecipeSource,
     ResolvedBlock,
     ResolvedMachine,
     ResolvedPower,
@@ -31,7 +32,7 @@ from gtnh_solver.adapter import (
     load_plan,
     to_input_ir,
 )
-from gtnh_solver.adapter.core import _bounding_region
+from gtnh_solver.adapter.core import _bounding_region, _recipe_map
 from gtnh_solver.adapter.plan import MAX_MACHINE_COUNT
 from gtnh_solver.dataset import PhysicalDataset
 from gtnh_solver.ir import (
@@ -120,6 +121,38 @@ def test_an_unbounded_multiplier_is_refused_at_the_plan() -> None:
         Node(id="n", recipe_id="r", overclock_tier="LV", machine_count=MAX_MACHINE_COUNT + 1)
     # and the bounds admit what the examples actually carry
     assert Node(id="n", recipe_id="r", overclock_tier="LV", machine_count=3).machine_count == 3
+
+
+def test_a_machine_carries_the_unlocalized_id_of_its_recipe_map() -> None:
+    # #232: "Forge Hammer" is the map's LOCALIZED name, which is what the plan leads with. The id
+    # before the colon of rawRecipeId is exact, and it is what draws a single block as its machine.
+    ir = adapt_file(_SAND)
+    hammers = [m for m in ir.machines if m.type == "Forge Hammer"]
+    assert hammers
+    assert {m.recipe_map for m in hammers} == {"gt.recipe.hammer"}
+    assert all(m.recipe_map is None for m in ir.machines if m.type != "Forge Hammer"), (
+        "storages and the power source run no recipe"
+    )
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("gt.recipe.orewasher:efedc636a33541b2", "gt.recipe.orewasher"),
+        ("gt.recipe.orewasher", None),  # no hash: not the map:hash shape
+        (":efedc636a33541b2", None),
+        ("", None),
+    ],
+)
+def test_a_raw_recipe_id_states_a_map_only_in_the_map_colon_hash_shape(
+    raw: str, expected: str | None
+) -> None:
+    recipe = Recipe(id="r", machine_type="Ore Washer", source=RecipeSource(raw_recipe_id=raw))
+    assert _recipe_map(recipe) == expected
+
+
+def test_a_recipe_with_no_source_states_no_map() -> None:
+    assert _recipe_map(Recipe(id="r", machine_type="Ore Washer")) is None
 
 
 def test_adapt_sand_to_input_ir() -> None:

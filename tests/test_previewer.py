@@ -66,6 +66,10 @@ def test_scene_has_machines_region_and_legend() -> None:
     m = scene["machines"][0]
     assert set(m) >= {"id", "type", "cell", "size", "front", "role", "color", "voltage_tier"}
     assert all(mm["voltage_tier"] for mm in scene["machines"])  # tier drives single-block texturing
+    # ...and so does the recipe map a machine runs, which names it where its type does not (#232)
+    hammers = [mm for mm in scene["machines"] if mm["type"] == "Forge Hammer"]
+    assert hammers
+    assert all(mm["recipe_map"] == "gt.recipe.hammer" for mm in hammers)
 
 
 def test_scene_power_route_carries_thickness() -> None:

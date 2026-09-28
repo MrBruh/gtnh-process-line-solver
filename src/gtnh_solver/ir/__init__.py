@@ -280,4 +280,13 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   nothing for a one-block pipe, and the line is missing a connection with nothing raising.
 #   `Route.cells()` is the one reading of a route's blocks that covers both forms, so a consumer
 #   should use it (or, like `route_blocks`, take the terminals' cells as well as the segments').
+#
+# InputIR v3 (additive, no version bump) - added `Machine.recipe_map: str | None`, the unlocalized id
+#   of the GT recipe map the machine runs ("gt.recipe.orewasher"), read off the export's
+#   `recipe.source.rawRecipeId`. `Machine.type` is that map's localized name, which a single-block
+#   machine's own name often does not contain ("Ore Washer" vs "Basic Ore Washing Plant") and which
+#   two maps can share ("Furnace" for both the furnace and the microwave), so the previewer and the
+#   exporter drew some machines as the wrong block, or as none. They now join on this and the
+#   voltage tier first. None for storages, power sources and a plan that does not state it, where
+#   they fall back to `type` exactly as before. (GitHub #232.)
 # ---------------------------------------------------------------------------

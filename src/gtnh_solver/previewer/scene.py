@@ -160,6 +160,9 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
             # generically named single-block machine to its GT tier-prefixed manifest entry
             # (e.g. "Forge Hammer" at LV -> "Basic Forge Hammer").
             "voltage_tier": machines[pl.machine_id].voltage_tier,
+            # The GT recipe map it runs ("gt.recipe.orewasher"), which with the tier names a
+            # single-block machine exactly where `type` ("Ore Washer") does not (#232).
+            "recipe_map": machines[pl.machine_id].recipe_map,
             "role": _role(machines[pl.machine_id]),
             # What a boundary storage holds, so a hover can tell four identical Super Tanks apart
             # (GitHub #155). Empty for every other machine - a machine's ports are its recipe, not

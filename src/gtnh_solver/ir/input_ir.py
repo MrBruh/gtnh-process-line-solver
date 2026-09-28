@@ -152,6 +152,13 @@ class Machine(StrictModel):
     #: own key, or None when the export carried none; a consumer whose lookup finds nothing under
     #: it falls back to ``type``. (GitHub #98, #205.)
     block_key: str | None = None
+    #: The GT recipe map this machine runs, by its unlocalized id (``"gt.recipe.orewasher"``), when
+    #: the export states it. ``type`` is that map's LOCALIZED name, which is often not the machine's
+    #: own ("Ore Washer" runs in a "Basic Ore Washing Plant") and not even unique (the Furnace's map
+    #: and the Microwave's both localize to "Furnace"). So a consumer drawing a single-block machine
+    #: joins on this and ``voltage_tier`` first, and falls back to ``type`` when it is None or finds
+    #: nothing. (GitHub #232.)
+    recipe_map: str | None = None
     footprint: CellBox = Field(default_factory=CellBox)
     faces: FaceSpec = Field(default_factory=FaceSpec)
     voltage_tier: str = Field(min_length=1)  # LV/MV/HV/... - sets cable voltage rating

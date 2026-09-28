@@ -177,6 +177,22 @@ def _block_key_for(recipe: Recipe, resolved: ResolvedMachine | None) -> str | No
     return None
 
 
+def _recipe_map(recipe: Recipe) -> str | None:
+    """The unlocalized id of the GT recipe map the recipe runs in, or None if the export omits it.
+
+    Read off ``source.rawRecipeId`` (``"gt.recipe.orewasher:efedc636a33541b2"``), which both forks
+    emit. The name the export leads with, ``machineType``/``recipeMap`` ("Ore Washer"), is that
+    map's localized name: often not the machine's ("Basic Ore Washing Plant") and not even unique
+    (the furnace's and the microwave's maps both read "Furnace"). The id is exact, so the previewer
+    and the exporter join a single-block machine on it (#232). An id without the ``map:hash`` shape
+    states no map.
+    """
+    if recipe.source is None:
+        return None
+    recipe_map, colon, _ = recipe.source.raw_recipe_id.partition(":")
+    return recipe_map if colon and recipe_map else None
+
+
 def _fluid_output_count(recipe: Recipe) -> int:
     """How many distinct fluids the recipe outputs.
 
@@ -333,6 +349,7 @@ def to_input_ir(
                 id=instance_id,
                 type=recipe.machine_type,
                 block_key=block_key,
+                recipe_map=_recipe_map(recipe),
                 footprint=shape.footprint if shape is not None else _DEFAULT_FOOTPRINT,
                 # None without a dataset record: no structural ceiling is known, so the power
                 # synthesis keeps such a machine on one connection (see adapter.power).
