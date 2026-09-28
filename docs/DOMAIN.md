@@ -22,7 +22,8 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
 
 - A machine has six faces. The **front face** (set by orientation) is the working face and
   carries **no item/fluid I/O**. The solver chooses orientation so required I/O faces stay
-  routable.
+  routable. A block whose faces do fixed jobs (the Item Filter below) states them per port instead
+  (`Port.faces`, read through `Machine.allowed_faces`), and may then use its front.
 - The **other five faces** can each be input OR output of items or fluids. Routing a specific
   commodity onto a face may require a **cover** (conveyor for items, pump/regulator for
   fluids); a cover occupies that face. The layout records the face each pipe docks on (the
@@ -34,11 +35,36 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
 - **One face is one connection, but one pipe block can serve several machines.** A pipe block
   wired to faces of several machines on the same net is a manifold, and a real build uses it
   freely: the maintainer's parallel-sand build puts 20 item connections on 12 pipe blocks that way
-  (#164). Two connections of *one* machine through one face are not something a block has (its
-  output side refuses input by default, `mAllowInputFromOutputSide`), so the validator rejects
-  them (`terminal_face_contention`). And two **nets** never share a pipe block: a GT item pipe
-  delivers to any wired inventory that accepts the stack, and nothing in a plan says two nets
-  carry the same item, so a shared block would cross-feed them.
+  (#164). Two connections of *one* machine through one face are not modelled: the solver gives
+  each connection a face of its own, and the validator rejects two on one face
+  (`terminal_face_contention`). Whether a basic machine's output face also takes input differs by
+  pack: `mAllowInputFromOutputSide` is **off** by default on 2.8.4 (`MTEBasicMachine.java:118`)
+  and **on** by default on 2.9 (`:123`), where the output face accepts any valid recipe input, so a
+  layout that relied on either default would run on one pack only. And two **nets** never share a
+  pipe block: a GT item pipe delivers to any wired inventory that accepts the stack, and nothing in
+  a plan says two nets carry the same item, so a shared block would cross-feed them.
+- **A single block with too few faces sends its item outputs out of one face, sorted by Item
+  Filters (#249).** Five usable faces, one per connection, is not enough for a machine like the
+  Ore Washer (item in, fluid in, three item outputs, power). A GT basic machine with item
+  auto-output on ejects *every* item slot through its output face, so the build is one pipe from
+  that face (the **trunk**) to one **Item Filter** per item. The filter
+  (`MTEFilter` < `MTEBuffer`; the ULV one is mID 9240 in both packs and needs no power) takes items
+  on every face but its back, its front included, keeps only what its slots name, and pushes one
+  stack at a time out of its **back** into whatever is there, with no toggle
+  (`MTEBuffer.moveItems`). A GT item pipe skips an inventory that refuses a stack and never pushes
+  back to the side it received from (`MTEItemPipe.sendItemStack`), so each item reaches the one
+  filter that takes it. The adapter builds this only for a machine that
+  `single_block_shortfalls` flags, has at least two item outputs, and is **proven** a single block
+  (its handler says `single`, or a census dataset for the plan's pack lacks it): a 1x1x1 box that
+  might be a multiblock missing from the dataset is left as it is and reported. Each machine
+  instance gets its own trunk and filters, since on 2.9 a sibling's output face would take the
+  other's items. The filter's faces are pinned in the IR (`Port.faces`: input on front, left,
+  right, up, down; output on back), and the validator checks that every trunk item has exactly one
+  filter, that each filter's output carries only its items, and that nothing but its own output
+  sits behind it (`FILTER_ITEM_UNSORTED`, `FILTER_BACK_NOT_ITS_OUTPUT`). Two limits: a filter faces
+  horizontally only, because every machine orientation is horizontal, so its back is never up or
+  down; and fluids are never merged, since GT has no fluid filter block. #248's Item Distributor
+  would ride the same face pins.
 - **Required-I/O-face reachability is a HARD constraint** - a blocked required output face
   means the line doesn't run. "Convenient access" is a soft preference.
 
