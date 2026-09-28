@@ -559,6 +559,7 @@ const centerById = {}, sizeById = {}, expandedById = {};
 const hoverables = [];
 const nameById = Object.fromEntries(SCENE.machines.map((m) => [m.id, m.type]));
 const contentsById = Object.fromEntries(SCENE.machines.map((m) => [m.id, m.contents || []]));
+const filterItemsById = Object.fromEntries(SCENE.machines.map((m) => [m.id, m.filter_items || []]));
 for (const m of SCENE.machines) {
   const [sx, sy, sz] = m.size;
   const pos = new THREE.Vector3(m.cell[0] + sx / 2, m.cell[1] + sy / 2, m.cell[2] + sz / 2);
@@ -1014,10 +1015,15 @@ function machineHover(id) {
   if (!c || !nameById[id]) return null;
   const s = sizeById[id] || [1, 1, 1];
   // A boundary storage's contents under its type, in the system-i/o panel's own words: 'in:' is a
-  // buffer the builder keeps stocked, 'out:' one a product collects in. A machine that holds
-  // nothing adds no line at all, so its tag is the single name it has always been.
+  // buffer the builder keeps stocked, 'out:' one a product collects in. An Item Filter lists what
+  // its slots must let through (#249). A machine that holds nothing adds no line at all, so its tag
+  // is the single name it has always been.
   return {
-    lines: () => [nameById[id], ...contentsById[id].map((c) => c.flow + ': ' + c.resource + viaMe(c))],
+    lines: () => [
+      nameById[id],
+      ...contentsById[id].map((c) => c.flow + ': ' + c.resource + viaMe(c)),
+      ...filterItemsById[id].map((item) => 'lets through: ' + item),
+    ],
     anchor: [c.x, c.y + s[1] / 2 + 0.15, c.z],
   };
 }

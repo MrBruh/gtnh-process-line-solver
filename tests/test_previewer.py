@@ -451,6 +451,39 @@ def test_scene_storage_contents_skip_its_power_connection() -> None:
     assert placed["contents"] == [{"resource": "water", "flow": "out", "me": False}]
 
 
+def test_scene_names_an_item_filter_and_what_it_lets_through() -> None:
+    """An Item Filter the adapter placed to sort a merged run (#249) renders as a filter and its
+    hover lists the items its slots must let through, which is what a builder sets in game. It is
+    known by ``filter_items``, not by its type string, and every other machine lists nothing."""
+    item_filter = Machine.model_validate(
+        {
+            **machine(
+                "item-filter:w:gt.dust.stone",
+                [
+                    Port(id="input:x", commodity=Commodity.ITEM, direction=IODirection.INPUT),
+                    Port(id="output:x", commodity=Commodity.ITEM, direction=IODirection.OUTPUT),
+                ],
+                type_="Ultra Low Voltage Item Filter",
+            ).model_dump(),
+            "filter_items": ("gt.dust.stone",),
+        }
+    )
+    washer = machine("w", [], type_="Ore Washer")
+    problem = InputIR(bounding_region=CellBox(sx=4, sy=2, sz=4), machines=[item_filter, washer])
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[at(item_filter.id, 0, 0, 0), at("w", 2, 0, 0)],
+    )
+    scene = build_scene(problem, layout)
+    by_id = {m["id"]: m for m in scene["machines"]}
+    assert by_id[item_filter.id]["role"] == "filter"
+    assert by_id[item_filter.id]["filter_items"] == ["gt.dust.stone"]
+    assert by_id["w"]["role"] == "machine"
+    assert by_id["w"]["filter_items"] == []
+    assert "'lets through: '" in render_html(scene)
+
+
 def test_the_nitrobenzene_super_tanks_are_individually_identifiable(
     solved_nitrobenzene: tuple[InputIR, LayoutResult],
 ) -> None:
