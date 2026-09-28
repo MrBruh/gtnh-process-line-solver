@@ -261,8 +261,8 @@ doc as intent and reconcile.
     `MTEBasicMachine.maxAmperesIn()`, `(mEUt * 2) / V[tier] + 1`, which scales with the recipe and
     is only defined for `mEUt <= V[tier] * mAmperage`. `Machine.hatch_cells is None` does not pick
     between them: it says only "no structural record", a population dominated by multiblocks
-    whenever the dump does not cover them - under the committed two-machine fixtures it is *every*
-    machine in both shipped examples, the Large Chemical Reactor included. So the adapter states a
+    whenever the dump does not cover them - with no dataset at all it is *every* machine in both
+    shipped examples, the Large Chemical Reactor included. So the adapter states a
     `Port.max_amps` ceiling only where the class is established - a structural record (hatches), or
     a **census** dataset that positively failed to find the machine (a single block) - and leaves
     it unset otherwise, which the validator reads as "cannot be measured" rather than "unlimited".

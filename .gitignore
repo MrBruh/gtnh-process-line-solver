@@ -41,6 +41,17 @@ out/
 !/data/multiblocks/_meta.json
 !/data/multiblocks/gregtech_machine_1000.json
 !/data/multiblocks/gregtech_machine_1001.json
+# The controllers the shipped example lines resolve to, trimmed to the forms those lines reserve by
+# tools/derive_example_multiblocks.py, so they solve on a fresh clone. Listed one by one, so a
+# verbatim dump copied into data/multiblocks/ is still ignored.
+!/data/multiblocks/gregtech_gt_blockmachines_1126.json
+!/data/multiblocks/gregtech_gt_blockmachines_1169.json
+!/data/multiblocks/gregtech_gt_blockmachines_15512.json
+!/data/multiblocks/gregtech_gt_blockmachines_15543.json
+!/data/multiblocks/gregtech_gt_blockmachines_2730.json
+!/data/multiblocks/gregtech_gt_blockmachines_31021.json
+!/data/multiblocks/gregtech_gt_blockmachines_791.json
+!/data/multiblocks/gregtech_gt_blockmachines_998.json
 /data/textures/*
 !/data/textures/manifest.json
 

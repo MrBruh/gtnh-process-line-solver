@@ -55,6 +55,13 @@ alarm costs the search its best placements while a missed one costs a single rou
 - m's neighbours' connections on m's own nets, which may share m's cells or may not;
 - that a piped net needs two cells to be a route at all;
 - the multiblock casing cell (see :func:`crowded_machines`).
+
+**One shortfall needs no placement at all.** A single block has :data:`SINGLE_BLOCK_IO_FACES` faces
+that can carry a connection, and each connection takes one of its own, so a single block carrying
+more than that fits in no placement (:func:`single_block_shortfalls`). It is the machine the gate
+names on every attempt, and it is mostly a multiblock whose structure the dataset lacks, placed as
+a 1x1x1 box. Knowing it up front is what lets the solver say so instead of reporting whichever net
+lost the last face.
 """
 
 from __future__ import annotations
@@ -62,7 +69,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from gtnh_solver.ir import InputIR, Placement
+from gtnh_solver.ir import Facing, InputIR, Placement
 from gtnh_solver.ir.geometry import Cell
 from gtnh_solver.ir.nets import placement_index
 from gtnh_solver.router._grid import dock_candidates, obstacle_cells
@@ -140,6 +147,38 @@ def crowded_machines(problem: InputIR, placements: Sequence[Placement]) -> tuple
         )
     ]
     return tuple(dict.fromkeys(crowded))  # de-duplicated, first occurrence order
+
+
+#: The faces of a single block that can carry a connection: every face but the front, which carries
+#: no I/O (docs/DOMAIN.md).
+SINGLE_BLOCK_IO_FACES = len(Facing) - 1
+
+
+def single_block_shortfalls(problem: InputIR) -> dict[str, int]:
+    """Single blocks carrying more connections than they have faces for, with how many they carry.
+
+    Needs no placement, unlike :func:`crowded_machines`, and is exact under the solver's own rule:
+    each connection of a machine takes a face of its own, whether a pipe or cable docks on it or an
+    auto-output spends it touching its sink, so no placement hosts more than
+    :data:`SINGLE_BLOCK_IO_FACES` on a single block. A commodity riding the ME network docks nothing
+    and counts nothing. Machines come in problem order.
+
+    A single block here is any one-cell footprint, which is also what a multiblock falls back to
+    when the dataset lacks its structure, the case this mostly catches. It states a limit of the
+    solver's model, not of the game: GT lets some outputs share a face, which the solver does not
+    model.
+    """
+    connections: dict[str, int] = {}
+    for net in problem.nets:
+        if problem.me_toggles.toggled(net.commodity):
+            continue
+        for endpoint in net.endpoints:
+            connections[endpoint.machine_id] = connections.get(endpoint.machine_id, 0) + 1
+    return {
+        machine.id: connections[machine.id]
+        for machine in problem.machines
+        if machine.footprint.volume == 1 and connections.get(machine.id, 0) > SINGLE_BLOCK_IO_FACES
+    }
 
 
 def _docked_connections(problem: InputIR, placements: Sequence[Placement]) -> list[_Connection]:

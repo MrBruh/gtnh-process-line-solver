@@ -54,6 +54,8 @@ worse one. Dropping it is what lets the attempts run side by side::
                 start (_POOL_AFTER_S), else in turn, in this process
     rank in grid order: the best VALID layout, else the fewest unrouted nets, else lay the first
     placement the gate turned away
+    a partial layout's reason names any single block with more connections than faces, the cause
+    no placement can fix (placement.single_block_shortfalls), ahead of the routers' own words
 
 An attempt returns the same thing whichever process runs it, and the ranking reads the attempts in
 grid order, so a given input and ``seed`` yields the same layout whatever ``jobs`` is and however
@@ -99,11 +101,13 @@ from gtnh_solver.ir import (
     Route,
 )
 from gtnh_solver.placement import (
+    SINGLE_BLOCK_IO_FACES,
     Objective,
     bank_columns,
     crowded_machines,
     optimize_placement,
     place,
+    single_block_shortfalls,
 )
 from gtnh_solver.router import (
     claims_by_machine,
@@ -185,7 +189,7 @@ def solve(
     The fast path ignores it, having only the one attempt.
     """
     if not optimize:
-        return _solve_fast(problem, seed, objective)
+        return _with_shortfall_reason(problem, _solve_fast(problem, seed, objective))
     budget = _BUDGETS[effort or DEFAULT_EFFORT]
     # The first placement the gate turned away, kept as a parachute. The gate is a heuristic about
     # geometry and the routers are the authority, so it is only ever allowed to pick BETTER
@@ -248,8 +252,46 @@ def solve(
         # changed nothing else.
         assert gated is not None  # the only path that skips every attempt sets it
         layout, _ = _assemble(problem, gated, seed, objective, max_rounds=budget.negotiation_rounds)
+        return _with_shortfall_reason(problem, layout)
+    return _with_shortfall_reason(problem, best_partial)
+
+
+def _with_shortfall_reason(problem: InputIR, layout: LayoutResult) -> LayoutResult:
+    """``layout``, its reason restated when a single block has more connections than faces.
+
+    The routers report such a line by whichever net lost the race for the last free face, often as
+    congestion with advice to spread the machines apart, which no amount of room satisfies. The
+    shortfall is the cause, so the reason names it first and keeps the routers' words after it. Only
+    a partial layout is restated: a VALID one needs no reason, and an INFEASIBLE one (machines that
+    do not fit the region at all) has a different cause.
+    """
+    if layout.status is not LayoutStatus.PARTIAL_INVALID:
         return layout
-    return best_partial
+    shortfalls = single_block_shortfalls(problem)
+    if not shortfalls:
+        return layout
+    types = {m.id: m.type for m in problem.machines}
+    named = ", ".join(f"{mid!r} ({types[mid]}, {n})" for mid, n in shortfalls.items())
+    routers = layout.infeasibility.detail if layout.infeasibility is not None else "no reason"
+    return layout.model_copy(
+        update={
+            "infeasibility": Infeasibility(
+                constraint="single_block_faces",
+                detail=(
+                    f"more connections than a single block has faces for: {named}. The solver gives "
+                    f"each connection a face of its own, and a single block has "
+                    f"{SINGLE_BLOCK_IO_FACES} that can carry one (the front carries none), so no "
+                    f"placement lays these; GT lets some outputs share a face, which the solver "
+                    f"does not model yet. The routers stopped at: {routers}"
+                ),
+                suggested_relaxation=(
+                    "if a machine is a multiblock, load a dataset with its structure so it is "
+                    "placed at its real size (run the extractor for the plan's pack); otherwise "
+                    "move one of its commodities to ME, or split its work across more machines"
+                ),
+            )
+        }
+    )
 
 
 @dataclass(frozen=True)

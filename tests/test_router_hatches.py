@@ -48,7 +48,7 @@ from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
 from tests._helpers import at, power_source
 
-#: The committed two-machine fixture dump, named so a test can pin it instead of inheriting
+#: The committed fixture sample, named so a test can pin it instead of inheriting
 #: whichever dataset this checkout happens to resolve.
 _FIXTURE_DATASET = Path(__file__).resolve().parents[1] / "data" / "multiblocks"
 

@@ -431,11 +431,12 @@ def test_the_shipped_lines_place_a_hatch_for_every_multiblock_port() -> None:
     from gtnh_solver.cli import _load_physical_or_warn
 
     physical = _load_physical_or_warn(None)
-    for name in ("gtnh-sand.json", "gtnh-nitrobenzene.json"):
+    # Nitrobenzene at seed 1: the suite's one short attempt leaves seed 0's MV cable no free face.
+    for name, seed in (("gtnh-sand.json", 0), ("gtnh-nitrobenzene.json", 1)):
         problem = adapt_file(_EXAMPLES / name, physical=physical)
-        layout = solve(problem)
+        layout = solve(problem, seed=seed)
         if layout.status is not LayoutStatus.VALID:
-            continue  # CI carries only the two committed fixtures; see docs/TESTING.md
+            continue  # a partial layout has no finished wiring to check; see docs/TESTING.md
         assert validate(problem, layout).ok, name
         wired = {(h.machine_id, h.port_id) for h in layout.hatches if h.port_id is not None}
         for machine in problem.machines:

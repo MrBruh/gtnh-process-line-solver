@@ -443,8 +443,8 @@ def test_no_dataset_states_no_intake_ceiling_at_all() -> None:
     # per energy hatch and a basic machine's at its own maxAmperesIn, and with no dataset nothing
     # says which class this is - so the connection states no ceiling and the validator reports the
     # machine as unmeasured rather than measuring it against whichever formula happened to be
-    # coded (#114). Under the committed two-machine fixtures this is every machine in both shipped
-    # examples, the Large Chemical Reactor included.
+    # coded (#114). With no dataset this is every machine in both shipped examples, the Large
+    # Chemical Reactor included.
     assert _power_in(to_input_ir(_powered_plan(30.0))).max_amps is None
 
 

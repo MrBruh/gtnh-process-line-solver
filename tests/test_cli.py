@@ -68,9 +68,10 @@ from tests._helpers import hatched_dataset
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 _SAND = str(_EXAMPLES / "gtnh-sand.json")
 _NITROBENZENE = str(_EXAMPLES / "gtnh-nitrobenzene.json")
-#: The committed fixtures: a two-machine SAMPLE declaring ``census: false``. Named here so a test
-#: can pin that configuration rather than inherit whichever dump the machine happens to hold
-#: (docs/TESTING.md, "CI sees a smaller dataset than you do").
+#: The committed fixtures: a SAMPLE declaring ``census: false`` (two hand-authored controllers plus
+#: the ones the shipped example lines resolve to). Named here so a test can pin that configuration
+#: rather than inherit whichever dump the machine happens to hold (docs/TESTING.md, "CI sees a
+#: smaller dataset than you do").
 _FIXTURE_DATASET = Path(__file__).resolve().parents[1] / "data" / "multiblocks"
 
 
@@ -337,8 +338,24 @@ def _undumped(plan: Plan) -> tuple[Plan, PhysicalDataset, InputIR]:
     """``plan`` adapted the way a fresh clone adapts it: against the committed sample."""
     physical = _load_physical_or_warn()
     assert physical is not None
-    assert not physical.meta.census, "the suite is pinned to the committed two-machine sample"
+    assert not physical.meta.census, "the suite is pinned to the committed sample"
     return plan, physical, to_input_ir(plan, physical=physical)
+
+
+#: The hand-authored pair: the committed sample as it stood before it carried the shipped lines'
+#: controllers, and still a sample that lacks every nitrobenzene multiblock.
+_HAND_AUTHORED = ("gregtech_machine_1000.json", "gregtech_machine_1001.json")
+
+
+def _stage_hand_authored_sample(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Resolve the dataset to the hand-authored pair and the committed manifest, under ``root``."""
+    (root / "multiblocks").mkdir()
+    for name in ("_meta.json", *_HAND_AUTHORED):
+        shutil.copy2(_FIXTURE_DATASET / name, root / "multiblocks" / name)
+    (root / "textures").mkdir()
+    committed_manifest = dataset_roots.DEFAULT_DATA / "textures" / "manifest.json"
+    shutil.copy2(committed_manifest, root / "textures" / "manifest.json")
+    monkeypatch.setattr(dataset_roots, "DEFAULT_DATA", root)
 
 
 def _one_node_plan(machine_type: str, *, kind: str = "", tier: str = "LV") -> Plan:
@@ -378,10 +395,12 @@ def test_cli_is_quiet_about_an_undumped_pack_whose_machines_are_all_single_block
 
 
 def test_the_undumped_pack_warning_names_exactly_the_multiblock_types(
-    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # The line where it matters: each of these reserves one cell, which is why the shipped
-    # nitrobenzene line is infeasible on a fresh clone (test_cli_solves_nitrobenzene).
+    # The line where it matters, against a sample lacking its structures: each of these reserves
+    # one cell, which is why the nitrobenzene line could not solve on a fresh clone until the
+    # committed sample carried them (test_cli_solves_nitrobenzene).
+    _stage_hand_authored_sample(tmp_path, monkeypatch)
     err = _warning_for(load_plan(_NITROBENZENE), capsys)
     assert err.startswith(f"{_UNDUMPED} 2.8.4, so these reserve 1x1x1 footprints")
     assert (
@@ -393,6 +412,14 @@ def test_the_undumped_pack_warning_names_exactly_the_multiblock_types(
     assert missing in err
     assert "tools/gtnh-extractor/README.md" in err
     assert len(err) - len(missing) < 300, "a warning is read, so it stays short"
+
+
+def test_a_fresh_clone_says_nothing_of_the_shipped_nitrobenzene_line(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The committed sample carries this line's controllers (tools/derive_example_multiblocks.py),
+    # so on a fresh clone each finds its structure and nothing falls to 1x1x1.
+    assert _warning_for(load_plan(_NITROBENZENE), capsys) == ""
 
 
 def test_a_handler_saying_single_keeps_a_type_off_the_list(
@@ -512,39 +539,37 @@ def _line_resolves_multiblocks() -> bool:
     """Whether the dataset the CLI resolves knows the nitrobenzene line's machines.
 
     Generated dumps are local and version-namespaced by policy, and the suite pins resolution to
-    the committed data (``conftest._pinned_dataset_root``), which is two fixtures (Electric Blast
-    Furnace, Vacuum Freezer) that this line uses neither of. So every machine on it falls back to
-    the 1x1x1 default, and this reads that off the CLI's own load path rather than asserting it
-    from the outside.
+    the committed data (``conftest._pinned_dataset_root``), which carries this line's controllers
+    trimmed to the forms it reserves (``tools/derive_example_multiblocks.py``). This reads that off
+    the CLI's own load path rather than asserting it from the outside: every machine the export
+    names a controller for has its real form, none the 1x1x1 default.
     """
     ir = adapt_file(_NITROBENZENE, physical=_load_physical_or_warn())
-    return any(m.footprint.volume > 1 for m in ir.machines)
+    return all(m.footprint.volume > 1 for m in ir.machines if m.block_key is not None)
 
 
 def test_cli_solves_nitrobenzene(capsys: pytest.CaptureFixture[str]) -> None:
-    """End to end on the multiblock line, asserting what the pinned dataset actually allows.
+    """End to end on the multiblock line, from the committed data alone: VALID.
 
-    With fixtures alone every machine is a 1x1x1 block, the HV Distillation Tower needs 7
-    connections against 5 usable faces, and the honest answer is an explicit face-reachability
-    infeasibility. With the real structure dump the same line is VALID instead, and the multi-hatch
-    power model is what makes it so: the Coke Oven draws far more than one energy hatch can take,
-    and before that model the MV net was rejected outright.
+    The committed data carries this line's controllers, so a fresh clone (and CI) reserves each
+    multiblock's real form. It used to hold only two unrelated fixtures, every machine here was a
+    1x1x1 block, and the line could not solve: its HV Distillation Tower has 7 connections and a
+    single block has 5 faces that can carry I/O. With the real forms it is VALID, and the
+    multi-hatch power model is what makes it so: the Coke Oven draws far more than one energy hatch
+    can take, and before that model the MV net was rejected outright.
 
-    Which of the two this asserts used to depend on the machine it ran on. It does not any more
-    (#182): the pin puts every run in the fixtures configuration, so the configuration is asserted
-    first and the outcome unconditionally after it. The full-dump outcome is a real property of a
-    configuration the suite no longer resolves, and would need that dump staged to be tested.
+    The configuration is asserted first and the outcome unconditionally after it (#182). Seed 1,
+    because the suite's solve is one short attempt (``conftest._minimal_solves``) and seed 0's
+    leaves the MV cable no free face on one machine; which seeds solve moves with the search, as
+    for ``conftest._nitrobenzene_session``.
     """
-    code = main([_NITROBENZENE])
+    code = main([_NITROBENZENE, "--seed", "1"])
     captured = capsys.readouterr()
-    layout = _published(captured.out)  # the layout is published either way
-    assert not _line_resolves_multiblocks(), "the suite is pinned to the committed fixtures"
-    assert code == 1
-    assert layout.status is not LayoutStatus.VALID
-    assert layout.infeasibility is not None
-    assert f"[{layout.status.value}] {layout.infeasibility.constraint}:" in captured.err
-    # And the run says why, which it did not before #207: the plan's pack has no dump here.
-    assert f"{_UNDUMPED} 2.8.4" in captured.err
+    layout = _published(captured.out)
+    assert _line_resolves_multiblocks(), "the committed data carries this line's controllers"
+    assert code == 0
+    assert layout.status is LayoutStatus.VALID
+    assert _UNDUMPED not in captured.err, "nothing fell to 1x1x1, so there is nothing to warn of"
 
 
 def test_cli_partial_invalid_returns_1(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -1031,7 +1056,7 @@ def sample_dataset(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin the CLI to the committed fixtures, whatever dump this checkout happens to hold.
 
     The abstention tests below are *about* the note, and only a **sample** dump produces one: a
-    miss in a two-machine sample is no evidence, so the adapter states no ceiling and the
+    miss in a sample is no evidence, so the adapter states no ceiling and the
     validator abstains. In a **census** dump a miss is positive evidence the machine is a basic
     machine, `max_amps` is stated, the intake is measured, and there is correctly no note at all
     (`dataset/schema.py`: `census` defaults to True, so any pre-#129 local dump reads as one).
@@ -1055,7 +1080,7 @@ def test_cli_says_how_many_machines_went_unmeasured_for_power_intake(
     # Against a SAMPLE dump nothing says whether a machine is a basic machine or a multiblock, so
     # the validator's under-supply check abstains and the run must SAY so. Silence there used to
     # be indistinguishable from "checked and fine" (#114). Sand is three Forge Hammers and the
-    # committed fixtures are a two-machine sample, so all three go unmeasured.
+    # committed fixtures are a sample of multiblocks, so all three go unmeasured.
     assert main([_SAND]) == 0
     err = capsys.readouterr().err
     assert "power intake unmeasured for 3 of 3 powered machine(s)" in err

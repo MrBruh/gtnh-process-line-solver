@@ -93,15 +93,18 @@ can hold several pack versions side by side without overwriting, and there is **
 
 Only small curated fixtures ship, so a fresh clone and the test suite work offline:
 
-- the two multiblock fixtures (`gregtech_machine_1000.json` = Electric Blast Furnace,
-  `gregtech_machine_1001.json` = Vacuum Freezer); and
-- a small (~120 KB) `data/textures/manifest.json` scoped to the example lines' machines, derived
-  from a full manifest, so `gtnh-solve --preview examples/*.json` still skins out of the box.
+- the two hand-authored multiblock fixtures (`gregtech_machine_1000.json` = Electric Blast
+  Furnace, `gregtech_machine_1001.json` = Vacuum Freezer);
+- the controllers the shipped example lines resolve to, one file each, trimmed from a real dump to
+  the built forms those lines reserve by `tools/derive_example_multiblocks.py` (decided 2026-09-28,
+  so the nitrobenzene lines solve in CI; a verbatim dump is still never committed); and
+- a small (under 0.5 MB) `data/textures/manifest.json` scoped to the example lines' machines,
+  derived from a full manifest, so `gtnh-solve --preview examples/*.json` still skins out of the box.
 
-`.gitignore` is an allow-list under `data/`: everything is ignored except those fixtures and the
-small manifest, so any `data/<version>/` dump stays local automatically. A fresh clone places and
-renders the two fixtures plus single-block machines; the full data for anything else appears once a
-developer runs the extractor. Rationale: the shipped example lines barely use the full data, and a
+`.gitignore` is an allow-list under `data/`, file by file: everything is ignored except those
+fixtures and the small manifest, so any `data/<version>/` dump stays local automatically. A fresh
+clone places the committed controllers plus single-block machines; the full data for anything else
+appears once a developer runs the extractor. Rationale: the shipped example lines barely use the full data, and a
 committed full dataset (~6 MB manifest, ~190 multiblock docs) is not worth its repo weight or a
 weekly Forge CI run.
 

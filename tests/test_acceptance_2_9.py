@@ -11,8 +11,9 @@ machine now draws, and exports, as the controller it was sized from::
          --build_scene + machine_cubes--> each machine expands to the doc keyed by ITS block_key
          --build_schematic--> the controller mIDs the plan names, and nothing unresolved
 
-**It needs the real 2.9 dump, so it skips without one.** The committed ``data/multiblocks/`` is a
-two-controller sample and the committed manifest is example-scoped; neither holds these machines.
+**It needs the real 2.9 dump, so it skips without one.** The committed ``data/multiblocks/`` does
+carry this line's controllers, trimmed, but the committed manifest skips the line, so it cannot
+draw them.
 The suite pins the dataset every other test resolves to the committed copy (``tests/conftest.py``),
 so this module reads the repo's own ``data/2.9.0-beta-2/`` by explicit path instead of through
 ``resolve_dataset_path``, and a missing half skips with the extractor run that makes it. For the

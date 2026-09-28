@@ -155,7 +155,7 @@ def pytest_configure(config: pytest.Config) -> None:
 _COMMITTED_DATA = Path(__file__).resolve().parents[1] / "data"
 
 #: The sub-paths ``resolve_dataset_path`` falls back to, and the whole of what a fresh clone (and
-#: therefore every CI job) carries: the two multiblock fixtures and the example-scoped texture
+#: therefore every CI job) carries: the multiblock fixtures and the example-scoped texture
 #: manifest. Everything else under ``data/`` is a gitignored ``data/<version>/`` dump.
 _COMMITTED_SUBPATHS = ("multiblocks", "textures/manifest.json")
 

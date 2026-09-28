@@ -1,0 +1,194 @@
+{
+  "schema": 2,
+  "controller": {
+    "registry_name": "gregtech:gt.blockmachines",
+    "meta": 1169,
+    "display_name": "Large Chemical Reactor",
+    "source_class": "gregtech.common.tileentities.machines.multi.MTELargeChemicalReactor",
+    "facing_convention": "controller front = NORTH (-Z), ExtendedFacing NORTH_NORMAL_NONE; offsets d = [dx,dy,dz] world-space deltas from the controller block"
+  },
+  "variants": [
+    {
+      "trigger_stack_size": 1,
+      "channels": {"gt_no_hatch": 1},
+      "blocks": [
+        {"d": [-1, -1, 0], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [0, -1, 0], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [1, -1, 0], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [-1, -1, 1], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [0, -1, 1], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [1, -1, 1], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [-1, -1, 2], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [0, -1, 2], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [1, -1, 2], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [-1, 0, 0], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [0, 0, 0], "block": "gregtech:gt.blockmachines", "meta": 1169},
+        {"d": [1, 0, 0], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [-1, 0, 1], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [0, 0, 1], "block": "gregtech:gt.blockcasings8", "meta": 1},
+        {"d": [1, 0, 1], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [-1, 0, 2], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [0, 0, 2], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [1, 0, 2], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [-1, 1, 0], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [0, 1, 0], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [1, 1, 0], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [-1, 1, 1], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [0, 1, 1], "block": "gregtech:gt.blockcasings5", "meta": 0},
+        {"d": [1, 1, 1], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [-1, 1, 2], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [0, 1, 2], "block": "gregtech:gt.blockcasings8", "meta": 0},
+        {"d": [1, 1, 2], "block": "gregtech:gt.blockcasings8", "meta": 0}
+      ],
+      "hints": [
+        {"d": [-1, -1, 0], "hint": 0},
+        {"d": [0, -1, 0], "hint": 0},
+        {"d": [1, -1, 0], "hint": 0},
+        {"d": [-1, -1, 1], "hint": 0},
+        {"d": [0, -1, 1], "hint": 0},
+        {"d": [1, -1, 1], "hint": 0},
+        {"d": [-1, -1, 2], "hint": 0},
+        {"d": [0, -1, 2], "hint": 0},
+        {"d": [1, -1, 2], "hint": 0},
+        {"d": [-1, 0, 0], "hint": 0},
+        {"d": [1, 0, 0], "hint": 0},
+        {"d": [-1, 0, 1], "hint": 0},
+        {"d": [1, 0, 1], "hint": 0},
+        {"d": [-1, 0, 2], "hint": 0},
+        {"d": [0, 0, 2], "hint": 0},
+        {"d": [1, 0, 2], "hint": 0},
+        {"d": [-1, 1, 0], "hint": 0},
+        {"d": [0, 1, 0], "hint": 0},
+        {"d": [1, 1, 0], "hint": 0},
+        {"d": [-1, 1, 1], "hint": 0},
+        {"d": [0, 1, 1], "hint": 0},
+        {"d": [1, 1, 1], "hint": 0},
+        {"d": [-1, 1, 2], "hint": 0},
+        {"d": [0, 1, 2], "hint": 0},
+        {"d": [1, 1, 2], "hint": 0}
+      ],
+      "hatch_slots": [
+        {
+          "d": [-1, -1, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, -1, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, -1, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, -1, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, -1, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, -1, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, -1, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, -1, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, -1, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 0, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 0, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 0, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 0, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 0, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 0, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 0, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 1, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 1, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 1, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 1, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 1, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 1, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 1, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 1, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 1, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        }
+      ],
+      "bbox": [3, 3, 3]
+    }
+  ],
+  "substitutions": {
+    "coil": [
+      {"channel_value": 1, "block": "gregtech:gt.blockcasings5", "meta": 0},
+      {"channel_value": 2, "block": "gregtech:gt.blockcasings5", "meta": 1},
+      {"channel_value": 3, "block": "gregtech:gt.blockcasings5", "meta": 2},
+      {"channel_value": 4, "block": "gregtech:gt.blockcasings5", "meta": 3},
+      {"channel_value": 5, "block": "gregtech:gt.blockcasings5", "meta": 4},
+      {"channel_value": 6, "block": "gregtech:gt.blockcasings5", "meta": 9},
+      {"channel_value": 7, "block": "gregtech:gt.blockcasings5", "meta": 5},
+      {"channel_value": 8, "block": "gregtech:gt.blockcasings5", "meta": 6},
+      {"channel_value": 9, "block": "gregtech:gt.blockcasings5", "meta": 10},
+      {"channel_value": 10, "block": "gregtech:gt.blockcasings5", "meta": 7},
+      {"channel_value": 11, "block": "gregtech:gt.blockcasings5", "meta": 8},
+      {"channel_value": 12, "block": "gregtech:gt.blockcasings5", "meta": 11},
+      {"channel_value": 13, "block": "gregtech:gt.blockcasings5", "meta": 12},
+      {"channel_value": 14, "block": "gregtech:gt.blockcasings5", "meta": 13}
+    ]
+  },
+  "failures": []
+}

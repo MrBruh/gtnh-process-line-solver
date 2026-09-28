@@ -1519,8 +1519,8 @@ def test_committed_heat_proof_casing_is_not_a_tier_casing() -> None:
     tiered ``MACHINECASINGS_*`` arrays below that, but the extractor's casing table claimed 0-14 and
     runs first, so meta 11 shipped as ``MACHINE_UIV_SIDE``. That is the failure mode nothing
     downstream can detect - a confident, plausible, wrong sprite - and it reached every clean clone,
-    because the Electric Blast Furnace is one of the two committed multiblock fixtures and this is
-    the casing it is built from.
+    because the Electric Blast Furnace is one of the two hand-authored committed fixtures and this
+    is the casing it is built from.
     """
     manifest = json.loads(_COMMITTED_MANIFEST.read_text(encoding="utf-8"))
     m = TextureManifest(manifest)

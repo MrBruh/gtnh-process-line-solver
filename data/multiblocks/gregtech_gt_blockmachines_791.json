@@ -1,0 +1,137 @@
+{
+  "schema": 2,
+  "controller": {
+    "registry_name": "gregtech:gt.blockmachines",
+    "meta": 791,
+    "display_name": "Industrial Coke Oven",
+    "source_class": "gtPlusPlus.xmod.gregtech.common.tileentities.machines.multi.processing.MTEIndustrialCokeOvenLegacy",
+    "facing_convention": "controller front = NORTH (-Z), ExtendedFacing NORTH_NORMAL_NONE; offsets d = [dx,dy,dz] world-space deltas from the controller block"
+  },
+  "variants": [
+    {
+      "trigger_stack_size": 1,
+      "channels": {"gt_no_hatch": 1},
+      "blocks": [
+        {"d": [-1, 0, 0], "block": "miscutils:miscutils.blockcasings", "meta": 1},
+        {"d": [0, 0, 0], "block": "gregtech:gt.blockmachines", "meta": 791},
+        {"d": [1, 0, 0], "block": "miscutils:miscutils.blockcasings", "meta": 1},
+        {"d": [-1, 0, 1], "block": "miscutils:miscutils.blockcasings", "meta": 1},
+        {"d": [0, 0, 1], "block": "miscutils:miscutils.blockcasings", "meta": 1},
+        {"d": [1, 0, 1], "block": "miscutils:miscutils.blockcasings", "meta": 1},
+        {"d": [-1, 0, 2], "block": "miscutils:miscutils.blockcasings", "meta": 1},
+        {"d": [0, 0, 2], "block": "miscutils:miscutils.blockcasings", "meta": 1},
+        {"d": [1, 0, 2], "block": "miscutils:miscutils.blockcasings", "meta": 1},
+        {"d": [-1, 1, 0], "block": "miscutils:miscutils.blockcasings", "meta": 2},
+        {"d": [0, 1, 0], "block": "miscutils:miscutils.blockcasings", "meta": 2},
+        {"d": [1, 1, 0], "block": "miscutils:miscutils.blockcasings", "meta": 2},
+        {"d": [-1, 1, 1], "block": "miscutils:miscutils.blockcasings", "meta": 2},
+        {"d": [1, 1, 1], "block": "miscutils:miscutils.blockcasings", "meta": 2},
+        {"d": [-1, 1, 2], "block": "miscutils:miscutils.blockcasings", "meta": 2},
+        {"d": [0, 1, 2], "block": "miscutils:miscutils.blockcasings", "meta": 2},
+        {"d": [1, 1, 2], "block": "miscutils:miscutils.blockcasings", "meta": 2},
+        {"d": [-1, 2, 0], "block": "miscutils:miscutils.blockcasings", "meta": 1},
+        {"d": [0, 2, 0], "block": "miscutils:miscutils.blockcasings", "meta": 1},
+        {"d": [1, 2, 0], "block": "miscutils:miscutils.blockcasings", "meta": 1},
+        {"d": [-1, 2, 1], "block": "miscutils:miscutils.blockcasings", "meta": 1},
+        {"d": [0, 2, 1], "block": "miscutils:miscutils.blockcasings", "meta": 1},
+        {"d": [1, 2, 1], "block": "miscutils:miscutils.blockcasings", "meta": 1},
+        {"d": [-1, 2, 2], "block": "miscutils:miscutils.blockcasings", "meta": 1},
+        {"d": [0, 2, 2], "block": "miscutils:miscutils.blockcasings", "meta": 1},
+        {"d": [1, 2, 2], "block": "miscutils:miscutils.blockcasings", "meta": 1}
+      ],
+      "hints": [
+        {"d": [-1, 0, 0], "hint": 0},
+        {"d": [1, 0, 0], "hint": 0},
+        {"d": [-1, 0, 1], "hint": 0},
+        {"d": [0, 0, 1], "hint": 0},
+        {"d": [1, 0, 1], "hint": 0},
+        {"d": [-1, 0, 2], "hint": 0},
+        {"d": [0, 0, 2], "hint": 0},
+        {"d": [1, 0, 2], "hint": 0},
+        {"d": [0, 1, 1], "hint": 13},
+        {"d": [-1, 2, 0], "hint": 0},
+        {"d": [0, 2, 0], "hint": 0},
+        {"d": [1, 2, 0], "hint": 0},
+        {"d": [-1, 2, 1], "hint": 0},
+        {"d": [0, 2, 1], "hint": 0},
+        {"d": [1, 2, 1], "hint": 0},
+        {"d": [-1, 2, 2], "hint": 0},
+        {"d": [0, 2, 2], "hint": 0},
+        {"d": [1, 2, 2], "hint": 0}
+      ],
+      "hatch_slots": [
+        {
+          "d": [-1, 0, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 0, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 0, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 0, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 0, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 0, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 0, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 0, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 2, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 2, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 2, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 2, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 2, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 2, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 2, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 2, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 2, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        }
+      ],
+      "bbox": [3, 3, 3]
+    }
+  ],
+  "substitutions": {},
+  "failures": []
+}

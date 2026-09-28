@@ -36,7 +36,9 @@ is kept byte-identical to the export rather than trimmed. `.pre-commit-config.ya
 file from the large-file check, and `tools/derive_small_manifest.py` skips it, so the committed
 texture manifest does not grow to cover its EV tier and 2.9 machines.
 
-On a fresh clone its multiblocks resolve to 1x1x1 boxes: the committed dump in `data/multiblocks/`
-is a two-machine sample (an Electric Blast Furnace and a Vacuum Freezer), not a census, so none of
-this line's machines is in it. Real footprints need a local 2.9 dump from the extractor (see
-`docs/dataset-extraction/`). The default test suite only adapts this plan; it never solves it.
+On a fresh clone its multiblocks resolve from the committed `data/multiblocks/`, which carries the
+controllers of both nitrobenzene lines trimmed to the forms they use
+(`tools/derive_example_multiblocks.py`), so this line solves there and in CI
+(`tests/test_derive_example_multiblocks.py`). The committed texture manifest still skips it, so a
+fresh-clone preview draws the machines only this line uses with the missing-texture checkerboard;
+real textures need a local 2.9 dump from the extractor (see `docs/dataset-extraction/`).

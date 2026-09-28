@@ -1,0 +1,290 @@
+{
+  "schema": 2,
+  "controller": {
+    "registry_name": "gregtech:gt.blockmachines",
+    "meta": 15512,
+    "display_name": "Industrial Centrifuge",
+    "source_class": "gregtech.common.tileentities.machines.multi.MTEIndustrialCentrifuge",
+    "facing_convention": "controller front = NORTH (-Z), ExtendedFacing NORTH_NORMAL_NONE; offsets d = [dx,dy,dz] world-space deltas from the controller block"
+  },
+  "variants": [
+    {
+      "trigger_stack_size": 1,
+      "channels": {"gt_no_hatch": 1},
+      "blocks": [
+        {"d": [-1, -2, -1], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [0, -2, -1], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [1, -2, -1], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [-1, -2, 0], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [0, -2, 0], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [1, -2, 0], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [0, -2, 1], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [0, -2, 2], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [-1, -2, 3], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [0, -2, 3], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [1, -2, 3], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [-2, -1, -1], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [2, -1, -1], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [-2, -1, 0], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [-1, -1, 0], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [0, -1, 0], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [1, -1, 0], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [2, -1, 0], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [-1, -1, 1], "block": "miscutils:gtplusplus.blockcasings.2", "meta": 6},
+        {"d": [0, -1, 1], "block": "miscutils:gtplusplus.blockcasings.2", "meta": 6},
+        {"d": [1, -1, 1], "block": "miscutils:gtplusplus.blockcasings.2", "meta": 6},
+        {"d": [-1, -1, 2], "block": "miscutils:gtplusplus.blockcasings.2", "meta": 6},
+        {"d": [0, -1, 2], "block": "miscutils:gtplusplus.blockcasings.2", "meta": 6},
+        {"d": [1, -1, 2], "block": "miscutils:gtplusplus.blockcasings.2", "meta": 6},
+        {"d": [-2, -1, 3], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [-1, -1, 3], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [0, -1, 3], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [1, -1, 3], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [2, -1, 3], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [-2, 0, -1], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [2, 0, -1], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [-2, 0, 0], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [-1, 0, 0], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [0, 0, 0], "block": "gregtech:gt.blockmachines", "meta": 15512},
+        {"d": [1, 0, 0], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [2, 0, 0], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [-2, 0, 1], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [-1, 0, 1], "block": "miscutils:gtplusplus.blockcasings.2", "meta": 6},
+        {"d": [0, 0, 1], "block": "miscutils:gtplusplus.blockcasings.2", "meta": 6},
+        {"d": [1, 0, 1], "block": "miscutils:gtplusplus.blockcasings.2", "meta": 6},
+        {"d": [2, 0, 1], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [-2, 0, 2], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [-1, 0, 2], "block": "miscutils:gtplusplus.blockcasings.2", "meta": 6},
+        {"d": [0, 0, 2], "block": "miscutils:gtplusplus.blockcasings.2", "meta": 6},
+        {"d": [1, 0, 2], "block": "miscutils:gtplusplus.blockcasings.2", "meta": 6},
+        {"d": [2, 0, 2], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [-2, 0, 3], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [-1, 0, 3], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [0, 0, 3], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [1, 0, 3], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [2, 0, 3], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [-2, 1, -1], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [2, 1, -1], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [-2, 1, 0], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [-1, 1, 0], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [0, 1, 0], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [1, 1, 0], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [2, 1, 0], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [-1, 1, 1], "block": "miscutils:gtplusplus.blockcasings.2", "meta": 6},
+        {"d": [0, 1, 1], "block": "miscutils:gtplusplus.blockcasings.2", "meta": 6},
+        {"d": [1, 1, 1], "block": "miscutils:gtplusplus.blockcasings.2", "meta": 6},
+        {"d": [-1, 1, 2], "block": "miscutils:gtplusplus.blockcasings.2", "meta": 6},
+        {"d": [0, 1, 2], "block": "miscutils:gtplusplus.blockcasings.2", "meta": 6},
+        {"d": [1, 1, 2], "block": "miscutils:gtplusplus.blockcasings.2", "meta": 6},
+        {"d": [-2, 1, 3], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [-1, 1, 3], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [0, 1, 3], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [1, 1, 3], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [2, 1, 3], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [-1, 2, -1], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [0, 2, -1], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [1, 2, -1], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [-1, 2, 0], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [0, 2, 0], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [1, 2, 0], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [0, 2, 1], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [0, 2, 2], "block": "miscutils:miscutils.blockcasings", "meta": 0},
+        {"d": [-1, 2, 3], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [0, 2, 3], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0},
+        {"d": [1, 2, 3], "block": "miscutils:blockFrameGtEglinSteel", "meta": 0}
+      ],
+      "hints": [
+        {"d": [-1, -2, -1], "hint": 0},
+        {"d": [0, -2, -1], "hint": 0},
+        {"d": [1, -2, -1], "hint": 0},
+        {"d": [0, -2, 1], "hint": 0},
+        {"d": [0, -2, 2], "hint": 0},
+        {"d": [-2, -1, -1], "hint": 0},
+        {"d": [2, -1, -1], "hint": 0},
+        {"d": [-1, -1, 0], "hint": 0},
+        {"d": [0, -1, 0], "hint": 0},
+        {"d": [1, -1, 0], "hint": 0},
+        {"d": [-1, -1, 3], "hint": 0},
+        {"d": [0, -1, 3], "hint": 0},
+        {"d": [1, -1, 3], "hint": 0},
+        {"d": [-2, 0, -1], "hint": 0},
+        {"d": [2, 0, -1], "hint": 0},
+        {"d": [-1, 0, 0], "hint": 0},
+        {"d": [1, 0, 0], "hint": 0},
+        {"d": [-2, 0, 1], "hint": 0},
+        {"d": [2, 0, 1], "hint": 0},
+        {"d": [-2, 0, 2], "hint": 0},
+        {"d": [2, 0, 2], "hint": 0},
+        {"d": [-1, 0, 3], "hint": 0},
+        {"d": [0, 0, 3], "hint": 0},
+        {"d": [1, 0, 3], "hint": 0},
+        {"d": [-2, 1, -1], "hint": 0},
+        {"d": [2, 1, -1], "hint": 0},
+        {"d": [-1, 1, 0], "hint": 0},
+        {"d": [0, 1, 0], "hint": 0},
+        {"d": [1, 1, 0], "hint": 0},
+        {"d": [-1, 1, 3], "hint": 0},
+        {"d": [0, 1, 3], "hint": 0},
+        {"d": [1, 1, 3], "hint": 0},
+        {"d": [-1, 2, -1], "hint": 0},
+        {"d": [0, 2, -1], "hint": 0},
+        {"d": [1, 2, -1], "hint": 0},
+        {"d": [0, 2, 1], "hint": 0},
+        {"d": [0, 2, 2], "hint": 0}
+      ],
+      "hatch_slots": [
+        {
+          "d": [-1, -2, -1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, -2, -1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, -2, -1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, -2, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, -2, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-2, -1, -1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [2, -1, -1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, -1, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, -1, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, -1, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, -1, 3],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, -1, 3],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, -1, 3],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-2, 0, -1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [2, 0, -1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 0, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 0, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-2, 0, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [2, 0, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-2, 0, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [2, 0, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 0, 3],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 0, 3],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 0, 3],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-2, 1, -1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [2, 1, -1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 1, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 1, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 1, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 1, 3],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 1, 3],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 1, 3],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 2, -1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 2, -1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 2, -1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 2, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 2, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "Muffler", "OutputBus", "OutputHatch"]
+        }
+      ],
+      "bbox": [5, 5, 5]
+    }
+  ],
+  "substitutions": {},
+  "failures": []
+}
