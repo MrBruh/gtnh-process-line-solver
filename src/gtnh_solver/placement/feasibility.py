@@ -72,7 +72,7 @@ from dataclasses import dataclass
 
 from gtnh_solver.ir import Facing, InputIR, Machine, Placement
 from gtnh_solver.ir.geometry import Cell
-from gtnh_solver.ir.nets import connection_counts, placement_index
+from gtnh_solver.ir.nets import SINGLE_BLOCK_IO_FACES, connection_counts, placement_index
 from gtnh_solver.router._grid import dock_candidates, obstacle_cells
 from gtnh_solver.router.auto import assign_auto_outputs
 
@@ -151,11 +151,6 @@ def crowded_machines(problem: InputIR, placements: Sequence[Placement]) -> tuple
         )
     ]
     return tuple(dict.fromkeys(crowded))  # de-duplicated, first occurrence order
-
-
-#: The faces of a single block that can carry a connection: every face but the front, which carries
-#: no I/O (docs/DOMAIN.md).
-SINGLE_BLOCK_IO_FACES = len(Facing) - 1
 
 
 def single_block_shortfalls(problem: InputIR) -> dict[str, int]:

@@ -128,8 +128,7 @@ from gtnh_solver.ir import (
     RelativeFace,
 )
 from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
-from gtnh_solver.ir.nets import connection_counts
-from gtnh_solver.placement import SINGLE_BLOCK_IO_FACES
+from gtnh_solver.ir.nets import SINGLE_BLOCK_IO_FACES, connection_counts
 
 from ._errors import AdapterError, AdapterWarning
 from .plan import (

@@ -14,9 +14,11 @@ The multi-start that routes and ranks the annealed attempts lives in ``solver.co
 
 from __future__ import annotations
 
+from gtnh_solver.ir.nets import SINGLE_BLOCK_IO_FACES
+
 from .banks import bank_columns
 from .constructive import PlacementResult, place
-from .feasibility import SINGLE_BLOCK_IO_FACES, crowded_machines, single_block_shortfalls
+from .feasibility import crowded_machines, single_block_shortfalls
 from .search import Objective, optimize_placement
 
 __all__ = [

@@ -15,9 +15,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
-from .enums import IODirection
+from .enums import Facing, IODirection
 from .input_ir import InputIR, MachineFaceRef, METoggles, Net
 from .output import Placement
+
+#: The faces of a single block that can carry a connection: every face but the front, which carries
+#: no I/O (docs/DOMAIN.md). Kept beside :func:`connection_counts` because the two make the one rule
+#: the adapter's Item Filter merge and ``placement.feasibility.single_block_shortfalls`` both apply.
+SINGLE_BLOCK_IO_FACES = len(Facing) - 1
 
 
 def connection_counts(nets: Iterable[Net], me_toggles: METoggles) -> dict[str, int]:
