@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from gtnh_solver.ir import CellBox, CellCoord, Facing, HatchSlot
+from gtnh_solver.ir import CellBox, CellCoord, Facing, HatchSlot, RelativeFace
 from gtnh_solver.ir.geometry import FACE_DELTAS, OPPOSITE_FACE, Cell
 
 __all__ = [
@@ -30,6 +30,7 @@ __all__ = [
     "in_region",
     "is_connected",
     "is_unit_step",
+    "usable_faces",
 ]
 
 #: How many quarter-turns each facing is from NORTH, counted the way the dump states its
@@ -42,6 +43,40 @@ _QUARTER_TURNS_FROM_NORTH: dict[Facing, int] = {
     Facing.SOUTH: 2,
     Facing.WEST: 3,
 }
+
+
+#: The horizontal facings indexed by their quarter-turns from NORTH (the inverse of the table above).
+_FACING_AT_TURNS: tuple[Facing, ...] = tuple(
+    sorted(_QUARTER_TURNS_FROM_NORTH, key=_QUARTER_TURNS_FROM_NORTH.__getitem__)
+)
+
+
+def usable_faces(pins: tuple[RelativeFace, ...] | None, orientation: Facing) -> frozenset[Facing]:
+    """The world faces a port may carry a connection through, on the validator's own arithmetic.
+
+    Unpinned (``Port.faces`` is None), that is every face but the front, which carries no I/O. A
+    pinned port names faces from the machine's point of view, and they are turned here from the
+    convention rather than through ``ir.geometry.absolute_face`` (see the module docstring): the
+    front is the facing itself and the back its opposite; a machine looking out of its front has its
+    right hand one quarter turn clockwise from it seen from above (facing NORTH, the right is EAST,
+    one turn on in the table above) and its left one turn the other way; up and down never turn.
+    Reading the pins is data plumbing, the turning is a derivation, so the validator keeps its own.
+
+    A vertical ``orientation`` (never legal, and reported as such) turns as NORTH does, so the check
+    stays total rather than raising.
+    """
+    if pins is None:
+        return frozenset(face for face in Facing if face is not orientation)
+    turns = _QUARTER_TURNS_FROM_NORTH.get(orientation, 0)
+    world = {
+        RelativeFace.FRONT: orientation,
+        RelativeFace.BACK: OPPOSITE_FACE[orientation],
+        RelativeFace.RIGHT: _FACING_AT_TURNS[(turns + 1) % 4],
+        RelativeFace.LEFT: _FACING_AT_TURNS[(turns + 3) % 4],
+        RelativeFace.UP: Facing.UP,
+        RelativeFace.DOWN: Facing.DOWN,
+    }
+    return frozenset(world[pin] for pin in pins)
 
 
 def body_cells(origin: CellCoord, footprint: CellBox, orientation: Facing) -> set[Cell]:

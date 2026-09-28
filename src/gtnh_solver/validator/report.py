@@ -44,6 +44,9 @@ class ViolationCode(str, Enum):
     TERMINAL_NOT_AN_ENDPOINT = "terminal_not_an_endpoint"  # terminal's (machine,port) not in net
     DUPLICATE_TERMINAL = "duplicate_terminal"  # >1 terminal for the same net endpoint
     TERMINAL_ON_FRONT_FACE = "terminal_on_front_face"
+    # a terminal or auto-output on a face its PINNED port may not use (InputIR v4 `Port.faces`); an
+    # unpinned port on its front keeps TERMINAL_ON_FRONT_FACE / AUTO_OUTPUT_ON_FRONT_FACE
+    TERMINAL_ON_DISALLOWED_FACE = "terminal_on_disallowed_face"
     TERMINAL_NOT_ADJACENT = "terminal_not_adjacent"
     TERMINAL_NOT_ON_ROUTE = "terminal_not_on_route"
     # auto-output connections (adjacent machines feeding each other, no pipe)
@@ -115,6 +118,12 @@ class ViolationCode(str, Enum):
     TERMINAL_FACE_CONTENTION = (
         "terminal_face_contention"  # two connections of one slot-less machine on one dock cell
     )
+    # Item Filters sorting a single block's merged item outputs (#249): every item on a merged run
+    # must leave it through exactly one filter, and a filter passes on only what it lets through
+    FILTER_ITEM_UNSORTED = "filter_item_unsorted"
+    # a filter pushes out of its back into whatever is there (MTEBuffer.moveItems, no toggle), so
+    # that cell may hold only its own output's pipe or the machine it auto-outputs into
+    FILTER_BACK_NOT_ITS_OUTPUT = "filter_back_not_its_output"
 
 
 @dataclass(frozen=True)
