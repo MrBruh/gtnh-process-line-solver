@@ -376,16 +376,17 @@ def _warn_if_plan_pack_undumped(
     already reported, and this stays out of their way rather than say it twice: a **census** of
     another pack draws the adapter's mismatch warning (``_check_dataset_version``), and a failed load
     draws :func:`_load_physical_or_warn`'s. The quiet one is a **sample**: the committed fixtures
-    hold two controllers, the adapter rightly declines to judge a sample's nominal pack, and every
-    other multiblock in the plan reserves a 1x1x1 footprint - which the previewer then draws (via
+    hold only the controllers the shipped examples use, the adapter rightly declines to judge a
+    sample's nominal pack, and every other multiblock in the plan reserves a 1x1x1 footprint - which the previewer then draws (via
     ``TextureManifest.mte_block``) as a lone controller that never forms, and ``--schematic``
     exports the same way. Nothing said so.
 
     **Only what may be a multiblock is named.** A machine type is left out when it found its
     structure (it lost nothing), or when it is known to be a single block (:func:`_may_be_multiblock`:
     the plan's handler says so, else the resolved texture manifest's class does). The warning stays
-    quiet when nothing is left, so the shipped sand line (Forge Hammers only) says nothing on a
-    fresh clone while the nitrobenzene line names its four multiblocks.
+    quiet when nothing is left, so the shipped lines say nothing on a fresh clone (sand has only
+    Forge Hammers, and the sample carries nitrobenzene's multiblocks) while a line whose
+    multiblocks the sample lacks names each of them.
     """
     stated = plan_pack_version(plan)
     if stated is None or dataset_version is not None:

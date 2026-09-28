@@ -2,7 +2,7 @@
 
 The extractor's generated datasets live in gitignored, per-version folders
 (``data/<version>/{multiblocks,textures}/``), regenerated on demand so several pack versions
-coexist without overwriting. The two committed fixtures plus the small example-scoped texture
+coexist without overwriting. The committed multiblock fixtures plus the small example-scoped texture
 manifest live at the fixed ``data/multiblocks/`` and ``data/textures/manifest.json`` and are the
 fallback when no generated version is present.
 

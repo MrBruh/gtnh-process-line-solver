@@ -13,8 +13,9 @@
 > **The generated dataset is deliberately local-only.** The Java extractor
 > (`tools/gtnh-extractor/`) regenerates the multiblock dump and the texture manifest on demand into
 > gitignored `data/<version>/` folders, so several pack versions can sit side by side; the repo
-> ships two multiblock fixtures plus a small example-scoped texture manifest, so a fresh clone
-> still solves and renders without running anything.
+> ships the multiblocks its example lines use (trimmed from a dump), two hand-authored fixtures and
+> a small example-scoped texture manifest, so a fresh clone still solves and renders its examples
+> without running anything.
 >
 > Still ahead: the multi-channel realizability invariant, power optimization beyond
 > size-or-reject, the anytime wall-clock budget, and pipe/cable textures. See

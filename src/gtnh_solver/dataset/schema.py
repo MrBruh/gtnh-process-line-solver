@@ -227,7 +227,7 @@ class DatasetMeta(BaseModel):
     #: Whether this dump is a COMPLETE census of the pack's multiblock controllers. True for any
     #: extractor run (it walks every registered controller), which is why it defaults to True and
     #: a real dump need not state it. The committed ``data/multiblocks/`` fixtures set it False:
-    #: they are a two-machine sample kept for the tests, not a census.
+    #: they are a sample kept for the tests and the shipped examples, not a census.
     #:
     #: Load-bearing, not documentation. Absence from a census is evidence a machine is NOT a
     #: multiblock - which is the only thing that lets the adapter state GT's single-block intake

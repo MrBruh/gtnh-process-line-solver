@@ -47,8 +47,8 @@ from tests._helpers import hatched_dataset
 
 _ROOT = Path(__file__).resolve().parents[1]
 _EV_NITROBENZENE = _ROOT / "examples" / "ev-nitrobenzene.json"
-#: The committed two-controller sample, passed explicitly: the regression below turns on the
-#: Vacuum Freezer's real casing cells, which a local ``data/<version>/`` dump must not change.
+#: The committed sample, passed explicitly: the regression below turns on the hand-authored
+#: Vacuum Freezer's casing cells, which a local ``data/<version>/`` dump must not change.
 _FIXTURE_DATASET = _ROOT / "data" / "multiblocks"
 
 _MULTIBLOCK = "multiblock"

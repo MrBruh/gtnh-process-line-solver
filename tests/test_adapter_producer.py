@@ -459,7 +459,7 @@ def test_quiet_when_the_plan_states_no_pack() -> None:
 
 
 def test_quiet_against_a_non_census_sample_whatever_pack_it_claims() -> None:
-    # The committed fixtures are a two-machine sample declaring pack_version 2.9.0-beta-1, and they
+    # The committed fixtures are a sample declaring pack_version 2.9.0-beta-1, and they
     # are what a fresh clone resolves to. Trusting that nominal version would greet every new
     # contributor with a mismatch against the shipped 2.8.4 examples.
     plan = _plan(dataset_version="stable-2.8.4")

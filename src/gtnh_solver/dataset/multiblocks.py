@@ -319,8 +319,8 @@ class PhysicalDataset:
         controller in the pack: there a miss is a positive fact - the machine is not a multiblock,
         so it is a single block, and GT's ``MTEBasicMachine`` rules apply to it
         (``dataset.machine_amps_in``). The committed ``data/multiblocks/`` fixtures are a
-        two-machine sample, so a miss there means only "not one of those two" and a caller must
-        abstain instead of inferring a class.
+        sample (two hand-authored controllers and the ones the shipped examples use), so a miss
+        there means only "not one of those" and a caller must abstain instead of inferring a class.
         """
         return self.meta.census
 

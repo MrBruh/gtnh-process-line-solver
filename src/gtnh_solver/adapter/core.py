@@ -292,7 +292,7 @@ def to_input_ir(
     # Machines a CENSUS dataset positively failed to find, so absence proves they are not
     # multiblocks: the only population whose intake ceiling GT's single-block rule may be stated
     # for (adapter.power). Empty without a dataset, and empty under the committed fixtures - a
-    # two-machine sample, where a miss proves nothing (dataset.PhysicalDataset).
+    # sample, where a miss proves nothing (dataset.PhysicalDataset).
     single_block_ids: set[str] = set()
     identifies_single_blocks = physical is not None and physical.identifies_single_blocks
     # Machines whose I/O rides hatches, so a port of theirs is one hatch and one net (#213).
@@ -710,7 +710,7 @@ def _check_dataset_version(plan: Plan, physical: PhysicalDataset | None) -> None
     mis-join) and when the plan does not state a single pack version (:func:`plan_pack_version`).
 
     Also silent for a **non-census** dump. The committed ``data/multiblocks/`` fixtures are a
-    two-machine sample whose ``pack_version`` is nominal rather than surveyed, and they are what a
+    sample whose ``pack_version`` is nominal rather than surveyed, and they are what a
     fresh clone resolves to - so trusting it here would greet every new contributor with a mismatch
     against the shipped examples. This is the same reading ``identifies_single_blocks`` already
     applies to that dump: a sample is evidence of nothing beyond the machines in it.

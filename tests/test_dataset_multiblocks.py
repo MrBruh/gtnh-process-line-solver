@@ -91,9 +91,34 @@ def test_vacuum_freezer_is_3x3x3(dataset: PhysicalDataset) -> None:
 
 
 def test_load_physical_dataset_keys_by_display_name(dataset: PhysicalDataset) -> None:
-    assert set(dataset.machines) == {"Electric Blast Furnace", "Vacuum Freezer"}
+    # The two hand-authored fixtures, and the controllers the shipped example lines resolve to
+    # (tools/derive_example_multiblocks.py).
+    assert set(dataset.machines) == {
+        "Electric Blast Furnace",
+        "Vacuum Freezer",
+        "Dangote Distillus",
+        "Distillation Tower",
+        "ExxonMobil Chemical Plant",
+        "Industrial Centrifuge",
+        "Industrial Coke Oven",
+        "Large Chemical Reactor",
+        "Large Fluid Extractor",
+    }
     assert dataset.get("Nonexistent Machine") is None
-    assert dataset.meta.controller_count == 2
+    assert dataset.meta.controller_count == 10
+
+
+def test_the_committed_coke_ovens_share_a_name_and_the_current_one_takes_it(
+    dataset: PhysicalDataset,
+) -> None:
+    # Both nitrobenzene lines need an "Industrial Coke Oven", and they need different ones: the
+    # 2.8.4 plan names GT++'s controller by block id (791, a ...Legacy class by 2.9), while the 2.9
+    # plan names the machine only, meaning the one the name refers to now. So the committed data
+    # carries a real name collision, settled the way the loader settles it for a full dump.
+    oven = dataset.get("Industrial Coke Oven")
+    assert oven is not None
+    assert oven.block_key == "gregtech:gt.blockmachines@15543"
+    assert "gregtech:gt.blockmachines@791" in dataset.by_block_key
 
 
 def test_the_committed_fixtures_declare_themselves_a_sample_not_a_census(
@@ -101,8 +126,8 @@ def test_the_committed_fixtures_declare_themselves_a_sample_not_a_census(
 ) -> None:
     # Load-bearing, not trivia. Absence from a CENSUS is evidence a machine is not a multiblock,
     # which is the only thing that lets the adapter state GT's single-block intake ceiling for it.
-    # These two files are a sample kept for the tests: nearly every machine in both shipped
-    # examples misses them, the Large Chemical Reactor included, so a miss here proves nothing and
+    # These files are a sample kept for the tests and the shipped examples: every single block
+    # misses them, and so does every multiblock no example uses, so a miss here proves nothing and
     # the adapter must abstain (#114).
     assert dataset.meta.census is False
     assert dataset.identifies_single_blocks is False
@@ -144,6 +169,14 @@ def test_block_key_is_registry_name_at_meta(dataset: PhysicalDataset) -> None:
     assert set(dataset.by_block_key) == {
         "gregtech:gt.blockmachines@1000",
         "gregtech:gt.blockmachines@1001",
+        "gregtech:gt.blockmachines@791",
+        "gregtech:gt.blockmachines@998",
+        "gregtech:gt.blockmachines@1126",
+        "gregtech:gt.blockmachines@1169",
+        "gregtech:gt.blockmachines@2730",
+        "gregtech:gt.blockmachines@15512",
+        "gregtech:gt.blockmachines@15543",
+        "gregtech:gt.blockmachines@31021",
     }
 
 

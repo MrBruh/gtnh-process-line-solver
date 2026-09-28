@@ -123,10 +123,11 @@ break that only appears at the newer pack) stayed invisible.
 
 That the committed data is *small* still matters, and this is not hypothetical:
 `test_cli_solves_nitrobenzene` asserted `exit 0` for weeks. With real footprints the line solves
-valid; with fixtures alone every machine falls back to 1x1x1, and its HV Distillation Tower needs 7
-connections against the 5 usable faces a single block has, so the honest answer is exit 1 with a
-`face_reachability` infeasibility. Nothing caught it because the branch was not pushed until long
-after it was written.
+valid; with the fixtures of the time (two unrelated controllers) every machine fell back to 1x1x1,
+and its HV Distillation Tower needs 7 connections against the 5 usable faces a single block has, so
+the honest answer was exit 1 with a `face_reachability` infeasibility. Nothing caught it because the
+branch was not pushed until long after it was written. The committed data now carries that line's
+controllers (`tools/derive_example_multiblocks.py`), so it solves in CI as well.
 
 So, to test against anything other than the committed data, **state it**, in order of preference:
 

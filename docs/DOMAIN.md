@@ -273,7 +273,7 @@ where load **sums** along shared segments (Steiner-tree-like):
 - **The solver states an intake ceiling only where it knows which rule applies.** That needs the
   machine's class, which means a physical dataset that is a **complete census** of the pack's
   multiblock controllers: only then is absence from the dump evidence that a machine is a single
-  block. With no dataset - or with the committed two-machine fixtures, which are a sample and say
+  block. With no dataset - or with the committed fixtures, which are a sample and say
   so (`_meta.json`'s `census: false`) - the class is unknown, `Port.max_amps` stays unset, and the
   connection reads as genuinely unmeasurable. The validator then *reports* that it did not measure
   the machine (`ValidationReport.unverified_power_intake`, surfaced by the CLI) instead of picking

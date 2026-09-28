@@ -7,6 +7,22 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Both nitrobenzene example lines now solve on a fresh clone, and in CI.** The committed
+  `data/multiblocks/` held only two hand-authored fixtures (an Electric Blast Furnace and a Vacuum
+  Freezer), so without a local dump every other multiblock fell back to a 1x1x1 box. A single block
+  has 5 faces that can carry I/O, and the lines' Distillation Towers, Dangote Distillus and Chemical
+  Plants carry 6 or 7 connections, so neither line could solve on any seed. It now also carries the
+  eight controllers the two lines resolve to (Chemical Plant, Distillation Tower, Dangote Distillus,
+  both Industrial Coke Ovens, Large Chemical Reactor, Industrial Centrifuge, Large Fluid Extractor),
+  trimmed from the 2.9.0-beta-2 dump to the built forms the lines reserve: 166 KB for what is 2.3 MB
+  in the dump. The new `tools/derive_example_multiblocks.py` writes them and checks that every
+  example adapts exactly as it does against the full dump, and `tools/derive_small_manifest.py`
+  now keeps the casings of the fixtures the skinned examples use, so the fresh-clone preview of
+  gtnh-nitrobenzene draws its multiblocks textured rather than as a checkerboard (the committed
+  manifest grows from 344 KB to 431 KB). `tests/test_derive_example_multiblocks.py` solves
+  ev-nitrobenzene from the committed data, and `test_cli_solves_nitrobenzene` now expects VALID.
+  The 2.8.4 gtnh-nitrobenzene plan resolves against these 2.9 forms on a fresh clone; a local 2.8.4
+  dump still wins where one exists.
 - **`gtnh-solve --effort minimal` runs one short attempt instead of the full search.** A full solve
   anneals 8 placements and routes every one to keep the best, which is right for a layout you will
   build and more than a preview or a check that the line solves needs. `--effort minimal`

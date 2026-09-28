@@ -2,9 +2,14 @@
 
 The full texture manifest (~6 MB, ~1470 blocks) is local and version-namespaced
 (``data/<version>/textures/manifest.json``, gitignored). This prunes it to just the blocks the
-shipped example lines and the two committed multiblock fixtures need, plus the icons those blocks
-reference, and writes the small committed ``data/textures/manifest.json`` so
-``gtnh-solve --preview examples/*.json`` skins out of the box. Rerun when the examples change.
+shipped example lines need, plus the icons those blocks reference, and writes the small committed
+``data/textures/manifest.json`` so ``gtnh-solve --preview examples/*.json`` skins out of the box.
+Rerun when the examples change.
+
+**Multiblock casings are kept by the fixture that places them.** A fresh clone draws a multiblock
+from the committed ``data/multiblocks/`` fixture its controller resolves to, block by block, so the
+blocks of every fixture a scoped example resolves to are kept, and so are the two hand-authored
+fixtures'. A fixture only an unscoped example needs stays unskinned (``_NOT_MANIFEST_SCOPED``).
 
 **Cables and pipes are kept the same way, and for the same reason.** ``cable.tin.02`` contains
 no machine-type name either, so the name rule can never reach one. The stand-in policy in
@@ -78,21 +83,40 @@ def _find_full_manifest() -> Path:
     )
 
 
-def _example_types_and_tiers() -> tuple[set[str], set[str]]:
-    """Normalized machine-type names and voltage tiers the shipped example lines reference.
+def _scoped_examples() -> list[Path]:
+    """Every ``examples/*.json`` except those in ``_NOT_MANIFEST_SCOPED``."""
+    return [
+        example
+        for example in sorted((REPO / "examples").glob("*.json"))
+        if example.name not in _NOT_MANIFEST_SCOPED
+    ]
 
-    Every ``examples/*.json`` except those in ``_NOT_MANIFEST_SCOPED``.
-    """
+
+def _example_types_and_tiers() -> tuple[set[str], set[str]]:
+    """Normalized machine-type names and voltage tiers the shipped example lines reference."""
     physical = load_physical_dataset()
     types: set[str] = set()
     tiers: set[str] = set()
-    for example in sorted((REPO / "examples").glob("*.json")):
-        if example.name in _NOT_MANIFEST_SCOPED:
-            continue
+    for example in _scoped_examples():
         for machine in adapt_file(str(example), physical=physical).machines:
             types.add(_norm(machine.type))
             tiers.add(machine.voltage_tier)
     return types, tiers
+
+
+def _example_controllers() -> set[str]:
+    """Controller block keys the scoped examples resolve to against the committed fixtures.
+
+    The committed ``data/multiblocks/`` rather than a local dump, because it is what a fresh clone
+    previews from, and so what decides which fixtures a preview draws.
+    """
+    physical = load_physical_dataset(REPO / "data" / "multiblocks")
+    return {
+        machine.block_key
+        for example in _scoped_examples()
+        for machine in adapt_file(str(example), physical=physical).machines
+        if machine.block_key is not None
+    }
 
 
 def _hatch_keys(full: dict[str, Any], tiers: set[str]) -> set[str]:
@@ -188,13 +212,22 @@ def _power_source_stand_in_keys(full: dict[str, Any]) -> set[str]:
     }
 
 
-def _fixture_block_keys() -> set[str]:
-    """``"<block>|<meta>"`` keys the two committed multiblock fixtures place."""
+#: The multiblock fixtures written by hand (``data/multiblocks/README.md``), skinned whatever the
+#: examples resolve to. ``tools/derive_example_multiblocks.py`` never rewrites these two either.
+_HAND_AUTHORED_FIXTURES = frozenset({"gregtech_machine_1000.json", "gregtech_machine_1001.json"})
+
+
+def _fixture_block_keys(controllers: set[str]) -> set[str]:
+    """``"<block>|<meta>"`` keys placed by the hand-authored fixtures and by every committed
+    fixture whose controller is in ``controllers``."""
     keys: set[str] = set()
     for path in sorted((REPO / "data" / "multiblocks").glob("*.json")):
         if path.name == "_meta.json":
             continue
         doc = json.loads(path.read_text(encoding="utf-8"))
+        controller = f"{doc['controller']['registry_name']}@{doc['controller']['meta']}"
+        if path.name not in _HAND_AUTHORED_FIXTURES and controller not in controllers:
+            continue
         for variant in doc.get("variants", []):
             for block in variant.get("blocks", []):
                 keys.add(f"{block['block']}|{block['meta']}")
@@ -213,7 +246,7 @@ def main() -> None:
         raise SystemExit(f"{source} looks already pruned, not a full manifest")
 
     types, tiers = _example_types_and_tiers()
-    fixture_keys = _fixture_block_keys()
+    fixture_keys = _fixture_block_keys(_example_controllers())
     hatch_keys = _hatch_keys(full, tiers)
     route_keys = _route_keys(full, tiers)
     source_keys = _power_source_stand_in_keys(full)
@@ -244,8 +277,9 @@ def main() -> None:
             **full["provenance"],
             "coverage": {"blocks": len(keep), "mte": mte_kept, "icons": len(icons), "gaps": 0},
             "note": (
-                "SMALL committed manifest: only the blocks the shipped example lines and the two "
-                "multiblock fixtures need - plus every hatch kind at the tiers those lines use, "
+                "SMALL committed manifest: only the blocks the shipped example lines and the "
+                "multiblock fixtures they resolve to need - plus every hatch kind at the tiers "
+                "those lines use, "
                 "the cables and pipes those tiers route, and the block that stands in for a "
                 "synthesized power source, none of which matches a machine name - so "
                 "`gtnh-solve --preview examples/*.json` "
