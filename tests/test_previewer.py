@@ -23,12 +23,16 @@ from gtnh_solver.ir import (
     CellBox,
     CellCoord,
     Commodity,
+    FaceSpec,
     Facing,
     InputIR,
     IODirection,
     LayoutResult,
     LayoutStatus,
+    Machine,
+    MachineFaceRef,
     METoggles,
+    Net,
     Port,
     Route,
     Segment,
@@ -872,3 +876,39 @@ def test_a_texture_pass_that_fails_part_way_leaves_plain_boxes(
     assert scene["blocks"] == []
     assert scene["atlas"] is None
     assert all(cell.get("tex") is None for r in scene["routes"] for cell in r["cells"])
+
+
+def test_scene_route_of_a_merged_run_names_every_item_it_carries() -> None:
+    """A merged item run (#249) carries several items down one pipe to the filters that sort them,
+    so hovering it lists them all rather than naming nothing (its ``fluid_or_item`` is empty)."""
+    ports = [
+        Port(id="output:items", commodity=Commodity.ITEM, direction=IODirection.OUTPUT),
+        Port(id="input:items", commodity=Commodity.ITEM, direction=IODirection.INPUT),
+    ]
+    washer = Machine(
+        id="w",
+        type="Ore Washer",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(ports=ports),
+    )
+    trunk = Net(
+        id="item-trunk:w",
+        commodity=Commodity.ITEM,
+        items=("gt.crushed.iron", "gt.dust.stone"),
+        throughput=0.2,
+        endpoints=[
+            MachineFaceRef(machine_id="w", port_id="output:items"),
+            MachineFaceRef(machine_id="w", port_id="input:items"),
+        ],
+    )
+    problem = InputIR(bounding_region=CellBox(sx=4, sy=2, sz=4), machines=[washer], nets=[trunk])
+    route = Route(
+        net_id=trunk.id,
+        commodity=Commodity.ITEM,
+        segments=[Segment(start=CellCoord(x=0, y=0, z=0), end=CellCoord(x=1, y=0, z=0), channel=0)],
+    )
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, routes=[route])
+    (scene_route,) = build_scene(problem, layout)["routes"]
+    assert scene_route["resource"] == "gt.crushed.iron, gt.dust.stone"
+    assert scene_route["rate"] == pytest.approx(0.2)

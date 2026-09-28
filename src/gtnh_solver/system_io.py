@@ -83,6 +83,16 @@ def port_resource(port: Port) -> str:
     return port.id[len(prefix) :] if port.id.startswith(prefix) else port.id
 
 
+def net_resource(net: Net) -> str | None:
+    """What ``net`` carries as one label: its fluid or item, or ``None`` for power.
+
+    A merged item run (``Net.items``, #249) carries several, which it names comma separated in the
+    order the net lists them ("a, b, c"), so a hover or a panel row shows everything in the pipe.
+    Every other net names its one resource exactly as before, verbatim as the plan spells it.
+    """
+    return ", ".join(net.resources) or None
+
+
 def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
     """Derive the boundary I/O + summed power of ``layout`` (only machines it actually placed)."""
     port_dir = port_direction_map(problem)
@@ -115,7 +125,7 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
         if is_boundary_storage(machine.type) and only_sources:
             for port in out_ports:
                 src = net_by_source.get((machine.id, port.id))
-                resource = src.fluid_or_item if src and src.fluid_or_item else port_resource(port)
+                resource = (net_resource(src) if src else None) or port_resource(port)
                 rate = src.throughput if src else None
                 inputs.append(
                     BoundaryFlow(machine.id, machine.type, cell_t, resource, port.commodity, rate)
@@ -130,9 +140,7 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
                 if port.commodity is Commodity.POWER:
                     continue
                 sink = net_by_sink.get((machine.id, port.id))
-                resource = (
-                    sink.fluid_or_item if sink and sink.fluid_or_item else port_resource(port)
-                )
+                resource = (net_resource(sink) if sink else None) or port_resource(port)
                 rate = sink.throughput if sink else port.rate
                 outputs.append(
                     BoundaryFlow(machine.id, machine.type, cell_t, resource, port.commodity, rate)
