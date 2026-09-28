@@ -1300,10 +1300,11 @@ final class StructureDumper {
      * The name a plan knows this controller by: GT's localized name, else its meta name, else its class.
      *
      * <p>
-     * On this dedicated server GT's translation of a few controllers' names does not resolve, and
-     * {@code getLocalName()} hands back the lang key itself ({@code gt.blockmachines.<name>.name}): six
-     * at 2.9, both Large Sifters among them (GitHub #231). A plan can never name a machine that way. The
-     * English name GT registered is still in the {@code GregTech.lang} it writes on boot, so that is read
+     * On a dedicated server GT's translation of six controllers' names can fail at 2.9, both Large
+     * Sifters among them (GitHub #231), and {@code getLocalName()} then hands back the lang key itself
+     * ({@code gt.blockmachines.<name>.name}). It depends on the run folder: a fresh one names them
+     * correctly, one whose {@code GregTech.lang} an earlier boot wrote does not. A plan can never name a
+     * machine by its key. The English name GT registered is in that {@code GregTech.lang}, so it is read
      * instead, and every controller that needed it is listed in {@code _meta.json}. The name stays the key
      * when that file has no entry either; the Python loader then declines to index it by name.
      */

@@ -98,9 +98,10 @@ Two known rough edges are GT's, not ours: `meta.14003` and `meta.15755` fail ext
 client-only classes (`TileEntitySpaceElevatorCable`, `GTSoundLoop`), and six controllers (both
 Large Sifters, both Industrial Arc Furnaces, the Industrial Bending Machine and the TFFT) report an
 **unlocalized lang key** such as `gt.blockmachines.industrialsifter.controller.tier.single.name` as
-their name on a dedicated server. The dump names those from GT's own `GregTech.lang` and lists them
-in `_meta.json.untranslated_names` (#231); a dump taken before that records the key, which the
-Python loader refuses to index as a name.
+their name on a dedicated server whose run folder has booted before (a fresh `run/` names them
+correctly). The dump names those from GT's own `GregTech.lang` and lists them in
+`_meta.json.untranslated_names` (#231); a dump taken before that records the key, which the Python
+loader refuses to index as a name.
 
 Only these two mods are pinned by hand. Every other hard dependency (IndustrialCraft2,
 NotEnoughItems, NotEnoughIds, GTNHLib, ModularUI, waila, AE2, ...) is a runtime dependency

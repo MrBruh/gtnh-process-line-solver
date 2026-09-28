@@ -218,9 +218,10 @@ class UntranslatedName(BaseModel):
     """A controller whose localized name GT handed the dumping server as its untranslated lang key.
 
     GT's ``getLocalName()`` returns the key itself (``gt.blockmachines.<name>.name``) when its
-    translation does not resolve, which on a 2.9 server it does not for six controllers, both Large
-    Sifters among them (#231). No plan names a machine that way, so the extractor records the English
-    name from GT's own ``GregTech.lang`` instead, and lists each controller it did that for here.
+    translation does not resolve, which on a 2.9 server whose run folder has booted before it does
+    not for six controllers, both Large Sifters among them (#231). No plan names a machine that way,
+    so the extractor records the English name from GT's own ``GregTech.lang`` instead, and lists each
+    controller it did that for here. Empty when every name resolved, as on a fresh run folder.
     """
 
     model_config = _STRICT

@@ -199,10 +199,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     name several constants share is probed once, and a scan that finds a real hatch fails the
     controller, so a GT that starts placing hatches in `construct` cannot quietly change what the
     dump means.
-  - **Names that were lang keys (#231).** On a dedicated server GT names six controllers, both Large
-    Sifters among them, by their untranslated lang key, so a plan could never find them. The dump
-    now reads their English name from GT's own `GregTech.lang` and lists them in `_meta.json`'s new
-    `untranslated_names`. Loading an older dump that still carries a key no longer indexes it as a
+  - **Names that were lang keys (#231).** On a dedicated server whose run folder had booted before,
+    GT named six controllers, both Large Sifters among them, by their untranslated lang key, so a
+    plan could never find them. The dump now reads their English name from GT's own
+    `GregTech.lang` and lists them in `_meta.json`'s new `untranslated_names`. Loading an older dump that still carries a key no longer indexes it as a
     name, and warns naming each such controller.
 - **A multiblock line no longer sprawls into a long strip (#254).** The placement search starts from
   a first-fit that fills the floor row by row across the whole region, which for ev-nitrobenzene is
