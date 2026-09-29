@@ -681,6 +681,71 @@ def test_scene_still_carries_a_multiblock_auto_connection_it_draws_no_arrow_for(
     assert (auto["source"], auto["sourceFace"]) == ("mb", "east")
     size = next(m["size"] for m in scene["machines"] if m["id"] == "mb")
     assert size[0] * size[1] * size[2] > 1  # ...and it is the multi-cell source the viewer skips
+    # A multiblock ejects from a hatch, so it carries no output reading to draw from (#249).
+    assert all(m["outputs"] is None for m in scene["machines"])
+
+
+def test_scene_gives_every_sand_block_its_auto_face_or_its_covers() -> None:
+    # The maintainer's rule (#249): every single block shows how its outputs leave it. A hammer
+    # auto-outputs through one face; the source Super Chest cannot auto-output at all, so its one
+    # output face is a conveyor cover; the sink chest and the power source have no output face.
+    scene = _sand_scene()
+    for m in scene["machines"]:
+        out = m["outputs"]
+        if m["type"] == "Forge Hammer":
+            assert out["autoFace"] is not None
+            assert out["covers"] == []
+        elif m["role"] == "storage" and out is not None:
+            assert out["autoFace"] is None
+            assert [c["cover"] for c in out["covers"]] == ["conveyor"]
+        else:
+            assert out is None, m["id"]
+
+
+def test_scene_marks_a_piped_single_block_output_as_its_auto_face() -> None:
+    # No AutoConnection: the hammer pipes its output. It still auto-outputs into that pipe, so the
+    # viewer draws the same arrow, which is what tells a builder no conveyor cover is meant.
+    problem = InputIR(
+        bounding_region=CellBox(sx=6, sy=2, sz=4),
+        machines=[producer("p"), consumer("c")],
+        nets=[net("n0", "p", "c")],
+    )
+    cell = CellCoord(x=1, y=0, z=0)
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[at("p", 0, 0, 0), at("c", 2, 0, 0)],
+        routes=[
+            Route(
+                net_id="n0",
+                commodity=Commodity.ITEM,
+                terminals=[
+                    Terminal(machine_id="p", port_id="out", face=Facing.EAST, cell=cell),
+                    Terminal(machine_id="c", port_id="in", face=Facing.WEST, cell=cell),
+                ],
+                segments=[],
+            )
+        ],
+    )
+    by_id = {m["id"]: m for m in build_scene(problem, layout)["machines"]}
+    assert by_id["p"]["outputs"] == {
+        "autoFace": "east",
+        "autoItems": True,
+        "autoFluids": False,
+        "covers": [],
+    }
+    assert by_id["c"]["outputs"] is None
+
+
+def test_render_html_draws_arrows_from_each_blocks_auto_face_and_cover_markers() -> None:
+    page = render_html(_sand_scene())
+    assert "for (const m of SCENE.machines)" in page
+    assert "out.autoFace" in page
+    assert "function coverMark(kind)" in page
+    assert "'cover (conveyor / pump)'" in page
+    assert "coverHover(" in page
+    # The arrows no longer come from machine-to-machine links alone: a piped output shows one too.
+    assert "for (const ac of SCENE.autoConnections)" not in page
 
 
 def test_scene_route_segments_and_terminals_drive_node_and_arm_drawing() -> None:

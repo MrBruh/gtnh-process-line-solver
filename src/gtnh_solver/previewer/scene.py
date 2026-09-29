@@ -6,9 +6,10 @@ into a plain dict the three.js viewer can draw with no further lookups (machine 
 and buses built into each one's casing, what a boundary storage holds, routes as the blocks they
 are built from - each cell with the sides that connect, its gauge and GT's real cross-section
 (``route_blocks``) - plus the resource each route carries at what rate, the raw
-segments and terminals behind them, auto-output links, the region, a legend, and the ``io`` boundary
-summary - inputs to load, outputs to collect, summed power, each flagged ``me`` when its commodity
-rides ME, since nothing is drawn for it). This
+segments and terminals behind them, auto-output links, how each single block's outputs leave it
+(``output_faces``: the one face it auto-outputs through and the faces that need a cover), the
+region, a legend, and the ``io`` boundary summary - inputs to load, outputs to collect, summed
+power, each flagged ``me`` when its commodity rides ME, since nothing is drawn for it). This
 is a *previewer-internal* format - NOT the versioned contract - so the un-testable
 WebGL last mile stays a thin static template while the mapping here is pure and fully tested.
 """
@@ -31,6 +32,7 @@ from gtnh_solver.ir import (
     Route,
 )
 from gtnh_solver.ir.geometry import Cell, rotated_footprint
+from gtnh_solver.output_faces import BlockOutputs, output_faces
 from gtnh_solver.route_blocks import route_cells
 from gtnh_solver.system_io import (
     RATE_STEM,
@@ -146,6 +148,7 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
             }
         )
 
+    outputs = output_faces(problem, layout)
     scene_machines = [
         {
             "id": pl.machine_id,
@@ -177,6 +180,11 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
             # The items an Item Filter lets through (#249), which is how its slots must be set in
             # game; the hover lists them. Empty for every other machine.
             "filter_items": list(machines[pl.machine_id].filter_items),
+            # How this single block's outputs leave it (``output_faces``): the one face it
+            # auto-outputs through, which the viewer marks with the arrow whether it ejects into a
+            # neighbour or into a pipe, and every other output face, which takes a cover and gets a
+            # cover marker. None for a multiblock and for a block with no output on a face.
+            "outputs": _outputs_entry(outputs.get(pl.machine_id)),
             "color": color_for_type[machines[pl.machine_id].type],
             # The hatches and buses built into this machine's casing, each at the CELL it replaces
             # and facing the way it works. The texture pass swaps them in for the casing cubes
@@ -422,6 +430,20 @@ def _contents(machine: Machine, me: METoggles) -> list[dict[str, Any]]:
         entry = {"resource": resource, "flow": flow, "me": me.toggled(port.commodity)}
         seen.setdefault((resource, flow), entry)
     return list(seen.values())
+
+
+def _outputs_entry(block: BlockOutputs | None) -> dict[str, Any] | None:
+    """A scene machine's ``outputs``: its auto face, what leaves through it, and its cover faces."""
+    if block is None:
+        return None
+    return {
+        "autoFace": block.auto_face.value if block.auto_face is not None else None,
+        "autoItems": block.auto_items,
+        "autoFluids": block.auto_fluids,
+        "covers": [
+            {"face": c.face.value, "cover": c.cover, "nets": list(c.net_ids)} for c in block.covers
+        ],
+    }
 
 
 def _role(machine: Machine) -> str:

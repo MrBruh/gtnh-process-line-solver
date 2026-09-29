@@ -21,10 +21,12 @@ for the gauge and skinned with the real cable/pipe sprite where the manifest res
 unresolved route keeps its flat coloured bar - never a checkerboard, which on a noodle threaded
 through a layout reads as damage rather than as missing data) - the cells, their connections, their
 size and their two baked looks all resolved in Python and read straight off ``scene.routes[].cells``,
-so no two surfaces can disagree about what a layout is made of (#4); auto-output
-is a small arrow on each source-machine face perpendicular to the ejecting direction (so one stays
-visible however the machines are packed), drawn for **single-block sources only** - a multiblock
-ejects from a hatch's own face, not from its bounding box, so there is no box face to mark (#153). A side panel lists the
+so no two surfaces can disagree about what a layout is made of (#4); every single block's one
+auto-output face is a small cyan arrow on each of its faces perpendicular to the ejecting direction
+(so one stays visible however the machines are packed), whether it ejects into a neighbour or into a
+pipe, and every other output face, which takes a cover, an amber cover marker
+(``scene.machines[].outputs``, #249); drawn for **single blocks only** - a multiblock ejects from a
+hatch's own face, not from its bounding box, so there is no box face to mark (#153). A side panel lists the
 machine/route legend (materials footnoted as stand-ins where they are), an inventory of the
 **nets** - what each carries and at what rate, every row a button that *solos* that net by hiding
 every other route, which is how one run reads end to end through a bundle the hover tag can only
@@ -114,7 +116,7 @@ _TEMPLATE = """<!doctype html>
     <button id="reset">reset camera</button>
     <button id="rateUnit" title="toggle throughput units">rate: per tick</button>
     <button id="stateToggle" title="toggle machine idle / running skins">state: idle</button>
-    <button id="arrowToggle" title="show / hide the auto-output arrows">auto-output arrows: on</button>
+    <button id="arrowToggle" title="show / hide the auto-output arrows and cover markers">output markers: on</button>
   </div>
 </div>
 <div id="nametag"></div>
@@ -445,11 +447,40 @@ function faceArrow(color) {
   ctx.closePath();
   ctx.fill();
   // alphaTest (not transparent) so it renders in the opaque pass with normal depth testing. The arrow
-  // is positioned just OUTSIDE the machine's rendered surface (see the autoConnections loop), so it
+  // is positioned just OUTSIDE the machine's rendered surface (see the output-marker loop), so it
   // draws on top of the casing texture and the opaque name plate rather than being buried under either,
   // while still being occluded by any other machine that sits in front of it (GitHub #30).
   return new THREE.Mesh(
     new THREE.PlaneGeometry(0.25, 0.25),
+    new THREE.MeshBasicMaterial(
+      { map: new THREE.CanvasTexture(cnv), alphaTest: 0.5, side: THREE.DoubleSide }));
+}
+
+// A cover marker: a small amber plate (a GT cover is a plate on a machine face) with the cover's
+// sign on it, laid out like faceArrow so it points along the plane's local +x: two chevrons for a
+// conveyor, a ring for a pump. Amber and square, so it never reads as the cyan auto-output arrow.
+const COVER_COLOR = '#ffb300';
+function coverMark(kind) {
+  const S = 128, cnv = document.createElement('canvas');
+  cnv.width = S; cnv.height = S;
+  const ctx = cnv.getContext('2d');
+  ctx.fillStyle = COVER_COLOR;
+  ctx.fillRect(0.14 * S, 0.14 * S, 0.72 * S, 0.72 * S);
+  ctx.strokeStyle = '#1b1f24';
+  ctx.lineWidth = 0.09 * S;
+  ctx.beginPath();
+  if (kind === 'pump') {
+    ctx.arc(0.5 * S, 0.5 * S, 0.19 * S, 0, 2 * Math.PI);
+  } else {
+    for (const x of [0.30, 0.50]) {
+      ctx.moveTo(x * S, 0.30 * S);
+      ctx.lineTo((x + 0.18) * S, 0.50 * S);
+      ctx.lineTo(x * S, 0.70 * S);
+    }
+  }
+  ctx.stroke();
+  return new THREE.Mesh(
+    new THREE.PlaneGeometry(0.22, 0.22),
     new THREE.MeshBasicMaterial(
       { map: new THREE.CanvasTexture(cnv), alphaTest: 0.5, side: THREE.DoubleSide }));
 }
@@ -473,7 +504,7 @@ function wrap(ctx, words, maxW) {
 // Name drawn onto the machine's front face - kept even when the box is textured, so the five other
 // faces show the GT casing texture while the front stays the readable identity label. The fill is
 // opaque so the text keeps a flat, high-contrast backing; the auto-output arrow is lifted clear of
-// this plane so it still draws on top (GitHub #30 - see the autoConnections loop).
+// this plane so it still draws on top (GitHub #30 - see the output-marker loop).
 function frontFace(text, bg, size, normal) {
   const W = 256, H = 256, pad = 20;
   const cnv = document.createElement('canvas');
@@ -682,46 +713,63 @@ for (const [netId, byLayer] of routeBatches) {
   }
 }
 
-// Auto-output: a small arrow on each source-machine face whose plane CONTAINS the ejecting
-// direction - the two side faces perpendicular to it plus the top and bottom. (The output face and
-// its opposite can't show an in-plane arrow.) At least one is visible from any angle, however
-// tightly the machines are packed together, so the flow direction is never fully occluded.
+// Output markers (#249): every single block shows how its outputs leave it, read from the scene's
+// per-machine `outputs` (gtnh_solver.output_faces, the reading the .schematic export writes too).
+// Its ONE auto-output face (a basic machine's output face, a Super Tank's front, an Item Filter's
+// back) gets the cyan arrow whether it ejects into a neighbour or into a pipe, so a builder never
+// reads a conveyor cover where none is meant; every other output face takes a cover (conveyor for
+// items, pump for fluids; a Super Chest has no auto-output, so all of its are covers) and gets the
+// amber cover marker instead. A block with no output on a face, and a multiblock, has none.
 //
-// SINGLE-BLOCK SOURCES ONLY (GitHub #153). The decal is positioned off the machine's bounding box,
-// which is only where the ejection happens when the machine IS one cell - then it is its own hatch.
-// A multiblock ejects from an output hatch's own front face (GT's MTEHatchOutput /
-// MTEHatchOutputBus push to getFrontFacing(); the controller has no auto-output at all), so an
-// arrow on the bounding box marks a casing face that moves nothing - four of them 3.5 blocks off
-// the nearest hatch on the 7x7x7 Chemical Plant. router.auto already picks the real casing cells;
-// until the decal can be drawn at the hatch that LayoutResult.hatches records, no arrow beats a
-// wrong one.
-const arrows = [];   // the auto-output arrow decals, shown/hidden by #arrowToggle
+// Each marker sits on the faces whose plane CONTAINS the marked direction - the two side faces
+// perpendicular to it plus the top and bottom - slid to the edge it marks. (The marked face and its
+// opposite can't show an in-plane decal, and the marked face usually touches the pipe or machine it
+// feeds, which would bury a plate on it.) At least one is visible from any angle, however tightly
+// the machines are packed together, so a flow direction is never fully occluded.
+//
+// SINGLE BLOCKS ONLY (GitHub #153): output_faces leaves multiblocks out. A multiblock ejects from an
+// output hatch's own front face (GT's MTEHatchOutput / MTEHatchOutputBus push to getFrontFacing();
+// the controller has no auto-output at all), so an arrow on its bounding box would mark a casing face
+// that moves nothing. Until the decal can be drawn at the hatch that LayoutResult.hatches records, no
+// arrow beats a wrong one.
+const arrows = [];   // the arrow and cover-marker decals, shown/hidden by #arrowToggle
 let arrowsOn = true;
-for (const ac of SCENE.autoConnections) {
-  const src = centerById[ac.source], n = FACE_NORMAL[ac.sourceFace];
-  if (!src || !n) continue;
-  const size = sizeById[ac.source] || [1, 1, 1], cellY = Math.round(src.y - size[1] / 2);
-  if (size[0] * size[1] * size[2] > 1) continue;   // multiblock: the ejecting face is a hatch's, not this box's
-  // Sit the arrow just OUTSIDE the machine's rendered surface so it is never buried in the geometry:
+let coverCount = 0;
+function edgeDecals(id, face, make, userData) {
+  const src = centerById[id], n = FACE_NORMAL[face];
+  if (!src || !n) return;
+  const size = sizeById[id] || [1, 1, 1], cellY = Math.round(src.y - size[1] / 2);
+  if (size[0] * size[1] * size[2] > 1) return;   // multiblock: the ejecting face is a hatch's, not this box's
+  // Sit the decal just OUTSIDE the machine's rendered surface so it is never buried in the geometry:
   // an expanded machine draws full-size (0.50 half-extent) textured block cubes, a placeholder its
-  // 0.92-scaled box (0.46). The extra 0.03 also clears the front name plate (+0.012), so the arrow
+  // 0.92-scaled box (0.46). The extra 0.03 also clears the front name plate (+0.012), so the decal
   // draws on top of the texture AND the label; normal depth testing still hides it behind any machine
   // that is actually in front of it.
-  const surf = expandedById[ac.source] ? 0.50 : 0.46, lift = 0.03;
+  const surf = expandedById[id] ? 0.50 : 0.46, lift = 0.03;
   const nv = new THREE.Vector3(n[0], n[1], n[2]);
-  for (const m of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]) {
-    if (m[0]*n[0] + m[1]*n[1] + m[2]*n[2] !== 0) continue;   // skip the output face and its opposite
-    const mv = new THREE.Vector3(m[0], m[1], m[2]);
-    const alongM = Math.abs(m[0])*size[0] + Math.abs(m[1])*size[1] + Math.abs(m[2])*size[2];
+  for (const d of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]) {
+    if (d[0]*n[0] + d[1]*n[1] + d[2]*n[2] !== 0) continue;   // skip the marked face and its opposite
+    const dv = new THREE.Vector3(d[0], d[1], d[2]);
+    const alongD = Math.abs(d[0])*size[0] + Math.abs(d[1])*size[1] + Math.abs(d[2])*size[2];
     const alongN = Math.abs(n[0])*size[0] + Math.abs(n[1])*size[1] + Math.abs(n[2])*size[2];
-    const deco = faceArrow('#00e5ff');
+    const deco = make();
     deco.position.copy(src)
-      .addScaledVector(mv, surf * alongM + lift)    // just outside the rendered face + name plate -> on top
-      .addScaledVector(nv, surf * alongN - 0.10);   // slide toward the output edge so the tip reaches it
+      .addScaledVector(dv, surf * alongD + lift)    // just outside the rendered face + name plate -> on top
+      .addScaledVector(nv, surf * alongN - 0.10);   // slide toward the marked edge so the tip reaches it
     deco.quaternion.setFromRotationMatrix(
-      new THREE.Matrix4().makeBasis(nv, new THREE.Vector3().crossVectors(mv, nv), mv));
+      new THREE.Matrix4().makeBasis(nv, new THREE.Vector3().crossVectors(dv, nv), dv));
+    if (userData) { deco.userData = userData; hoverables.push(deco); }   // hover -> which cover
     track(deco, cellY, cellY + size[1] - 1);
     arrows.push(deco);
+  }
+}
+for (const m of SCENE.machines) {
+  const out = m.outputs;
+  if (!out) continue;
+  if (out.autoFace) edgeDecals(m.id, out.autoFace, () => faceArrow('#00e5ff'), null);
+  for (const c of out.covers) {
+    coverCount++;
+    edgeDecals(m.id, c.face, () => coverMark(c.cover), { machineId: m.id, cover: c });
   }
 }
 
@@ -769,16 +817,17 @@ if (!atlasActive) {
   });
 }
 
-// Auto-output arrow show/hide. Disabled when the layout has no auto-output connections. When on, the
-// arrows still obey the layer slider (they are layer-tracked); when off, applyLayer forces them hidden.
+// Output marker show/hide: the auto-output arrows and the cover markers together, one control so the
+// phone's fold keeps its four toggles. Disabled when the layout has no marker at all. When on, the
+// markers still obey the layer slider (they are layer-tracked); when off, applyLayer forces them hidden.
 const arrowToggle = document.getElementById('arrowToggle');
 if (arrows.length === 0) {
   arrowToggle.disabled = true;
-  arrowToggle.title = 'no auto-output arrows in this layout';
+  arrowToggle.title = 'no auto-output arrows or cover markers in this layout';
 } else {
   arrowToggle.addEventListener('click', () => {
     arrowsOn = !arrowsOn;
-    arrowToggle.textContent = 'auto-output arrows: ' + (arrowsOn ? 'on' : 'off');
+    arrowToggle.textContent = 'output markers: ' + (arrowsOn ? 'on' : 'off');
     applyLayer();
   });
 }
@@ -919,6 +968,7 @@ function renderLegend() {
   const routes = section(panel, 'routes');
   for (const k of ['item', 'fluid', 'power']) row(routes, swatch(COMMODITY[k]), k);
   row(routes, swatch('#00e5ff'), 'auto-output');
+  if (coverCount) row(routes, swatch(COVER_COLOR), 'cover (conveyor / pump)');
   // The net inventory, which the page did not have at all: what nets exist, what each carries and
   // at what rate, and a click to see one of them by itself.
   if (SCENE.routes.length) {
@@ -1027,6 +1077,20 @@ function machineHover(id) {
     anchor: [c.x, c.y + s[1] / 2 + 0.15, c.z],
   };
 }
+// A cover marker's tag: which cover, on which machine's which face, and what it lets out.
+const resourceByNet = Object.fromEntries(SCENE.routes.map((r) => [r.netId, r.resource]));
+function coverHover(what, at) {
+  const c = what.cover;
+  const carried = c.nets.map((n) => resourceByNet[n]).filter((r) => r);
+  return {
+    lines: () => [
+      c.cover + ' cover',
+      (nameById[what.machineId] || what.machineId) + ', ' + c.face + ' face',
+      ...carried,
+    ],
+    anchor: [at.x, at.y + 0.25, at.z],
+  };
+}
 function routeHover(r, cell) {
   return { lines: () => routeLines(r), anchor: [cell[0] + 0.5, cell[1] + 1 + 0.15, cell[2] + 0.5] };
 }
@@ -1055,6 +1119,7 @@ function pickAt(ev) {
   const owners = hit.object.userData.owners;
   const what = owners ? owners[hit.faceIndex] : hit.object.userData;
   if (!what) return null;
+  if (what.cover) return coverHover(what, hit.object.position);
   return what.route ? routeHover(what.route, what.cell) : machineHover(what.machineId);
 }
 // Mouse only: a touch 'pointermove' is a finger dragging the camera, and picking along it would
