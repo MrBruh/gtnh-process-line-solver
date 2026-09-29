@@ -58,6 +58,13 @@ class TileEntity:
     is not a GT machine at all - an EnderIO reservoir, a StorageDrawers drawer - which is a fact
     about the block rather than a parse failure. ``raw`` keeps the whole compound, so covers, stored
     fluids and recipe locks stay reachable without this dataclass modelling GT's ~90 tags.
+
+    A GT **basic machine** points two ways (#249): ``main_facing`` (``mMainFacing``) is its working
+    face and ``facing`` (``mFacing``) its OUTPUT face, the one it auto-outputs through. Every other
+    GT block has one facing, ``facing``, and no ``main_facing``. So a reader asking which way a
+    machine was placed reads ``main_facing`` when it is present and ``facing`` otherwise: a file
+    written before #249, like ``tests/golden/schematic/sand-parallel-exported.schematic``, carries
+    only ``mFacing``, and there it was the placed front. Both are ``ForgeDirection`` ordinals.
     """
 
     id: str
@@ -66,6 +73,12 @@ class TileEntity:
     facing: int | None
     connections: int | None
     raw: nbt.Compound
+    main_facing: int | None = None
+
+    @property
+    def placed_facing(self) -> int | None:
+        """The way the block was placed: ``main_facing`` for a basic machine, else ``facing``."""
+        return self.main_facing if self.main_facing is not None else self.facing
 
 
 @dataclass(frozen=True)
@@ -157,6 +170,7 @@ def _tile_entity(tile: nbt.Compound) -> TileEntity:
         facing=_int_or_none(tile, "mFacing"),
         connections=_int_or_none(tile, "mConnections"),
         raw=tile,
+        main_facing=_int_or_none(tile, "mMainFacing"),
     )
 
 
