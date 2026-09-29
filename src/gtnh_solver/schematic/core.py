@@ -65,6 +65,7 @@ from gtnh_solver.previewer.scene import build_scene
 from gtnh_solver.previewer.textures import (
     BlockCube,
     TextureManifest,
+    auto_output_faces,
     load_multiblock_docs,
     machine_cubes,
 )
@@ -428,7 +429,7 @@ def lower(
     size = tuple(int(bounds["max"][i]) - origin[i] for i in range(3))
     grid: dict[tuple[int, int, int], Cell] = {}
 
-    auto_out = {str(ac["source"]): str(ac["sourceFace"]) for ac in scene.get("autoConnections", [])}
+    auto_out = auto_output_faces(scene)
     outputs = output_faces(problem, layout)
     covers: list[tuple[str, tuple[int, int, int], CoverFace]] = []
     filters: list[tuple[str, tuple[int, int, int], list[str]]] = []

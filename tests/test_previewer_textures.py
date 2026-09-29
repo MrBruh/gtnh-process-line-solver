@@ -1058,13 +1058,33 @@ def test_generic_single_block_machine_textures_via_tier(dataset: tuple[Path, Pat
     assert "Test Hammer" in summary.textured_types
 
 
+def _outputs(auto_face: str | None) -> dict[str, Any]:
+    """A scene machine's ``outputs`` (``output_faces``) with ``auto_face`` and nothing else."""
+    return {"autoFace": auto_face, "autoItems": False, "autoFluids": True, "covers": []}
+
+
 def test_storage_glyph_faces_auto_output_direction(dataset: tuple[Path, Path]) -> None:
-    """A boundary-storage block auto-outputs from its front, so its output glyph rotates to face the
-    auto-output direction (EAST here), not the placer's default 'north' - the Super Tank/Chest fix."""
+    """A Super Tank auto-outputs out of its front, so its output glyph rotates to face its auto face
+    (EAST here, the scene's ``outputs.autoFace``), not the placer's default 'north'."""
     mb, manifest = dataset
+    tank = {**_machine("s1", "Test Macerator", [0, 0, 0], [1, 1, 1]), "role": "storage"}
+    scene: dict[str, Any] = {"version": 1, "machines": [{**tank, "outputs": _outputs("east")}]}
+    texturize_scene(scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider)
+    # the world EAST face now samples the machine's NORTH glyph, so the glyph points where it ejects
+    assert (
+        scene["blocks"][0]["texture"][_GT_SIDE_TO_THREE_SLOT[5]]
+        == "gregtech:gt.blockmachines|5|NORTH|inactive"
+    )
+
+
+def test_a_storage_with_no_auto_face_keeps_its_placed_front(dataset: tuple[Path, Path]) -> None:
+    """A Super Chest never auto-outputs (#249): even beside an auto-connection it has no auto face,
+    so its glyph stays on its placed front, which is also the facing the export writes."""
+    mb, manifest = dataset
+    chest = {**_machine("s1", "Test Macerator", [0, 0, 0], [1, 1, 1]), "role": "storage"}
     scene: dict[str, Any] = {
         "version": 1,
-        "machines": [{**_machine("s1", "Test Macerator", [0, 0, 0], [1, 1, 1]), "role": "storage"}],
+        "machines": [{**chest, "outputs": _outputs(None)}],
         "autoConnections": [
             {
                 "netId": "n",
@@ -1076,30 +1096,19 @@ def test_storage_glyph_faces_auto_output_direction(dataset: tuple[Path, Path]) -
         ],
     }
     texturize_scene(scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider)
-    # the world EAST face now samples the machine's NORTH glyph, so the glyph points where it ejects
+    block = scene["blocks"][0]
     assert (
-        scene["blocks"][0]["texture"][_GT_SIDE_TO_THREE_SLOT[5]]
-        == "gregtech:gt.blockmachines|5|NORTH|inactive"
+        block["texture"][_GT_SIDE_TO_THREE_SLOT[2]] == "gregtech:gt.blockmachines|5|NORTH|inactive"
     )
+    assert block["texture"][_GT_SIDE_TO_THREE_SLOT[5]] is None
 
 
 def test_non_storage_glyph_keeps_placed_front(dataset: tuple[Path, Path]) -> None:
     """A non-storage machine ignores the auto-output face: its front glyph stays on its placed front,
     so only Super Tank/Chest-style storage blocks are reoriented."""
     mb, manifest = dataset
-    scene: dict[str, Any] = {
-        "version": 1,
-        "machines": [_machine("m1", "Test Macerator", [0, 0, 0], [1, 1, 1])],  # role 'machine'
-        "autoConnections": [
-            {
-                "netId": "n",
-                "source": "m1",
-                "target": "x",
-                "sourceFace": "east",
-                "targetFace": "west",
-            }
-        ],
-    }
+    machine = _machine("m1", "Test Macerator", [0, 0, 0], [1, 1, 1])  # role 'machine'
+    scene: dict[str, Any] = {"version": 1, "machines": [{**machine, "outputs": _outputs("east")}]}
     texturize_scene(scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider)
     block = scene["blocks"][0]
     assert (
