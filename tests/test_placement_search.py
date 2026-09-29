@@ -338,11 +338,12 @@ def test_optimize_respects_reserved_and_bounds() -> None:
 
 
 def test_optimize_max_iterations_caps_the_schedule() -> None:
-    # No iteration leaves the constructive seed as the best seen; a short cap is still a real anneal
-    # (minimal effort's), and one that runs past the schedule's own length changes nothing.
+    # No iteration leaves the constructive seed (the annealer's lattice one) as the best seen; a
+    # short cap is still a real anneal (minimal effort's), and one that runs past the schedule's own
+    # length changes nothing.
     problem = _star(4)
     assert optimize_placement(problem, seed=0, max_iterations=0).placements == (
-        place(problem).placements
+        place(problem, lattice=True).placements
     )
     capped = optimize_placement(problem, seed=0, max_iterations=50)
     assert _validates(problem, capped.placements)
@@ -360,7 +361,7 @@ def test_the_anneal_returns_the_cheapest_placement_the_gate_passes(
     import gtnh_solver.placement.search as search_module
 
     problem = _star(4)
-    seed_placements = place(problem).placements
+    seed_placements = place(problem, lattice=True).placements
     assert optimize_placement(problem, seed=0).placements != seed_placements
 
     def only_the_seed(_problem: InputIR, placements: tuple[Placement, ...]) -> tuple[str, ...]:
