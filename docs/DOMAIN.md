@@ -69,7 +69,8 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
   other's items. The filter's faces are pinned in the IR (`Port.faces`: input on front, left,
   right, up, down; output on back), and the validator checks that every trunk item has exactly one
   filter, that each filter's output carries only its items, and that nothing but its own output
-  sits behind it (`FILTER_ITEM_UNSORTED`, `FILTER_BACK_NOT_ITS_OUTPUT`). Two limits: a filter faces
+  sits behind it (`FILTER_ITEM_UNSORTED`, `FILTER_BACK_NOT_ITS_OUTPUT`). The routers hold that
+  cell for the net the filter feeds: every other net, and every cable, treats it as a wall. Two limits: a filter faces
   horizontally only, because every machine orientation is horizontal, so its back is never up or
   down; and fluids are never merged, since GT has no fluid filter block. #248's Item Distributor
   would ride the same face pins.

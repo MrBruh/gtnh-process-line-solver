@@ -91,7 +91,7 @@ from gtnh_solver.ir import (
 from gtnh_solver.ir.geometry import Cell
 from gtnh_solver.ir.nets import placement_index
 
-from ._grid import claim_key, coord, dock_candidates, obstacle_cells
+from ._grid import claim_key, coord, dock_candidates, filter_backs, obstacle_cells
 from .auto import assign_auto_outputs
 from .steiner import Endpoint, Grid, Key, Tree, route_tree
 
@@ -298,6 +298,18 @@ def _negotiate(
     region = problem.bounding_region
     hard = obstacle_cells(problem, placements, machines)
     grid = Grid(region, hard)
+    # The cell behind an Item Filter takes whatever the filter pushes, so it is a wall to every net
+    # but the one the filter feeds (``_grid.filter_backs``, #249). Per net, not in ``hard``: the
+    # filter's own output must still dock there.
+    backs = filter_backs(nets, placements, machines)
+    walls = {
+        net.id: frozenset(
+            grid.enc(cell)
+            for cell, owners in backs.items()
+            if net.id not in owners and grid.inside(cell)
+        )
+        for net in nets
+    }
 
     failures: dict[str, Infeasibility] = {}
     eps_by_net: dict[str, list[Endpoint]] = {}
@@ -335,7 +347,13 @@ def _negotiate(
             key_extra = _prices(key_history, key_usage, present)
             prefer = old.terminals[0][0] if old is not None else None
             tree = route_tree(
-                eps, grid, extra, key_extra, prefer=prefer, trunk=net.commodity is Commodity.POWER
+                eps,
+                grid,
+                extra,
+                key_extra,
+                blocked=walls[net.id],
+                prefer=prefer,
+                trunk=net.commodity is Commodity.POWER,
             )
             if tree is None:
                 # Prices never block, so this is geometry: some endpoint is walled off from the
@@ -358,7 +376,7 @@ def _negotiate(
         now = (frozenset(over), frozenset(over_keys))
         stall, prev_over = (stall + 1, prev_over) if now == prev_over else (0, now)
         if stall == _STALL_ROUNDS and _congestion_is_irreducible(
-            over, over_keys, active, trees, eps_by_net, grid
+            over, over_keys, active, trees, eps_by_net, grid, walls=walls
         ):
             break
         for c in over:
@@ -466,6 +484,7 @@ def _congestion_is_irreducible(
     trees: Mapping[str, Tree],
     eps_by_net: Mapping[str, list[Endpoint]],
     grid: Grid,
+    walls: Mapping[str, frozenset[int]] = MappingProxyType({}),
 ) -> bool:
     """Would no further negotiation round reduce the overlap? True only when *proven* so.
 
@@ -479,6 +498,8 @@ def _congestion_is_irreducible(
     round of history could price that net away. Conservative by construction, it answers True only
     on proof, so it never turns a routable problem into a false congestion. It proves a lone
     bottleneck, not capacity spread over parallel openings (those are left to the round budget).
+    ``walls`` are each net's own extra walls (the cells behind Item Filters it does not feed), so the
+    proof asks exactly the question the negotiation's own searches do.
     """
     for cell in over:
         forced = 0
@@ -488,7 +509,14 @@ def _congestion_is_irreducible(
                 continue  # not a user of this cell, so not what keeps it over-used
             trunk = net.commodity is Commodity.POWER
             if (
-                route_tree(eps_by_net[net.id], grid, {}, {}, blocked=frozenset({cell}), trunk=trunk)
+                route_tree(
+                    eps_by_net[net.id],
+                    grid,
+                    {},
+                    {},
+                    blocked=walls.get(net.id, frozenset()) | {cell},
+                    trunk=trunk,
+                )
                 is None
             ):
                 forced += 1
@@ -514,7 +542,10 @@ def _congestion_is_irreducible(
             trunk = net.commodity is Commodity.POWER
             if (
                 any(not e.cands for e in without)
-                or route_tree(without, grid, {}, {}, trunk=trunk) is None
+                or route_tree(
+                    without, grid, {}, {}, blocked=walls.get(net.id, frozenset()), trunk=trunk
+                )
+                is None
             ):
                 forced += 1
         if forced < 2:

@@ -16,10 +16,13 @@ from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
 from gtnh_solver.ir import (
     CellBox,
     CellCoord,
+    Commodity,
     Facing,
     HatchSlot,
     InputIR,
+    IODirection,
     Machine,
+    Net,
     Placement,
     Route,
     Terminal,
@@ -54,6 +57,43 @@ def obstacle_cells(
                 occupied_cells(placement.cell, machine.footprint, placement.orientation)
             )
     return obstacles | vent_cells(placements, machines)
+
+
+def filter_backs(
+    nets: Iterable[Net], placements: Sequence[Placement], machines: Mapping[str, Machine]
+) -> dict[Cell, frozenset[str]]:
+    """The cell behind each placed Item Filter, and the nets allowed on it: the ones it feeds.
+
+    An Item Filter pushes a stack out of its back every tick it holds one, into whatever tile is
+    there, with no toggle (``MTEBuffer.moveItems``). So the cell behind it may hold its own output's
+    pipe (or the machine it auto-outputs into), and nothing else: another net's pipe there is fed
+    the filter's item, which is what the validator refuses as ``FILTER_BACK_NOT_ITS_OUTPUT`` (#249).
+    The routers read this to keep every other net, and every cable, off that cell up front, the
+    move :func:`vent_cells` makes for a muffler; a machine body behind a filter is the placement
+    cost's to price, since the filter's output port then has no free cell of its own.
+
+    "Behind" is wherever the filter's item output port may dock (``Machine.allowed_faces``), which
+    for the adapter's filters is its back alone. A filter is known by ``Machine.filter_items``.
+    """
+    feeds: dict[tuple[str, str], set[str]] = {}
+    for net in nets:
+        for endpoint in net.endpoints:
+            feeds.setdefault((endpoint.machine_id, endpoint.port_id), set()).add(net.id)
+    backs: dict[Cell, set[str]] = {}
+    for placement in placements:
+        machine = machines.get(placement.machine_id)
+        if machine is None or not machine.filter_items:
+            continue
+        body = list(occupied_cells(placement.cell, machine.footprint, placement.orientation))
+        for port in machine.faces.ports:
+            if port.commodity is not Commodity.ITEM or port.direction is not IODirection.OUTPUT:
+                continue
+            owners = feeds.get((machine.id, port.id), set())
+            for face in machine.allowed_faces(port.id, placement.orientation):
+                dx, dy, dz = FACE_DELTAS[face]
+                for x, y, z in body:
+                    backs.setdefault((x + dx, y + dy, z + dz), set()).update(owners)
+    return {cell: frozenset(owners) for cell, owners in backs.items()}
 
 
 def vent_cells(placements: Sequence[Placement], machines: Mapping[str, Machine]) -> set[Cell]:

@@ -26,6 +26,8 @@ from gtnh_solver.ir import (
     HatchSlot,
     InputIR,
     IODirection,
+    LayoutResult,
+    LayoutStatus,
     Machine,
     MachineFaceRef,
     METoggles,
@@ -45,9 +47,10 @@ from gtnh_solver.ir.geometry import (
 )
 from gtnh_solver.placement import crowded_machines, single_block_shortfalls
 from gtnh_solver.placement.search import _bodies, _face_shortfall
-from gtnh_solver.router import assign_auto_outputs
-from gtnh_solver.router._grid import FACE_ORDER, dock_candidates, host_cells
-from tests._helpers import at, consumer, machine, producer
+from gtnh_solver.router import assign_auto_outputs, route, route_power
+from gtnh_solver.router._grid import FACE_ORDER, dock_candidates, filter_backs, host_cells
+from gtnh_solver.validator import ViolationCode, validate
+from tests._helpers import at, consumer, machine, power_source, producer
 
 _HORIZONTAL = (Facing.NORTH, Facing.EAST, Facing.SOUTH, Facing.WEST)
 _FILTER_INPUT_FACES = (
@@ -456,3 +459,106 @@ def test_six_connections_fit_when_the_pins_include_the_front() -> None:
     # may use its front, so six distinct pins fit.
     problem = _pinned_block([(face,) for face in RelativeFace])
     assert single_block_shortfalls(problem) == {}
+
+
+# ------------------------------------------------------------- nothing but its output behind it
+
+
+def _crossing_line(*, sorted_net: bool = True) -> tuple[InputIR, list[Placement]]:
+    """A filter at (3,0,3) facing north, so its back is (3,0,4), on the straight line between q and
+    d. The filter's own output runs south from its back to c (unless ``sorted_net`` is False, the
+    shape seed 200 of iron.json failed in: the filter's own net unrouted); q -> d is an unrelated net
+    whose shortest path is that row. One layer, so a detour has to go round rather than over."""
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=1, sz=8),
+        machines=[
+            _turnable("p", Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)),
+            _item_filter(),
+            _turnable("c", Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT)),
+            _turnable("q", Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)),
+            _turnable("d", Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT)),
+        ],
+        nets=[
+            _item_net("feed", ("p", "out"), ("f", "input:r")),
+            *([_item_net("sorted", ("f", "output:r"), ("c", "in"))] if sorted_net else []),
+            _item_net("other", ("q", "out"), ("d", "in")),
+        ],
+    )
+    placements = [
+        at("p", 0, 0, 0, orientation=Facing.WEST),
+        at("f", 3, 0, 3, orientation=Facing.NORTH),
+        at("c", 3, 0, 6, orientation=Facing.SOUTH),
+        at("q", 0, 0, 4, orientation=Facing.WEST),
+        at("d", 6, 0, 4, orientation=Facing.EAST),
+    ]
+    return problem, placements
+
+
+def test_the_cell_behind_a_filter_belongs_to_the_nets_it_feeds() -> None:
+    problem, placements = _crossing_line()
+    machines = {m.id: m for m in problem.machines}
+    assert filter_backs(problem.nets, placements, machines) == {(3, 0, 4): frozenset({"sorted"})}
+
+
+def test_no_other_net_is_piped_through_the_cell_behind_a_filter() -> None:
+    # MTEBuffer.moveItems pushes into whatever is behind the filter, so another net's pipe there is
+    # fed the filter's item (FILTER_BACK_NOT_ITS_OUTPUT). With the filter's own net absent, as when
+    # it fails to route, that cell is the straight line's; the router walls it and goes round.
+    problem, placements = _crossing_line(sorted_net=False)
+    result = route(problem, placements)
+    assert result.ok, result.infeasibility
+    (other,) = [r for r in result.routes if r.net_id == "other"]
+    assert (3, 0, 4) not in other.cells()
+
+
+def test_the_filters_own_output_still_docks_behind_it() -> None:
+    # The wall is per net: the net the filter feeds docks on its back as its pin requires.
+    problem, placements = _crossing_line()
+    result = route(problem, placements)
+    assert result.ok, result.infeasibility
+    by_net = {r.net_id: r for r in result.routes}
+    assert (3, 0, 4) not in by_net["other"].cells()
+    assert (3, 0, 4) in {t.cell.as_tuple() for t in by_net["sorted"].terminals}
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=placements,
+        routes=list(result.routes),
+        auto_connections=list(result.auto_connections),
+    )
+    assert ViolationCode.FILTER_BACK_NOT_ITS_OUTPUT not in validate(problem, layout).codes()
+
+
+def test_no_cable_is_laid_through_the_cell_behind_a_filter() -> None:
+    # A filter never takes power, so its back is a wall to every power net.
+    consumer_m = _turnable(
+        "m", Port(id="power:in", commodity=Commodity.POWER, direction=IODirection.INPUT)
+    )
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=1, sz=8),
+        machines=[
+            power_source(orientations=list(_HORIZONTAL)),
+            consumer_m.model_copy(update={"eut": 16.0}),
+            _item_filter(),
+        ],
+        nets=[
+            Net(
+                id="power:LV",
+                commodity=Commodity.POWER,
+                throughput=16.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="src", port_id="power:out"),
+                    MachineFaceRef(machine_id="m", port_id="power:in"),
+                ],
+            )
+        ],
+    )
+    placements = [
+        at("src", 0, 0, 4, orientation=Facing.WEST),
+        at("m", 6, 0, 4, orientation=Facing.EAST),
+        at("f", 3, 0, 3, orientation=Facing.NORTH),
+    ]
+    result = route_power(problem, placements)
+    assert result.ok, result.infeasibility
+    (cable,) = result.routes
+    assert (3, 0, 4) not in cable.cells()

@@ -33,13 +33,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     hover listing what it lets through. It still draws as a placeholder box, and `.schematic`
     export of filters is the follow-up PR.
 
-  With the local 2.8.4 census, iron.json now adapts to 12 filters on 4 trunks (the washers and the
-  first Macerator) with no face shortfall, and every net routes on 3 of 4 full-effort seeds. It is
-  still `partial_invalid`, for the one reason the shortfall used to hide: its washers' fan-out to
-  four Thermal Centrifuges needs more insertions than a huge tin pipe makes. Merging only above five
-  connections left the Macerator's nets unrouted on every seed, and merging every multi-output
-  single block (24 filters) spread the layout until nets failed on every seed. No shipped example
-  merges, and their layouts are byte-identical.
+  - The routers keep every other net, and every cable, off the cell behind a filter, since the
+    filter pushes into whatever is there; only the net it feeds may dock on it.
+
+  **iron.json now solves VALID** (seeds 0 and 100 of four tried at full effort, validator-clean,
+  every pipe normal size) with the local 2.8.4 census: 12 filters on 4 trunks, for the washers and
+  the first Macerator. Seeds 200 and 300 end `partial_invalid` on routing congestion and on the MV
+  power net finding no dock. Merging only above five connections left the Macerator's nets unrouted
+  on every seed, and merging every multi-output single block (24 filters) spread the layout until
+  nets failed on every seed. No shipped example merges, and their layouts are byte-identical.
 - **Both nitrobenzene example lines now solve on a fresh clone, and in CI.** The committed
   `data/multiblocks/` held only two hand-authored fixtures (an Electric Blast Furnace and a Vacuum
   Freezer), so without a local dump every other multiblock fell back to a 1x1x1 box. A single block

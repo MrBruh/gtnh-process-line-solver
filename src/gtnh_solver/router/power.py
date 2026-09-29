@@ -85,7 +85,15 @@ from gtnh_solver.ir import (
 from gtnh_solver.ir.geometry import Cell
 from gtnh_solver.ir.nets import net_sources_sinks, placement_index, port_direction_map
 
-from ._grid import astar_multi, claim_key, coord, dock_candidates, manhattan, obstacle_cells
+from ._grid import (
+    astar_multi,
+    claim_key,
+    coord,
+    dock_candidates,
+    filter_backs,
+    manhattan,
+    obstacle_cells,
+)
 
 #: Backstop on rip-up/reroute passes (cycle detection on the failed-net set usually stops
 #: first). The item/fluid router moved on to negotiated congestion (core, GitHub #7); power
@@ -219,8 +227,8 @@ def _route_pass(
 ) -> tuple[list[Route], dict[str, Infeasibility]]:
     """Route ``nets`` once in the given order as shared-amperage trunks, capacity-aware.
 
-    Builds the obstacle set fresh (reserved + machine
-    bodies + ``extra_obstacles``), then grows each net's trunk in turn, adding a finished trunk's
+    Builds the obstacle set fresh (reserved + machine bodies + the cell behind every Item Filter,
+    which takes whatever the filter pushes and never carries power, + ``extra_obstacles``), then grows each net's trunk in turn, adding a finished trunk's
     cells to the obstacles so later tiers route around it. Failures are order-dependent - a
     malformed net (not one source + >=1 sink), an undockable/unroutable trunk, or an
     amperage/tier/voltage rejection - so this skips (does not abort on) them and records why per
@@ -232,7 +240,11 @@ def _route_pass(
     region = problem.bounding_region
     port_dir = port_direction_map(problem)
 
-    obstacles = obstacle_cells(problem, placements, machines) | set(extra_obstacles)
+    obstacles = (
+        obstacle_cells(problem, placements, machines)
+        | set(filter_backs(problem.nets, placements, machines))
+        | set(extra_obstacles)
+    )
     routes: list[Route] = []
     failures: dict[str, Infeasibility] = {}
     for net in nets:
