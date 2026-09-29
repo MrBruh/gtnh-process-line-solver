@@ -178,11 +178,13 @@ def _proven_build() -> tuple[InputIR, LayoutResult]:
     placements = []
     for pos, tile in sorted(tiles.items()):
         mid = _machine_id(tile)
-        if mid is None or tile.facing is None:
+        # placed_facing: a basic machine's working face when the file records one (an export since
+        # #249), else mFacing, which this file (written before #249) carries as the placed front.
+        if mid is None or tile.placed_facing is None:
             continue
         machine_at[pos] = mid
         placements.append(
-            Placement(machine_id=mid, cell=_coord(pos), orientation=_FACING_OF[tile.facing])
+            Placement(machine_id=mid, cell=_coord(pos), orientation=_FACING_OF[tile.placed_facing])
         )
 
     net_by_machines = {frozenset(e.machine_id for e in n.endpoints): n for n in problem.nets}
