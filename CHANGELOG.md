@@ -7,15 +7,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
-- **A single block short of faces sends its item outputs out of one face, sorted by Item Filters
-  (#249).** A single block has five faces that can carry a connection, one each, so a machine with
-  several item outputs could run out: iron.json's Ore Washer (item in, fluid in, three item outputs,
-  power) left its line `partial_invalid` with `single_block_faces` on every seed. The adapter now
+- **A single block with no face to spare sends its item outputs out of one face, sorted by Item
+  Filters (#249).** A single block has five faces that can carry a connection, one each, so a
+  machine with several item outputs could run out: iron.json's Ore Washer (item in, fluid in, three
+  item outputs, power) left its line `partial_invalid` with `single_block_faces` on every seed, and
+  its first Macerator (item in, three item outputs, power) used all five, so a route had to reach
+  every face and one of its nets lost the negotiation on every seed. The adapter now
   does what a GT build does: the machine gets one item output on a trunk pipe (a net whose new
   `items` lists what it carries) to one "Ultra Low Voltage Item Filter" per item (mID 9240, no
   power), and each filter sources that item's downstream net from its back. It merges only a
-  machine that `single_block_shortfalls` flags, that has two or more item outputs, and that is
-  proven a single block: its handler says `single`, or a census dataset for the plan's own pack
+  machine with no face to spare (five connections or more), two or more item outputs, and proof
+  that it is a single block: its handler says `single`, or a census dataset for the plan's own pack
   lacks it. A 1x1x1 box that may be a multiblock missing from the dataset is left alone, and the
   `single_block_faces` advice now names the census that would prove it. Each machine instance gets
   its own trunk and filters, since on 2.9 a sibling's output face would take the other's items.
@@ -31,11 +33,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     hover listing what it lets through. It still draws as a placeholder box, and `.schematic`
     export of filters is the follow-up PR.
 
-  With the local 2.8.4 census, iron.json now adapts to 9 filters on 3 trunks with no face shortfall.
-  It is still `partial_invalid` on every seed tried, now for reasons the shortfall used to hide: two
-  nets elsewhere in the line lose the routing negotiation, and its washers' fan-out to four Thermal
-  Centrifuges needs more insertions than a huge tin pipe makes. No shipped example merges, and
-  their layouts are byte-identical.
+  With the local 2.8.4 census, iron.json now adapts to 12 filters on 4 trunks (the washers and the
+  first Macerator) with no face shortfall, and every net routes on 3 of 4 full-effort seeds. It is
+  still `partial_invalid`, for the one reason the shortfall used to hide: its washers' fan-out to
+  four Thermal Centrifuges needs more insertions than a huge tin pipe makes. Merging only above five
+  connections left the Macerator's nets unrouted on every seed, and merging every multi-output
+  single block (24 filters) spread the layout until nets failed on every seed. No shipped example
+  merges, and their layouts are byte-identical.
 - **Both nitrobenzene example lines now solve on a fresh clone, and in CI.** The committed
   `data/multiblocks/` held only two hand-authored fixtures (an Electric Blast Furnace and a Vacuum
   Freezer), so without a local dump every other multiblock fell back to a 1x1x1 box. A single block

@@ -68,12 +68,14 @@ a line that shares only storages lays out exactly as before. A single-block mach
 is left unmerged too: it has no hatch to disagree about, and whether it should merge is a separate
 question this does not settle.
 
-**A single block short of faces sends its items out of one face, sorted by Item Filters** (#249,
-:func:`_merge_item_outputs`). A single block has five faces that can carry a connection, one each,
-so an Ore Washer with an item in, a fluid in, three item outputs and power cannot be built as the
-plan draws it. In GT its items leave through one output face into one pipe, and an Item Filter per
-item (a block that takes items on every face but its back and pushes the ones in its slots out of
-its back) sorts them onto their own nets. The adapter builds exactly that, as ordinary IR, after
+**A single block with no face to spare sends its items out of one face, sorted by Item Filters**
+(#249, :func:`_merge_item_outputs`). A single block has five faces that can carry a connection, one
+each, so an Ore Washer with an item in, a fluid in, three item outputs and power cannot be built as
+the plan draws it, and a Macerator with an item in, three item outputs and power needs a route to
+reach every one of its five, top and bottom included, which in practice the routers rarely manage.
+In GT its items leave through one output face into one pipe, and an Item Filter per item (a block
+that takes items on every face but its back and pushes the ones in its slots out of its back) sorts
+them onto their own nets. The adapter builds exactly that, as ordinary IR, after
 the power synthesis and before the region is sized::
 
     Washer  # 1 out:a --A--> Sink A         Washer#1 out:items --trunk#1 (a,b,c)--> F1a, F1b, F1c
@@ -82,13 +84,18 @@ the power synthesis and before the region is sized::
 
 It merges only what needs it and only what is safe to merge:
 
-- the machine is short of faces by the count ``placement.single_block_shortfalls`` reports from
-  (``ir.nets.connection_counts``), and has two or more item outputs; all of them merge, since a
-  basic machine with item auto-output ejects every item slot through its output face;
+- the machine has **no face to spare**: at least as many connections as a single block has usable
+  faces, by the count ``placement.single_block_shortfalls`` reports from
+  (``ir.nets.connection_counts``), and two or more item outputs; all of them merge, since a basic
+  machine with item auto-output ejects every item slot through its output face. Merging at exactly
+  five and not only above it is measured, not assumed: on iron.json it is what lets every net of
+  the line route (3 of 4 seeds, 2026-09-28), while merging every multi-output single block adds so many filters that the
+  layout spreads and routing fails again. A machine with a face to spare keeps a face per output,
+  which GT builds with an Item Filter cover on each extra face (covers are not modelled yet);
 - it is **proven** a single block: its handler says ``kind: "single"``, or a census dump for the
   plan's own pack misses it. A 1x1x1 node is more often a multiblock whose structure is missing,
   and filters on one would be nonsense, so a structure record, a ``multiblock`` handler or no
-  evidence at all leaves it unmerged and the solver reports it short of faces;
+  evidence at all leaves it unmerged, and one over the limit is reported short of faces;
 - each machine of a parallel node gets its own trunk and filters. One trunk shared by three washers
   would carry nine streams through one pipe, and on 2.9 (where a basic machine's output face also
   accepts recipe inputs) the siblings would take each other's outputs.
@@ -1091,7 +1098,7 @@ def _merge_item_outputs(
     proven_single: frozenset[str],
     me_toggles: METoggles,
 ) -> tuple[list[Machine], list[Net]]:
-    """Send each flagged single block's item outputs out of one face, sorted by Item Filters (#249).
+    """Send a full single block's item outputs out of one face, sorted by Item Filters (#249).
 
     See the module docstring for when a machine merges and why. For each machine ``M`` that does:
 
@@ -1172,14 +1179,15 @@ def _mergeable_outputs(
 ) -> list[Port]:
     """The item output ports :func:`_merge_item_outputs` merges on ``machine``, or none.
 
-    A machine merges when it is a single block short of faces by the very count
-    ``placement.single_block_shortfalls`` reports from, is proven a single block, and has two or
-    more item outputs (one needs no sorting). All of them merge: a basic machine with item
-    auto-output on ejects every item slot through its output face, so there is no merging some.
+    A machine merges when it is a single block with **no face to spare**, by the very count
+    ``placement.single_block_shortfalls`` reports from (at least :data:`SINGLE_BLOCK_IO_FACES`
+    connections, not only more), is proven a single block, and has two or more item outputs (one
+    needs no sorting). All of them merge: a basic machine with item auto-output on ejects every
+    item slot through its output face, so there is no merging some.
     """
     if machine.id not in proven_single or machine.footprint.volume != 1:
         return []
-    if counts.get(machine.id, 0) <= SINGLE_BLOCK_IO_FACES:
+    if counts.get(machine.id, 0) < SINGLE_BLOCK_IO_FACES:
         return []
     outputs = [
         port

@@ -5,8 +5,9 @@ in, a fluid in, three item outputs and power cannot be built as the plan draws i
 such a machine's items out of one face on a trunk and places an Item Filter per item to sort them
 (``adapter.core._merge_item_outputs``). What these pin:
 
-- **when** it merges: short of faces by the solver's own count, PROVEN a single block (a ``single``
-  handler, or a census miss for the plan's own pack), and two or more item outputs;
+- **when** it merges: no face to spare by the solver's own count (five connections or more),
+  PROVEN a single block (a ``single`` handler, or a census miss for the plan's own pack), and two
+  or more item outputs;
 - **the shape** every later stage relies on: filter and trunk ids, types, face pins, rates;
 - **what moves**: each downstream net is sourced by its item's filter, nets one filter sources fold
   into one, and a line that merges nothing (every shipped example) is untouched.
@@ -54,6 +55,7 @@ from gtnh_solver.ir import (
     RelativeFace,
 )
 from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
+from gtnh_solver.ir.nets import SINGLE_BLOCK_IO_FACES, connection_counts
 from gtnh_solver.placement import single_block_shortfalls
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -391,9 +393,24 @@ def test_a_structure_record_never_merges() -> None:
 # ------------------------------------------------------------------ what needs merging
 
 
-def test_a_machine_within_its_faces_is_untouched() -> None:
-    # Item in, fluid in, two item outputs, power: five connections, one face each.
+def test_a_machine_with_no_face_to_spare_merges() -> None:
+    # Item in, fluid in, two item outputs, power: five connections on five faces. Not a shortfall,
+    # but every face would need a route, top and bottom included, which is what kept iron.json's
+    # first Macerator from routing on every seed; merged, it has two faces free.
+    unmerged = _adapt(_washer_plan(items=("gt.dust.a", "gt.dust.b"), handler=None))
+    assert connection_counts(unmerged.nets, unmerged.me_toggles)["w#1"] == SINGLE_BLOCK_IO_FACES
+    assert not single_block_shortfalls(unmerged)
     ir = _adapt(_washer_plan(items=("gt.dust.a", "gt.dust.b")))
+    assert len(_filters(ir)) == 6
+    assert [t.items for t in _trunks(ir)] == [("gt.dust.a", "gt.dust.b")] * 3
+    assert connection_counts(ir.nets, ir.me_toggles)["w#1"] == SINGLE_BLOCK_IO_FACES - 1
+
+
+def test_a_machine_with_a_face_to_spare_is_untouched() -> None:
+    # The same two item outputs with the water on ME: four connections, so one face stays free and
+    # each output keeps a face of its own.
+    ir = _adapt(_washer_plan(items=("gt.dust.a", "gt.dust.b")), me_toggles=METoggles(fluids=True))
+    assert connection_counts(ir.nets, ir.me_toggles)["w#1"] == SINGLE_BLOCK_IO_FACES - 1
     assert not _filters(ir)
     assert not _trunks(ir)
     assert {"output:gt.dust.a", "output:gt.dust.b"} <= {
