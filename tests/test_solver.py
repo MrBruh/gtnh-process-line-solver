@@ -373,28 +373,29 @@ def _edge(nid: str, src: str, dst: str) -> Net:
 
 
 def test_the_multi_start_recovers_a_layout_a_single_attempt_leaves_partial() -> None:
-    # A tight single-layer fan-out graph where the seed-0 placement strands a net - the router
+    # A tight single-layer fan-out graph where the seed-1 placement strands a net - the router
     # cannot lay its pipe in the congested layout, so one assembly attempt is partial_invalid.
     # Another seed of the multi-start places it differently and routes cleanly: solve() returns
     # VALID where a single attempt did not. (The seed is whichever one the annealer happens to
     # strand: it was seed 1 while the LNS recreate priced compactness without the one-cell nudge,
-    # #254, and is seed 0 again with both.)
+    # #254, seed 0 with both, and seed 1 again since an anneal returns the cheapest placement the
+    # crowding gate passes, which routes seed 0.)
     edges = [("m0", "m2"), ("m0", "m3"), ("m1", "m3"), ("m1", "m4"), ("m2", "m5"), ("m4", "m5")]
     problem = InputIR(
         bounding_region=CellBox(sx=7, sy=1, sz=7),
         machines=[_io_machine(f"m{i}") for i in range(6)],
         nets=[_edge(f"e{k}", a, b) for k, (a, b) in enumerate(edges)],
     )
-    first = optimize_placement(problem, seed=0)
-    single_attempt, failed = solver_core._assemble(problem, first.placements, 0)
+    first = optimize_placement(problem, seed=1)
+    single_attempt, failed = solver_core._assemble(problem, first.placements, 1)
     assert single_attempt.status is LayoutStatus.PARTIAL_INVALID  # one attempt cannot route it...
     assert failed  # ...and it names the net it could not lay
 
-    layout = solve(problem, effort="full")
+    layout = solve(problem, seed=1, effort="full")
     assert layout.status is LayoutStatus.VALID, layout.infeasibility  # ...another attempt does
     assert validate(problem, layout).ok
-    assert layout.seed != 0  # it took a later attempt, not attempt 0
-    assert solve(problem, effort="full") == layout  # still deterministic
+    assert layout.seed != 1  # it took a later attempt, not attempt 1
+    assert solve(problem, seed=1, effort="full") == layout  # still deterministic
 
 
 def test_solve_fork_auto_outputs_one_and_pipes_the_other() -> None:

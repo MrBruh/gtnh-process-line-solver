@@ -351,6 +351,40 @@ def test_optimize_max_iterations_caps_the_schedule() -> None:
     )
 
 
+def test_the_anneal_returns_the_cheapest_placement_the_gate_passes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The solver discards a placement the crowding gate proves crowded, so a cheaper one it gates
+    # is worth nothing to it. Here the gate passes only the constructive seed, so the seed is what
+    # comes back, though the anneal found cheaper states.
+    import gtnh_solver.placement.search as search_module
+
+    problem = _star(4)
+    seed_placements = place(problem).placements
+    assert optimize_placement(problem, seed=0).placements != seed_placements
+
+    def only_the_seed(_problem: InputIR, placements: tuple[Placement, ...]) -> tuple[str, ...]:
+        return () if tuple(placements) == seed_placements else ("hub",)
+
+    monkeypatch.setattr(search_module, "crowded_machines", only_the_seed)
+    assert optimize_placement(problem, seed=0).placements == seed_placements
+
+
+def test_the_anneal_returns_the_cheapest_state_when_the_gate_passes_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # With nothing to prefer, the cheapest state comes back and the solver's own gate decides. The
+    # gate draws nothing from the rng, so asking it cannot change the walk: this is the same state
+    # the anneal returns when the gate passes everything.
+    import gtnh_solver.placement.search as search_module
+
+    problem = _star(4)
+    monkeypatch.setattr(search_module, "crowded_machines", lambda *_: ())
+    passing_all = optimize_placement(problem, seed=0)
+    monkeypatch.setattr(search_module, "crowded_machines", lambda *_: ("hub",))
+    assert optimize_placement(problem, seed=0) == passing_all
+
+
 def test_optimize_single_machine_returns_constructive_seed() -> None:
     problem = InputIR(bounding_region=CellBox(sx=4, sy=2, sz=4), machines=[_hub("only")], nets=[])
     assert optimize_placement(problem, seed=0).placements == place(problem).placements

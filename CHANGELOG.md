@@ -708,6 +708,18 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **An anneal hands back the cheapest placement the crowding gate passes, not the cheapest one
+  (`placement/search.py`).** The solver asks the gate of every attempt before routing and discards
+  a placement it proves crowded, while the placement cost only estimates crowding and misses some
+  of what the gate proves. On iron.json the cheapest state seen was gated on 50 of 64 anneals, so
+  most attempts were thrown away unrouted although the anneal had passed through uncrowded ones.
+  Now 16 of 64 are gated and the line solves VALID on 7 of 8 spaced seeds at full effort (3 of 8
+  before); the layout is still one block deep, which later placement work addresses. The gate is
+  asked once the anneal is done, cheapest accepted state first, so the walk itself is unchanged:
+  sand, parallel-sand, nitrobenzene (seeds 0 and 100) and ev-nitrobenzene (seed 0) solve to the
+  identical layouts. Iron's anneal takes about half again as long (0.7 s to about 1.1 s, most of
+  it the gate), nitrobenzene's no longer, and iron's solves take longer overall because more of
+  its attempts now reach routing.
 - **An item stream never needs more pipe insertions than the items it moves (#249).** The pipe
   capacity rule (#165, #190) charged every stream one insertion per 40 ticks, calibrated on the
   parallel sand build, where a plain tin pipe fed one Forge Hammer of three. GT counts an insertion
