@@ -26,13 +26,15 @@ a committed ``data/multiblocks/`` dump.
 
 from __future__ import annotations
 
+import re
+import warnings
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from gtnh_solver.ir import CellBox, CellCoord, Facing, HatchSlot
 
-from .roots import resolve_dataset_path
+from .roots import DatasetWarning, resolve_dataset_path
 from .schema import (
     DatasetMeta,
     MultiblockDoc,
@@ -56,6 +58,11 @@ _COIL_CHANNEL = "coil"
 #: lets a shared display name resolve to the machine that name means *now*
 #: (``load_physical_dataset``). A suffix on ``source_class``, so it is the dump's own declared fact.
 _LEGACY_SUFFIX = "Legacy"
+
+#: What GT's ``getLocalName()`` returns when its translation does not resolve: the lang key itself.
+#: A 2.9 server dump taken before #231 names six controllers this way, both Large Sifters among
+#: them. It is not a name any plan uses, so ``load_physical_dataset`` does not index it as one.
+_LANG_KEY = re.compile(r"gt\.blockmachines\..+\.name")
 
 
 class DatasetError(ValueError):
@@ -550,6 +557,10 @@ def load_physical_dataset(
 
     Two files claiming the same **block_key** is a different thing - the same controller dumped twice -
     and still raises :class:`DatasetError`.
+
+    A display name that is an untranslated lang key (``gt.blockmachines.<name>.name``, #231) is not
+    a name at all, so it indexes nothing, and loading warns naming each such controller. Its record
+    stays addressable by ``block_key`` like any other.
     """
     directory = (
         Path(data_dir)
@@ -558,6 +569,7 @@ def load_physical_dataset(
     )
     meta = load_meta(directory / "_meta.json")
     by_name: dict[str, list[MachinePhysical]] = {}
+    unnamed: list[MachinePhysical] = []
     seen_blocks: dict[str, str] = {}
     for path in sorted(directory.glob("*.json")):
         if path.name == "_meta.json":
@@ -570,7 +582,20 @@ def load_physical_dataset(
                 f"({path.name} and {previous})"
             )
         seen_blocks[physical.block_key] = path.name
+        if _LANG_KEY.fullmatch(physical.key):
+            unnamed.append(physical)
+            continue
         by_name.setdefault(physical.key, []).append(physical)
+    if unnamed:
+        listed = ", ".join(f"{record.block_key} ({record.key})" for record in unnamed)
+        warnings.warn(
+            f"{directory} names {len(unnamed)} controller(s) by an untranslated lang key, so no plan "
+            f"can find them by name: {listed}. A plan naming one of these machines gets a 1x1x1 "
+            f"footprint unless it carries the controller's block id. Re-run the extractor for this "
+            f"pack; it now reads these names from GT's own GregTech.lang (#231).",
+            DatasetWarning,
+            stacklevel=2,
+        )
 
     machines: dict[str, MachinePhysical] = {}
     ambiguous: dict[str, tuple[MachinePhysical, ...]] = {}
@@ -583,5 +608,5 @@ def load_physical_dataset(
             machines[name] = current[0]  # the superseded one keeps its block_key, loses the name
         else:
             ambiguous[name] = tuple(found)
-    records = tuple(record for found in by_name.values() for record in found)
+    records = tuple(record for found in by_name.values() for record in found) + tuple(unnamed)
     return PhysicalDataset(meta=meta, machines=machines, ambiguous=ambiguous, records=records)

@@ -176,6 +176,43 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   itself is unchanged. GT lets some outputs share a face, which the solver does not model yet, so
   this is a limit of the solver, and the message says so. `placement.single_block_shortfalls` is
   the bound; the pre-routing crowding gate names the same machines on every placement.
+- **The structure dump records what a multiblock actually takes, and no longer passes off a
+  fragment as a whole machine (#227, #175, #177, #231).** Four extractor defects, fixed together
+  because each needs the same re-dump:
+  - **Hatch cells behind a bare adder (#227).** A slot's hatch kinds came only from an element's
+    item filter, and a hatch adder built from a bare method reference has none, so the Distillation
+    Tower's ring recorded output hatches but not the energy hatches GT accepts there. An element
+    whose filter names no kind is now asked through its own structure check, with a real hatch of
+    each kind standing in the cell; a machine hull goes in first as a control, so an element that
+    takes any GT tile is not mistaken for a hatch slot. A kind found that way is kept only if the
+    machine's own `checkMachine`, over the whole built shell, counts the hatch as that kind and
+    reports no new kind of error: an element's check alone would put a muffler on every Dangote
+    Distillus ring, where GT reads it as the top of the tower.
+  - **Clipped structures (#175).** Structures were built at y=210, 45 blocks under the world
+    ceiling, and scanned in a cube capped at 80 blocks, so the Mega Distillation Tower lost its top
+    and the Large Hadron Collider its far end, and both validated cleanly. The build now sits at
+    y=128, the cap is 256, and a build that lies on a face of its scan cube is rebuilt on a wider
+    one. A face that cannot widen, or a hologram cell outside the cube, marks the form clipped: that
+    fails a controller's first form and ends the sweep after a later one, with a note in the file.
+  - **A removed channel (#177).** The block pass set `gt_no_hatch`, which GT 2.9 removed, and the
+    channel probe swept its opt-in successor `gt_hatch`. Neither is set or probed now, a channel
+    name several constants share is probed once, and a scan that finds a real hatch fails the
+    controller, so a GT that starts placing hatches in `construct` cannot quietly change what the
+    dump means.
+  - **Names that were lang keys (#231).** On a dedicated server whose run folder had booted before,
+    GT named six controllers, both Large Sifters among them, by their untranslated lang key, so a
+    plan could never find them. The dump now reads their English name from GT's own
+    `GregTech.lang` and lists them in `_meta.json`'s new `untranslated_names`. Loading an older
+    dump that still carries a key no longer indexes it as a name, and warns naming each such
+    controller.
+
+  The committed example fixtures are re-derived from the new dump. The Distillation Tower now takes
+  energy hatches on every ring layer, and the ExxonMobil Chemical Plant, which the old dump gave no
+  energy cell at all, on all 92 of its hatch cells; the Dangote Distillus keeps its muffler on the
+  top layer. Over eight solve seeds spaced eight apart against the 2.9 dump, both nitrobenzene
+  lines stay 8/8 VALID with the same median floor (ev-nitrobenzene 440.5, nitrobenzene 104.5). 3 of
+  8 ev-nitrobenzene layouts and 6 of 8 nitrobenzene ones move: median route cells 359.5 to 355.5 on
+  ev-nitrobenzene, median volume 1045 to 1010 on nitrobenzene.
 - **A multiblock line no longer sprawls into a long strip (#254).** The placement search starts from
   a first-fit that fills the floor row by row across the whole region, which for ev-nitrobenzene is
   a strip 68 wide. Its large move rips out a cluster of machines and re-inserts them, and it chose

@@ -22,9 +22,9 @@ once: a channel that changes the **shape** (a distillation tower's `height`, a `
 distinct occupied-cell sets and is recorded as separate size variants; a channel that only swaps a
 tiered **block** (coil, glass, pipe casing) keeps the same shape and collapsed into one variant,
 throwing its tier information away. Lane 3 recovers exactly that discarded tier information: holding
-the stack size at 1, it sets each GT channel (`GTStructureChannels.values()`, minus the
-always-applied `gt_no_hatch`) to values `2..N` and diffs the placed blocks against the default
-build. Shape-changing channels (occupied cells move) are left to the stack sweep; identity-only
+the stack size at 1, it sets each distinct GT channel name (`GTStructureChannels.values()`, minus
+`coil`, which has its own sweep, and `gt_hatch`, see below) to values `2..N` and diffs the placed
+blocks against the default build. Shape-changing channels (occupied cells move) are left to the stack sweep; identity-only
 channels are recorded once as `substitutions[channel]` = the default tier plus every distinct higher
 tier `{channel_value, block, meta}`. The default-placed block is always included, so the Python
 adapter can match the tiered blocks in the primary variant. Hard caps bound the per-channel value
@@ -50,13 +50,26 @@ schema-v2 dataset:
   sweeps the trigger stack (size 1..N, stopping when the placed block set stops changing).
   Per stack size it runs a **hint pass** (`construct(trigger, hintsOnly=true)` with a
   recording proxy that captures the hologram's hint dots) and a **block pass**
-  (`construct(trigger, hintsOnly=false)` into a wiped void region, then scan), applying the
-  `gt_no_hatch` channel so real hatches stay out and the casing shell plus hint positions
-  are what get recorded.
+  (`construct(trigger, hintsOnly=false)` into a wiped region, then scan). GT's hatch element
+  places nothing (`HatchElementBuilder.placeBlock` is a `// TODO` returning false), so the casing
+  shell plus hint positions are what get recorded, and a scan that finds a real hatch fails the
+  controller rather than record it (#177: this used to set `gt_no_hatch`, which GT 2.9 removed; its
+  opt-in successor `gt_hatch` is never probed). The build sits at `8, 128, 8`, halfway up the world,
+  and a build that lies on a face of its scan cube is rebuilt on a wider one; a face that cannot
+  widen (the world's height, `MAX_SCAN_DIM` = 256) or a hologram cell outside the cube marks the
+  form clipped, which fails the controller's first form and ends the sweep after a later one (#175).
+  A controller whose localized name comes back as its untranslated lang key is named from GT's own
+  `GregTech.lang` instead and listed in `_meta.json.untranslated_names` (#231).
 - `RecordingProxy` captures hint particles headlessly (the server's normal proxy no-ops
   them); `ElementRecorder` + `HatchProbe` ask each visited `IStructureElement` which hatch
   kinds it accepts, so a slot carries its `HatchElement` names (this is what schema v2 added:
-  `variants[].hatch_slots`); `JsonWriter` serialises the raw facts to schema-v2 JSON (Gson,
+  `variants[].hatch_slots`). An element whose item filter names no kind, such as a hatch adder
+  built from a bare method reference, is asked through its own structure check instead, with a
+  real hatch of each kind standing in the cell (#227: the Distillation Tower ring's energy hatches).
+  A kind found that way is kept only if the machine's own `checkMachine`, run over the whole shell
+  with the hatch in place, counts the hatch as that kind and reports no kind of error the bare shell
+  did not already have: a muffler on a Dangote Distillus ring passes the element's check but ends
+  the tower at that layer, and the machine check is what says so; `JsonWriter` serialises the raw facts to schema-v2 JSON (Gson,
   stable key + variant ordering); `ErrorCollector` sends any exception,
   non-terminating/explosive sweep, or empty scan to `_meta.json.failures` so one broken
   multiblock never kills the run.
@@ -82,10 +95,13 @@ tags on the two mod repos match these versions.
 2.9.0-beta-2 is a **beta**, against the "stable release" rule above, and is pinned anyway because the
 adapter now reads plans from a fork that is 2.9-only. Its dump is 296 controllers against 2.8.4's 208.
 Two known rough edges are GT's, not ours: `meta.14003` and `meta.15755` fail extraction on
-client-only classes (`TileEntitySpaceElevatorCable`, `GTSoundLoop`), and two controllers report an
-**unlocalized lang key** as their display name
-(`gt.blockmachines.industrialsifter.controller.tier.single.name`, and the arc furnace's), so those
-cannot be joined by name at all.
+client-only classes (`TileEntitySpaceElevatorCable`, `GTSoundLoop`), and six controllers (both
+Large Sifters, both Industrial Arc Furnaces, the Industrial Bending Machine and the TFFT) report an
+**unlocalized lang key** such as `gt.blockmachines.industrialsifter.controller.tier.single.name` as
+their name on a dedicated server whose run folder has booted before (a fresh `run/` names them
+correctly). The dump names those from GT's own `GregTech.lang` and lists them in
+`_meta.json.untranslated_names` (#231); a dump taken before that records the key, which the Python
+loader refuses to index as a name.
 
 Only these two mods are pinned by hand. Every other hard dependency (IndustrialCraft2,
 NotEnoughItems, NotEnoughIds, GTNHLib, ModularUI, waila, AE2, ...) is a runtime dependency
@@ -131,16 +147,19 @@ actually touches:
 | Symbol | Package | Used for |
 | ------ | ------- | -------- |
 | `GregTechAPI.METATILEENTITIES` | `gregtech.api` | The array of registered meta tile entities to iterate (index = meta id). |
-| `IMetaTileEntity` | `gregtech.api.interfaces.metatileentity` | Element type of that array; `getStackForm`, `newMetaEntity`, `setBaseMetaTileEntity`, `getLocalName`/`getMetaName` filter, place, and name the controller. |
-| `BaseMetaTileEntity` | `gregtech.api.metatileentity` | The tile entity the controller is placed into: `setMetaTileID`, `setMetaTileEntity`, `setFrontFacing`. |
+| `IMetaTileEntity` | `gregtech.api.interfaces.metatileentity` | Element type of that array; `getStackForm`, `newMetaEntity`, `setBaseMetaTileEntity`, `getLocalName`/`getLocalNameKey`/`getMetaName` filter, place, and name the controller. |
+| `BaseMetaTileEntity` | `gregtech.api.metatileentity` | The tile entity the controller (and each probe hatch) is placed into: `setMetaTileID`, `setMetaTileEntity`, `setFrontFacing`. |
+| `MTEHatch`, `MTEBasicHull` | `gregtech.api.metatileentity.implementations` | `MTEHatch` marks a real hatch found in the block pass (a failure, see #177); a hull is `HatchProbe`'s control, since an element whose check takes a hull takes any GT tile rather than a hatch. |
+| `MTEMultiBlockBase` (`newMetaEntity`, `clearHatches`, `checkMachine(base, stack, errors)`) + `StructureError` / `TranslatableStructureError` | `gregtech.api.metatileentity.implementations`, `gregtech.api.structure.error` | `HatchProbe` asks a throwaway copy of the controller, and confirms a bare adder's kind with the machine's own whole-structure check, comparing the kinds of error it reports (#227). |
+| `GTLanguageManager.sEnglishFile` | `gregtech.api.util` | GT's `GregTech.lang`, read (never written) for the English name of a controller whose translation does not resolve on the server (#231). |
 | `IConstructable` | `com.gtnewhorizon.structurelib.alignment.constructable` | Filter + the build call `construct(ItemStack trigger, boolean hintsOnly)` (hint pass and block pass). |
-| `ChannelDataAccessor` | `com.gtnewhorizon.structurelib.alignment.constructable` | `setChannelData(trigger, channel, value)` to apply `gt_no_hatch` and to probe each tier channel (lane 3). |
+| `ChannelDataAccessor` | `com.gtnewhorizon.structurelib.alignment.constructable` | `setChannelData(trigger, channel, value)` to probe each tier channel (lane 3). |
 | `GTStructureChannels` | `gregtech.common.misc` | The enum of GT's structure channels; `values()` + `get()` give the channel names the lane 3 probe sweeps (coil, glass, pipe, ...) so the tool never hard-codes them and a GT5U bump that adds a channel is picked up automatically. |
 | `IHeatingCoil` | `gregtech.api.interfaces` | Identifies a placed block as a heating coil (`block instanceof IHeatingCoil`) so the coil substitution table can be built from a stack-size sweep, since the classic coil element is stack-size driven rather than coil-channel driven. |
 | `IAlignment` / `ExtendedFacing` | `com.gtnewhorizon.structurelib.alignment[.enumerable]` | Point the controller front at a fixed direction so the offset frame is deterministic. |
 | `StructureLibAPI.getBlockHint()`, `enableInstrument()` / `disableInstrument()` | `com.gtnewhorizon.structurelib` | Identify hint-block dots while scanning (a hatch/DOF slot vs. a solid casing cell); the instrument brackets a build so `StructureEvent` reports which element visited each cell. |
-| `IStructureElement` / `IStructureElementChain` (+ `StructureEvent`) | `com.gtnewhorizon.structurelib[.structure]` | `ElementRecorder` maps cell -> visiting element; `HatchProbe` flattens a chain and asks `getBlocksToPlace` what each leaf accepts, which is where a slot's hatch kinds come from. |
-| `HatchElement` (+ `mteClasses()`) | `gregtech.api.enums` | The GT hatch-kind enum whose names a slot's `kinds` list holds (`InputBus`, `OutputHatch`, ...). One probe stack per kind (the first registered MTE of the classes the kind declares) is tested against the element's predicate, so a GT bump that renumbers hatches is picked up automatically. |
+| `IStructureElement` / `IStructureElementChain` (+ `StructureEvent`) | `com.gtnewhorizon.structurelib[.structure]` | `ElementRecorder` maps cell -> visiting element; `HatchProbe` flattens a chain and asks `getBlocksToPlace` what each leaf accepts, falling back to the leaf's own `check` when its filter names no hatch kind, which is where a slot's hatch kinds come from. |
+| `HatchElement` (+ `mteClasses()`, `count()`) | `gregtech.api.enums` | The GT hatch-kind enum whose names a slot's `kinds` list holds (`InputBus`, `OutputHatch`, ...). One probe per kind (the first registered MTE of the classes the kind declares) is tested against the element's predicate, or placed for its check, so a GT bump that renumbers hatches is picked up automatically; `count()` says whether a placed probe registered as its kind. |
 | `StructureLib.proxy` (reflected) + `CommonProxy` (subclassed) | `com.gtnewhorizon.structurelib` | Temporarily swap in `RecordingProxy` to capture hint particles headlessly (the server's proxy no-ops them). The one reflective touch of a StructureLib internal; a bump that moves it fails loudly and locally. |
 
 One extra reflective touch, on the Minecraft side: StructureLib's hint walk is client-only

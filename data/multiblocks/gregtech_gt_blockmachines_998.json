@@ -10,7 +10,7 @@
   "variants": [
     {
       "trigger_stack_size": 1,
-      "channels": {"gt_no_hatch": 1},
+      "channels": {},
       "blocks": [
         {"d": [-3, 0, 0], "block": "miscutils:gtplusplus.blockspecialcasings.2", "meta": 0},
         {"d": [-2, 0, 0], "block": "miscutils:gtplusplus.blockspecialcasings.2", "meta": 0},
@@ -303,98 +303,374 @@
         {"d": [3, 6, 6], "hint": 0}
       ],
       "hatch_slots": [
-        {"d": [-3, 0, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-2, 0, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-1, 0, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [1, 0, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [2, 0, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 0, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 0, 1], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 0, 1], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 0, 2], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 0, 2], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 0, 3], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 0, 3], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 0, 4], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 0, 4], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 0, 5], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 0, 5], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 0, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-2, 0, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-1, 0, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [0, 0, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [1, 0, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [2, 0, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 0, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 1, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 1, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 1, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 1, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 2, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 2, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 2, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 2, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 3, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 3, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 3, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 3, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 4, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 4, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 4, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 4, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 5, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 5, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 5, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 5, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 6, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-2, 6, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-1, 6, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [0, 6, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [1, 6, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [2, 6, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 6, 0], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 6, 1], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-2, 6, 1], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-1, 6, 1], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [0, 6, 1], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [1, 6, 1], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [2, 6, 1], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 6, 1], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 6, 2], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-2, 6, 2], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-1, 6, 2], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [0, 6, 2], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [1, 6, 2], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [2, 6, 2], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 6, 2], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 6, 3], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-2, 6, 3], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-1, 6, 3], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [0, 6, 3], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [1, 6, 3], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [2, 6, 3], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 6, 3], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 6, 4], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-2, 6, 4], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-1, 6, 4], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [0, 6, 4], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [1, 6, 4], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [2, 6, 4], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 6, 4], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 6, 5], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-2, 6, 5], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-1, 6, 5], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [0, 6, 5], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [1, 6, 5], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [2, 6, 5], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 6, 5], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-3, 6, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-2, 6, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [-1, 6, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [0, 6, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [1, 6, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [2, 6, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]},
-        {"d": [3, 6, 6], "kinds": ["InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]}
+        {
+          "d": [-3, 0, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-2, 0, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 0, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 0, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [2, 0, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 0, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 0, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 0, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 0, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 0, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 0, 3],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 0, 3],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 0, 4],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 0, 4],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 0, 5],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 0, 5],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 0, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-2, 0, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 0, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 0, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 0, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [2, 0, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 0, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 1, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 1, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 1, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 1, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 2, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 2, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 2, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 2, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 3, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 3, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 3, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 3, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 4, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 4, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 4, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 4, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 5, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 5, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 5, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 5, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 6, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-2, 6, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 6, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 6, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 6, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [2, 6, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 6, 0],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 6, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-2, 6, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 6, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 6, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 6, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [2, 6, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 6, 1],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 6, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-2, 6, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 6, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 6, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 6, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [2, 6, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 6, 2],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 6, 3],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-2, 6, 3],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 6, 3],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 6, 3],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 6, 3],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [2, 6, 3],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 6, 3],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 6, 4],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-2, 6, 4],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 6, 4],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 6, 4],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 6, 4],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [2, 6, 4],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 6, 4],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 6, 5],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-2, 6, 5],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 6, 5],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 6, 5],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 6, 5],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [2, 6, 5],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 6, 5],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-3, 6, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-2, 6, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [-1, 6, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [0, 6, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [1, 6, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [2, 6, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        },
+        {
+          "d": [3, 6, 6],
+          "kinds": ["Energy", "InputBus", "InputHatch", "Maintenance", "OutputBus", "OutputHatch"]
+        }
       ],
       "bbox": [7, 7, 7]
     }

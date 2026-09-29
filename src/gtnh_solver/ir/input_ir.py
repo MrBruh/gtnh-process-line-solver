@@ -94,9 +94,10 @@ class HatchSlot(FrozenModel):
     ``kinds`` holds ``gregtech.api.enums.HatchElement`` names (``OutputHatch``, ``InputBus``,
     ``Energy``, ``Maintenance``, ``Muffler``, ...), sorted so a layout is reproducible. **It is a
     lower bound, never a whitelist**: a GT hatch adder built from a bare method reference exposes no
-    filter, so its cell is recorded without that kind rather than wrongly. 23 of 208 dumped
-    controllers record no slots at all, 61 of the remaining 185 record no ``Energy``-capable cell,
-    and 35 no ``Maintenance``-capable one. A consumer that treats an absent kind as a prohibition
+    filter, so a dump taken before #227 records its cell without that kind rather than wrongly. In
+    the 2.8.4 dump 23 of 208 controllers record no slots at all, 61 of the remaining 185 record no
+    ``Energy``-capable cell, and 35 no ``Maintenance``-capable one; a 2.9 dump taken since still has
+    98 of 286 with no ``Energy`` cell. A consumer that treats an absent kind as a prohibition
     manufactures a false infeasibility across roughly a third of the dataset; treat "unrecorded" as
     permissive (``validator/core`` already refuses to enforce per-kind counts for this reason).
     """
@@ -217,9 +218,10 @@ class Machine(StrictModel):
           an input hatch;
         - slots are recorded but *none* names the port's kind -> all of them. The dump is silent
           about that kind on this machine rather than prohibiting it: a hatch adder built from a
-          bare method reference exposes no filter, so its cell is recorded without the kind. 61 of
-          185 controllers record no ``Energy`` cell, the Chemical Plant among them, and reading
-          that as a prohibition would refuse to power a machine that certainly takes power.
+          bare method reference exposes no filter, so a dump taken before #227 records its cell
+          without the kind. In the 2.8.4 dump 61 of 185 controllers record no ``Energy`` cell, the
+          Chemical Plant among them, and reading that as a prohibition would refuse to power a
+          machine that certainly takes power.
 
         An unknown ``port_id`` names no kinds and therefore lands in the third case, permissive.
         """

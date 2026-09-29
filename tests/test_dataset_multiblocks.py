@@ -37,6 +37,7 @@ from gtnh_solver.adapter import (
 from gtnh_solver.dataset import (
     DatasetError,
     DatasetMeta,
+    DatasetWarning,
     MultiblockDoc,
     PhysicalDataset,
     load_physical_dataset,
@@ -741,6 +742,48 @@ def test_an_unambiguous_name_is_unaffected_by_a_collision_elsewhere(tmp_path: Pa
     dataset = load_physical_dataset(tmp_path)
     assert dataset.get("Unique") is not None
     assert dataset.get("Shared") is None
+
+
+_SIFTER_KEY = "gt.blockmachines.industrialsifter.controller.tier.single.name"
+
+
+def test_a_lang_key_display_name_indexes_nothing_and_warns(tmp_path: Path) -> None:
+    """A 2.9 server dump taken before #231 names six controllers by their untranslated lang key.
+
+    No plan names a machine that way, so the key must not claim a slot in the name index, and loading
+    has to say which controllers it left unnamed. The record itself is kept, reachable by block key.
+    """
+    (tmp_path / "_meta.json").write_text(json.dumps(_dump_meta()), encoding="utf-8")
+    (tmp_path / "sifter.json").write_text(json.dumps(_doc(15542, _SIFTER_KEY)), encoding="utf-8")
+    (tmp_path / "ebf.json").write_text(
+        json.dumps(_doc(1000, "Electric Blast Furnace")), encoding="utf-8"
+    )
+    with pytest.warns(DatasetWarning, match=r"r@15542 \(gt\.blockmachines\.industrialsifter"):
+        dataset = load_physical_dataset(tmp_path)
+
+    assert _SIFTER_KEY not in dataset.machines
+    assert dataset.get("Electric Blast Furnace") is not None
+    assert dataset.get("Large Sifter", block_key="r@15542") is not None
+
+
+def test_the_run_summary_lists_the_names_the_extractor_recovered(tmp_path: Path) -> None:
+    """A dump taken since #231 records the GregTech.lang name, and lists the controller in _meta."""
+    meta = {
+        **_dump_meta(1),
+        "untranslated_names": [
+            {
+                "registry_name": "r#15542",
+                "lang_key": _SIFTER_KEY,
+                "display_name": "Large Sifter",
+            }
+        ],
+    }
+    (tmp_path / "_meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    (tmp_path / "sifter.json").write_text(json.dumps(_doc(15542, "Large Sifter")), encoding="utf-8")
+    dataset = load_physical_dataset(tmp_path)
+
+    assert [u.lang_key for u in dataset.meta.untranslated_names] == [_SIFTER_KEY]
+    assert dataset.get("Large Sifter") is not None
 
 
 # ---------------------------------------------------------- opt-in gtnh-factory-flow wiring

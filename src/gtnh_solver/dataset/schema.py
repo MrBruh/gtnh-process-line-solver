@@ -151,8 +151,10 @@ class HatchSlot(BaseModel):
 
     ``kinds`` holds ``gregtech.api.enums.HatchElement`` names (``OutputHatch``, ``InputBus``, ...)
     and is never empty - a cell accepting nothing is simply not recorded. A hatch adder built from a
-    bare method reference exposes no item filter, so its cell is absent rather than wrong; treat this
-    list as a lower bound on what a cell permits.
+    bare method reference exposes no item filter, so the extractor stands each kind of hatch in the
+    cell and asks the element's own structure check instead (#227: the Distillation Tower's ring
+    takes energy hatches only that way). A dump taken before that went in lacks those kinds, so for
+    it this list is a lower bound on what a cell permits.
     """
 
     model_config = _STRICT
@@ -212,6 +214,25 @@ class ControllerFailure(BaseModel):
     reason: str = Field(min_length=1)
 
 
+class UntranslatedName(BaseModel):
+    """A controller whose localized name GT handed the dumping server as its untranslated lang key.
+
+    GT's ``getLocalName()`` returns the key itself (``gt.blockmachines.<name>.name``) when its
+    translation does not resolve, which on a 2.9 server whose run folder has booted before it does
+    not for six controllers, both Large Sifters among them (#231). No plan names a machine that way,
+    so the extractor records the English name from GT's own ``GregTech.lang`` instead, and lists each
+    controller it did that for here. Empty when every name resolved, as on a fresh run folder.
+    """
+
+    model_config = _STRICT
+
+    registry_name: str = Field(min_length=1)  # "<registry>#<meta>", as the failure list names one
+    lang_key: str = Field(min_length=1)  # what getLocalName() returned
+    #: The name the controller file records: the ``GregTech.lang`` entry, or the key itself when
+    #: that file had none (which ``load_physical_dataset`` then declines to index by name).
+    display_name: str = Field(min_length=1)
+
+
 class DatasetMeta(BaseModel):
     """``data/multiblocks/_meta.json``: the run summary that makes a dataset diff reviewable."""
 
@@ -234,6 +255,9 @@ class DatasetMeta(BaseModel):
     #: ceiling for it (``dataset.machine_amps_in``, ``adapter.power``). Absence from a sample is
     #: evidence of nothing at all, so the adapter must abstain there instead.
     census: bool = True
+    #: Controllers whose name had to be recovered from an untranslated lang key (#231). Provenance
+    #: for a reviewer; empty for a dump taken before the extractor recorded it.
+    untranslated_names: list[UntranslatedName] = Field(default_factory=list)
 
 
 def load_multiblock_doc(path: str | Path) -> MultiblockDoc:

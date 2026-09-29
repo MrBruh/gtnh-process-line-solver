@@ -10,7 +10,7 @@
   "variants": [
     {
       "trigger_stack_size": 1,
-      "channels": {"gt_no_hatch": 1},
+      "channels": {},
       "blocks": [
         {"d": [-1, 0, 0], "block": "gregtech:gt.blockcasings4", "meta": 1},
         {"d": [0, 0, 0], "block": "gregtech:gt.blockmachines", "meta": 31021},
@@ -98,7 +98,7 @@
     },
     {
       "trigger_stack_size": 2,
-      "channels": {"gt_no_hatch": 1},
+      "channels": {},
       "blocks": [
         {"d": [-1, 0, 0], "block": "gregtech:gt.blockcasings4", "meta": 1},
         {"d": [0, 0, 0], "block": "gregtech:gt.blockmachines", "meta": 31021},
@@ -211,7 +211,7 @@
     },
     {
       "trigger_stack_size": 3,
-      "channels": {"gt_no_hatch": 1},
+      "channels": {},
       "blocks": [
         {"d": [-1, 0, 0], "block": "gregtech:gt.blockcasings4", "meta": 1},
         {"d": [0, 0, 0], "block": "gregtech:gt.blockmachines", "meta": 31021},
@@ -349,7 +349,7 @@
     },
     {
       "trigger_stack_size": 4,
-      "channels": {"gt_no_hatch": 1},
+      "channels": {},
       "blocks": [
         {"d": [-1, 0, 0], "block": "gregtech:gt.blockcasings4", "meta": 1},
         {"d": [0, 0, 0], "block": "gregtech:gt.blockmachines", "meta": 31021},
