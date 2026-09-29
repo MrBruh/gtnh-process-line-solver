@@ -238,7 +238,8 @@ def _pipe_size(net: Net, machines: Mapping[str, Machine]) -> PipeSize:
     count. Its sinks each need topping up; its sources each fill a pipe block that GT refuses to
     refill until it is empty (``MTEItemPipe.allowPutStack``), so each needs an insertion to drain it.
     The demand is the larger side's sum of :func:`~gtnh_solver.dataset.endpoint_insertions`, which
-    is where the rate enters: an endpoint moving more than a stack per interval needs a second.
+    is where the rate enters: an endpoint moving more than a stack per interval needs a second, and
+    one moving under an item per interval needs only that fraction of one.
 
     Sized per net rather than per segment, unlike a cable. A cable's load sums along a known tree;
     where GT's nearest-first routing sends items depends on buffers the layout does not model, so
@@ -263,13 +264,14 @@ def _pipe_size(net: Net, machines: Mapping[str, Machine]) -> PipeSize:
         )
         if port is not None:
             sides[port.direction].append(port.rate)
-    demand = 0
+    demand = 0.0
     for rates in sides.values():
         # A port with no recorded rate takes an even share of the net's throughput, which is what
         # the adapter would have written for a node of identical machines.
         share = net.throughput / max(len(rates), 1)
         demand = max(demand, sum(endpoint_insertions(share if r is None else r) for r in rates))
-    size = item_pipe_size_for(max(demand, 1))  # a routed net always has an endpoint to reach
+    # Never below one insertion: normal is the smallest size a routed item net is laid at.
+    size = item_pipe_size_for(max(demand, 1.0))
     return size if size is not None else ROUTED_PIPE_SIZES[Commodity.ITEM][-1]
 
 

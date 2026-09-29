@@ -245,7 +245,10 @@ def _check_item_pipe_throughput(
     first, each consumer taking only its share of the net, and each matched pair is a **stream**
     (:func:`_item_streams`). A stream needs one insertion per :data:`STREAM_SERVICE_TICKS`, which is
     the in-game calibration rather than a GT figure (see ``dataset/pipe_capacity.py``), plus one per
-    further stack it moves in that time. A block's demand is the sum over the streams it pays for.
+    further stack it moves in that time, and never more than the items it moves in that time: GT
+    counts an insertion only when it delivered an item (``MTEItemPipe`` lines 221-223, 326-337), so
+    a stream slower than an item per interval spends only that fraction of one. A block's demand is
+    the sum over the streams it pays for.
     On the maintainer's parallel sand build, whose geometry and wiring are known::
 
         stone run: the chest and hammer 3 dock on s, hammer 2 on b, hammer 1 on c
@@ -293,19 +296,23 @@ def _check_item_pipe_throughput(
         slots, window = ITEM_PIPE_CAPACITY[size]
         capacity = slots * STREAM_SERVICE_TICKS / window  # insertions per service interval
 
-        demand: dict[Cell, int] = defaultdict(int)
+        demand: dict[Cell, float] = defaultdict(float)
         paying: dict[Cell, list[_ItemStream]] = defaultdict(list)
         for stream in _item_streams(r, net, ports):
-            # The validator's OWN rounding, not dataset.endpoint_insertions: one insertion at least,
-            # since a consumer that is never reached never runs, and one per further stack moved.
-            stacks = stream.rate * STREAM_SERVICE_TICKS / ITEMS_PER_INSERTION
-            need = max(1, math.ceil(stacks - _INSERTION_EPSILON))
+            # The validator's OWN rounding, not dataset.endpoint_insertions: one insertion, since a
+            # consumer that is never reached never runs, and one per further stack moved; but never
+            # more than the items the stream moves, since GT counts only an insertion that moved one.
+            # A stream of a net with no throughput states no rate, and keeps the whole insertion.
+            moved = stream.rate * STREAM_SERVICE_TICKS
+            need: float = max(1, math.ceil(moved / ITEMS_PER_INSERTION - _INSERTION_EPSILON))
+            if moved > _INSERTION_EPSILON:
+                need = min(need, moved)
             for cell in stream.charged:
                 demand[cell] += need
                 paying[cell].append(stream)
 
         for cell in sorted(demand):
-            if demand[cell] <= capacity:
+            if demand[cell] <= capacity + _INSERTION_EPSILON:
                 continue
             streams = paying[cell]
             count = len(streams)
@@ -314,7 +321,7 @@ def _check_item_pipe_throughput(
                     ViolationCode.ITEM_PIPE_SIZE_INSUFFICIENT,
                     f"item route for net {r.net_id!r} block {cell} carries {count} "
                     f"stream{'' if count == 1 else 's'} of {', '.join(net.resources)} "
-                    f"({sum(s.rate for s in streams):g} items/t) needing {demand[cell]} "
+                    f"({sum(s.rate for s in streams):g} items/t) needing {demand[cell]:g} "
                     f"insertions per {STREAM_SERVICE_TICKS} ticks, but its {size.value} "
                     f"{material.material} pipe makes only {capacity:g}",
                 )

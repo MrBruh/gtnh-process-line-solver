@@ -634,6 +634,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **An item stream never needs more pipe insertions than the items it moves (#249).** The pipe
+  capacity rule (#165, #190) charged every stream one insertion per 40 ticks, calibrated on the
+  parallel sand build, where a plain tin pipe fed one Forge Hammer of three. GT counts an insertion
+  only when a send succeeds and moves at least one item (`MTEItemPipe` lines 221-223, 326-337), so
+  a consumer eating less than an item per 40 ticks cannot use up a whole one. The router's sizing and
+  the validator's check now cap each stream at `rate * 40` insertions per 40 ticks. The sand
+  calibration is untouched (its hammers eat 4 items per 40 ticks); a slow line is where it bites:
+  iron.json's washers feed four Thermal Centrifuges 0.01 items/t in all, which the old rule refused
+  even on a huge pipe and a plain one now carries. A net with no throughput recorded keeps the full
+  insertion per endpoint. That a stream slower than an item per 40 ticks is served at its item rate
+  is read from GT's source, not yet measured in game.
 - **InputIR v4 (breaking): a port may be pinned to some of its machine's faces, and an item net may
   carry several items (#249).** `Port.faces` names the only faces a port may dock on, from the
   machine's own point of view (front, back, left, right, up, down), so it turns with the machine;

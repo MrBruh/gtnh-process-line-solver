@@ -73,7 +73,8 @@ def test_the_calibration_is_the_one_measurement_there_is() -> None:
 @pytest.mark.parametrize(
     ("rate", "insertions"),
     [
-        (0.0, 1),  # an endpoint that moves nothing is still an endpoint to reach
+        (0.0, 1),  # a zero rate states no rate: still an endpoint to reach, charged in full
+        (0.025, 1),  # exactly one item per interval: GT's floor and the cap agree
         (0.1, 1),  # a Forge Hammer on the sand line
         (0.30000000000000004, 1),  # float noise from the adapter must not round up
         (1.6, 1),  # exactly one stack per interval
@@ -84,6 +85,31 @@ def test_the_calibration_is_the_one_measurement_there_is() -> None:
 )
 def test_an_endpoint_needs_one_insertion_per_stack_it_moves(rate: float, insertions: int) -> None:
     assert endpoint_insertions(rate) == insertions
+
+
+@pytest.mark.parametrize(
+    ("rate", "insertions"),
+    [
+        (0.0025, 0.1),  # one of iron.json's four Thermal Centrifuges: an item per 400 ticks
+        (0.01, 0.4),  # the whole of that fan-out
+        (0.02, 0.8),
+    ],
+)
+def test_a_slow_endpoint_needs_no_more_insertions_than_items(
+    rate: float, insertions: float
+) -> None:
+    """GT counts an insertion only when it delivered at least one item (``MTEItemPipe`` lines
+    221-223, 326-337), so an endpoint moving under one item per interval cannot use up a whole one
+    (#249). What the in-game calibration measured, a hammer at 4 items per interval, is untouched."""
+    assert endpoint_insertions(rate) == pytest.approx(insertions)
+    assert endpoint_insertions(0.1) == 1
+
+
+def test_four_slow_endpoints_fit_one_plain_pipe() -> None:
+    """iron.json's washers feed four Thermal Centrifuges 0.01 items/t in all: a tenth of an
+    insertion each, so a plain tin pipe carries the run where the uncapped rule wanted a huge one."""
+    demand = sum(endpoint_insertions(0.0025) for _ in range(4))
+    assert item_pipe_size_for(max(demand, 1.0)) is PipeSize.NORMAL
 
 
 def test_a_stack_is_gts_sixty_four() -> None:

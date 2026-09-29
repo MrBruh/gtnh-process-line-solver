@@ -34,7 +34,9 @@ on the covers pushing items in, on recipe times and on buffer sizes, none of whi
 there is, the maintainer's in-game build of the parallel sand line (tests/golden/schematic/README.md):
 a plain tin pipe, which GT gives exactly one insertion per 40 ticks, fed exactly one of three stone
 hammers. One insertion per 40 ticks is enough for one endpoint and not for two, so every endpoint is
-taken to need one insertion per 40 ticks, the most conservative value that observation allows.
+taken to need one insertion per 40 ticks, the most conservative value that observation allows,
+except that none needs more insertions than items it moves (:func:`endpoint_insertions`): GT only
+counts an insertion that delivered at least one item, so a slow endpoint cannot use up a whole one.
 """
 
 from __future__ import annotations
@@ -88,16 +90,30 @@ STREAM_SERVICE_TICKS = 40
 _EPS = 1e-9
 
 
-def endpoint_insertions(rate: float) -> int:
+def endpoint_insertions(rate: float) -> float:
     """Insertions one item endpoint needs per :data:`STREAM_SERVICE_TICKS`, at ``rate`` items/t.
 
-    At least one, because an endpoint that is never reached never runs, however little it moves;
-    and one more for every further stack it moves in the interval, because an insertion carries one
-    stack at most. The analogue of :func:`~gtnh_solver.dataset.voltage.amp_load`: the per-endpoint
-    figure a caller sums over the endpoints a run serves.
+    One, because an endpoint that is never reached never runs, and one more for every further stack
+    it moves in the interval, because an insertion carries one stack at most. The analogue of
+    :func:`~gtnh_solver.dataset.voltage.amp_load`: the per-endpoint figure a caller sums over the
+    endpoints a run serves.
+
+    **Never more than the items it moves** (``rate * STREAM_SERVICE_TICKS``), which is what a slow
+    endpoint needs instead of a whole insertion. GT counts an insertion only when a send succeeds
+    and moves at least one item (``MTEItemPipe`` lines 221-223, 326-337; 2.9 runs the same loop),
+    so an inventory can never take more insertions than items, and in steady state it takes items
+    only as fast as its machine uses them. The near machine that soaks up a plain tin pipe's one
+    insertion and starves the rest (the sand calibration above) does so because it eats 4 items per
+    interval; one eating 0.1 items per interval spends at most a tenth of an insertion, and leaves
+    the rest to the far ones. Every calibrated case moves at least one item per interval, so this
+    changes none of them; what it does rely on, unmeasured in game, is that a stream slower than
+    that is served at its item rate (#249, iron.json's fan-out to four Thermal Centrifuges at 0.01
+    items/t in all). A rate of zero states no rate at all (a net with no throughput recorded), so it
+    keeps the whole insertion rather than being assumed idle.
     """
-    stacks = rate * STREAM_SERVICE_TICKS / ITEMS_PER_INSERTION
-    return max(1, math.ceil(stacks - _EPS))
+    moved = rate * STREAM_SERVICE_TICKS
+    insertions = max(1, math.ceil(moved / ITEMS_PER_INSERTION - _EPS))
+    return insertions if moved <= _EPS else min(insertions, moved)
 
 
 def item_pipe_insertions(size: PipeSize) -> float:
@@ -110,7 +126,7 @@ def item_pipe_insertions(size: PipeSize) -> float:
     return insertions * STREAM_SERVICE_TICKS / window
 
 
-def item_pipe_size_for(insertions: int) -> PipeSize | None:
+def item_pipe_size_for(insertions: float) -> PipeSize | None:
     """The smallest item pipe that makes ``insertions`` per service interval, or ``None``.
 
     ``None`` means no size of the stand-in material is enough, which is a real answer rather than an
@@ -118,6 +134,6 @@ def item_pipe_size_for(insertions: int) -> PipeSize | None:
     policy does not choose yet, so the caller decides what to lay and says so.
     """
     for size in PipeSize:  # declaration order is the ladder, smallest first
-        if item_pipe_insertions(size) >= insertions:
+        if item_pipe_insertions(size) >= insertions - _EPS:
             return size
     return None

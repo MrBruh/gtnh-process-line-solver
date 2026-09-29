@@ -2680,6 +2680,35 @@ def test_a_block_beside_a_sender_pays_for_a_delivery_that_went_the_other_way() -
     assert validate(problem, layout).ok
 
 
+#: _ONE_TO_THREE at a hundredth of the rate: each consumer takes 0.001 items/t, an item per 1000
+#: ticks, like iron.json's washers feeding its Thermal Centrifuges (#249).
+_SLOW_ONE_TO_THREE: tuple[_Dock, ...] = (
+    (2, _OUT, 0.003),
+    (2, _IN, 0.001),
+    (1, _IN, 0.001),
+    (0, _IN, 0.001),
+)
+
+
+def test_a_slow_stream_spends_no_more_insertions_than_items_it_moves() -> None:
+    """GT counts an insertion only when it delivered an item (``MTEItemPipe`` lines 221-223,
+    326-337), so the near consumer that starves the rest can take only as many insertions as items
+    it eats. At an item per 1000 ticks each, three streams through block 2 spend 0.12 of the plain
+    pipe's one insertion per 40 ticks, where the full-rate run above needs three."""
+    problem, layout = _pipe_run(PipeSize.NORMAL, *_SLOW_ONE_TO_THREE)
+    assert validate(problem, layout).ok
+    # The calibrated case is untouched: at the sand line's 0.1 items/t the same run is refused.
+    problem, layout = _pipe_run(PipeSize.NORMAL, *_ONE_TO_THREE)
+    assert set(_refused(problem, layout)) == {1, 2}
+
+
+def test_a_net_that_states_no_throughput_still_charges_every_stream_in_full() -> None:
+    # A zero rate is no rate, not an idle endpoint: each consumer is still served once per interval.
+    docks = ((2, _OUT, 0.0), (2, _IN, 0.0), (1, _IN, 0.0), (0, _IN, 0.0))
+    problem, layout = _pipe_run(PipeSize.NORMAL, *docks, throughput=0.0)
+    assert set(_refused(problem, layout)) == {1, 2}
+
+
 @pytest.mark.parametrize(
     ("rate", "size", "refused"),
     [

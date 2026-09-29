@@ -191,7 +191,15 @@ GT builds every item pipe from its huge size's slot count `H` (`ItemPipeBuilder`
 dry, which depends on covers, recipe times and buffers a plan does not carry. The solver takes it
 from the one measurement there is: the plain pipe (1 per 40 ticks) fed one hammer and not two, so
 **each endpoint needs one insertion per 40 ticks**, plus one more for each further stack it moves in
-that time. A run's demand is the larger of its two sides, summed over their endpoints: all the
+that time, **but never more insertions than items it moves**. GT counts an insertion only when the
+send succeeded and moved at least one item (`MTEItemPipe` lines 221-223, 326-337), so a consumer
+takes insertions only as fast as its machine eats items: the near hammer that starved the other two
+ate 4 items per 40 ticks, while a machine eating one item per 400 ticks spends a tenth of an
+insertion and leaves the rest to the far ones (#249; iron.json's washers feed four Thermal
+Centrifuges 0.01 items/t in all, which a plain pipe carries). Every calibrated case moves at least
+an item per 40 ticks, so the cap changes none of them; that a slower stream is served at its item
+rate is read from GT's source, not yet measured in game. A net with no throughput recorded states
+no rate, and each of its endpoints keeps the whole insertion. A run's demand is the larger of its two sides, summed over their endpoints: all the
 sinks it tops up, or all the source blocks it drains. The router lays the smallest size that meets
 it, for the run as a whole (`router/core.py`, `_pipe_size`; the figures are
 `dataset/pipe_capacity.py`).
@@ -231,7 +239,7 @@ validator reads what each pipe block is actually charged for, from the same tran
   cannot take fails, charges nothing, and the sender tries the next block. In steady state that
   matches producers to consumers nearest pair first, each consumer taking only its share of the
   net. Each matched pair is a **stream**, needing one insertion per 40 ticks plus one per further
-  stack it moves.
+  stack it moves, and never more than the items it moves in that time.
 - **A block's demand is the sum over the streams it pays for**, against its size's insertions per 40
   ticks. A saturated block drops out of every scan and stops the scan passing through it
   (`IMetaTileEntityItemPipe.Util.scanPipes`, lines 57-58), which is how the far consumers starve.
