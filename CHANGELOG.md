@@ -636,6 +636,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **A line of single blocks is annealed from a spaced lattice, not a single row
+  (`placement/constructive.py`, `place(problem, lattice=True)`).** The region is square and wide
+  (60 by 60 for iron.json's 30 blocks), so first-fit seeded every single-block line as one row,
+  and the anneal never left it: its first move off the row doubles the floor area, which the
+  starting temperature never accepts. Iron came out as a wall one block deep and 26 long on every
+  seed, with its pipes spilling out in front. The annealer now starts such a line on a lattice of
+  rows of ceil(sqrt(n)) blocks, one free cell between neighbours and two between rows, which
+  leaves routing room inside a near-square build. Packed solid instead, iron jammed in routing;
+  rows one cell apart lost two of eight seeds to congestion. Measured at full effort on iron:
+  machines span about 10 by 12 cells instead of 26 by 1, the median VALID layout needs 196 route
+  cells instead of 230 (169 pipe instead of 187) for 140 floor cells instead of 135, and over 16
+  seeds it solves VALID on 15 either way with 37 of 128 attempts VALID instead of 29. A line with
+  any multiblock and the `--fast` path keep the row, so nitrobenzene, ev-nitrobenzene and
+  parallel-sand solve to identical layouts; sand's layouts keep their metrics with a different
+  facing. Iron's full solves take longer (about 25 to 40 s against 18 to 33 s).
 - **A solve ranks its routed attempts on floor area plus route cells, not floor area first
   (`solver/_structure.py`).** The quality key used to lead with the objective's compactness
   metric and count pipe and cable blocks only to break a tie, so a layout one floor cell smaller

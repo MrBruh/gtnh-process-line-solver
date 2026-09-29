@@ -48,7 +48,7 @@ itself: the anneal takes exactly the path it always did, and only the state it r
 When no state passes, it returns the cheapest one, and the solver's own gate and fallback decide
 as before.
 
-    initial = constructive.place      # a valid seed
+    initial = constructive.place(lattice=True)   # a valid seed; single blocks on a spaced lattice
     repeat for a seeded budget:
         cand = with prob p_lns:  ruin (remove a related cluster) + recreate (greedy re-insert,
                                  priced on nets, auto-output and how much it grows the build)
@@ -56,6 +56,16 @@ as before.
                (only ever a VALID candidate, else skip)
         accept if cheaper, or with prob exp(-d/T)   ; remember it ; cool T
     return the cheapest remembered state the crowding gate passes, else the cheapest
+
+**A line of single blocks starts spread out** (``constructive.place(lattice=True)``), on a
+lattice with room to route between the blocks. Started from first-fit's single row it never left
+the plane: iron.json's 30 blocks came out as a one-block-deep wall on every seed, because the
+first move off the row doubles the floor area and the starting temperature never accepts that.
+From the lattice its machines span about 10 by 12 cells instead of 26 by 1. Over 16 solve seeds
+at full effort iron solved VALID on 15 either way, at a median of 346 floor plus route cells
+against 366, and 37 of its 128 attempts routed VALID against 29. The floor term hardly moves a
+lattice (each edge is a whole row of blocks), so it was left alone: priced as a smooth
+((x + z) / 2) ** 2, or with a one-cell routing margin on each side, iron solved no better.
 
 **The nudge** shifts one machine by one cell. Relocate draws a cell anywhere in the region, which
 almost never lands anywhere useful (under 2% of relocates are accepted), so without a nudge the
@@ -391,7 +401,7 @@ def optimize_placement(
         parallel line came out 57% larger that way than the same search at a flat weight (footprint 84
         against 36), because only the sprawled late attempts survived to be ranked.
     """
-    base = place(problem)
+    base = place(problem, lattice=True)
     if not base.ok or len(base.placements) < 2:
         return base  # infeasible, or nothing to optimize (0/1 machine)
 
