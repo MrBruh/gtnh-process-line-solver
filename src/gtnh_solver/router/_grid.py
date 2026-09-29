@@ -1,9 +1,10 @@
 """Shared cell-grid primitives for the routers (generic + power).
 
-Obstacle building, terminal docking on a usable (non-front) machine face, and the multi-goal A*
-the power router grows its trunk with all live here, so ``router.core`` (with ``router.steiner``)
-and ``router.power`` route over the *same* grid model and docking rules. The conventions (front face = placement orientation carries no
-I/O; machine + reserved cells are obstacles, and so is a muffler's only vent; the validator
+Obstacle building, terminal docking on a face the port may use, and the multi-goal A* the power
+router grows its trunk with all live here, so ``router.core`` (with ``router.steiner``) and
+``router.power`` route over the *same* grid model and docking rules. The conventions (a port docks
+only on a face ``Machine.allowed_faces`` grants it, which for an unpinned port is any face but the
+front; machine + reserved cells are obstacles, and so is a muffler's only vent; the validator
 independently re-checks every terminal) are unchanged from the original crude router.
 """
 
@@ -15,10 +16,13 @@ from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
 from gtnh_solver.ir import (
     CellBox,
     CellCoord,
+    Commodity,
     Facing,
     HatchSlot,
     InputIR,
+    IODirection,
     Machine,
+    Net,
     Placement,
     Route,
     Terminal,
@@ -32,9 +36,9 @@ from gtnh_solver.ir.geometry import (
     rotated_slot,
 )
 
-# Enumeration order for the non-front faces (the front face == placement orientation is skipped
-# at runtime). Both routers weigh every face against the route, so this fixes only the order
-# candidates are listed in - it is a determinism aid, not a preference.
+# Enumeration order for the faces (a face the port may not use, for an unpinned port the front face
+# == placement orientation, is skipped at runtime). Both routers weigh every face against the route,
+# so this fixes only the order candidates are listed in - it is a determinism aid, not a preference.
 FACE_ORDER = (Facing.SOUTH, Facing.NORTH, Facing.EAST, Facing.WEST, Facing.UP, Facing.DOWN)
 NEIGHBORS = FACE_OFFSETS  # the six face-adjacent unit steps A* expands into
 _UNREACHABLE = 1 << 30
@@ -53,6 +57,43 @@ def obstacle_cells(
                 occupied_cells(placement.cell, machine.footprint, placement.orientation)
             )
     return obstacles | vent_cells(placements, machines)
+
+
+def filter_backs(
+    nets: Iterable[Net], placements: Sequence[Placement], machines: Mapping[str, Machine]
+) -> dict[Cell, frozenset[str]]:
+    """The cell behind each placed Item Filter, and the nets allowed on it: the ones it feeds.
+
+    An Item Filter pushes a stack out of its back every tick it holds one, into whatever tile is
+    there, with no toggle (``MTEBuffer.moveItems``). So the cell behind it may hold its own output's
+    pipe (or the machine it auto-outputs into), and nothing else: another net's pipe there is fed
+    the filter's item, which is what the validator refuses as ``FILTER_BACK_NOT_ITS_OUTPUT`` (#249).
+    The routers read this to keep every other net, and every cable, off that cell up front, the
+    move :func:`vent_cells` makes for a muffler; a machine body behind a filter is the placement
+    cost's to price, since the filter's output port then has no free cell of its own.
+
+    "Behind" is wherever the filter's item output port may dock (``Machine.allowed_faces``), which
+    for the adapter's filters is its back alone. A filter is known by ``Machine.filter_items``.
+    """
+    feeds: dict[tuple[str, str], set[str]] = {}
+    for net in nets:
+        for endpoint in net.endpoints:
+            feeds.setdefault((endpoint.machine_id, endpoint.port_id), set()).add(net.id)
+    backs: dict[Cell, set[str]] = {}
+    for placement in placements:
+        machine = machines.get(placement.machine_id)
+        if machine is None or not machine.filter_items:
+            continue
+        body = list(occupied_cells(placement.cell, machine.footprint, placement.orientation))
+        for port in machine.faces.ports:
+            if port.commodity is not Commodity.ITEM or port.direction is not IODirection.OUTPUT:
+                continue
+            owners = feeds.get((machine.id, port.id), set())
+            for face in machine.allowed_faces(port.id, placement.orientation):
+                dx, dy, dz = FACE_DELTAS[face]
+                for x, y, z in body:
+                    backs.setdefault((x + dx, y + dy, z + dz), set()).update(owners)
+    return {cell: frozenset(owners) for cell, owners in backs.items()}
 
 
 def vent_cells(placements: Sequence[Placement], machines: Mapping[str, Machine]) -> set[Cell]:
@@ -89,6 +130,10 @@ def hatch_faces(
     the controller's front: a hatch facing into its own structure moves nothing, so an interior
     casing cell offers no face at all. ``FACE_ORDER`` then ascending cell, the same total order
     docking uses, so whichever option a caller takes first is reproducible.
+
+    Only the upkeep hatches (maintenance, muffler) come through here, and they belong to no
+    ``Port``, so no pin (``Port.faces``) applies and the front rule stays as it is; a port's hatch
+    docks through :func:`dock_candidates`, which asks ``Machine.allowed_faces``.
     """
     body = set(occupied_cells(placement.cell, machine.footprint, placement.orientation))
     slots = [s for s in machine.hatch_slots if kind in s.kinds]
@@ -188,13 +233,17 @@ def _dock_faces(
       and is not already ``claimed`` by another connection on this machine. What "already held"
       means differs by machine and :func:`claim_key` decides it: a multiblock contends over casing
       cells, a single block over faces;
-    - the face is not the machine's front, which carries no I/O;
+    - the face is one the port may use (:meth:`~gtnh_solver.ir.Machine.allowed_faces`): for an
+      unpinned port any face but the front, which carries no I/O; for a pinned one exactly its
+      pins, which may include the front (an Item Filter takes items there) and may exclude every
+      side (its output leaves by its back alone);
     - the face is **exposed**: the cell one step out is not another cell of this machine's own
       body. That is what keeps a hatch off an interior slot - 29% of all slots dataset-wide - which
       would be walled inside the structure and could reach nothing;
     - that outward cell is in-region, free of obstacles, and unclaimed by another net.
 
-    Walks ``FACE_ORDER`` (front skipped) and, within each, ascending host cell, deduping a cell
+    Walks ``FACE_ORDER`` (faces the port may not use skipped) and, within each, ascending host
+    cell, deduping a cell
     already yielded from an earlier face so each appears exactly once. Order is deterministic and
     total; no caller may read anything into the *first* yield, which is the ``FACE_ORDER`` tiebreak
     and not a decision.
@@ -204,9 +253,10 @@ def _dock_faces(
     hosts = host_cells(placement, machine, slots)
     if slots is not None:  # a multiblock contends over casing cells (see :func:`claim_key`)
         hosts = [c for c in hosts if c not in claimed]
+    allowed = machine.allowed_faces(port_id, placement.orientation)
     seen: set[Cell] = set()
     for face in FACE_ORDER:
-        if face is placement.orientation:  # front face carries no I/O
+        if face not in allowed:  # unpinned: the front, which carries no I/O; pinned: off its pins
             continue
         dx, dy, dz = FACE_DELTAS[face]
         for bx, by, bz in hosts:
@@ -235,7 +285,8 @@ def dock_candidates(
     region: CellBox,
     claimed: Collection[Cell] = (),
 ) -> list[Terminal]:
-    """Every free cell outside a hatch-capable, exposed, usable face; one Terminal per face+cell.
+    """Every free cell outside a hatch-capable, exposed face the port may use; one Terminal per
+    face+cell.
 
     Returning *all* the options is what lets both routers choose a face from where the route has
     to go rather than from a tuple ordering: the power router docks on whichever face yields the
@@ -253,7 +304,8 @@ def astar_multi(
 
     Multi-source, multi-goal A* (the heuristic is the Manhattan distance to the nearest goal). The
     power router uses it to dock a cable on whichever usable face gives the shortest run: ``goals``
-    are all of a machine's free non-front dock cells, so routing - not a fixed face order - picks
+    are all of a machine's free dock cells on faces the port may use, so routing - not a fixed face
+    order - picks
     the terminal. ``starts`` are seeded at cost 0 even if they lie in
     ``obstacles`` (a leg begins on the previous leg's end cell, already part of the laid trunk).
     Returns the path (``path[0] in starts``, ``path[-1] in goals``), or ``None`` if none is

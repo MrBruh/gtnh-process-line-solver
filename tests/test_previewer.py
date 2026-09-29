@@ -23,12 +23,16 @@ from gtnh_solver.ir import (
     CellBox,
     CellCoord,
     Commodity,
+    FaceSpec,
     Facing,
     InputIR,
     IODirection,
     LayoutResult,
     LayoutStatus,
+    Machine,
+    MachineFaceRef,
     METoggles,
+    Net,
     Port,
     Route,
     Segment,
@@ -445,6 +449,39 @@ def test_scene_storage_contents_skip_its_power_connection() -> None:
     layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=[at("t", 0, 0, 0)])
     (placed,) = build_scene(problem, layout)["machines"]
     assert placed["contents"] == [{"resource": "water", "flow": "out", "me": False}]
+
+
+def test_scene_names_an_item_filter_and_what_it_lets_through() -> None:
+    """An Item Filter the adapter placed to sort a merged run (#249) renders as a filter and its
+    hover lists the items its slots must let through, which is what a builder sets in game. It is
+    known by ``filter_items``, not by its type string, and every other machine lists nothing."""
+    item_filter = Machine.model_validate(
+        {
+            **machine(
+                "item-filter:w:gt.dust.stone",
+                [
+                    Port(id="input:x", commodity=Commodity.ITEM, direction=IODirection.INPUT),
+                    Port(id="output:x", commodity=Commodity.ITEM, direction=IODirection.OUTPUT),
+                ],
+                type_="Ultra Low Voltage Item Filter",
+            ).model_dump(),
+            "filter_items": ("gt.dust.stone",),
+        }
+    )
+    washer = machine("w", [], type_="Ore Washer")
+    problem = InputIR(bounding_region=CellBox(sx=4, sy=2, sz=4), machines=[item_filter, washer])
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[at(item_filter.id, 0, 0, 0), at("w", 2, 0, 0)],
+    )
+    scene = build_scene(problem, layout)
+    by_id = {m["id"]: m for m in scene["machines"]}
+    assert by_id[item_filter.id]["role"] == "filter"
+    assert by_id[item_filter.id]["filter_items"] == ["gt.dust.stone"]
+    assert by_id["w"]["role"] == "machine"
+    assert by_id["w"]["filter_items"] == []
+    assert "'lets through: '" in render_html(scene)
 
 
 def test_the_nitrobenzene_super_tanks_are_individually_identifiable(
@@ -872,3 +909,39 @@ def test_a_texture_pass_that_fails_part_way_leaves_plain_boxes(
     assert scene["blocks"] == []
     assert scene["atlas"] is None
     assert all(cell.get("tex") is None for r in scene["routes"] for cell in r["cells"])
+
+
+def test_scene_route_of_a_merged_run_names_every_item_it_carries() -> None:
+    """A merged item run (#249) carries several items down one pipe to the filters that sort them,
+    so hovering it lists them all rather than naming nothing (its ``fluid_or_item`` is empty)."""
+    ports = [
+        Port(id="output:items", commodity=Commodity.ITEM, direction=IODirection.OUTPUT),
+        Port(id="input:items", commodity=Commodity.ITEM, direction=IODirection.INPUT),
+    ]
+    washer = Machine(
+        id="w",
+        type="Ore Washer",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(ports=ports),
+    )
+    trunk = Net(
+        id="item-trunk:w",
+        commodity=Commodity.ITEM,
+        items=("gt.crushed.iron", "gt.dust.stone"),
+        throughput=0.2,
+        endpoints=[
+            MachineFaceRef(machine_id="w", port_id="output:items"),
+            MachineFaceRef(machine_id="w", port_id="input:items"),
+        ],
+    )
+    problem = InputIR(bounding_region=CellBox(sx=4, sy=2, sz=4), machines=[washer], nets=[trunk])
+    route = Route(
+        net_id=trunk.id,
+        commodity=Commodity.ITEM,
+        segments=[Segment(start=CellCoord(x=0, y=0, z=0), end=CellCoord(x=1, y=0, z=0), channel=0)],
+    )
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, routes=[route])
+    (scene_route,) = build_scene(problem, layout)["routes"]
+    assert scene_route["resource"] == "gt.crushed.iron, gt.dust.stone"
+    assert scene_route["rate"] == pytest.approx(0.2)

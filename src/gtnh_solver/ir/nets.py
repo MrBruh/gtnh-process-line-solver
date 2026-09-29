@@ -13,11 +13,35 @@ its own arithmetic, it does not re-invent how to read the same input data.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
-from .enums import IODirection
-from .input_ir import InputIR, MachineFaceRef, Net
+from .enums import Facing, IODirection
+from .input_ir import InputIR, MachineFaceRef, METoggles, Net
 from .output import Placement
+
+#: The faces of a single block that can carry a connection: every face but the front, which carries
+#: no I/O (docs/DOMAIN.md). Kept beside :func:`connection_counts` because the two are the one measure
+#: the adapter's Item Filter merge (a single block using all of them) and
+#: ``placement.feasibility.single_block_shortfalls`` (one needing more) both read.
+SINGLE_BLOCK_IO_FACES = len(Facing) - 1
+
+
+def connection_counts(nets: Iterable[Net], me_toggles: METoggles) -> dict[str, int]:
+    """``machine_id -> how many connections it carries``: one per net endpoint on it.
+
+    A net whose commodity rides the ME network docks nothing, so it counts nothing. Each endpoint is
+    one connection, and on a single block one face of its own, whether a pipe or cable docks on it or
+    an auto-output spends it touching its sink. It takes nets rather than a whole ``InputIR`` so the
+    adapter can ask it of the nets it is still building, and decide which machines to merge with the
+    same count ``placement.feasibility.single_block_shortfalls`` later reports from.
+    """
+    counts: dict[str, int] = {}
+    for net in nets:
+        if me_toggles.toggled(net.commodity):
+            continue
+        for endpoint in net.endpoints:
+            counts[endpoint.machine_id] = counts.get(endpoint.machine_id, 0) + 1
+    return counts
 
 
 def port_direction_map(problem: InputIR) -> dict[tuple[str, str], IODirection]:

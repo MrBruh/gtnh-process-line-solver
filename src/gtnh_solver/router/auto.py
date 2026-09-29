@@ -7,6 +7,10 @@ covers: a source ejecting straight into an adjacent target's input face, no pipe
 for the nets it could not cover, so the optimizer's job shrinks to moving blocks and choosing
 front faces.
 
+Each side's face must be one its port may use (``Machine.allowed_faces``): any face but the front
+for an unpinned port, exactly its pins for a pinned one. So an Item Filter, whose output is pinned
+to its back, auto-outputs only from its back, and may be fed on its front.
+
 Auto-output is preferred because it is what a player actually builds for a simple chain: a row of
 adjacent machines feeding each other needs zero pipes. Pipes are only for what is left -
 non-adjacent endpoints, fan-out, or a machine with no free face for one.
@@ -191,6 +195,9 @@ class _Host:
     #: Kept so the machine's ``id`` cannot be recycled onto a different object while the entry
     #: lives, and so a hit can verify identity rather than trust the key.
     machine: Machine
+    #: The faces this port may use facing this way (``Machine.allowed_faces``), read once here so
+    #: the per-face test below is a set lookup, not a scan of the machine's ports.
+    faces: frozenset[Facing]
     size: Size  # the footprint as it sits facing this way
     offsets: tuple[Cell, ...]  # host cells relative to the origin; the source side iterates these
     offset_set: frozenset[Cell]  # the same cells, for the target side's "does it contain" test
@@ -213,7 +220,13 @@ def _host(machine: Machine, port_id: str, orientation: Facing) -> _Host:
         )
     )
     box = rotated_footprint(machine.footprint, orientation)
-    host = _HOSTS[key] = _Host(machine, (box.sx, box.sy, box.sz), cells, frozenset(cells))
+    host = _HOSTS[key] = _Host(
+        machine,
+        machine.allowed_faces(port_id, orientation),
+        (box.sx, box.sy, box.sz),
+        cells,
+        frozenset(cells),
+    )
     return host
 
 
@@ -232,7 +245,9 @@ def _auto_faces(
     which is the machine's whole body where no structure was dumped, so a single-block machine
     behaves exactly as it did under the old any-touching-cell rule. Faces are tried in
     ``FACE_DELTAS`` order, the same order ``ir.geometry.auto_output_faces`` used, so an assignment
-    that was legal before and is still legal comes out identical.
+    that was legal before and is still legal comes out identical. The source must eject on a face
+    its port may use and the target receive on one its port may use (``Machine.allowed_faces``),
+    which for two unpinned ports is exactly the old "neither side's front" rule.
     """
     if source is None or target is None:
         return None
@@ -246,9 +261,9 @@ def _auto_faces(
     # The scan itself runs in OFFSET space: which cells can host a hatch depends on how a machine
     # is turned, not where it stands (:func:`_host_offsets`), so position enters only as the vector
     # between the two origins. World cells are built solely when a pair matches.
-    source_front, target_front = source.orientation, target.orientation
-    source_host = _host(source_m, source_port, source_front)
-    target_host = _host(target_m, target_port, target_front)
+    source_host = _host(source_m, source_port, source.orientation)
+    target_host = _host(target_m, target_port, target.orientation)
+    source_faces, target_faces = source_host.faces, target_host.faces
     source_offsets, target_offsets = source_host.offsets, target_host.offset_set
     ssx, ssy, ssz = source_host.size
     tsx, tsy, tsz = target_host.size
@@ -260,10 +275,10 @@ def _auto_faces(
     taken_source = claimed.get(source.machine_id, ())
     taken_target = claimed.get(target.machine_id, ())
     for face, (dx, dy, dz) in FACE_DELTAS.items():
-        if face is source_front:  # the source's front carries no I/O
+        if face not in source_faces:  # unpinned: its front, which carries no I/O
             continue
         opposite = OPPOSITE_FACE[face]
-        if opposite is target_front:  # the target's input face would be its front
+        if opposite not in target_faces:  # unpinned: the target's input face would be its front
             continue
         # The stepped source box against the target box, half-open on both sides.
         sx0, sy0, sz0 = ox + dx, oy + dy, oz + dz

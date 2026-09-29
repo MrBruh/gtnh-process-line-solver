@@ -36,6 +36,7 @@ from gtnh_solver.system_io import (
     BoundaryFlow,
     SystemIO,
     is_boundary_storage,
+    net_resource,
     port_resource,
     system_io,
 )
@@ -383,3 +384,19 @@ def test_helper_predicates() -> None:
     assert port_resource(out) == "minecraft:sand"
     bare = Port(id="widget", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)
     assert port_resource(bare) == "widget"  # no ``output:`` prefix -> used as-is
+
+
+def test_a_net_is_labelled_by_what_it_carries_a_merged_run_by_all_of_it() -> None:
+    """A merged item run (#249) names no single item, so its label lists every item in the pipe in
+    the order the net gives them; a one-item net and a power net read exactly as before."""
+    here = [MachineFaceRef(machine_id="m", port_id="p")]
+    merged = Net(
+        id="t", commodity=Commodity.ITEM, items=("a", "b", "c"), throughput=0.3, endpoints=here
+    )
+    single = Net(
+        id="s", commodity=Commodity.ITEM, fluid_or_item="a", throughput=0.1, endpoints=here
+    )
+    power = Net(id="p", commodity=Commodity.POWER, throughput=8.0, endpoints=here)
+    assert net_resource(merged) == "a, b, c"
+    assert net_resource(single) == "a"
+    assert net_resource(power) is None

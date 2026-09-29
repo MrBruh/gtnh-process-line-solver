@@ -7,6 +7,41 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **A single block with no face to spare sends its item outputs out of one face, sorted by Item
+  Filters (#249).** A single block has five faces that can carry a connection, one each, so a
+  machine with several item outputs could run out: iron.json's Ore Washer (item in, fluid in, three
+  item outputs, power) left its line `partial_invalid` with `single_block_faces` on every seed, and
+  its first Macerator (item in, three item outputs, power) used all five, so a route had to reach
+  every face and one of its nets lost the negotiation on every seed. The adapter now
+  does what a GT build does: the machine gets one item output on a trunk pipe (a net whose new
+  `items` lists what it carries) to one "Ultra Low Voltage Item Filter" per item (mID 9240, no
+  power), and each filter sources that item's downstream net from its back. It merges only a
+  machine with no face to spare (five connections or more), two or more item outputs, and proof
+  that it is a single block: its handler says `single`, or a census dataset for the plan's own pack
+  lacks it. A 1x1x1 box that may be a multiblock missing from the dataset is left alone, and the
+  `single_block_faces` advice now names the census that would prove it. Each machine instance gets
+  its own trunk and filters, since on 2.9 a sibling's output face would take the other's items.
+  - The filters' faces are pinned (`Port.faces`): items in on front, left, right, up and down, out of
+    the back only. The router, the placement cost and the crowding gate now read every port's faces
+    through `Machine.allowed_faces`, so an unpinned machine docks exactly where it always did.
+  - The validator checks the sorting: `filter_item_unsorted` (every trunk item taken by exactly one
+    filter, each filter's output carrying only its items, only filters on a trunk),
+    `filter_back_not_its_output` (nothing behind a filter but its own output pipe or auto-output
+    target) and `terminal_on_disallowed_face` (a pinned port docked off its pins). A trunk counts
+    as one stream per item from its producer to the filter taking it.
+  - The previewer labels a trunk by all its items and shows a filter with the role "filter" and a
+    hover listing what it lets through. It still draws as a placeholder box, and `.schematic`
+    export of filters is the follow-up PR.
+
+  - The routers keep every other net, and every cable, off the cell behind a filter, since the
+    filter pushes into whatever is there; only the net it feeds may dock on it.
+
+  **iron.json now solves VALID** (seeds 0 and 100 of four tried at full effort, validator-clean,
+  every pipe normal size) with the local 2.8.4 census: 12 filters on 4 trunks, for the washers and
+  the first Macerator. Seeds 200 and 300 end `partial_invalid` on routing congestion and on the MV
+  power net finding no dock. Merging only above five connections left the Macerator's nets unrouted
+  on every seed, and merging every multi-output single block (24 filters) spread the layout until
+  nets failed on every seed. No shipped example merges, and their layouts are byte-identical.
 - **Both nitrobenzene example lines now solve on a fresh clone, and in CI.** The committed
   `data/multiblocks/` held only two hand-authored fixtures (an Electric Blast Furnace and a Vacuum
   Freezer), so without a local dump every other multiblock fell back to a 1x1x1 box. A single block
@@ -601,6 +636,25 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **An item stream never needs more pipe insertions than the items it moves (#249).** The pipe
+  capacity rule (#165, #190) charged every stream one insertion per 40 ticks, calibrated on the
+  parallel sand build, where a plain tin pipe fed one Forge Hammer of three. GT counts an insertion
+  only when a send succeeds and moves at least one item (`MTEItemPipe` lines 221-223, 326-337), so
+  a consumer eating less than an item per 40 ticks cannot use up a whole one. The router's sizing and
+  the validator's check now cap each stream at `rate * 40` insertions per 40 ticks. The sand
+  calibration is untouched (its hammers eat 4 items per 40 ticks); a slow line is where it bites:
+  iron.json's washers feed four Thermal Centrifuges 0.01 items/t in all, which the old rule refused
+  even on a huge pipe and a plain one now carries. A net with no throughput recorded keeps the full
+  insertion per endpoint. That a stream slower than an item per 40 ticks is served at its item rate
+  is read from GT's source, not yet measured in game.
+- **InputIR v4 (breaking): a port may be pinned to some of its machine's faces, and an item net may
+  carry several items (#249).** `Port.faces` names the only faces a port may dock on, from the
+  machine's own point of view (front, back, left, right, up, down), so it turns with the machine;
+  unset, it is the old rule, any face but the front. `Machine.allowed_faces(port_id, orientation)`
+  is now the one reading of that rule. `Net.items` lists what a merged item run carries (an item net
+  names `fluid_or_item` or `items`, never both), and `Machine.filter_items` what an Item Filter lets
+  through. These are what the adapter needs to send a single block's item outputs out of one face
+  and sort them with Item Filters. A v3 payload is refused on parse; re-adapt the plan.
 - **A solve's attempts are independent, and a slow line runs them in parallel (`solver/core.py`,
   `gtnh-solve --jobs`).** A solve anneals 8 placements and keeps the best one once routed. Each
   attempt used to anneal under penalties the ones before it had built up (a net one attempt left

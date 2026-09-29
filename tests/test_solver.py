@@ -19,7 +19,17 @@ from typing import ClassVar
 
 import pytest
 
-from gtnh_solver.adapter import adapt_file
+from gtnh_solver.adapter import (
+    Edge,
+    MachineHandler,
+    Node,
+    Plan,
+    Recipe,
+    Resource,
+    Storage,
+    adapt_file,
+    to_input_ir,
+)
 from gtnh_solver.ir import (
     CellBox,
     CellCoord,
@@ -37,10 +47,17 @@ from gtnh_solver.ir import (
     PipeSize,
     Placement,
     Port,
+    RelativeFace,
     Route,
     Segment,
 )
-from gtnh_solver.placement import Objective, PlacementResult, optimize_placement, place
+from gtnh_solver.placement import (
+    Objective,
+    PlacementResult,
+    optimize_placement,
+    place,
+    single_block_shortfalls,
+)
 from gtnh_solver.router import RouteResult, assign_auto_outputs, route
 from gtnh_solver.solver import Effort, solve
 from gtnh_solver.solver import core as solver_core
@@ -233,6 +250,9 @@ def test_a_partial_layout_names_a_single_block_with_more_connections_than_faces(
     assert "The routers stopped at: " in layout.infeasibility.detail
     assert layout.infeasibility.suggested_relaxation is not None
     assert "structure" in layout.infeasibility.suggested_relaxation
+    # A single block is merged through Item Filters only once proven one (#249), so the advice
+    # names the census that would prove it.
+    assert "census dataset for the plan's pack" in layout.infeasibility.suggested_relaxation
 
 
 def test_machines_that_do_not_fit_keep_their_own_reason() -> None:
@@ -784,3 +804,80 @@ def test_no_effort_named_takes_the_default_when_solve_runs(monkeypatch: pytest.M
     monkeypatch.setattr(solver_core, "DEFAULT_EFFORT", "full")
     solve(ir)
     assert len(anneals) == 1 + 8
+
+
+# ----------------------------------------------------------------- merged item outputs (#249)
+
+
+def _iron_shaped_plan() -> Plan:
+    """iron.json's Ore Washer node in miniature: three single-block washers, each with an item in,
+    a fluid in, three item outputs and power, which is six connections on five usable faces."""
+    washer = Recipe(
+        id="washer",
+        machine_type="Ore Washer",
+        eut=16.0,
+        duration_ticks=400.0,
+        inputs=[
+            Resource(kind="item", id="gregtech:crushed.iron", amount=1.0),
+            Resource(kind="fluid", id="water", amount=1000.0),
+        ],
+        outputs=[
+            Resource(kind="item", id="gregtech:purified.iron", amount=1.0),
+            Resource(kind="item", id="gregtech:dust.tiny.nickel", amount=1.0),
+            Resource(kind="item", id="gregtech:dust.stone", amount=1.0),
+        ],
+        machine_handlers=[MachineHandler(id="h", kind="single", label="Basic Ore Washing Plant")],
+    )
+    return Plan(
+        schema_version=1,
+        recipes=[washer],
+        nodes=[Node(id="washer", recipe_id="washer", overclock_tier="LV", machine_count=3)],
+        storages=[Storage(id="ore", kind="item"), Storage(id="tank", kind="fluid")],
+        edges=[
+            Edge(
+                id="feed",
+                source="ore",
+                target="washer",
+                resource_kind="item",
+                resource_id="gregtech:crushed.iron",
+            ),
+            Edge(
+                id="water",
+                source="tank",
+                target="washer",
+                resource_kind="fluid",
+                resource_id="water",
+            ),
+        ],
+    )
+
+
+def test_a_single_block_short_of_faces_is_merged_and_solves_or_says_why() -> None:
+    # [E2E] The adapter sends each washer's three items out of one face to three Item Filters, and
+    # the solver lays that line. Whether one minimal attempt lays it validly is a question of layout
+    # quality, which this suite does not judge; what it holds is that the answer is VALID and
+    # validator-clean, or explicitly infeasible, and never a silently invalid layout.
+    ir = to_input_ir(_iron_shaped_plan())
+
+    washers = [m for m in ir.machines if m.type == "Ore Washer"]
+    filters = [m for m in ir.machines if m.filter_items]
+    trunks = [n for n in ir.nets if n.items]
+    assert len(washers) == 3
+    assert len(filters) == 9
+    assert len(trunks) == 3
+    assert all(m.type == "Ultra Low Voltage Item Filter" for m in filters)
+    for f in filters:
+        (resource,) = f.filter_items
+        out = next(p for p in f.faces.ports if p.direction is IODirection.OUTPUT)
+        assert out.id == f"output:{resource}"
+        assert out.faces == (RelativeFace.BACK,)
+        assert f.allowed_faces(out.id, Facing.NORTH) == {Facing.SOUTH}
+    assert not single_block_shortfalls(ir), "no washer is short of faces once merged"
+
+    layout = solve(ir)
+    if layout.status is LayoutStatus.VALID:
+        assert validate(ir, layout).ok
+        assert sum(p.machine_id.startswith("item-filter:") for p in layout.placements) == 9
+    else:
+        assert layout.infeasibility is not None  # incompleteness is never silent
+        assert layout.infeasibility.constraint != "single_block_faces"

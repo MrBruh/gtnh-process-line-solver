@@ -8,7 +8,8 @@ here as the package's public surface, but the low-level cell-grid *helpers* in `
 from ``ir.geometry`` directly, a convention applied consistently across the placement, router, and
 validator lanes. Only the value types (``CellCoord``, ``CellBox``) surface here. The submodules:
 
-- ``enums``      - Commodity, IODirection, Facing, LayoutStatus, PipeFamily, PipeSize
+- ``enums``      - Commodity, IODirection, Facing, RelativeFace, LayoutStatus, PipeFamily,
+                   PipeSize
 - ``geometry``   - CellCoord, CellBox (integer cell-grid value types)
 - ``input_ir``   - Port, FaceSpec, HatchSlot, Machine, MachineFaceRef, Net, METoggles, PinnedIO,
                    InputIR  (+ INPUT_IR_VERSION)
@@ -23,7 +24,15 @@ consumers in the same PR. Keep the changelog at the bottom of this file current.
 
 from __future__ import annotations
 
-from .enums import Commodity, Facing, IODirection, LayoutStatus, PipeFamily, PipeSize
+from .enums import (
+    Commodity,
+    Facing,
+    IODirection,
+    LayoutStatus,
+    PipeFamily,
+    PipeSize,
+    RelativeFace,
+)
 from .geometry import CellBox, CellCoord
 from .input_ir import (
     INPUT_IR_VERSION,
@@ -59,6 +68,7 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
     "Commodity",
     "IODirection",
     "Facing",
+    "RelativeFace",
     "LayoutStatus",
     "PipeFamily",
     "PipeSize",
@@ -289,4 +299,26 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   exporter drew some machines as the wrong block, or as none. They now join on this and the
 #   voltage tier first. None for storages, power sources and a plan that does not state it, where
 #   they fall back to `type` exactly as before. (GitHub #232.)
+#
+# InputIR v4 (BREAKING) - a port may be PINNED to some of its machine's faces, and an item net may
+#   carry several items. Three fields, all for GitHub #249: a single block has five faces that can
+#   carry a connection, and a machine with several item outputs spent one on each, so an Ore Washer
+#   (item in, fluid in, three item outputs, power) could not be built. GT sends such a machine's
+#   items out of one face into one pipe and sorts them with Item Filter blocks, and the adapter now
+#   places those filters as ordinary machines.
+#   - `Port.faces: tuple[RelativeFace, ...] | None`, the faces a port may dock on, named from the
+#     machine's point of view (front, back, left, right, up, down) so they turn with it. None is
+#     the old rule, any face but the front. An Item Filter pushes out of its back and nowhere else,
+#     and takes items on every other face, its front included. Read through
+#     `Machine.allowed_faces(port_id, orientation)`, the one reading of the face rule every stage
+#     now shares.
+#   - `Net.items: tuple[str, ...]`, the items a merged run carries. An item net names what it
+#     carries in `fluid_or_item` (one item) or `items` (a merged run), exactly one; fluid and power
+#     nets never name `items`. `Net.resources` reads either.
+#   - `Machine.filter_items: tuple[str, ...]`, what an Item Filter lets through; empty elsewhere.
+#   Breaking by the rule `hatches` set: the omission is what breaks. A v3 consumer that ignores
+#   `Port.faces` docks a filter's output on a side face, where the block never pushes anything, and
+#   one that reads only `fluid_or_item` finds a merged run naming nothing. Existing machines and
+#   nets are unchanged in shape (every new field defaults to the old meaning), but a v3 payload is
+#   still refused on parse, per the #38 rule above; re-adapt the plan.
 # ---------------------------------------------------------------------------

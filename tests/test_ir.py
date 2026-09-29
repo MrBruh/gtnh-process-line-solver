@@ -37,12 +37,15 @@ from gtnh_solver.ir import (
     PipeSize,
     Placement,
     Port,
+    RelativeFace,
     Route,
     RouteMaterial,
     Segment,
     Terminal,
 )
 from gtnh_solver.ir._base import FrozenModel, StrictModel
+from gtnh_solver.ir.geometry import absolute_face
+from gtnh_solver.ir.nets import connection_counts
 
 # --------------------------------------------------------------------------- helpers
 
@@ -304,7 +307,198 @@ def test_a_power_sources_output_rate_is_not_a_draw_to_account_for() -> None:
     assert m.power_input_ports == []
 
 
+# --------------------------------------------------------------------------- face pins (v4)
+
+_HORIZONTAL = (Facing.NORTH, Facing.EAST, Facing.SOUTH, Facing.WEST)
+_OPPOSITE = {
+    Facing.NORTH: Facing.SOUTH,
+    Facing.SOUTH: Facing.NORTH,
+    Facing.EAST: Facing.WEST,
+    Facing.WEST: Facing.EAST,
+}
+
+
+def _filter_ports() -> list[Port]:
+    """An Item Filter's two ports, pinned as the adapter pins them (#249)."""
+    return [
+        Port(
+            id="input:x",
+            commodity=Commodity.ITEM,
+            direction=IODirection.INPUT,
+            faces=(
+                RelativeFace.FRONT,
+                RelativeFace.LEFT,
+                RelativeFace.RIGHT,
+                RelativeFace.UP,
+                RelativeFace.DOWN,
+            ),
+        ),
+        Port(
+            id="output:x",
+            commodity=Commodity.ITEM,
+            direction=IODirection.OUTPUT,
+            faces=(RelativeFace.BACK,),
+        ),
+    ]
+
+
+@pytest.mark.parametrize("orientation", _HORIZONTAL)
+def test_an_unpinned_port_may_use_every_face_but_the_front(orientation: Facing) -> None:
+    # REGRESSION: the rule every machine had before ports could be pinned. A consumer that now
+    # reads the accessor instead of skipping the front must see exactly the old five faces.
+    machine = _machine(orientations=list(_HORIZONTAL))
+    faces = machine.allowed_faces("out", orientation)
+    assert faces == frozenset(Facing) - {orientation}
+    assert len(faces) == 5
+
+
+@pytest.mark.parametrize("orientation", _HORIZONTAL)
+def test_a_back_pin_is_the_face_opposite_the_front_at_every_orientation(
+    orientation: Facing,
+) -> None:
+    machine = _machine(ports=_filter_ports(), orientations=list(_HORIZONTAL))
+    assert machine.allowed_faces("output:x", orientation) == {_OPPOSITE[orientation]}
+
+
+@pytest.mark.parametrize("orientation", _HORIZONTAL)
+def test_a_pin_may_name_the_front(orientation: Facing) -> None:
+    # An Item Filter takes items on its front too (MTEBuffer.allowPutStack refuses only its back),
+    # which the unpinned rule would never allow.
+    machine = _machine(ports=_filter_ports(), orientations=list(_HORIZONTAL))
+    expected = frozenset(Facing) - {_OPPOSITE[orientation]}
+    assert machine.allowed_faces("input:x", orientation) == expected
+
+
+def test_left_and_right_are_the_machines_own_looking_out_of_its_front() -> None:
+    assert absolute_face(Facing.NORTH, RelativeFace.LEFT) is Facing.WEST
+    assert absolute_face(Facing.NORTH, RelativeFace.RIGHT) is Facing.EAST
+    assert absolute_face(Facing.EAST, RelativeFace.LEFT) is Facing.NORTH
+    assert absolute_face(Facing.EAST, RelativeFace.RIGHT) is Facing.SOUTH
+    assert absolute_face(Facing.SOUTH, RelativeFace.LEFT) is Facing.EAST
+    assert absolute_face(Facing.WEST, RelativeFace.RIGHT) is Facing.NORTH
+    for orientation in _HORIZONTAL:
+        assert absolute_face(orientation, RelativeFace.FRONT) is orientation
+        assert absolute_face(orientation, RelativeFace.UP) is Facing.UP
+        assert absolute_face(orientation, RelativeFace.DOWN) is Facing.DOWN
+
+
+def test_every_relative_face_maps_to_a_distinct_world_face() -> None:
+    for orientation in _HORIZONTAL:
+        assert {absolute_face(orientation, r) for r in RelativeFace} == set(Facing)
+
+
+def test_a_relative_face_needs_a_horizontal_front() -> None:
+    with pytest.raises(ValueError, match="horizontal"):
+        absolute_face(Facing.UP, RelativeFace.BACK)
+
+
+def test_an_unknown_port_gets_the_unpinned_rule() -> None:
+    machine = _machine(ports=_filter_ports())
+    assert machine.allowed_faces("nope", Facing.NORTH) == frozenset(Facing) - {Facing.NORTH}
+
+
+def test_a_pinned_port_names_at_least_one_face() -> None:
+    with pytest.raises(ValidationError, match="at least one face"):
+        Port(id="o", commodity=Commodity.ITEM, direction=IODirection.OUTPUT, faces=())
+
+
+def test_a_pinned_ports_faces_must_not_repeat() -> None:
+    with pytest.raises(ValidationError, match="must not repeat"):
+        Port(
+            id="o",
+            commodity=Commodity.ITEM,
+            direction=IODirection.OUTPUT,
+            faces=(RelativeFace.BACK, RelativeFace.BACK),
+        )
+
+
+def test_face_pins_round_trip_as_their_plain_names() -> None:
+    port = _filter_ports()[1]
+    assert port.model_dump(mode="json")["faces"] == ["back"]
+    assert Port.model_validate_json(port.model_dump_json()) == port
+
+
+def test_filter_items_default_to_empty_and_must_not_repeat_or_be_blank() -> None:
+    assert _machine().filter_items == ()
+    with pytest.raises(ValidationError, match="must not repeat"):
+        Machine.model_validate({**_machine().model_dump(), "filter_items": ("a", "a")})
+    with pytest.raises(ValidationError, match="name something"):
+        Machine.model_validate({**_machine().model_dump(), "filter_items": ("",)})
+
+
 # --------------------------------------------------------------------------- net
+
+
+def _item_net(**over: object) -> Net:
+    fields: dict[str, object] = {
+        "id": "trunk",
+        "commodity": Commodity.ITEM,
+        "throughput": 3.0,
+        "endpoints": [MachineFaceRef(machine_id="m", port_id="output:items")],
+    }
+    fields.update(over)
+    return Net.model_validate(fields)
+
+
+def test_a_merged_run_names_its_items_and_no_single_item() -> None:
+    net = _item_net(items=("gt.dust.a", "gt.dust.b"))
+    assert net.fluid_or_item is None
+    assert net.resources == ("gt.dust.a", "gt.dust.b")
+
+
+def test_an_item_net_may_not_name_both_one_item_and_a_merged_run() -> None:
+    # REGRESSION: which of the two a consumer read would decide what it thought the pipe carried.
+    with pytest.raises(ValidationError, match="not both"):
+        _item_net(fluid_or_item="gt.dust.a", items=("gt.dust.a", "gt.dust.b"))
+
+
+def test_an_item_net_must_name_one_item_or_a_merged_run() -> None:
+    # REGRESSION: the v3 rule, kept - an item net naming nothing is still refused.
+    with pytest.raises(ValidationError, match="must name a fluid_or_item"):
+        _item_net()
+
+
+def test_only_an_item_net_carries_a_merged_run() -> None:
+    with pytest.raises(ValidationError, match="only an item net"):
+        _item_net(commodity=Commodity.FLUID, items=("water", "steam"))
+    with pytest.raises(ValidationError, match="power nets"):
+        _item_net(commodity=Commodity.POWER, items=("a", "b"))
+
+
+def test_a_merged_runs_items_must_not_repeat_or_be_blank() -> None:
+    with pytest.raises(ValidationError, match="must not repeat"):
+        _item_net(items=("a", "a"))
+    with pytest.raises(ValidationError, match="name something"):
+        _item_net(items=("a", ""))
+
+
+def test_a_nets_resources_are_its_one_item_or_nothing_for_power() -> None:
+    assert _item_net(fluid_or_item="gt.dust.a").resources == ("gt.dust.a",)
+    power = Net(
+        id="p",
+        commodity=Commodity.POWER,
+        throughput=32.0,
+        endpoints=[MachineFaceRef(machine_id="m", port_id="pwr")],
+    )
+    assert power.resources == ()
+
+
+def test_connection_counts_count_endpoints_and_skip_an_me_commodity() -> None:
+    nets = [
+        _item_net(fluid_or_item="a", endpoints=[MachineFaceRef(machine_id="m", port_id="o")]),
+        Net(
+            id="f",
+            commodity=Commodity.FLUID,
+            fluid_or_item="water",
+            throughput=1.0,
+            endpoints=[
+                MachineFaceRef(machine_id="m", port_id="i"),
+                MachineFaceRef(machine_id="n", port_id="o"),
+            ],
+        ),
+    ]
+    assert connection_counts(nets, METoggles()) == {"m": 2, "n": 1}
+    assert connection_counts(nets, METoggles(fluids=True)) == {"m": 1}
 
 
 def test_power_net_must_not_name_a_commodity() -> None:

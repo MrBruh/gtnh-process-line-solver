@@ -18,9 +18,9 @@ What is checked now (needs only the IR):
   reserved cell, and no two nets' routes sharing a cell (crude single-channel capacity); pinned
   I/O actually sits on its net's route.
   terminals - every net endpoint has a terminal, and every terminal pins one of the net's own
-  endpoints exactly once (no foreign or duplicate terminals), on a usable (non-front) face adjacent
-  to its machine, with that terminal cell on the route (the geometric + structural halves of
-  required-I/O-face reachability). Terminals of different machines may share a cell (one pipe
+  endpoints exactly once (no foreign or duplicate terminals), on a face its port may use (any but
+  the front, or exactly the faces a pinned port names) adjacent to its machine, with that terminal
+  cell on the route (the geometric + structural halves of required-I/O-face reachability). Terminals of different machines may share a cell (one pipe
   block wired to several neighbours), but two connections of one machine may not: on a multiblock
   they would need one casing cell, on a single block one face.
   hatches - a multiblock does no I/O of its own, so every connection is a block: each recorded
@@ -31,8 +31,12 @@ What is checked now (needs only the IR):
   multiblock forming, and a muffler (any number; GT splits venting across them) with literal air
   in front of it.
   auto-output - every auto-connection joins its net's real OUTPUT->INPUT endpoint machines
-  (resolved by port direction) on adjacent usable faces; power/ME commodities cannot
+  (resolved by port direction) on adjacent faces their ports may use; power/ME commodities cannot
   auto-output, and a machine has at most one auto-output face.
+  item filters - a merged item run (``Net.items``) is sorted by Item Filters: every consumer on it is
+  a filter, each item is let through by exactly one, a filter takes only from a net carrying
+  something it lets through and passes on nothing else; and the cell behind a placed filter, where
+  it pushes with no toggle, holds only its own output's pipe or the machine it auto-outputs into.
   power - per-segment cable thickness is present and well-formed (1/2/4/8/12/16, aligned); the route
   has exactly one source terminal and its cables form a single tree rooted there (neither is
   certifiable otherwise, so both are rejected, not skipped); AND independently re-derived on the
@@ -85,6 +89,7 @@ from gtnh_solver.dataset.voltage import _AMP_EPSILON
 from gtnh_solver.ir import (
     AutoConnection,
     Commodity,
+    Facing,
     InputIR,
     IODirection,
     LayoutResult,
@@ -96,7 +101,7 @@ from gtnh_solver.ir import (
     Route,
     Segment,
 )
-from gtnh_solver.ir.nets import placement_index, port_direction_map
+from gtnh_solver.ir.nets import net_sources_sinks, placement_index, port_direction_map
 
 from ._geometry import (
     FACE_DELTAS,
@@ -107,6 +112,7 @@ from ._geometry import (
     in_region,
     is_connected,
     is_unit_step,
+    usable_faces,
 )
 from .report import ValidationReport, Violation, ViolationCode
 
@@ -125,6 +131,8 @@ def validate(problem: InputIR, layout: LayoutResult) -> ValidationReport:
     _check_hatch_cells(problem, out)
     _check_terminal_hatch_cells(problem, layout, out)
     _check_terminal_faces(problem, layout, out)
+    _check_filter_sorting(problem, out)
+    _check_filter_backs(problem, layout, out)
     _check_hatches(problem, layout, out)
     _check_port_hatches(problem, layout, out)
     _check_upkeep_hatches(problem, layout, out)
@@ -237,7 +245,10 @@ def _check_item_pipe_throughput(
     first, each consumer taking only its share of the net, and each matched pair is a **stream**
     (:func:`_item_streams`). A stream needs one insertion per :data:`STREAM_SERVICE_TICKS`, which is
     the in-game calibration rather than a GT figure (see ``dataset/pipe_capacity.py``), plus one per
-    further stack it moves in that time. A block's demand is the sum over the streams it pays for.
+    further stack it moves in that time, and never more than the items it moves in that time: GT
+    counts an insertion only when it delivered an item (``MTEItemPipe`` lines 221-223, 326-337), so
+    a stream slower than an item per interval spends only that fraction of one. A block's demand is
+    the sum over the streams it pays for.
     On the maintainer's parallel sand build, whose geometry and wiring are known::
 
         stone run: the chest and hammer 3 dock on s, hammer 2 on b, hammer 1 on c
@@ -285,19 +296,23 @@ def _check_item_pipe_throughput(
         slots, window = ITEM_PIPE_CAPACITY[size]
         capacity = slots * STREAM_SERVICE_TICKS / window  # insertions per service interval
 
-        demand: dict[Cell, int] = defaultdict(int)
+        demand: dict[Cell, float] = defaultdict(float)
         paying: dict[Cell, list[_ItemStream]] = defaultdict(list)
         for stream in _item_streams(r, net, ports):
-            # The validator's OWN rounding, not dataset.endpoint_insertions: one insertion at least,
-            # since a consumer that is never reached never runs, and one per further stack moved.
-            stacks = stream.rate * STREAM_SERVICE_TICKS / ITEMS_PER_INSERTION
-            need = max(1, math.ceil(stacks - _INSERTION_EPSILON))
+            # The validator's OWN rounding, not dataset.endpoint_insertions: one insertion, since a
+            # consumer that is never reached never runs, and one per further stack moved; but never
+            # more than the items the stream moves, since GT counts only an insertion that moved one.
+            # A stream of a net with no throughput states no rate, and keeps the whole insertion.
+            moved = stream.rate * STREAM_SERVICE_TICKS
+            need: float = max(1, math.ceil(moved / ITEMS_PER_INSERTION - _INSERTION_EPSILON))
+            if moved > _INSERTION_EPSILON:
+                need = min(need, moved)
             for cell in stream.charged:
                 demand[cell] += need
                 paying[cell].append(stream)
 
         for cell in sorted(demand):
-            if demand[cell] <= capacity:
+            if demand[cell] <= capacity + _INSERTION_EPSILON:
                 continue
             streams = paying[cell]
             count = len(streams)
@@ -305,8 +320,8 @@ def _check_item_pipe_throughput(
                 Violation(
                     ViolationCode.ITEM_PIPE_SIZE_INSUFFICIENT,
                     f"item route for net {r.net_id!r} block {cell} carries {count} "
-                    f"stream{'' if count == 1 else 's'} of {net.fluid_or_item} "
-                    f"({sum(s.rate for s in streams):g} items/t) needing {demand[cell]} "
+                    f"stream{'' if count == 1 else 's'} of {', '.join(net.resources)} "
+                    f"({sum(s.rate for s in streams):g} items/t) needing {demand[cell]:g} "
                     f"insertions per {STREAM_SERVICE_TICKS} ticks, but its {size.value} "
                     f"{material.material} pipe makes only {capacity:g}",
                 )
@@ -323,6 +338,17 @@ def _item_streams(
     goes on to the next closest. Distance is hops along the route's own segments, since GT pipes
     join only where they are wired. Pairs at equal distance are taken in terminal order, a
     deterministic stand-in for an order GT does not fix either.
+
+    **A merged run is not nearest first** (``Net.items``, #249). Its consumers are Item Filters, each
+    letting through only its own item (``MTEFilter.allowPutStack``), and a pipe skips an inventory
+    that refuses a stack and carries it on (``MTEItemPipe.sendItemStack``), charging nothing for the
+    refusal. So no filter takes another's item however near it sits: every producer on the run feeds
+    every filter, the filter's share of what that producer ejects, and each such pair is a stream
+    charged up to that filter. A filter's share is its input port's rate, which is its item's rate.
+    With one producer, which is the run the adapter builds (one per machine instance), this is
+    exactly what nearest first gives; with several it keeps an item from being counted as delivered
+    to the nearest filter that would never take it. Which filter lets which item through is
+    :func:`_check_filter_sorting`'s concern, not this count's.
 
     Terminals that are foreign, duplicated or off the route are left out; ``_check_terminals``
     reports each of those. A net with no producer or no consumer on the route moves nothing here.
@@ -356,11 +382,14 @@ def _item_streams(
     )
     streams: list[_ItemStream] = []
     for reach, i, j in pairs:
-        share = min(supply[i], wanted[j])
+        if net.items:
+            share = supply[i] * wanted[j]  # every producer feeds every filter its own item
+        else:
+            share = min(supply[i], wanted[j])
+            supply[i] -= share
+            wanted[j] -= share
         if share <= _INSERTION_EPSILON:
             continue  # one of the two is already served; float dust is not a stream
-        supply[i] -= share
-        wanted[j] -= share
         charged = frozenset(c for c, h in hops[senders[i][0]].items() if h <= reach)
         streams.append(_ItemStream(share * flow, charged))
     return streams
@@ -811,11 +840,14 @@ def _check_terminal_faces(problem: InputIR, layout: LayoutResult, out: list[Viol
     machine recording no ``hatch_slots`` is a single block (or one the dump knows nothing about),
     so it has no hatches to contend over, and it rightly may take input on one face and output on
     another. But a terminal is one cell outside one face, so two terminals of that machine on one
-    cell are two connections through one face of one block. GT settles the case that matters: a
-    basic machine ejects through one output side and by default refuses input on it
-    (``mAllowInputFromOutputSide``), so an input and an output sharing a face cannot both work, and
-    any other pair is one pipe connection claimed as two. Either way the layout promises a
-    connection the block does not have.
+    cell are two connections through one face of one block, and a cell holds one pipe block, so the
+    layout promises two connections where the block has one. The pack does not rescue the input and
+    output pair either. A basic machine ejects through one output side, and whether it also accepts
+    input there is ``mAllowInputFromOutputSide``, whose default differs by pack: off on 2.8.4
+    (``MTEBasicMachine``, GT5U 5.09.51.482 line 118) and on for valid recipe inputs on 2.9 (5.09.54.20
+    line 123). Off, the input side cannot work at all; on, the one pipe block on that face would
+    carry the machine's own output back into it alongside its feed, which is still one connection
+    doing the work of two.
 
     Keyed on ``(machine, dock cell)``, the same unit ``router._grid.claim_key`` uses for such a
     machine, but re-derived here rather than imported (``docs/ARCHITECTURE.md`` #4: shared rule
@@ -847,6 +879,174 @@ def _check_terminal_faces(problem: InputIR, layout: LayoutResult, out: list[Viol
                         f"{owner!r} and {terminal.port_id!r} of {terminal.machine_id!r} both dock "
                         f"on {cell}, one face of a single block; a face carries one connection",
                         machine_id=terminal.machine_id,
+                    )
+                )
+
+
+def _check_filter_sorting(problem: InputIR, out: list[Violation]) -> None:
+    """Every item on a merged run leaves it through exactly one Item Filter, and nothing else (#249).
+
+    A single block that runs out of faces sends all its items out of one face into one pipe (a
+    merged run, ``Net.items``), and an Item Filter per item sorts them: a filter takes only what its
+    slots name (``Machine.filter_items``; ``MTEFilter.allowPutStack``) and a pipe carries a refused
+    stack on to the next inventory (``MTEItemPipe.sendItemStack``). Four things make that sorting
+    real, all read off the problem alone, so they hold whatever the layout:
+
+    - **every consumer on a merged run is a filter.** Anything else takes every item that reaches
+      it, so the sorting is lost;
+    - **each of its items is let through by exactly one of those filters.** With none, the item has
+      nowhere to leave the pipe: it backs up and blocks the machine feeding it. With two, it splits
+      between them, and each downstream net gets part of a flow it was balanced to receive whole;
+    - **a filter takes from a net only if that net carries something it lets through.** Otherwise
+      nothing ever reaches it, and what it should pass on never arrives;
+    - **a filter passes on only what it lets through**: a net it sources carries nothing else.
+
+    A filter slot naming an item its run never carries is not refused. It sorts nothing and blocks
+    nothing, which is an idle slot rather than a defect, and whether the filter still has work is
+    the third rule's question.
+    """
+    machines = {m.id: m for m in problem.machines}
+    port_dir = port_direction_map(problem)
+    for net in problem.nets:
+        if net.commodity is not Commodity.ITEM:
+            continue
+        sources, sinks = net_sources_sinks(net, port_dir)
+        carried = set(net.resources)
+        takers: dict[str, list[str]] = {item: [] for item in net.items}
+        for sink in sinks:
+            machine = machines.get(sink.machine_id)
+            if machine is None:
+                continue  # an unknown machine is not this check's to report
+            if not machine.filter_items:
+                if net.items:
+                    out.append(
+                        Violation(
+                            ViolationCode.FILTER_ITEM_UNSORTED,
+                            f"{machine.id!r} takes from merged run {net.id!r} without filtering "
+                            f"it, so every item on it ({', '.join(net.items)}) can land there",
+                            machine_id=machine.id,
+                        )
+                    )
+                continue
+            for item in machine.filter_items:
+                if item in takers:
+                    takers[item].append(machine.id)
+            if carried.isdisjoint(machine.filter_items):
+                out.append(
+                    Violation(
+                        ViolationCode.FILTER_ITEM_UNSORTED,
+                        f"filter {machine.id!r} takes from net {net.id!r} "
+                        f"({', '.join(net.resources)}) but lets through only "
+                        f"{', '.join(machine.filter_items)}, so nothing ever reaches it",
+                        machine_id=machine.id,
+                    )
+                )
+        for item, filters in takers.items():
+            if not filters:
+                out.append(
+                    Violation(
+                        ViolationCode.FILTER_ITEM_UNSORTED,
+                        f"no filter on merged run {net.id!r} lets {item} through: it has nowhere "
+                        f"to leave the pipe, backs up, and blocks the machine feeding it",
+                    )
+                )
+            elif len(filters) > 1:
+                out.append(
+                    Violation(
+                        ViolationCode.FILTER_ITEM_UNSORTED,
+                        f"{item} on merged run {net.id!r} is let through by {len(filters)} filters "
+                        f"({', '.join(filters)}), so it splits between them",
+                    )
+                )
+        for source in sources:
+            machine = machines.get(source.machine_id)
+            if machine is None or not machine.filter_items:
+                continue
+            stray = [r for r in net.resources if r not in machine.filter_items]
+            if stray:
+                out.append(
+                    Violation(
+                        ViolationCode.FILTER_ITEM_UNSORTED,
+                        f"filter {machine.id!r} sources net {net.id!r} carrying "
+                        f"{', '.join(stray)}, which it does not let through "
+                        f"(only {', '.join(machine.filter_items)})",
+                        machine_id=machine.id,
+                    )
+                )
+
+
+def _check_filter_backs(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
+    """Behind an Item Filter is its own output and nothing else (#249).
+
+    A filter pushes one stack at a time out of its back into whatever is there, and has no toggle to
+    stop it (``MTEBuffer.moveItems``). So the cell behind it decides where its items go, whatever the
+    layout says: the block it pushes into must be its own output. That is either the pipe of a net
+    its output sources (its terminal docks there, its port being pinned to the back) or the machine
+    it auto-outputs into through that back. Anything else there is fed by it, and the filter's items
+    arrive where no net was meant to put them:
+
+    - **another machine's body**, when this filter does not auto-output into that machine through its
+      back, receives its items directly;
+    - **another net's pipe** carries its items off into a line they do not belong to.
+
+    An empty cell behind it is not this rule's business: then the filter's output is unconnected,
+    which ``MISSING_CONNECTION`` or the pinned terminal-face check already reports. The back is the
+    face opposite the filter's front, derived here, and "behind" is every cell one step out of its
+    body through that face, so the rule does not assume a filter is one block.
+    """
+    machines = {m.id: m for m in problem.machines}
+    port_dir = port_direction_map(problem)
+    placements = placement_index(layout.placements)
+    owner: dict[Cell, str] = {}  # body cell -> the machine standing on it
+    for placement in placements.values():
+        machine = machines.get(placement.machine_id)
+        if machine is not None:
+            for cell in body_cells(placement.cell, machine.footprint, placement.orientation):
+                owner.setdefault(cell, placement.machine_id)
+    route_nets: dict[Cell, set[str]] = defaultdict(set)  # route cell -> the nets routed through it
+    for route in layout.routes:
+        for cell in route.cells():
+            route_nets[cell].add(route.net_id)
+    feeds: dict[str, set[str]] = defaultdict(set)  # filter -> the nets its outputs source
+    for net in problem.nets:
+        for endpoint in net.endpoints:
+            if port_dir.get((endpoint.machine_id, endpoint.port_id)) is IODirection.OUTPUT:
+                feeds[endpoint.machine_id].add(net.id)
+
+    for placement in placements.values():
+        machine = machines.get(placement.machine_id)
+        if machine is None or not machine.filter_items:
+            continue
+        back = OPPOSITE_FACE[placement.orientation]
+        dx, dy, dz = FACE_DELTAS[back]
+        body = body_cells(placement.cell, machine.footprint, placement.orientation)
+        behind = sorted({(x + dx, y + dy, z + dz) for x, y, z in body} - body)
+        targets = {
+            ac.target_machine_id
+            for ac in layout.auto_connections
+            if ac.source_machine_id == machine.id and ac.source_face is back
+        }
+        for cell in behind:
+            other = owner.get(cell)
+            if other is not None and other not in targets:
+                out.append(
+                    Violation(
+                        ViolationCode.FILTER_BACK_NOT_ITS_OUTPUT,
+                        f"filter {machine.id!r} pushes out of its back ({back.value}) into "
+                        f"{other!r} at {cell}, which it does not auto-output into: GT's filter "
+                        f"ejects into whatever stands behind it",
+                        machine_id=machine.id,
+                    )
+                )
+            foreign = sorted(route_nets.get(cell, set()) - feeds[machine.id])
+            if foreign:
+                out.append(
+                    Violation(
+                        ViolationCode.FILTER_BACK_NOT_ITS_OUTPUT,
+                        f"filter {machine.id!r} pushes out of its back ({back.value}) into the "
+                        f"pipe of {', '.join(repr(n) for n in foreign)} at {cell}, a net it does "
+                        f"not feed",
+                        machine_id=machine.id,
                     )
                 )
 
@@ -1162,6 +1362,7 @@ def _check_terminals(problem: InputIR, layout: LayoutResult, out: list[Violation
     machines = {m.id: m for m in problem.machines}
     placement_by_machine = placement_index(layout.placements)
     nets = {n.id: n for n in problem.nets}
+    ports = {(m.id, p.id): p for m in problem.machines for p in m.faces.ports}
 
     for r in layout.routes:
         net = nets.get(r.net_id)
@@ -1211,12 +1412,26 @@ def _check_terminals(problem: InputIR, layout: LayoutResult, out: list[Violation
             if placement is None or machine is None:
                 continue  # placement/machine problems reported elsewhere
             cell = (t.cell.x, t.cell.y, t.cell.z)
-            if t.face is placement.orientation:
+            port = ports.get(key)
+            refusal = _face_refusal(
+                port, t.face, placement.orientation, ViolationCode.TERMINAL_ON_FRONT_FACE
+            )
+            if refusal is ViolationCode.TERMINAL_ON_FRONT_FACE:
                 out.append(
                     Violation(
-                        ViolationCode.TERMINAL_ON_FRONT_FACE,
+                        refusal,
                         f"terminal for net {r.net_id!r} on {t.machine_id!r} uses the front "
                         f"face {t.face.value}",
+                    )
+                )
+            elif refusal is not None and port is not None:
+                out.append(
+                    Violation(
+                        refusal,
+                        f"terminal for net {r.net_id!r} on {t.machine_id!r} port {t.port_id!r} "
+                        f"docks on {t.face.value}, which that port is not pinned to "
+                        f"({_faces_text(port, placement.orientation)})",
+                        machine_id=t.machine_id,
                     )
                 )
             dx, dy, dz = FACE_DELTAS[t.face]
@@ -1242,6 +1457,7 @@ def _check_auto_connections(problem: InputIR, layout: LayoutResult, out: list[Vi
     machines = {m.id: m for m in problem.machines}
     nets = {n.id: n for n in problem.nets}
     port_dir = port_direction_map(problem)
+    ports = {(m.id, p.id): p for m in problem.machines for p in m.faces.ports}
     placement_of = placement_index(layout.placements)
     source_uses: dict[str, int] = defaultdict(int)
 
@@ -1263,7 +1479,30 @@ def _check_auto_connections(problem: InputIR, layout: LayoutResult, out: list[Vi
         tm = machines.get(ac.target_machine_id)
         if sp is None or sm is None or tp is None or tm is None:
             continue  # unknown / unplaced machine reported by _check_placements
-        if ac.source_face is sp.orientation or ac.target_face is tp.orientation:
+        source_port = _endpoint_port(net, ac.source_machine_id, sm)
+        target_port = _endpoint_port(net, ac.target_machine_id, tm)
+        front_face = False
+        for side, machine_id, port_id, face, orientation in (
+            ("source", ac.source_machine_id, source_port, ac.source_face, sp.orientation),
+            ("target", ac.target_machine_id, target_port, ac.target_face, tp.orientation),
+        ):
+            port = ports.get((machine_id, port_id))
+            refusal = _face_refusal(
+                port, face, orientation, ViolationCode.AUTO_OUTPUT_ON_FRONT_FACE
+            )
+            if refusal is ViolationCode.AUTO_OUTPUT_ON_FRONT_FACE:
+                front_face = True
+            elif refusal is not None and port is not None:
+                out.append(
+                    Violation(
+                        refusal,
+                        f"auto-output for net {ac.net_id!r}: its {side} {machine_id!r} port "
+                        f"{port_id!r} would connect through {face.value}, which that port is not "
+                        f"pinned to ({_faces_text(port, orientation)})",
+                        machine_id=machine_id,
+                    )
+                )
+        if front_face:
             out.append(
                 Violation(
                     ViolationCode.AUTO_OUTPUT_ON_FRONT_FACE,
@@ -1275,8 +1514,8 @@ def _check_auto_connections(problem: InputIR, layout: LayoutResult, out: list[Vi
         # front face and receives through an input bus's, so the connection needs a touching pair
         # of cells that can host those two hatches. For a machine with no dumped structure both
         # sets are its whole body, which is exactly the old rule.
-        source_cells = _hatch_hosts(sm, sp, _endpoint_port(net, ac.source_machine_id, sm))
-        target_cells = _hatch_hosts(tm, tp, _endpoint_port(net, ac.target_machine_id, tm))
+        source_cells = _hatch_hosts(sm, sp, source_port)
+        target_cells = _hatch_hosts(tm, tp, target_port)
         adjacent = any((x + dx, y + dy, z + dz) in target_cells for x, y, z in source_cells)
         if not adjacent or ac.target_face is not OPPOSITE_FACE[ac.source_face]:
             out.append(
@@ -1301,6 +1540,33 @@ def _check_auto_connections(problem: InputIR, layout: LayoutResult, out: list[Vi
                     f"machine {machine_id!r} auto-outputs to {uses} nets (only one auto-output face)",
                 )
             )
+
+
+def _face_refusal(
+    port: Port | None, face: Facing, orientation: Facing, front_code: ViolationCode
+) -> ViolationCode | None:
+    """Why ``port`` may not connect through ``face`` of its machine facing ``orientation``, or None.
+
+    One rule in two readings, both on the validator's own turning (``_geometry.usable_faces``). An
+    unpinned port may use any face but the front, and one on its front keeps the long-standing
+    ``front_code`` (a terminal's or an auto-output's), so a layout refused before is refused the same
+    way. A pinned port (``Port.faces``, InputIR v4) may use exactly the faces it names, its front
+    included when it names that, and any other face is ``TERMINAL_ON_DISALLOWED_FACE``. An Item
+    Filter's output is the case that needs it: the block pushes out of its back and nowhere else
+    (``MTEBuffer.moveItems``), so a pipe on its side would never be fed. An unknown port reads as
+    unpinned, since what is wrong with it is reported elsewhere.
+    """
+    pins = port.faces if port is not None else None
+    if face in usable_faces(pins, orientation):
+        return None
+    return front_code if pins is None else ViolationCode.TERMINAL_ON_DISALLOWED_FACE
+
+
+def _faces_text(port: Port, orientation: Facing) -> str:
+    """``port``'s pins and the world faces they are at ``orientation``, for a violation message."""
+    pins = "/".join(pin.value for pin in port.faces or ())
+    world = "/".join(sorted(face.value for face in usable_faces(port.faces, orientation)))
+    return f"{pins}, here {world}"
 
 
 def _endpoint_port(net: Net | None, machine_id: str, machine: Machine) -> str:

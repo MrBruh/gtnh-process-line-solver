@@ -42,6 +42,7 @@ from gtnh_solver.ir import (
     PlacedHatch,
     Placement,
     Port,
+    RelativeFace,
     Route,
     RouteMaterial,
     Segment,
@@ -49,6 +50,7 @@ from gtnh_solver.ir import (
 )
 from gtnh_solver.solver import solve
 from gtnh_solver.validator import validate
+from gtnh_solver.validator._geometry import usable_faces
 from gtnh_solver.validator.report import ViolationCode
 from tests._helpers import hatched_dataset
 
@@ -2678,6 +2680,35 @@ def test_a_block_beside_a_sender_pays_for_a_delivery_that_went_the_other_way() -
     assert validate(problem, layout).ok
 
 
+#: _ONE_TO_THREE at a hundredth of the rate: each consumer takes 0.001 items/t, an item per 1000
+#: ticks, like iron.json's washers feeding its Thermal Centrifuges (#249).
+_SLOW_ONE_TO_THREE: tuple[_Dock, ...] = (
+    (2, _OUT, 0.003),
+    (2, _IN, 0.001),
+    (1, _IN, 0.001),
+    (0, _IN, 0.001),
+)
+
+
+def test_a_slow_stream_spends_no_more_insertions_than_items_it_moves() -> None:
+    """GT counts an insertion only when it delivered an item (``MTEItemPipe`` lines 221-223,
+    326-337), so the near consumer that starves the rest can take only as many insertions as items
+    it eats. At an item per 1000 ticks each, three streams through block 2 spend 0.12 of the plain
+    pipe's one insertion per 40 ticks, where the full-rate run above needs three."""
+    problem, layout = _pipe_run(PipeSize.NORMAL, *_SLOW_ONE_TO_THREE)
+    assert validate(problem, layout).ok
+    # The calibrated case is untouched: at the sand line's 0.1 items/t the same run is refused.
+    problem, layout = _pipe_run(PipeSize.NORMAL, *_ONE_TO_THREE)
+    assert set(_refused(problem, layout)) == {1, 2}
+
+
+def test_a_net_that_states_no_throughput_still_charges_every_stream_in_full() -> None:
+    # A zero rate is no rate, not an idle endpoint: each consumer is still served once per interval.
+    docks = ((2, _OUT, 0.0), (2, _IN, 0.0), (1, _IN, 0.0), (0, _IN, 0.0))
+    problem, layout = _pipe_run(PipeSize.NORMAL, *docks, throughput=0.0)
+    assert set(_refused(problem, layout)) == {1, 2}
+
+
 @pytest.mark.parametrize(
     ("rate", "size", "refused"),
     [
@@ -2963,3 +2994,471 @@ def test_a_bigger_pipe_never_turns_a_pass_into_a_refusal(length: int, docks: lis
         refused = _refused(problem, layout)
         assert not (carried and refused), f"{size.value} refused what a smaller size carried"
         carried = carried or not refused
+
+
+# ------------------------------------------------------------------------------------------------
+# Item Filters sorting a single block's merged item outputs (#249)
+# ------------------------------------------------------------------------------------------------
+#
+# A producer M sends items a and b out of its south face into one pipe (a merged run). Two Item
+# Filters sit on the run, each taking it through its front, and each pushes out of its back into
+# the machine it feeds:
+#
+#     z=1          M            (faces north)
+#     z=2          T -- T -- T  the merged run, item-trunk:M
+#     z=3               Fa   Fb  (face north: the run docks on their fronts)
+#     z=4               Sa   Sb  (face south: each filter auto-outputs into one through its back)
+#                  x=1  x=2  x=3
+
+_FILTER_INPUT_FACES = (
+    RelativeFace.FRONT,
+    RelativeFace.LEFT,
+    RelativeFace.RIGHT,
+    RelativeFace.UP,
+    RelativeFace.DOWN,
+)
+
+
+def _item_filter(producer: str, item: str, *, rate: float | None = 0.1) -> Machine:
+    """An Item Filter exactly as the adapter synthesizes one (#249)."""
+    return Machine(
+        id=f"item-filter:{producer}:{item}",
+        type="Ultra Low Voltage Item Filter",
+        block_key="gregtech:gt.blockmachines@9240",
+        voltage_tier="ULV",
+        orientation_options=[Facing.NORTH, Facing.SOUTH, Facing.EAST, Facing.WEST],
+        filter_items=(item,),
+        faces=FaceSpec(
+            ports=[
+                Port(
+                    id=f"input:{item}",
+                    commodity=Commodity.ITEM,
+                    direction=IODirection.INPUT,
+                    rate=rate,
+                    faces=_FILTER_INPUT_FACES,
+                ),
+                Port(
+                    id=f"output:{item}",
+                    commodity=Commodity.ITEM,
+                    direction=IODirection.OUTPUT,
+                    rate=rate,
+                    faces=(RelativeFace.BACK,),
+                ),
+            ]
+        ),
+    )
+
+
+def _filter_sink(mid: str, item: str) -> Machine:
+    return Machine(
+        id=mid,
+        type="gt.macerator",
+        voltage_tier="LV",
+        orientation_options=[Facing.SOUTH],
+        faces=FaceSpec(
+            ports=[Port(id=f"input:{item}", commodity=Commodity.ITEM, direction=IODirection.INPUT)]
+        ),
+    )
+
+
+_FA, _FB = "item-filter:M:a", "item-filter:M:b"
+
+
+def _filter_line() -> tuple[InputIR, LayoutResult]:
+    """The merged run above, valid: every item sorted, each filter's back its own output."""
+    producer = Machine(
+        id="M",
+        type="gt.orewasher",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[
+                Port(
+                    id="output:items",
+                    commodity=Commodity.ITEM,
+                    direction=IODirection.OUTPUT,
+                    rate=0.2,
+                )
+            ]
+        ),
+    )
+    trunk = Net(
+        id="item-trunk:M",
+        commodity=Commodity.ITEM,
+        items=("a", "b"),
+        throughput=0.2,
+        endpoints=[
+            MachineFaceRef(machine_id="M", port_id="output:items"),
+            MachineFaceRef(machine_id=_FA, port_id="input:a"),
+            MachineFaceRef(machine_id=_FB, port_id="input:b"),
+        ],
+    )
+    sorted_nets = [
+        Net(
+            id=f"n{item}",
+            commodity=Commodity.ITEM,
+            fluid_or_item=item,
+            throughput=0.1,
+            endpoints=[
+                MachineFaceRef(machine_id=f"item-filter:M:{item}", port_id=f"output:{item}"),
+                MachineFaceRef(machine_id=f"S{item}", port_id=f"input:{item}"),
+            ],
+        )
+        for item in ("a", "b")
+    ]
+    problem = InputIR(
+        bounding_region=CellBox(sx=6, sy=2, sz=6),
+        machines=[
+            producer,
+            _item_filter("M", "a"),
+            _item_filter("M", "b"),
+            _filter_sink("Sa", "a"),
+            _filter_sink("Sb", "b"),
+        ],
+        nets=[trunk, *sorted_nets],
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            _place("M", 1, 0, 1, Facing.NORTH),
+            _place(_FA, 2, 0, 3, Facing.NORTH),
+            _place(_FB, 3, 0, 3, Facing.NORTH),
+            _place("Sa", 2, 0, 4, Facing.SOUTH),
+            _place("Sb", 3, 0, 4, Facing.SOUTH),
+        ],
+        routes=[
+            Route(
+                net_id="item-trunk:M",
+                commodity=Commodity.ITEM,
+                terminals=[
+                    Terminal(
+                        machine_id="M",
+                        port_id="output:items",
+                        face=Facing.SOUTH,
+                        cell=_coord(1, 0, 2),
+                    ),
+                    # each filter takes the run on its FRONT, which its input may use
+                    Terminal(
+                        machine_id=_FA, port_id="input:a", face=Facing.NORTH, cell=_coord(2, 0, 2)
+                    ),
+                    Terminal(
+                        machine_id=_FB, port_id="input:b", face=Facing.NORTH, cell=_coord(3, 0, 2)
+                    ),
+                ],
+                segments=[
+                    Segment(start=_coord(1, 0, 2), end=_coord(2, 0, 2), channel=0),
+                    Segment(start=_coord(2, 0, 2), end=_coord(3, 0, 2), channel=0),
+                ],
+            )
+        ],
+        auto_connections=[
+            AutoConnection(
+                net_id=f"n{item}",
+                source_machine_id=f"item-filter:M:{item}",
+                source_face=Facing.SOUTH,
+                target_machine_id=f"S{item}",
+                target_face=Facing.NORTH,
+            )
+            for item in ("a", "b")
+        ],
+    )
+    return problem, layout
+
+
+def _routed_filter_line() -> tuple[InputIR, LayoutResult]:
+    """The line with filter a's output piped instead: a one-block pipe behind it, Sa one further."""
+    problem, layout = _filter_line()
+    placements = [
+        _place("Sa", 2, 0, 5, Facing.SOUTH) if p.machine_id == "Sa" else p
+        for p in layout.placements
+    ]
+    pipe = Route(
+        net_id="na",
+        commodity=Commodity.ITEM,
+        terminals=[
+            Terminal(machine_id=_FA, port_id="output:a", face=Facing.SOUTH, cell=_coord(2, 0, 4)),
+            Terminal(machine_id="Sa", port_id="input:a", face=Facing.NORTH, cell=_coord(2, 0, 4)),
+        ],
+    )
+    return problem, layout.model_copy(
+        update={
+            "placements": placements,
+            "routes": [*layout.routes, pipe],
+            "auto_connections": [ac for ac in layout.auto_connections if ac.net_id != "na"],
+        }
+    )
+
+
+def _turned(layout: LayoutResult, machine_id: str, orientation: Facing) -> LayoutResult:
+    placements = [
+        p.model_copy(update={"orientation": orientation}) if p.machine_id == machine_id else p
+        for p in layout.placements
+    ]
+    return layout.model_copy(update={"placements": placements})
+
+
+def _with_machine(problem: InputIR, machine: Machine) -> InputIR:
+    machines = [machine if m.id == machine.id else m for m in problem.machines]
+    return problem.model_copy(update={"machines": machines})
+
+
+def _with_net(problem: InputIR, net: Net) -> InputIR:
+    return problem.model_copy(update={"nets": [net if n.id == net.id else n for n in problem.nets]})
+
+
+def _messages(problem: InputIR, layout: LayoutResult, code: ViolationCode) -> list[str]:
+    return [v.message for v in validate(problem, layout).violations if v.code is code]
+
+
+@pytest.mark.parametrize("build", [_filter_line, _routed_filter_line], ids=["auto", "piped"])
+def test_a_sorted_merged_run_passes(build: Callable[[], tuple[InputIR, LayoutResult]]) -> None:
+    """Both filters take the run on their front (a face the unpinned rule forbids, and their pins
+    allow), and each feeds its own sink out of its back: by auto-output, or into its own pipe."""
+    problem, layout = build()
+    report = validate(problem, layout)
+    assert report.ok, str(report)
+
+
+def test_a_filter_output_piped_from_a_side_face_is_on_a_disallowed_face() -> None:
+    # Turned east, filter a's back is west; the pipe south of it is now on its right, where the
+    # block never pushes anything. Its input on the north is now its left, which it may use.
+    problem, layout = _routed_filter_line()
+    layout = _turned(layout, _FA, Facing.EAST)
+    assert set(validate(problem, layout).codes()) == {ViolationCode.TERMINAL_ON_DISALLOWED_FACE}
+    (message,) = _messages(problem, layout, ViolationCode.TERMINAL_ON_DISALLOWED_FACE)
+    assert "'output:a'" in message
+    assert "docks on south" in message
+    assert "(back, here west)" in message
+
+
+def test_a_filter_auto_outputting_from_a_side_face_is_on_a_disallowed_face() -> None:
+    problem, layout = _filter_line()
+    layout = _turned(layout, _FA, Facing.EAST)
+    assert set(validate(problem, layout).codes()) == {ViolationCode.TERMINAL_ON_DISALLOWED_FACE}
+    (message,) = _messages(problem, layout, ViolationCode.TERMINAL_ON_DISALLOWED_FACE)
+    assert message.startswith("auto-output for net 'na': its source")
+
+
+def test_an_unpinned_port_on_its_front_keeps_the_front_face_code() -> None:
+    # REGRESSION: pins are new; a plain machine's front is refused exactly as it always was.
+    problem, layout = _filter_line()
+    layout = _turned(layout, "M", Facing.SOUTH)
+    problem = _with_machine(
+        problem,
+        problem.machines[0].model_copy(update={"orientation_options": [Facing.SOUTH]}),
+    )
+    codes = validate(problem, layout).codes()
+    assert ViolationCode.TERMINAL_ON_FRONT_FACE in codes
+    assert ViolationCode.TERMINAL_ON_DISALLOWED_FACE not in codes
+
+
+def test_the_validators_face_turning_agrees_with_the_contracts() -> None:
+    """The validator turns pins on its own arithmetic (``_geometry.usable_faces``), independent of
+    ``ir.geometry.absolute_face``, so a mistake in one cannot hide in both. They must still agree,
+    or the gate would refuse the layouts the solver is right to build."""
+    machine = _item_filter("M", "a")
+    orientations = [Facing.NORTH, Facing.EAST, Facing.SOUTH, Facing.WEST]
+    pin_sets: list[tuple[RelativeFace, ...] | None] = [None, *((r,) for r in RelativeFace)]
+    for pins in pin_sets:
+        port = Port(id="p", commodity=Commodity.ITEM, direction=IODirection.OUTPUT, faces=pins)
+        pinned = machine.model_copy(update={"faces": FaceSpec(ports=[port])})
+        for orientation in orientations:
+            assert usable_faces(pins, orientation) == pinned.allowed_faces("p", orientation), (
+                pins,
+                orientation,
+            )
+
+
+def test_an_item_no_filter_lets_through_is_unsorted() -> None:
+    problem, layout = _filter_line()
+    trunk = problem.nets[0].model_copy(update={"items": ("a", "b", "c")})
+    problem = _with_net(problem, trunk)
+    assert set(validate(problem, layout).codes()) == {ViolationCode.FILTER_ITEM_UNSORTED}
+    (message,) = _messages(problem, layout, ViolationCode.FILTER_ITEM_UNSORTED)
+    assert "no filter on merged run 'item-trunk:M' lets c through" in message
+
+
+def test_an_item_two_filters_let_through_is_unsorted() -> None:
+    problem, layout = _filter_line()
+    both = _item_filter("M", "b").model_copy(update={"filter_items": ("a", "b")})
+    problem = _with_machine(problem, both)
+    (message,) = _messages(problem, layout, ViolationCode.FILTER_ITEM_UNSORTED)
+    assert "a on merged run 'item-trunk:M' is let through by 2 filters" in message
+    assert set(validate(problem, layout).codes()) == {ViolationCode.FILTER_ITEM_UNSORTED}
+
+
+def test_a_filter_passing_on_an_item_it_does_not_let_through_is_unsorted() -> None:
+    problem, layout = _filter_line()
+    problem = _with_net(problem, problem.nets[2].model_copy(update={"fluid_or_item": "z"}))
+    (message,) = _messages(problem, layout, ViolationCode.FILTER_ITEM_UNSORTED)
+    assert f"filter {_FB!r} sources net 'nb' carrying z, which it does not let through" in message
+
+
+def test_a_consumer_on_a_merged_run_that_does_not_filter_it_is_unsorted() -> None:
+    # Swap filter b for a plain machine with the same ports: every item on the run can land in it.
+    problem, layout = _filter_line()
+    plain = _item_filter("M", "b").model_copy(update={"filter_items": ()})
+    problem = _with_machine(problem, plain)
+    messages = _messages(problem, layout, ViolationCode.FILTER_ITEM_UNSORTED)
+    assert f"{_FB!r} takes from merged run 'item-trunk:M' without filtering it" in messages[0]
+    assert any("lets b through" in m for m in messages)  # and b now has no filter at all
+
+
+def test_a_filter_whose_run_carries_nothing_it_lets_through_is_unsorted() -> None:
+    # Filter b set to c: nothing on the run reaches it, b has no filter, and what it passes on is not
+    # its own. Each is its own reason, and each is reported.
+    problem, layout = _filter_line()
+    problem = _with_machine(
+        problem, _item_filter("M", "b").model_copy(update={"filter_items": ("c",)})
+    )
+    messages = _messages(problem, layout, ViolationCode.FILTER_ITEM_UNSORTED)
+    assert any("but lets through only c, so nothing ever reaches it" in m for m in messages)
+    assert any("lets b through" in m for m in messages)
+    assert any("carrying b, which it does not let through" in m for m in messages)
+
+
+def test_an_idle_filter_slot_is_not_a_defect() -> None:
+    # A slot naming an item the run never carries sorts nothing and blocks nothing.
+    problem, layout = _filter_line()
+    problem = _with_machine(
+        problem, _item_filter("M", "b").model_copy(update={"filter_items": ("b", "zzz")})
+    )
+    assert validate(problem, layout).ok
+
+
+def test_a_machine_behind_a_filter_it_does_not_feed_is_refused() -> None:
+    # The two sinks swapped: each filter now pushes into the other's sink, whatever the layout says.
+    problem, layout = _filter_line()
+    swapped = {
+        "Sa": _place("Sa", 3, 0, 4, Facing.SOUTH),
+        "Sb": _place("Sb", 2, 0, 4, Facing.SOUTH),
+    }
+    layout = layout.model_copy(
+        update={"placements": [swapped.get(p.machine_id, p) for p in layout.placements]}
+    )
+    messages = _messages(problem, layout, ViolationCode.FILTER_BACK_NOT_ITS_OUTPUT)
+    assert any(
+        m.startswith(f"filter {_FA!r} pushes out of its back (south) into 'Sb' at (2, 0, 4)")
+        for m in messages
+    ), messages
+
+
+def test_a_filter_turned_to_push_back_into_its_own_run_is_refused() -> None:
+    # Turned south, filter a's back is north, onto the merged run itself: it would push its item
+    # straight back into the pipe it takes from.
+    problem, layout = _filter_line()
+    layout = _turned(layout, _FA, Facing.SOUTH)
+    messages = _messages(problem, layout, ViolationCode.FILTER_BACK_NOT_ITS_OUTPUT)
+    assert messages == [
+        f"filter {_FA!r} pushes out of its back (north) into the pipe of 'item-trunk:M' at "
+        f"(2, 0, 2), a net it does not feed"
+    ]
+    # ...and both of its ports now sit on faces they are not pinned to
+    assert len(_messages(problem, layout, ViolationCode.TERMINAL_ON_DISALLOWED_FACE)) == 2
+
+
+def _trunk_run(
+    size: PipeSize, producers: list[int], filters: list[tuple[int, str]]
+) -> tuple[InputIR, LayoutResult]:
+    """A merged run on the straight 3-block pipe of :func:`_pipe_run`, each dock below or above it.
+
+    Every filter takes 0.1 items/t of its own item, and the producers share the total evenly. A
+    filter faces north, takes the run through its top or bottom and has open air behind it.
+    """
+    docks = [(block, "items", "output:items") for block in producers] + [
+        (block, item, f"input:{item}") for block, item in filters
+    ]
+    total = 0.1 * len(filters)
+    machines, placements, terminals, endpoints = [], [], [], []
+    used: Counter[int] = Counter()
+    for i, (block, what, port) in enumerate(docks):
+        dy, face = (-1, Facing.UP) if used[block] == 0 else (1, Facing.DOWN)
+        used[block] += 1
+        if port == "output:items":
+            mid = f"P{i}"
+            machines.append(
+                Machine(
+                    id=mid,
+                    type="gt.orewasher",
+                    voltage_tier="LV",
+                    orientation_options=[Facing.NORTH],
+                    faces=FaceSpec(
+                        ports=[
+                            Port(
+                                id=port,
+                                commodity=Commodity.ITEM,
+                                direction=IODirection.OUTPUT,
+                                rate=total / len(producers),
+                            )
+                        ]
+                    ),
+                )
+            )
+        else:
+            mid = f"item-filter:P:{what}"
+            machines.append(_item_filter("P", what))
+        placements.append(_place(mid, block, 1 + dy, 1, Facing.NORTH))
+        terminals.append(
+            Terminal(machine_id=mid, port_id=port, face=face, cell=_coord(block, 1, 1))
+        )
+        endpoints.append(MachineFaceRef(machine_id=mid, port_id=port))
+    problem = InputIR(
+        bounding_region=CellBox(sx=3, sy=3, sz=3),
+        machines=machines,
+        nets=[
+            Net(
+                id="trunk",
+                commodity=Commodity.ITEM,
+                items=tuple(sorted(item for _, item in filters)),
+                throughput=total,
+                endpoints=endpoints,
+            )
+        ],
+    )
+    route = Route(
+        net_id="trunk",
+        commodity=Commodity.ITEM,
+        terminals=terminals,
+        segments=[
+            Segment(start=_coord(x, 1, 1), end=_coord(x + 1, 1, 1), channel=0) for x in range(2)
+        ],
+        material=RouteMaterial(family=PipeFamily.ITEM_PIPE, material="tin", size=size),
+    )
+    return problem, LayoutResult(
+        status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route]
+    )
+
+
+@pytest.mark.parametrize(
+    ("size", "refused"),
+    [(PipeSize.NORMAL, {0, 1}), (PipeSize.LARGE, {0}), (PipeSize.HUGE, set())],
+)
+def test_a_merged_run_is_one_stream_per_item_from_its_producer(
+    size: PipeSize, refused: set[int]
+) -> None:
+    """One producer and three filters: each item is its own stream, charged as far as its filter,
+    so the producer's block carries all three. The adapter's merged runs are this shape."""
+    problem, layout = _trunk_run(size, [0], [(0, "a"), (1, "b"), (2, "c")])
+    assert set(_refused(problem, layout)) == refused
+    assert set(validate(problem, layout).codes()) <= {ViolationCode.ITEM_PIPE_SIZE_INSUFFICIENT}
+    if 0 in refused:
+        assert "carries 3 streams of a, b, c (0.3 items/t)" in _refused(problem, layout)[0]
+
+
+@pytest.mark.parametrize(
+    ("size", "refused"),
+    [(PipeSize.NORMAL, {0, 1, 2}), (PipeSize.LARGE, {0, 2}), (PipeSize.HUGE, set())],
+)
+def test_a_merged_runs_items_reach_only_their_own_filter_however_near_another_sits(
+    size: PipeSize, refused: set[int]
+) -> None:
+    """Two producers at the ends of a run, filter a beside one and filter b beside the other. Nearest
+    first would pair each producer with the filter beside it, one stream a block, which a normal pipe
+    carries (the plain net below). But a filter refuses the other's item and the pipe carries it on,
+    so each producer's b travels to filter b and its a to filter a: four streams, the ends paying
+    for three each and the middle for two."""
+    problem, layout = _trunk_run(size, [0, 2], [(0, "a"), (2, "b")])
+    assert set(_refused(problem, layout)) == refused
+    plain = ((0, _OUT, 0.1), (0, _IN, 0.1), (2, _OUT, 0.1), (2, _IN, 0.1))
+    assert set(_refused(*_pipe_run(PipeSize.NORMAL, *plain))) == set()

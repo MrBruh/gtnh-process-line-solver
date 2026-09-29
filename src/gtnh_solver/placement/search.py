@@ -3,11 +3,11 @@
 Starts from the constructive first-fit solution and improves it under a cost that proxies
 buildability: half-perimeter wirelength (HPWL) per item/fluid net pulls connected machines
 together (more auto-output, shorter pipes); an auto-output reward favours orientations whose
-usable (non-front) faces actually let a source eject into its sink; and compactness is two
-independently weighted terms - the **footprint** (floor area, x-span times z-span, shrunk by
-stacking vertically) and the total bounding-box **volume** (shrunk by staying flat/cubic) -
-whose weights the selectable :data:`Objective` picks, since the two pull opposite ways
-(docs/ROADMAP.md lane C). The default ``footprint`` objective drives the floor area down and
+usable faces (``Machine.allowed_faces``) actually let a source eject into its sink; and
+compactness is two independently weighted terms - the **footprint** (floor area, x-span times
+z-span, shrunk by stacking vertically) and the total bounding-box **volume** (shrunk by staying
+flat/cubic) - whose weights the selectable :data:`Objective` picks, since the two pull opposite
+ways (docs/ROADMAP.md lane C). The default ``footprint`` objective drives the floor area down and
 keeps volume as a mild tiebreak. The auto reward is the only orientation-dependent term, so
 reorient moves carry a real cost signal - without it they were free random walk that could
 finalize an orientation BLOCKING auto-output.
@@ -82,12 +82,14 @@ from gtnh_solver.ir import (
     Machine,
     Placement,
 )
+from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 from gtnh_solver.ir.geometry import (
     FACE_DELTAS,
     FACE_OFFSETS,
     Cell,
     Pose,
     Size,
+    allowed_faces,
     box_cells,
     box_front_on_boundary,
     box_within,
@@ -231,31 +233,79 @@ class _Body:
 
     ``machine`` is kept for the callers that genuinely need the model: the auto-output rule, which
     keys its caches on it, and the first-fit fallback.
+
+    It is also the per-problem **face table** (#249): which faces each port may use is read off the
+    model once, through ``Machine.allowed_faces``, and kept here as shells of cell offsets, so the
+    cost never asks the model per evaluation.
     """
 
     machine: Machine
     #: The footprint as it sits facing each way (:func:`rotated_footprint`), for every facing.
     sizes: Mapping[Facing, Size]
-    #: :func:`_shell_offsets` of each of those sizes, facing that way.
+    #: :func:`_shell_offsets` of each of those sizes, facing that way, through every face some port
+    #: may use: the non-front faces for a machine with no pinned port, which is every machine but
+    #: an Item Filter.
     shells: Mapping[Facing, tuple[Cell, ...]]
     orientations: tuple[Facing, ...]
     is_power_source: bool
+    #: The ports a router will dock: on some net whose commodity is not on the ME network. A port on
+    #: no net, or riding ME, is docked by nobody, so it asks for no cell - the rule the exact gate
+    #: (``placement.feasibility``) already applies, and the cheap term must not tax what it exempts.
     port_ids: tuple[str, ...]
+    #: Per facing, one shell per entry of :attr:`port_ids`, through that port's own faces only; None
+    #: when no port is pinned (``Port.faces``), so an unpinned machine keeps the one shared shell.
+    #: A pinned machine faces horizontally only, so only those facings are tabulated.
+    port_shells: Mapping[Facing, tuple[tuple[Cell, ...], ...]] | None = None
 
 
-def _body(machine: Machine) -> _Body:
+def _body(machine: Machine, docked: Collection[str] | None = None) -> _Body:
+    """``machine`` as the search reads it. ``docked`` names the ports a router will dock (None:
+    all of them); :func:`optimize_placement` passes the ports on non-ME nets."""
     sizes: dict[Facing, Size] = {}
     for facing in Facing:
         box = rotated_footprint(machine.footprint, facing)
         sizes[facing] = (box.sx, box.sy, box.sz)
+    ports = [p for p in machine.faces.ports if docked is None or p.id in docked]
+    port_shells: dict[Facing, tuple[tuple[Cell, ...], ...]] | None = None
+    if any(port.faces is not None for port in machine.faces.ports):
+        facings = HORIZONTAL_FACINGS_ORDERED
+        shells = {
+            f: _shell_offsets(
+                *sizes[f],
+                frozenset().union(*(machine.allowed_faces(p.id, f) for p in machine.faces.ports)),
+            )
+            for f in facings
+        }
+        port_shells = {
+            f: tuple(_shell_offsets(*sizes[f], machine.allowed_faces(p.id, f)) for p in ports)
+            for f in facings
+        }
+    else:
+        shells = {f: _shell_offsets(*size, allowed_faces(None, f)) for f, size in sizes.items()}
     return _Body(
         machine=machine,
         sizes=sizes,
-        shells={facing: _shell_offsets(*size, facing) for facing, size in sizes.items()},
+        shells=shells,
         orientations=tuple(machine.orientation_options),
         is_power_source=machine.is_power_source,
-        port_ids=tuple(port.id for port in machine.faces.ports),
+        port_ids=tuple(port.id for port in ports),
+        port_shells=port_shells,
     )
+
+
+def _bodies(problem: InputIR) -> dict[str, _Body]:
+    """Every machine of ``problem`` as a :class:`_Body`, charged only for the ports a router docks.
+
+    A port docks when it sits on a net whose commodity is not on the ME network. The exact gate
+    (``placement.feasibility.crowded_machines``) charges nothing for any other port, so neither may
+    the face term that approximates it.
+    """
+    docked: dict[str, set[str]] = {m.id: set() for m in problem.machines}
+    for n in problem.nets:
+        if not problem.me_toggles.toggled(n.commodity):
+            for e in n.endpoints:
+                docked.setdefault(e.machine_id, set()).add(e.port_id)
+    return {m.id: _body(m, docked[m.id]) for m in problem.machines}
 
 
 def _placement(pose: Pose) -> Placement:
@@ -331,7 +381,7 @@ def optimize_placement(
     if not base.ok or len(base.placements) < 2:
         return base  # infeasible, or nothing to optimize (0/1 machine)
 
-    bodies = {m.id: _body(m) for m in problem.machines}
+    bodies = _bodies(problem)
     region = problem.bounding_region
     bounds = (region.sx, region.sy, region.sz)
     reserved = {(c.x, c.y, c.z) for c in problem.reserved_cells}
@@ -640,7 +690,10 @@ def _dockable_cells(
     bounds: Size,
     reserved: set[Cell],
 ) -> set[Cell]:
-    """The free cells this machine could put a connection on, front face excluded.
+    """The free cells this machine could put a connection on, through the faces its ports may use.
+
+    For an unpinned machine that is every face but the front; a pinned one (an Item Filter) goes
+    through :func:`_pinned_demand` instead, since each of its ports has faces of its own.
 
     The *cells*, not the faces: two faces of one body cell reach two different cells, and two body
     cells can reach the same cell from different sides, so a cell set is the honest account of
@@ -663,10 +716,13 @@ def _dockable_cells(
 
 
 @cache
-def _shell_offsets(sx: int, sy: int, sz: int, front: Facing) -> tuple[Cell, ...]:
-    """Offsets from a body's origin to the cells one step outside it through a non-front face.
+def _shell_offsets(sx: int, sy: int, sz: int, faces: frozenset[Facing]) -> tuple[Cell, ...]:
+    """Offsets from a body's origin to the cells one step outside it through any of ``faces``.
 
-    What :func:`_dockable_cells` scans, worked out once per rotated box rather than per call.
+    ``faces`` is what ``Machine.allowed_faces`` grants: every face but the front for an unpinned
+    port, and a pinned port's own faces otherwise, so a filter's output shell is the one cell
+    behind it. What :func:`_dockable_cells` scans, worked out once per rotated box rather than per
+    call.
     Stepping every body cell through every face mostly lands back inside the body (on a 3x3x3, 90
     of 135 steps), and those cells are always occupied - by the machine itself - so they are dropped
     here instead of being built and hashed to be rejected. A cell two body cells reach turns up once.
@@ -680,7 +736,7 @@ def _shell_offsets(sx: int, sy: int, sz: int, front: Facing) -> tuple[Cell, ...]
     seen: set[Cell] = set()
     shell: list[Cell] = []
     for face, (dx, dy, dz) in FACE_DELTAS.items():
-        if face is front:  # front face carries no I/O
+        if face not in faces:  # unpinned: the front, which carries no I/O
             continue
         for bx, by, bz in product(range(sx), range(sy), range(sz)):
             x, y, z = cell = (bx + dx, by + dy, bz + dz)
@@ -703,7 +759,9 @@ def _face_shortfall(
     """Connections with nowhere to sit, summed over every machine: the unbuildability measure.
 
     A machine needs one free adjacent cell per connection (item in, item out, power in, ...) and
-    its front face carries none of them. Pack it so that neighbours and region walls leave it
+    its front face carries none of them (for a pinned port, only its own faces do: an Item Filter's
+    output leaves by its back alone, so a filter walled at its back is short however much room it
+    has elsewhere - :func:`_pinned_demand`). Pack it so that neighbours and region walls leave it
     fewer free cells than it has ports and the layout cannot be built - the routers then report
     whichever net happens to lose the race for the last face, which names the wrong machine and
     reads like a routing bug. Priced here instead, where the packing decision is actually made.
@@ -743,25 +801,82 @@ def _face_shortfall(
     """
     occupied = _occupied(placements, bodies)
     exempt = set(free_ports)
-    demand: list[tuple[str, int, set[Cell]]] = []
+    # (machine, connections needing a cell, the cells they could take, pinned ports with none).
+    demand: list[tuple[str, int, set[Cell], int]] = []
     for p in placements:
         body = bodies[p.machine_id]
+        if body.port_shells is not None:
+            needed, cells, stranded = _pinned_demand(
+                p,
+                body.port_ids,
+                body.port_shells[p.orientation],
+                occupied,
+                bounds,
+                reserved,
+                exempt,
+            )
+            if needed:
+                demand.append((p.machine_id, needed, cells, stranded))
+            continue
         needed = sum(1 for port_id in body.port_ids if (p.machine_id, port_id) not in exempt)
         if needed:
             demand.append(
-                (p.machine_id, needed, _dockable_cells(p, body, occupied, bounds, reserved))
+                (p.machine_id, needed, _dockable_cells(p, body, occupied, bounds, reserved), 0)
             )
     contenders: dict[Cell, int] = {}
-    for _mid, needed, cells in demand:
+    for _mid, needed, cells, _stranded in demand:
         if len(cells) > needed:
             continue  # has room to spare, so it will not be fighting anyone for a particular cell
         for cell in cells:
             contenders[cell] = contenders.get(cell, 0) + 1
     short = 0.0
-    for mid, needed, cells in demand:
+    for mid, needed, cells, stranded in demand:
         share = sum(1.0 / max(1, contenders.get(cell, 0)) for cell in cells)
-        short += (1.0 + penalties.get(mid, 0.0)) * max(0.0, needed - share)
+        gap = max(0.0, needed - share)
+        if stranded > gap:  # a pinned port with no free cell of its own is short outright
+            gap = float(stranded)
+        short += (1.0 + penalties.get(mid, 0.0)) * gap
     return short
+
+
+def _pinned_demand(
+    pose: Pose,
+    port_ids: tuple[str, ...],
+    port_shells: tuple[tuple[Cell, ...], ...],
+    occupied: set[Cell],
+    bounds: Size,
+    reserved: set[Cell],
+    exempt: Collection[tuple[str, str]],
+) -> tuple[int, set[Cell], int]:
+    """A pinned machine's ``(connections needing a cell, the cells they could take, stranded)``.
+
+    Each non-exempt port looks only through its own faces (``port_shells``, the entry of
+    :attr:`_Body.port_shells` for the pose's facing, aligned with ``port_ids``), and the
+    cells are the union of what they see: a filter fed through its front has that cell to offer,
+    which the unpinned rule would never count. ``stranded`` counts the ports that see no free cell
+    at all. The shared count cannot notice one - a filter walled at its back still has five free
+    cells for its two connections - yet that port has nowhere to dock, and the exact gate says so
+    (``crowded_machines`` docks through the same faces), so the term has to as well.
+    """
+    ox, oy, oz = pose.cell
+    rx, ry, rz = bounds
+    needed = stranded = 0
+    cells: set[Cell] = set()
+    for port_id, shell in zip(port_ids, port_shells, strict=True):
+        if (pose.machine_id, port_id) in exempt:
+            continue
+        needed += 1
+        seen_free = False
+        for dx, dy, dz in shell:
+            x, y, z = cand = (ox + dx, oy + dy, oz + dz)
+            if cand in occupied or cand in reserved:
+                continue
+            if 0 <= x < rx and 0 <= y < ry and 0 <= z < rz:
+                cells.add(cand)
+                seen_free = True
+        if not seen_free:
+            stranded += 1
+    return needed, cells, stranded
 
 
 def _mst_length(centers: list[tuple[float, float, float]]) -> float:

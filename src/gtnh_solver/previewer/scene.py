@@ -32,7 +32,13 @@ from gtnh_solver.ir import (
 )
 from gtnh_solver.ir.geometry import Cell, rotated_footprint
 from gtnh_solver.route_blocks import route_cells
-from gtnh_solver.system_io import RATE_STEM, is_boundary_storage, port_resource, system_io
+from gtnh_solver.system_io import (
+    RATE_STEM,
+    is_boundary_storage,
+    net_resource,
+    port_resource,
+    system_io,
+)
 
 #: Bump if the scene shape the viewer template expects changes.
 SCENE_VERSION = 1
@@ -168,6 +174,9 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
             # (GitHub #155). Empty for every other machine - a machine's ports are its recipe, not
             # its contents. Resource ids verbatim, exactly as the plan carries them.
             "contents": _contents(machines[pl.machine_id], problem.me_toggles),
+            # The items an Item Filter lets through (#249), which is how its slots must be set in
+            # game; the hover lists them. Empty for every other machine.
+            "filter_items": list(machines[pl.machine_id].filter_items),
             "color": color_for_type[machines[pl.machine_id].type],
             # The hatches and buses built into this machine's casing, each at the CELL it replaces
             # and facing the way it works. The texture pass swaps them in for the casing cubes
@@ -208,13 +217,14 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
                 "netId": route.net_id,
                 "commodity": route.commodity.value,
                 # What this pipe or cable actually moves, so hovering one answers it (GitHub #155):
-                # the net's resource (``None`` on power, which names no fluid or item) and its typed
-                # throughput, with ``unit`` the stem the viewer suffixes /t or /s onto - the same
-                # shape ``io`` below uses. The resource id is verbatim, exactly as the plan carries
-                # it: mapping ``gregtech:gt.metaitem.01@2032`` to a name would mean authoring a
-                # table from memory (the reason ``route_blocks`` keeps GT's unlocalized spellings),
-                # and an id a builder can search NEI for beats a guessed name.
-                "resource": net.fluid_or_item if net is not None else None,
+                # the net's resource (``None`` on power, which names no fluid or item; a merged
+                # item run's several, comma separated) and its typed throughput, with ``unit`` the
+                # stem the viewer suffixes /t or /s onto - the same shape ``io`` below uses. The
+                # resource id is verbatim, exactly as the plan carries it: mapping
+                # ``gregtech:gt.metaitem.01@2032`` to a name would mean authoring a table from
+                # memory (the reason ``route_blocks`` keeps GT's unlocalized spellings), and an id a
+                # builder can search NEI for beats a guessed name.
+                "resource": net_resource(net) if net is not None else None,
                 "rate": net.throughput if net is not None else None,
                 "unit": RATE_STEM[route.commodity],
                 "color": _COMMODITY_COLOR[route.commodity],
@@ -415,11 +425,14 @@ def _contents(machine: Machine, me: METoggles) -> list[dict[str, Any]]:
 
 
 def _role(machine: Machine) -> str:
-    """Coarse render role: a power source, a boundary storage, or a plain machine. Reuses the
-    shared predicates (``Machine.is_power_source``, ``system_io.is_boundary_storage``) so the role
-    stays in step with the boundary summary instead of re-deriving them here."""
+    """Coarse render role: a power source, a boundary storage, an Item Filter, or a plain machine.
+    Reuses the shared predicates (``Machine.is_power_source``, ``system_io.is_boundary_storage``)
+    so the role stays in step with the boundary summary instead of re-deriving them here. A filter
+    is known by what it lets through (``Machine.filter_items``), never by its type string."""
     if machine.is_power_source:
         return "source"
     if is_boundary_storage(machine.type):  # Super Chest / Super Tank boundary blocks
         return "storage"
+    if machine.filter_items:  # an Item Filter the adapter placed to sort a merged run (#249)
+        return "filter"
     return "machine"

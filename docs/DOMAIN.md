@@ -22,7 +22,8 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
 
 - A machine has six faces. The **front face** (set by orientation) is the working face and
   carries **no item/fluid I/O**. The solver chooses orientation so required I/O faces stay
-  routable.
+  routable. A block whose faces do fixed jobs (the Item Filter below) states them per port instead
+  (`Port.faces`, read through `Machine.allowed_faces`), and may then use its front.
 - The **other five faces** can each be input OR output of items or fluids. Routing a specific
   commodity onto a face may require a **cover** (conveyor for items, pump/regulator for
   fluids); a cover occupies that face. The layout records the face each pipe docks on (the
@@ -34,11 +35,45 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
 - **One face is one connection, but one pipe block can serve several machines.** A pipe block
   wired to faces of several machines on the same net is a manifold, and a real build uses it
   freely: the maintainer's parallel-sand build puts 20 item connections on 12 pipe blocks that way
-  (#164). Two connections of *one* machine through one face are not something a block has (its
-  output side refuses input by default, `mAllowInputFromOutputSide`), so the validator rejects
-  them (`terminal_face_contention`). And two **nets** never share a pipe block: a GT item pipe
-  delivers to any wired inventory that accepts the stack, and nothing in a plan says two nets
-  carry the same item, so a shared block would cross-feed them.
+  (#164). Two connections of *one* machine through one face are not modelled: the solver gives
+  each connection a face of its own, and the validator rejects two on one face
+  (`terminal_face_contention`). Whether a basic machine's output face also takes input differs by
+  pack: `mAllowInputFromOutputSide` is **off** by default on 2.8.4 (`MTEBasicMachine.java:118`)
+  and **on** by default on 2.9 (`:123`), where the output face accepts any valid recipe input, so a
+  layout that relied on either default would run on one pack only. And two **nets** never share a
+  pipe block: a GT item pipe delivers to any wired inventory that accepts the stack, and nothing in
+  a plan says two nets carry the same item, so a shared block would cross-feed them.
+- **A single block with no face to spare sends its item outputs out of one face, sorted by Item
+  Filters (#249).** Five usable faces, one per connection, is not enough for a machine like the
+  Ore Washer (item in, fluid in, three item outputs, power), and exactly enough is rarely buildable
+  either: a Macerator with an item in, three item outputs and power needs a route on every face,
+  top and bottom included. A GT basic machine with item
+  auto-output on ejects *every* item slot through its output face, so the build is one pipe from
+  that face (the **trunk**) to one **Item Filter** per item. The filter
+  (`MTEFilter` < `MTEBuffer`; the ULV one is mID 9240 in both packs and needs no power) takes items
+  on every face but its back, its front included, keeps only what its slots name, and pushes one
+  stack at a time out of its **back** into whatever is there, with no toggle
+  (`MTEBuffer.moveItems`). A GT item pipe skips an inventory that refuses a stack and never pushes
+  back to the side it received from (`MTEItemPipe.sendItemStack`), so each item reaches the one
+  filter that takes it. The adapter builds this only for a machine that has no face to spare
+  (five connections or more, by the count `single_block_shortfalls` reports from), has at least two
+  item outputs, and is **proven** a single block
+  (its handler says `single`, or a census dataset for the plan's pack lacks it): a 1x1x1 box that
+  might be a multiblock missing from the dataset is left as it is and reported. A machine with a
+  face to spare keeps a face per output, which is a real build only with an Item Filter **cover**
+  on each output face but its output face (`CoverItemFilter` pushes only matching stacks); covers
+  are not modelled or exported yet. Merging every multi-output single block would remove those
+  covers too, but on iron.json the extra filters spread the layout until routing fails again. Each
+  machine
+  instance gets its own trunk and filters, since on 2.9 a sibling's output face would take the
+  other's items. The filter's faces are pinned in the IR (`Port.faces`: input on front, left,
+  right, up, down; output on back), and the validator checks that every trunk item has exactly one
+  filter, that each filter's output carries only its items, and that nothing but its own output
+  sits behind it (`FILTER_ITEM_UNSORTED`, `FILTER_BACK_NOT_ITS_OUTPUT`). The routers hold that
+  cell for the net the filter feeds: every other net, and every cable, treats it as a wall. Two limits: a filter faces
+  horizontally only, because every machine orientation is horizontal, so its back is never up or
+  down; and fluids are never merged, since GT has no fluid filter block. #248's Item Distributor
+  would ride the same face pins.
 - **Required-I/O-face reachability is a HARD constraint** - a blocked required output face
   means the line doesn't run. "Convenient access" is a soft preference.
 
@@ -157,7 +192,15 @@ GT builds every item pipe from its huge size's slot count `H` (`ItemPipeBuilder`
 dry, which depends on covers, recipe times and buffers a plan does not carry. The solver takes it
 from the one measurement there is: the plain pipe (1 per 40 ticks) fed one hammer and not two, so
 **each endpoint needs one insertion per 40 ticks**, plus one more for each further stack it moves in
-that time. A run's demand is the larger of its two sides, summed over their endpoints: all the
+that time, **but never more insertions than items it moves**. GT counts an insertion only when the
+send succeeded and moved at least one item (`MTEItemPipe` lines 221-223, 326-337), so a consumer
+takes insertions only as fast as its machine eats items: the near hammer that starved the other two
+ate 4 items per 40 ticks, while a machine eating one item per 400 ticks spends a tenth of an
+insertion and leaves the rest to the far ones (#249; iron.json's washers feed four Thermal
+Centrifuges 0.01 items/t in all, which a plain pipe carries). Every calibrated case moves at least
+an item per 40 ticks, so the cap changes none of them; that a slower stream is served at its item
+rate is read from GT's source, not yet measured in game. A net with no throughput recorded states
+no rate, and each of its endpoints keeps the whole insertion. A run's demand is the larger of its two sides, summed over their endpoints: all the
 sinks it tops up, or all the source blocks it drains. The router lays the smallest size that meets
 it, for the run as a whole (`router/core.py`, `_pipe_size`; the figures are
 `dataset/pipe_capacity.py`).
@@ -197,7 +240,7 @@ validator reads what each pipe block is actually charged for, from the same tran
   cannot take fails, charges nothing, and the sender tries the next block. In steady state that
   matches producers to consumers nearest pair first, each consumer taking only its share of the
   net. Each matched pair is a **stream**, needing one insertion per 40 ticks plus one per further
-  stack it moves.
+  stack it moves, and never more than the items it moves in that time.
 - **A block's demand is the sum over the streams it pays for**, against its size's insertions per 40
   ticks. A saturated block drops out of every scan and stops the scan passing through it
   (`IMetaTileEntityItemPipe.Util.scanPipes`, lines 57-58), which is how the far consumers starve.

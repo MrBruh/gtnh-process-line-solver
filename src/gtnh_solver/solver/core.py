@@ -280,13 +280,17 @@ def _with_shortfall_reason(problem: InputIR, layout: LayoutResult) -> LayoutResu
                 detail=(
                     f"more connections than a single block has faces for: {named}. The solver gives "
                     f"each connection a face of its own, and a single block has "
-                    f"{SINGLE_BLOCK_IO_FACES} that can carry one (the front carries none), so no "
-                    f"placement lays these; GT lets some outputs share a face, which the solver "
-                    f"does not model yet. The routers stopped at: {routers}"
+                    f"{SINGLE_BLOCK_IO_FACES} that can carry one (the front carries none), or only "
+                    f"the faces its ports are pinned to, so no placement lays these. It sends a single block's item outputs out of one face "
+                    f"to Item Filters only when it can prove the machine is a single block: its "
+                    f"handler says so, or a census dataset for the plan's pack lacks it. The "
+                    f"routers stopped at: {routers}"
                 ),
                 suggested_relaxation=(
                     "if a machine is a multiblock, load a dataset with its structure so it is "
-                    "placed at its real size (run the extractor for the plan's pack); otherwise "
+                    "placed at its real size (run the extractor for the plan's pack); if it is a "
+                    "single block, load a census dataset for the plan's pack so the machine can be "
+                    "proven a single block and its item outputs sorted by Item Filters; otherwise "
                     "move one of its commodities to ME, or split its work across more machines"
                 ),
             )

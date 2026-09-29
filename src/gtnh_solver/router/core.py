@@ -91,7 +91,7 @@ from gtnh_solver.ir import (
 from gtnh_solver.ir.geometry import Cell
 from gtnh_solver.ir.nets import placement_index
 
-from ._grid import claim_key, coord, dock_candidates, obstacle_cells
+from ._grid import claim_key, coord, dock_candidates, filter_backs, obstacle_cells
 from .auto import assign_auto_outputs
 from .steiner import Endpoint, Grid, Key, Tree, route_tree
 
@@ -238,7 +238,8 @@ def _pipe_size(net: Net, machines: Mapping[str, Machine]) -> PipeSize:
     count. Its sinks each need topping up; its sources each fill a pipe block that GT refuses to
     refill until it is empty (``MTEItemPipe.allowPutStack``), so each needs an insertion to drain it.
     The demand is the larger side's sum of :func:`~gtnh_solver.dataset.endpoint_insertions`, which
-    is where the rate enters: an endpoint moving more than a stack per interval needs a second.
+    is where the rate enters: an endpoint moving more than a stack per interval needs a second, and
+    one moving under an item per interval needs only that fraction of one.
 
     Sized per net rather than per segment, unlike a cable. A cable's load sums along a known tree;
     where GT's nearest-first routing sends items depends on buffers the layout does not model, so
@@ -263,13 +264,14 @@ def _pipe_size(net: Net, machines: Mapping[str, Machine]) -> PipeSize:
         )
         if port is not None:
             sides[port.direction].append(port.rate)
-    demand = 0
+    demand = 0.0
     for rates in sides.values():
         # A port with no recorded rate takes an even share of the net's throughput, which is what
         # the adapter would have written for a node of identical machines.
         share = net.throughput / max(len(rates), 1)
         demand = max(demand, sum(endpoint_insertions(share if r is None else r) for r in rates))
-    size = item_pipe_size_for(max(demand, 1))  # a routed net always has an endpoint to reach
+    # Never below one insertion: normal is the smallest size a routed item net is laid at.
+    size = item_pipe_size_for(max(demand, 1.0))
     return size if size is not None else ROUTED_PIPE_SIZES[Commodity.ITEM][-1]
 
 
@@ -296,6 +298,18 @@ def _negotiate(
     region = problem.bounding_region
     hard = obstacle_cells(problem, placements, machines)
     grid = Grid(region, hard)
+    # The cell behind an Item Filter takes whatever the filter pushes, so it is a wall to every net
+    # but the one the filter feeds (``_grid.filter_backs``, #249). Per net, not in ``hard``: the
+    # filter's own output must still dock there.
+    backs = filter_backs(nets, placements, machines)
+    walls = {
+        net.id: frozenset(
+            grid.enc(cell)
+            for cell, owners in backs.items()
+            if net.id not in owners and grid.inside(cell)
+        )
+        for net in nets
+    }
 
     failures: dict[str, Infeasibility] = {}
     eps_by_net: dict[str, list[Endpoint]] = {}
@@ -333,7 +347,13 @@ def _negotiate(
             key_extra = _prices(key_history, key_usage, present)
             prefer = old.terminals[0][0] if old is not None else None
             tree = route_tree(
-                eps, grid, extra, key_extra, prefer=prefer, trunk=net.commodity is Commodity.POWER
+                eps,
+                grid,
+                extra,
+                key_extra,
+                blocked=walls[net.id],
+                prefer=prefer,
+                trunk=net.commodity is Commodity.POWER,
             )
             if tree is None:
                 # Prices never block, so this is geometry: some endpoint is walled off from the
@@ -356,7 +376,7 @@ def _negotiate(
         now = (frozenset(over), frozenset(over_keys))
         stall, prev_over = (stall + 1, prev_over) if now == prev_over else (0, now)
         if stall == _STALL_ROUNDS and _congestion_is_irreducible(
-            over, over_keys, active, trees, eps_by_net, grid
+            over, over_keys, active, trees, eps_by_net, grid, walls=walls
         ):
             break
         for c in over:
@@ -464,6 +484,7 @@ def _congestion_is_irreducible(
     trees: Mapping[str, Tree],
     eps_by_net: Mapping[str, list[Endpoint]],
     grid: Grid,
+    walls: Mapping[str, frozenset[int]] = MappingProxyType({}),
 ) -> bool:
     """Would no further negotiation round reduce the overlap? True only when *proven* so.
 
@@ -477,6 +498,8 @@ def _congestion_is_irreducible(
     round of history could price that net away. Conservative by construction, it answers True only
     on proof, so it never turns a routable problem into a false congestion. It proves a lone
     bottleneck, not capacity spread over parallel openings (those are left to the round budget).
+    ``walls`` are each net's own extra walls (the cells behind Item Filters it does not feed), so the
+    proof asks exactly the question the negotiation's own searches do.
     """
     for cell in over:
         forced = 0
@@ -486,7 +509,14 @@ def _congestion_is_irreducible(
                 continue  # not a user of this cell, so not what keeps it over-used
             trunk = net.commodity is Commodity.POWER
             if (
-                route_tree(eps_by_net[net.id], grid, {}, {}, blocked=frozenset({cell}), trunk=trunk)
+                route_tree(
+                    eps_by_net[net.id],
+                    grid,
+                    {},
+                    {},
+                    blocked=walls.get(net.id, frozenset()) | {cell},
+                    trunk=trunk,
+                )
                 is None
             ):
                 forced += 1
@@ -512,7 +542,10 @@ def _congestion_is_irreducible(
             trunk = net.commodity is Commodity.POWER
             if (
                 any(not e.cands for e in without)
-                or route_tree(without, grid, {}, {}, trunk=trunk) is None
+                or route_tree(
+                    without, grid, {}, {}, blocked=walls.get(net.id, frozenset()), trunk=trunk
+                )
+                is None
             ):
                 forced += 1
         if forced < 2:
@@ -524,7 +557,7 @@ def _no_dock(net_id: str, machine_id: str) -> Infeasibility:
     return Infeasibility(
         constraint="face_reachability",
         detail=f"net {net_id!r} could not dock a terminal on machine {machine_id!r} "
-        f"(no free non-front face cell)",
+        f"(no free cell on a face its port may use)",
         suggested_relaxation="free up adjacent cells, or leave routing gaps around machines",
     )
 

@@ -61,7 +61,8 @@ that can carry a connection, and each connection takes one of its own, so a sing
 more than that fits in no placement (:func:`single_block_shortfalls`). It is the machine the gate
 names on every attempt, and it is mostly a multiblock whose structure the dataset lacks, placed as
 a 1x1x1 box. Knowing it up front is what lets the solver say so instead of reporting whichever net
-lost the last face.
+lost the last face. A block whose ports are pinned to faces (``Port.faces``, an Item Filter) is
+judged by those faces instead, which may include its front.
 """
 
 from __future__ import annotations
@@ -69,9 +70,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from gtnh_solver.ir import Facing, InputIR, Placement
+from gtnh_solver.ir import Facing, InputIR, Machine, Placement
 from gtnh_solver.ir.geometry import Cell
-from gtnh_solver.ir.nets import placement_index
+from gtnh_solver.ir.nets import SINGLE_BLOCK_IO_FACES, connection_counts, placement_index
 from gtnh_solver.router._grid import dock_candidates, obstacle_cells
 from gtnh_solver.router.auto import assign_auto_outputs
 
@@ -96,8 +97,11 @@ def crowded_machines(problem: InputIR, placements: Sequence[Placement]) -> tuple
     the order the placements arrive in.
 
     Judged with the router's own :func:`dock_candidates`, so the cells counted here are the cells
-    a hatch may really occupy (front face excluded, interior slots excluded, hatch-kind rules
-    respected) rather than a second, drifting notion of a usable face.
+    a hatch may really occupy (only faces ``Machine.allowed_faces`` grants the port, so the front
+    for no unpinned port and nothing off a pinned port's faces; interior slots excluded; hatch-kind
+    rules respected) rather than a second, drifting notion of a usable face. The placement cost's
+    cheap version of this (``search._face_shortfall``) exempts exactly what this does: a net an
+    auto-output covers, a commodity on ME, and a port on no net.
 
     It also has to ask the same question the routers ask *first*: which connections they dock at
     all. A net covered by a free auto-output connection needs **no dock cell** - the two machines
@@ -149,11 +153,6 @@ def crowded_machines(problem: InputIR, placements: Sequence[Placement]) -> tuple
     return tuple(dict.fromkeys(crowded))  # de-duplicated, first occurrence order
 
 
-#: The faces of a single block that can carry a connection: every face but the front, which carries
-#: no I/O (docs/DOMAIN.md).
-SINGLE_BLOCK_IO_FACES = len(Facing) - 1
-
-
 def single_block_shortfalls(problem: InputIR) -> dict[str, int]:
     """Single blocks carrying more connections than they have faces for, with how many they carry.
 
@@ -165,20 +164,53 @@ def single_block_shortfalls(problem: InputIR) -> dict[str, int]:
 
     A single block here is any one-cell footprint, which is also what a multiblock falls back to
     when the dataset lacks its structure, the case this mostly catches. It states a limit of the
-    solver's model, not of the game: GT lets some outputs share a face, which the solver does not
-    model.
+    solver's model, not of the game: GT lets some outputs share a face, which the solver models
+    only where the adapter merged a machine's item outputs onto one face, sorted by Item Filters.
+
+    A block with a pinned port (``Port.faces``) is judged by its pins instead of by the count: its
+    connections must take distinct faces each allowed to its own port, which is a matching (and
+    independent of the facing, since pins turn with the machine). That can pass six connections, a
+    pin may name the front, or refuse two, both pinned to one face. The count path is untouched, so
+    every machine the adapter may still merge, all unpinned, is judged exactly as before.
     """
-    connections: dict[str, int] = {}
+    connections = connection_counts(problem.nets, problem.me_toggles)
+    pinned = {
+        machine.id: machine
+        for machine in problem.machines
+        if machine.footprint.volume == 1 and any(p.faces is not None for p in machine.faces.ports)
+    }
+    ports_on: dict[str, list[str]] = {}  # a pinned block's connections, one port id per endpoint
     for net in problem.nets:
         if problem.me_toggles.toggled(net.commodity):
             continue
         for endpoint in net.endpoints:
-            connections[endpoint.machine_id] = connections.get(endpoint.machine_id, 0) + 1
+            if endpoint.machine_id in pinned:
+                ports_on.setdefault(endpoint.machine_id, []).append(endpoint.port_id)
     return {
         machine.id: connections[machine.id]
         for machine in problem.machines
-        if machine.footprint.volume == 1 and connections.get(machine.id, 0) > SINGLE_BLOCK_IO_FACES
+        if machine.footprint.volume == 1
+        and (
+            not _faces_fit(machine, ports_on.get(machine.id, []))
+            if machine.id in pinned
+            else connections.get(machine.id, 0) > SINGLE_BLOCK_IO_FACES
+        )
     }
+
+
+def _faces_fit(machine: Machine, port_ids: Sequence[str]) -> bool:
+    """Whether ``port_ids`` (one per connection) can each take a distinct face their port allows.
+
+    Asked at the machine's first facing: pins and the unpinned rule both turn with the machine, so
+    a fit at one facing is a fit at every facing.
+    """
+    facing = machine.orientation_options[0]
+    options = [
+        tuple(f for f in Facing if f in machine.allowed_faces(port_id, facing))
+        for port_id in port_ids
+    ]
+    taken: dict[Facing, int] = {}
+    return all(_augment(d, options, taken, set()) for d in range(len(options)))
 
 
 def _docked_connections(problem: InputIR, placements: Sequence[Placement]) -> list[_Connection]:
@@ -268,17 +300,18 @@ def _hosts(own: Sequence[_Connection], stand_ins: Sequence[tuple[Cell, ...]]) ->
     return all(_augment(d, options, taken, set()) for d in range(len(stand_ins), len(options)))
 
 
-def _augment(
+def _augment[T](
     demand: int,
-    options: Sequence[tuple[Cell, ...]],
-    taken: dict[Cell, int],
-    seen: set[Cell],
+    options: Sequence[tuple[T, ...]],
+    taken: dict[T, int],
+    seen: set[T],
 ) -> bool:
     """Try to seat ``demand``, displacing already-seated connections that have somewhere else.
 
     ``taken`` maps a cell to the demand holding it, and ``seen`` guards against revisiting a cell
     within one search. Standard augmenting path: a cell is available if nothing holds it, or if
-    whatever holds it can be re-seated elsewhere.
+    whatever holds it can be re-seated elsewhere. Generic in what is seated on, because a pinned
+    single block's connections are seated on faces (:func:`_faces_fit`) rather than cells.
     """
     for cell in options[demand]:
         if cell in seen:
