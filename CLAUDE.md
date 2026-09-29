@@ -62,7 +62,9 @@ disagree, the doc is the intent - fix one of them and say which.
   `AddBlocks` gives an **even** cell index the **high** nibble, and an id absent from
   `SchematicaMapping` has no name at all. All three are settled against the goldens in
   `tests/golden/schematic/` and pinned by tests; re-deriving them by hand is how you get a file that
-  reads back subtly wrong.
+  reads back subtly wrong. A fourth: a GT **basic machine** points two ways. `mMainFacing` is its
+  working face and `mFacing` its OUTPUT face, so read `TileEntity.placed_facing` for which way it
+  was placed, never `facing` alone (an export before #249 wrote only `mFacing`, as the front).
 - **Litematica does NOT run on 1.7.10.** GT:NH is Minecraft 1.7.10. The in-game schematic
   consumer is **Schematica-Plus** (classic `.schematic`, numeric block IDs). Don't target
   Litematica/`litemapy`. (Export is a post-v1 milestone anyway.)

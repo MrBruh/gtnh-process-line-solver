@@ -7,6 +7,22 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Every single block shows how its outputs leave it, in the preview and in the `.schematic`
+  (#249).** GT auto-outputs a single block through one face only: a basic machine's output face
+  (`mFacing`, items and fluids alike), a Super Tank's front, an Item Filter's back. A Super Chest
+  cannot auto-output at all. The new `output_faces` module reads, per placed single block, that one
+  auto-output face and every other output face that therefore needs a cover (a conveyor for items, a
+  pump for fluids), and both surfaces read it:
+  - The previewer draws the cyan auto-output arrow on every single block's auto-output face, piped
+    or not, where it used to mark only a machine ejecting straight into a neighbour; iron.json's
+    Thermal Centrifuges showed none. Each cover face gets an amber marker (chevrons for a conveyor,
+    a ring for a pump) that hovers with the block, face and what flows; the legend lists them and
+    the toggle, now "output markers", hides both. A Super Tank's glyph faces its auto-output face.
+  - The `.schematic` export writes every basic machine's working face (`mMainFacing`) and output
+    face (`mFacing`) with its transfer flags, a Super Tank facing its auto-output face with
+    `mOutputFluid` set, and Item Filters by mID 9240. What a `.schematic` cannot carry is warned:
+    each cover by block, face and kind, and each filter's items. A manifest with no filter entry
+    refuses with the reason. `read_schematic` and `--inspect-schematic` report the working face.
 - **A single block with no face to spare sends its item outputs out of one face, sorted by Item
   Filters (#249).** A single block has five faces that can carry a connection, one each, so a
   machine with several item outputs could run out: iron.json's Ore Washer (item in, fluid in, three
@@ -184,6 +200,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **A `.schematic` export pastes every single-block machine the right way round (#249).** A GT basic
+  machine points two ways, its working face (`mMainFacing`) and its output face (`mFacing`), and the
+  export wrote only `mFacing`, as the front. On 2.9 a pasted machine therefore worked on its bottom
+  face (an absent `mMainFacing` reads DOWN), output out of what the layout meant as its front, and,
+  with `mItemTransfer` absent, auto-output nothing; a 2.8.4 paste partly healed itself. Every
+  exported basic machine now carries both facings, its transfer flags, `mHasBeenUpdated` (2.8.4
+  flips `mFacing` on the first tick without it) and the filter and multi-stack settings a paste
+  would otherwise switch off. A basic machine is recognised by its GT class, a table of every
+  `MTEBasicMachine` subclass at both pinned GT tags.
 - **A single-block machine is drawn and exported as the machine it is, at the tier it runs (#232).**
   A plan names a machine by its recipe map's localized name, and the previewer and the
   `.schematic` export matched that name against GT's machine names. For 9 of GT's 41 recipe maps
