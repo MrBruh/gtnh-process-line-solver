@@ -162,8 +162,9 @@ doc as intent and reconcile.
    a penalty back to perturb placement. The estimate must be ~O(1) per SA move.
    *Built: `solve()` runs a bounded **multi-start grid** (SA weight modes x seeds), fully routes
    + validates every attempt, and keeps the best VALID layout by a quality ranking (the
-   objective's compactness metric, then real route cells, pipes and cable alike, then the other
-   compactness metric). This replaced the earlier first-valid-wins behaviour: cheap placement-time
+   objective's compactness metric plus real route cells, pipes and cable alike, then the metric
+   alone, then the other compactness metric; a blend since 2026-09-29, when ranking the metric
+   first kept a layout 12 floor cells smaller that laid 15 more route cells). This replaced the earlier first-valid-wins behaviour: cheap placement-time
    proxies cannot see dock faces or shared cable taps, so a layout's real quality is only knowable
    once it is routed, hence ranking fully routed attempts rather than stopping at the first valid
    one. **The feedback half of this decision was dropped on 2026-09-26.** A pass's unrouted nets

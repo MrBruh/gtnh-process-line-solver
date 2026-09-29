@@ -436,11 +436,12 @@ def test_the_solver_lays_the_proven_placement_as_it_was_built(
 def test_the_ranking_counts_the_builds_pipes_as_well_as_its_cable(
     proven_build: tuple[InputIR, LayoutResult],
 ) -> None:
-    # The solver keeps the attempt that ranks best on this key: floor area, then every route cell,
-    # then volume. The build's 12 pipe blocks count alongside its 3 cable blocks, since the builder
-    # places both; ranking on cable alone let a layout of the same floor lay any number of pipes.
+    # The solver keeps the attempt that ranks best on this key: floor area plus every route cell,
+    # then floor area, then volume. The build's 12 pipe blocks count alongside its 3 cable blocks,
+    # since the builder places both; ranking on cable alone let a layout of the same floor lay any
+    # number of pipes.
     problem, layout = proven_build
-    assert structure_quality(problem, layout.placements, layout.routes, "footprint") == (12, 15, 36)
+    assert structure_quality(problem, layout.placements, layout.routes, "footprint") == (27, 12, 36)
 
 
 def test_the_crowding_gate_does_not_turn_the_proven_placement_away(

@@ -61,6 +61,7 @@ from gtnh_solver.placement import (
 from gtnh_solver.router import RouteResult, assign_auto_outputs, route
 from gtnh_solver.solver import Effort, solve
 from gtnh_solver.solver import core as solver_core
+from gtnh_solver.solver._structure import structure_quality
 from gtnh_solver.validator import ValidationReport, Violation, ViolationCode, validate
 from tests._helpers import at, consumer, hub_line, net, power_source, producer
 
@@ -101,13 +102,35 @@ def _structure_metrics(layout: LayoutResult) -> tuple[int, int, int]:
     return footprint, volume, len(power_cells)
 
 
+def test_the_ranking_trades_floor_area_against_route_cells() -> None:
+    # Stacked, the pair takes one floor cell but needs a two-block pipe up to the consumer; side by
+    # side, it takes two floor cells and auto-feeds with no pipe at all. Ranked on floor area
+    # first the stack won whatever its pipe cost; the blend (floor plus route cells) picks the
+    # pair that builds fewer blocks in all.
+    problem = InputIR(
+        bounding_region=CellBox(sx=4, sy=4, sz=4),
+        machines=[producer("a"), consumer("b")],
+        nets=[net("n", "a", "b")],
+    )
+    pipe = Route(
+        net_id="n",
+        commodity=Commodity.ITEM,
+        segments=[Segment(start=CellCoord(x=0, y=1, z=0), end=CellCoord(x=0, y=2, z=0), channel=0)],
+    )
+    stacked = structure_quality(problem, [at("a", 0, 0, 0), at("b", 0, 3, 0)], [pipe], "footprint")
+    side_by_side = structure_quality(problem, [at("a", 0, 0, 0), at("b", 1, 0, 0)], [], "footprint")
+    assert stacked == (1 + 2, 1, 4)
+    assert side_by_side == (2 + 0, 2, 2)
+    assert side_by_side < stacked
+
+
 @pytest.mark.full_solve
 def test_solve_sand_optimized_matches_or_beats_the_hand_built_target() -> None:
     # The acceptance target (docs/ROADMAP.md lane C): the maintainer hand-builds the sand line in
     # a 3x2x2 volume with 3 power cables, so the optimizer must find that or better - VALID, the
     # whole built structure (machines + routes) on a floor area <= 3x2 = 6 cells, and <= 3 power
     # cable cells. The quality-driven feedback loop is what finds it: it routes every attempt and
-    # keeps the best by (footprint, cable cells, volume) instead of returning the first valid.
+    # keeps the best by floor area plus route cells instead of returning the first valid.
     layout = solve(adapt_file(_SAND))
     assert layout.status is LayoutStatus.VALID
     footprint, _, cables = _structure_metrics(layout)
