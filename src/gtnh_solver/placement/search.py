@@ -36,13 +36,26 @@ spot grows the build), which is what lets it fold the long strip the first-fit s
 multiblock line out in (#254). Metropolis acceptance with geometric cooling keeps the best valid
 layout seen.
 
+**Best means the cheapest layout the crowding gate passes**, not the cheapest one seen. The
+solver asks the gate (``placement.feasibility.crowded_machines``) of every attempt before routing
+it and discards the placements it proves crowded, and the face-shortfall term here is only a
+cheap stand-in for that proof: it misses crowding the gate can prove. On the iron line the
+cheapest state seen was gated on 50 of 64 attempts, so most anneals handed back a placement the
+solver threw away while cheaper, uncrowded ones had gone by; returning the cheapest one the gate
+passes left 16 of 64 gated, and the line solves VALID on 7 of 8 seeds instead of 3. The gate is
+asked once the walk is done, of the accepted states cheapest first, so it never steers the walk
+itself: the anneal takes exactly the path it always did, and only the state it returns can differ.
+When no state passes, it returns the cheapest one, and the solver's own gate and fallback decide
+as before.
+
     initial = constructive.place      # a valid seed
     repeat for a seeded budget:
         cand = with prob p_lns:  ruin (remove a related cluster) + recreate (greedy re-insert,
                                  priced on nets, auto-output and how much it grows the build)
                else:            relocate | nudge (single-block lines only) | swap | reorient
                (only ever a VALID candidate, else skip)
-        accept if cheaper, or with prob exp(-d/T)   ; track best-so-far ; cool T
+        accept if cheaper, or with prob exp(-d/T)   ; remember it ; cool T
+    return the cheapest remembered state the crowding gate passes, else the cheapest
 
 **The nudge** shifts one machine by one cell. Relocate draws a cell anywhere in the region, which
 almost never lands anywhere useful (under 2% of relocates are accepted), so without a nudge the
@@ -100,6 +113,7 @@ from gtnh_solver.ir.nets import net_sources_sinks, port_direction_map
 from gtnh_solver.router.auto import auto_output_possible
 
 from .constructive import PlacementResult, _fit, place
+from .feasibility import crowded_machines
 
 #: The six face-adjacent offsets, for growing LNS insertion candidates around placed neighbours.
 _FACE_DELTAS = FACE_OFFSETS
@@ -443,6 +457,9 @@ def optimize_placement(
         faces_penalty,
     )
     best, best_cost = current, current_cost
+    # Every state the walk accepts, with its cost and turn, so the cheapest one the crowding gate
+    # passes can be picked once the walk is done (module docstring); ``best`` is the fallback.
+    accepted: list[tuple[float, int, list[Pose]]] = [(current_cost, 0, current)]
     iters = min(_MAX_ITERS, max(_MIN_ITERS, _PER_MACHINE * len(current)))
     if max_iterations is not None:
         iters = min(iters, max_iterations)
@@ -470,8 +487,32 @@ def optimize_placement(
                 current, current_cost = cand, cand_cost
                 if current_cost < best_cost:
                     best, best_cost = current, current_cost
+                accepted.append((current_cost, len(accepted), current))
         temp *= _ALPHA
-    return PlacementResult(placements=tuple(_placement(p) for p in best))
+    chosen = _cheapest_uncrowded(problem, accepted, best)
+    return PlacementResult(placements=tuple(_placement(p) for p in chosen))
+
+
+def _cheapest_uncrowded(
+    problem: InputIR, accepted: list[tuple[float, int, list[Pose]]], fallback: list[Pose]
+) -> list[Pose]:
+    """The cheapest ``accepted`` state the crowding gate passes, else ``fallback``.
+
+    Cheapest first and, among equal costs, the one the walk reached first: the state the anneal
+    would keep if it asked the gate of every new low as it went. Asking afterwards finds that same
+    state while skipping every state a cheaper passing one makes moot, and a state the walk came
+    back to is asked about once. Over 24 anneals of each line that cut the gate's calls from 7265
+    to 2654 on iron and from 1249 to 24 on parallel-sand, for identical placements.
+    """
+    asked: set[tuple[Pose, ...]] = set()
+    for *_, state in sorted(accepted, key=lambda entry: (entry[0], entry[1])):
+        key = tuple(state)
+        if key in asked:
+            continue
+        asked.add(key)
+        if not crowded_machines(problem, [_placement(p) for p in state]):
+            return state
+    return fallback
 
 
 def _cells(pose: Pose, body: _Body) -> Iterator[Cell]:
