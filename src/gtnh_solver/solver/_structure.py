@@ -53,16 +53,23 @@ def structure_quality(
 ) -> tuple[int, int, int]:
     """Rank an assembled structure; smaller-lexicographic is better.
 
-    The ``objective``'s compactness metric leads (``footprint`` = floor area, ``volume`` =
-    enclosing box, ``balanced`` = their sum); the real route cells come second, pipes and cable
-    alike - only a routed layout knows them (placement-time proxies cannot see dock faces or shared
-    taps) - and the other compactness metric breaks ties toward the smaller build.
+    The key leads with the ``objective``'s compactness metric (``footprint`` = floor area,
+    ``volume`` = enclosing box, ``balanced`` = their sum) **plus the real route cells**, pipes and
+    cable alike, which only a routed layout knows (placement-time proxies cannot see dock faces or
+    shared taps). The metric alone breaks a tie toward the smaller build, then the other metric.
+
+    A blend, not the metric first: ranked on floor area first, a layout one cell smaller won
+    whatever it cost in pipe, so iron.json's default solve kept a wall that laid 15 more route cells
+    than a layout 12 cells bigger (262 against 247). Every term counts blocks - floor cells, box
+    cells, pipe and cable blocks - so they add with a weight of one. A sweep of weights from 0.25 to
+    2 over iron, sand, parallel-sand and nitrobenzene changed only that one iron layout, at 1 and
+    above.
 
     Pipes count as well as cable because a pipe block is built exactly like a cable block, and a
     tighter layout is one that needs fewer of either: with cable alone, two attempts of one
     footprint ranked the same however many pipes each laid. The power-source repair pass ranks on
-    this key too, and there the pipes are the same for every candidate, so they cannot change which
-    pose wins.
+    this key too, and there the pipes are the same for every candidate, so the blend weighs a
+    source's cable against the floor it grows.
     """
     cells = structure_cells(problem, placements, routes)
     if not cells:
@@ -72,8 +79,9 @@ def structure_quality(
         route_cells.update(r.cells())
     footprint, layers = footprint_and_layers(cells)
     volume = footprint * layers
+    route = len(route_cells)
     if objective == "volume":
-        return (volume, len(route_cells), footprint)
+        return (volume + route, volume, footprint)
     if objective == "balanced":
-        return (footprint + volume, len(route_cells), volume)
-    return (footprint, len(route_cells), volume)
+        return (footprint + volume + route, footprint + volume, volume)
+    return (footprint + route, footprint, volume)

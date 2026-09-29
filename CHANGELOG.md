@@ -708,6 +708,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **A solve ranks its routed attempts on floor area plus route cells, not floor area first
+  (`solver/_structure.py`).** The quality key used to lead with the objective's compactness
+  metric and count pipe and cable blocks only to break a tie, so a layout one floor cell smaller
+  won however much more pipe it laid. It now leads with the metric plus every route cell, then the
+  metric alone, then the other metric, for every objective; each term counts blocks, so they add
+  with a weight of one. The power-source repair pass ranks on the same key, so a source's cable
+  is now weighed against the floor it grows. A sweep of weights 0.25 to 2 changed one layout:
+  iron.json seed 0 now returns 162 floor cells and 247 route cells instead of 150 and 262. The
+  other iron seeds, sand, parallel-sand, nitrobenzene and ev-nitrobenzene solve to the same
+  layouts. `structure_quality` of parallel-sand's column build reads `(27, 12, 36)`, was
+  `(12, 15, 36)`.
 - **An anneal hands back the cheapest placement the crowding gate passes, not the cheapest one
   (`placement/search.py`).** The solver asks the gate of every attempt before routing and discards
   a placement it proves crowded, while the placement cost only estimates crowding and misses some

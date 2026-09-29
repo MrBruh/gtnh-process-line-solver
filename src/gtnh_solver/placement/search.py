@@ -18,7 +18,7 @@ sitting on top of a machine row scores nearer its sinks than one whose dock cell
 tap, yet needs more cable). Re-measured under #123 at weights down to 0.1, the shipped sand line's
 cable still went UP at every one (3 -> 4..6 cells), so this stands. The real per-segment cable cost
 is judged where it is knowable, on a routed layout: the solver routes each candidate placement
-and keeps the best by (footprint, cable cells, volume), and its
+and keeps the best by floor area plus route cells (``solver._structure.structure_quality``), and its
 ``solver.repair`` pass relocates each power source by really routing every candidate cell around
 the sinks it feeds - which is how a source gets positioned without a proxy having to guess.
 What remains here is a rescue path for a caller that re-places: a power net given a penalty
