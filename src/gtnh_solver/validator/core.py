@@ -33,10 +33,12 @@ What is checked now (needs only the IR):
   auto-output - every auto-connection joins its net's real OUTPUT->INPUT endpoint machines
   (resolved by port direction) on adjacent faces their ports may use; power/ME commodities cannot
   auto-output, and a machine has at most one auto-output face.
-  item filters - a merged item run (``Net.items``) is sorted by Item Filters: every consumer on it is
-  a filter, each item is let through by exactly one, a filter takes only from a net carrying
-  something it lets through and passes on nothing else; and the cell behind a placed filter, where
-  it pushes with no toggle, holds only its own output's pipe or the machine it auto-outputs into.
+  item filters - a merged item run (``Net.items``) that reaches an Item Filter is sorted by them:
+  every consumer on it is a filter, each item is let through by exactly one, a filter takes only
+  from a net carrying something it lets through and passes on nothing else; a run reaching no
+  filter is a feed run into the machines that take all of it (#277); and the cell behind a placed
+  filter, where it pushes with no toggle, holds only its own output's pipe or the machine it
+  auto-outputs into.
   power - per-segment cable thickness is present and well-formed (1/2/4/8/12/16, aligned); the route
   has exactly one source terminal and its cables form a single tree rooted there (neither is
   certifiable otherwise, so both are rejected, not skipped); AND independently re-derived on the
@@ -348,7 +350,9 @@ def _item_streams(
     With one producer, which is the run the adapter builds (one per machine instance), this is
     exactly what nearest first gives; with several it keeps an item from being counted as delivered
     to the nearest filter that would never take it. Which filter lets which item through is
-    :func:`_check_filter_sorting`'s concern, not this count's.
+    :func:`_check_filter_sorting`'s concern, not this count's. A **feed run** (#277) is counted the
+    same way: its producers each send one of the items its machines all take, so every producer
+    feeds every machine its share, and with one machine that is each producer's whole output.
 
     Terminals that are foreign, duplicated or off the route are left out; ``_check_terminals``
     reports each of those. A net with no producer or no consumer on the route moves nothing here.
@@ -884,7 +888,7 @@ def _check_terminal_faces(problem: InputIR, layout: LayoutResult, out: list[Viol
 
 
 def _check_filter_sorting(problem: InputIR, out: list[Violation]) -> None:
-    """Every item on a merged run leaves it through exactly one Item Filter, and nothing else (#249).
+    """Every item on a sorted run leaves it through exactly one Item Filter, and nothing else (#249).
 
     A single block that runs out of faces sends all its items out of one face into one pipe (a
     merged run, ``Net.items``), and an Item Filter per item sorts them: a filter takes only what its
@@ -892,8 +896,8 @@ def _check_filter_sorting(problem: InputIR, out: list[Violation]) -> None:
     stack on to the next inventory (``MTEItemPipe.sendItemStack``). Four things make that sorting
     real, all read off the problem alone, so they hold whatever the layout:
 
-    - **every consumer on a merged run is a filter.** Anything else takes every item that reaches
-      it, so the sorting is lost;
+    - **every consumer on a run that reaches a filter is a filter.** Anything else takes every item
+      that reaches it, so the sorting is lost;
     - **each of its items is let through by exactly one of those filters.** With none, the item has
       nowhere to leave the pipe: it backs up and blocks the machine feeding it. With two, it splits
       between them, and each downstream net gets part of a flow it was balanced to receive whole;
@@ -904,6 +908,13 @@ def _check_filter_sorting(problem: InputIR, out: list[Violation]) -> None:
     A filter slot naming an item its run never carries is not refused. It sorts nothing and blocks
     nothing, which is an idle slot rather than a defect, and whether the filter still has work is
     the third rule's question.
+
+    **A merged run that reaches no filter is a feed run** (#277): a single block short of faces
+    takes its item inputs through one face, and the run carries them from their producers into the
+    machine, which takes every one. There is nothing to sort, so the first two rules do not apply to
+    it. That the machine takes what the run carries is the adapter's to get right, as it is on any
+    net: the IR says which item a net carries, not which ones a port accepts. A run reaching filters
+    and anything else is still refused by the first rule.
     """
     machines = {m.id: m for m in problem.machines}
     port_dir = port_direction_map(problem)
@@ -912,13 +923,18 @@ def _check_filter_sorting(problem: InputIR, out: list[Violation]) -> None:
             continue
         sources, sinks = net_sources_sinks(net, port_dir)
         carried = set(net.resources)
-        takers: dict[str, list[str]] = {item: [] for item in net.items}
+        sorted_run = bool(net.items) and any(
+            machine.filter_items
+            for sink in sinks
+            if (machine := machines.get(sink.machine_id)) is not None
+        )
+        takers: dict[str, list[str]] = {item: [] for item in net.items} if sorted_run else {}
         for sink in sinks:
             machine = machines.get(sink.machine_id)
             if machine is None:
                 continue  # an unknown machine is not this check's to report
             if not machine.filter_items:
-                if net.items:
+                if sorted_run:
                     out.append(
                         Violation(
                             ViolationCode.FILTER_ITEM_UNSORTED,

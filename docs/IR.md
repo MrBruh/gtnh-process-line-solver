@@ -140,9 +140,12 @@ Net
   fluid_or_item: str | null         # which fluid/item (null for power and for a merged run)
   items: [str]                      # the items a MERGED run carries: one pipe from a single
                                     #  block's one output face to the Item Filters that sort
-                                    #  them. An item net names fluid_or_item OR items, exactly
-                                    #  one; fluid and power nets never name items. Net.resources
-                                    #  reads either. InputIR v4 (BREAKING, #249)
+                                    #  them (#249), or a FEED run from their producers into a
+                                    #  single block's one input face, whose consumers take all
+                                    #  of it (#277; no filter on it). An item net names
+                                    #  fluid_or_item OR items, exactly one; fluid and power nets
+                                    #  never name items. Net.resources reads either. InputIR v4
+                                    #  (BREAKING, #249)
   throughput: float                 # TYPED rate: mB/t (fluid), items/t (item), EU/t (power); >= 0
   endpoints: [MachineFaceRef]       # machine ports this net connects; >= 1
 
@@ -185,6 +188,13 @@ carries, and each item gets a `Machine` of type "Ultra Low Voltage Item Filter" 
 names it, whose input port takes the trunk on any face but its back and whose output port is pinned
 to its back, where it sources that item's downstream net. Nothing downstream needs a filter concept:
 the pins (`Port.faces`) say where each port docks, and the validator checks the sorting.
+
+**A single block's item inputs may share one face too (#277, same contract).** A machine still short
+of faces after that takes its item inputs on a **feed run**: the machine gets one `input:items` port,
+and the nets that fed its item inputs become one net whose `items` lists them, from every producer
+to that port. It is the same field in the other direction, so the contract does not change shape:
+a merged run that reaches an Item Filter is sorted, and one that reaches none is a feed, which the
+validator tells apart by that alone.
 
 ## Output layout schema - the solution
 

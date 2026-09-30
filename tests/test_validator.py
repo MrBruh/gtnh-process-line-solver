@@ -3305,6 +3305,18 @@ def test_a_consumer_on_a_merged_run_that_does_not_filter_it_is_unsorted() -> Non
     assert any("lets b through" in m for m in messages)  # and b now has no filter at all
 
 
+def test_a_merged_run_that_reaches_no_filter_is_a_feed_not_unsorted() -> None:
+    # #277: a single block short of faces takes its item inputs through one face, on a run whose
+    # consumers take all of it. With no filter on the run there is nothing to sort, so neither
+    # "takes it without filtering" nor "no filter lets it through" applies. (That the machines take
+    # what the run carries is the adapter's to get right, as it is on any net.)
+    problem, layout = _filter_line()
+    for plain in (_FA, _FB):
+        machine = next(m for m in problem.machines if m.id == plain)
+        problem = _with_machine(problem, machine.model_copy(update={"filter_items": ()}))
+    assert not _messages(problem, layout, ViolationCode.FILTER_ITEM_UNSORTED)
+
+
 def test_a_filter_whose_run_carries_nothing_it_lets_through_is_unsorted() -> None:
     # Filter b set to c: nothing on the run reaches it, b has no filter, and what it passes on is not
     # its own. Each is its own reason, and each is reported.
