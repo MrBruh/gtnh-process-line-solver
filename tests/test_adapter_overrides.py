@@ -5,7 +5,9 @@ apart:
 
 **Narrowing** a wildcard (``minecraft:log@32767`` -> ``minecraft:log@1``) is the exporter recording
 which item the player actually feeds the machine. Ignoring it is a hard failure, because the edge
-names the concrete id and the machine has no such port.
+names the concrete id and the machine has no such port. **Picking one of the input's listed
+``alternatives``** (GT's salt -> HarvestCraft's) is the same record, made from the ore-dictionary
+choices the arodoid exporter lists on the input, and fails the same way if ignored.
 
 **Substituting** a different resource (``oxygen`` -> ``water``) appears in real plans and must NOT
 be applied: doing so drops a required input and duplicates another, silently shrinking the port set.
@@ -37,6 +39,8 @@ from gtnh_solver.ir import InputIR, IODirection
 _WILDCARD_LOG = "minecraft:log@32767"
 _SPRUCE_LOG = "minecraft:log@1"  # vanilla log metas: 0 oak, 1 spruce, 2 birch
 _BIRCH_LOG = "minecraft:log@2"
+_GT_SALT = "gregtech:gt.metaitem.01@2817"
+_PAM_SALT = "harvestcraft:saltitem"
 _PARALLEL_SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-parallel-sand.json"
 
 
@@ -87,6 +91,38 @@ def test_a_different_kind_does_not_refine() -> None:
 def test_two_concrete_metas_do_not_refine() -> None:
     # Neither generalises the other, so this is a swap, not a narrowing.
     assert not _refines(_res("item", _BIRCH_LOG), _res("item", _SPRUCE_LOG))
+
+
+def _salt(*alternatives: str) -> Resource:
+    """The real case: a Mixer's Salt input, listing the ore-dictionary salts it accepts."""
+    return Resource(
+        kind="item",
+        id=_GT_SALT,
+        amount=2,
+        alternatives=[_res("item", rid) for rid in alternatives],
+    )
+
+
+def test_a_listed_alternative_refines() -> None:
+    assert _refines(_salt(_GT_SALT, _PAM_SALT), _res("item", _PAM_SALT, 2))
+
+
+def test_a_listed_wildcard_alternative_refines_when_narrowed() -> None:
+    # An alternative can itself be a wildcard ("any Natura log"), and an override naming one meta
+    # of it is that alternative named more precisely.
+    source = Resource(
+        kind="item", id=_WILDCARD_LOG, alternatives=[_res("item", "natura:tree@32767")]
+    )
+    assert _refines(source, _res("item", "natura:tree@2"))
+
+
+def test_a_resource_the_alternatives_do_not_list_does_not_refine() -> None:
+    assert not _refines(_salt(_GT_SALT, _PAM_SALT), _res("item", "gregtech:gt.metaitem.01@2818"))
+
+
+def test_an_alternative_of_the_other_kind_does_not_refine() -> None:
+    source = Resource(kind="item", id="x", alternatives=[_res("fluid", "y")])
+    assert not _refines(source, _res("item", "y"))
 
 
 # ------------------------------------------------------------------ resolution
@@ -140,6 +176,13 @@ def test_a_refinement_does_not_warn() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         _check_input_overrides(recipe, _node(i0=_res("item", _SPRUCE_LOG, 16)))
+
+
+def test_picking_a_listed_alternative_does_not_warn() -> None:
+    recipe = _recipe(_salt(_GT_SALT, _PAM_SALT))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _check_input_overrides(recipe, _node(i0=_res("item", _PAM_SALT, 2)))
 
 
 def test_an_out_of_range_index_warns() -> None:
@@ -200,6 +243,62 @@ def test_two_nodes_on_one_recipe_keep_their_own_ingredient() -> None:
     ir = to_input_ir(plan)
     assert _input_ports(ir, "spruce") == {f"input:{_SPRUCE_LOG}"}
     assert _input_ports(ir, "birch") == {f"input:{_BIRCH_LOG}"}
+
+
+def test_an_alternative_picked_by_the_export_loads_with_a_real_rate() -> None:
+    # platline, a real arodoid plan, in miniature and spelled as the export spells it: a Mixer's
+    # Salt input lists both salts, the node picks HarvestCraft's, and the edge delivers it. The
+    # override used to be refused as a substitution, leaving the edge naming a port the machine did
+    # not have, and the load died on `references unknown port`.
+    salt = {"kind": "item", "id": _GT_SALT, "amount": 2}
+    plan = Plan.model_validate(
+        {
+            "schemaVersion": 1,
+            "recipes": [
+                {
+                    "id": "r",
+                    "machineType": "Mixer",
+                    "durationTicks": 100,
+                    "inputs": [
+                        {
+                            **salt,
+                            "alternatives": [
+                                {**salt, "amount": 1},
+                                {"kind": "item", "id": _PAM_SALT, "amount": 1},
+                            ],
+                        },
+                        {"kind": "fluid", "id": "water", "amount": 1000},
+                    ],
+                    "outputs": [{"kind": "fluid", "id": "saltwater", "amount": 1000}],
+                }
+            ],
+            "nodes": [
+                {
+                    "id": "n",
+                    "recipeId": "r",
+                    "overclockTier": "LV",
+                    "recipeInputOverrides": {"0": {"kind": "item", "id": _PAM_SALT, "amount": 2}},
+                }
+            ],
+            "storages": [{"id": "s", "kind": "item"}],
+            "edges": [
+                {
+                    "id": "e0",
+                    "source": "s",
+                    "target": "n",
+                    "resourceKind": "item",
+                    "resourceId": _PAM_SALT,
+                }
+            ],
+        }
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        ir = to_input_ir(plan)
+    assert not [w for w in caught if "substitutes" in str(w.message)]
+    assert _input_ports(ir, "n") == {f"input:{_PAM_SALT}", "input:water"}
+    # The rate reads the picked input too: 2 salt per 100 ticks.
+    assert next(n for n in ir.nets if n.id == "e0").throughput == pytest.approx(0.02)
 
 
 def test_the_committed_fixture_applies_its_overrides_without_warning() -> None:

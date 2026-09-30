@@ -52,6 +52,11 @@ class Resource(BaseModel):
     kind: str  # "item" | "fluid"
     id: str
     amount: float = 0.0
+    #: Every resource a recipe INPUT accepts in this one's place, as the arodoid exporter lists it
+    #: from the ore dictionary ("Salt": GT's dust and HarvestCraft's salt), the input's own id
+    #: included. What a node's override may pick (``core._refines``). Empty on an output and on
+    #: every MrBruh-fork plan, which never emits it.
+    alternatives: list[Resource] = Field(default_factory=list)
 
 
 class MachineBlock(BaseModel):
