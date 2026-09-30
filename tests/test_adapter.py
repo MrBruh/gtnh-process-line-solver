@@ -272,6 +272,54 @@ def test_unsupported_storage_kind_raises() -> None:
         to_input_ir(plan)
 
 
+def _generator_plan() -> Plan:
+    """An arodoid plan that makes its own power, in miniature (log-bug, a community plan): a
+    Semifluid Generator burns creosote from a tank and wires its EU, like a product, to an EU
+    storage. EU is ``kind: "power"`` on the recipe output, the edge and the storage alike."""
+    return Plan(
+        schema_version=1,
+        recipes=[
+            Recipe(
+                id="gen",
+                machine_type="Semifluid Generator",
+                duration_ticks=20,
+                inputs=[_resource("fluid", "creosote", 14)],
+                outputs=[_resource("power", "eu", 640)],
+            )
+        ],
+        nodes=[Node(id="g", recipe_id="gen", overclock_tier="LV")],
+        storages=[Storage(id="tank", kind="fluid"), Storage(id="sink", kind="power")],
+        edges=[
+            Edge(
+                id="fuel", source="tank", target="g", resource_kind="fluid", resource_id="creosote"
+            ),
+            Edge(id="eu", source="g", target="sink", resource_kind="power", resource_id="eu"),
+        ],
+    )
+
+
+def test_a_generators_eu_is_dropped_with_a_warning() -> None:
+    # EU is a resource in the arodoid fork but no port carries it, and the whole load used to fail
+    # on `unsupported resource kind 'power'`. The generator is now placed and fed, its EU left
+    # unwired, and the warning names it.
+    with pytest.warns(AdapterWarning, match="Semifluid Generator"):
+        ir = to_input_ir(_generator_plan())
+    generator = next(m for m in ir.machines if m.id == "g")
+    assert {p.id for p in generator.faces.ports} == {"input:creosote"}
+    assert "sink" not in {m.id for m in ir.machines}
+    assert {n.id for n in ir.nets if n.commodity is not Commodity.POWER} == {"fuel"}
+
+
+def test_dropping_eu_leaves_the_callers_plan_as_parsed() -> None:
+    # The recipe is shared by every node that runs it, so the drop works on a copy.
+    plan = _generator_plan()
+    with pytest.warns(AdapterWarning):
+        to_input_ir(plan)
+    assert [o.kind for o in plan.recipes[0].outputs] == ["power"]
+    assert [e.id for e in plan.edges] == ["fuel", "eu"]
+    assert [s.id for s in plan.storages] == ["tank", "sink"]
+
+
 def test_a_machine_type_beginning_with_super_is_still_collected() -> None:
     """Storages are identified by id, not by a ``"Super "`` type prefix (#38).
 

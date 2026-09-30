@@ -209,6 +209,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   An override naming a listed alternative, or narrowing a wildcard one, is now applied like a
   narrowing, ports and rates alike. A true substitution (`oxygen` to `water`) is never listed, so it
   is still refused with the same warning.
+- **A plan with its own generators loads.** The arodoid fork models a generator as a recipe whose
+  output is EU (`kind: "power"`), wired like a product to an EU storage, and the adapter refused the
+  whole plan on `unsupported resource kind 'power'` (a community plan burning creosote in Semifluid
+  Generators). EU outputs, the edges carrying them and EU storages are now dropped with an
+  `AdapterWarning` naming the generators: they are placed and fed as the plan says, their EU is left
+  unwired, and the line is powered by the synthesized source as before. Using a plan's generators
+  as its power source is not done yet.
 - **The extractor builds against 2.8.4's GT again (#249).** #269 used two parts of GT's API that only
   GT 5.09.54 (GTNH 2.9) has, the structure errors `HatchProbe` confirms a bare hatch adder with and
   `IMetaTileEntity.getLocalNameKey()`, so `compileJava` failed against 2.8.4 and no 2.8.4 dump could
