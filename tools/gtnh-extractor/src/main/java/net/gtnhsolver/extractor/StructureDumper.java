@@ -2,6 +2,7 @@ package net.gtnhsolver.extractor;
 
 import java.io.File;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -120,6 +121,13 @@ import gregtech.common.misc.GTStructureChannels;
 final class StructureDumper {
 
     private static final Logger LOG = LogManager.getLogger(DumperMod.MODID);
+
+    /**
+     * {@code IMetaTileEntity.getLocalNameKey()}, which only GT 5.09.54 (GTNH 2.9) has, or null on a GT
+     * without it. Reached reflectively so the extractor compiles against 2.8.4's GT too (#249); that GT
+     * never hands back an untranslated key (#231), so without the method there is nothing to compare.
+     */
+    private static final Method LOCAL_NAME_KEY = localNameKeyMethod();
 
     /**
      * GT's opt-in hatch placement channel ({@code GTStructureChannels.HATCH} since 2.9, which replaced the
@@ -1312,7 +1320,7 @@ final class StructureDumper {
         String name = localizedName(imte);
         String key = null;
         try {
-            key = imte.getLocalNameKey();
+            key = LOCAL_NAME_KEY != null ? (String) LOCAL_NAME_KEY.invoke(imte) : null;
         } catch (Throwable ignored) {
             // no key to compare against: nothing marks the name as untranslated
         }
@@ -1323,6 +1331,15 @@ final class StructureDumper {
         String recorded = english != null ? english : name;
         untranslated.add(new DumpModel.UntranslatedName(registryName, key, recorded));
         return recorded;
+    }
+
+    /** {@link #LOCAL_NAME_KEY}, resolved on the public interface, or null if this GT lacks it. */
+    private static Method localNameKeyMethod() {
+        try {
+            return IMetaTileEntity.class.getMethod("getLocalNameKey");
+        } catch (NoSuchMethodException | SecurityException e) {
+            return null;
+        }
     }
 
     /**
