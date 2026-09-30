@@ -192,6 +192,19 @@ def test_a_tier_is_kept_where_nothing_can_check_it() -> None:
     assert _run_tier(_recipe(eut=2.0), _node("ULV")) == "ULV"
 
 
+def test_the_edges_of_the_run_tier() -> None:
+    # A stored tier off the GT:NH ladder reads as the recipe's minimum, as arodoid reads it.
+    assert _run_tier(_macerator(), _node("")) == "LV"
+    # A recipe above every real block runs in the top one, the nearest thing the game has.
+    beyond = _macerator()
+    beyond.machine_handlers[0].minimum_tier = "MAX"
+    assert _run_tier(beyond, _node("MAX")) == "UMV"
+    # A list naming no tier on the ladder is no list at all.
+    unknown = _macerator()
+    unknown.machine_handlers[0].available_tiers = ["Tier 1"]
+    assert _run_tier(unknown, _node("ULV")) == "ULV"
+
+
 # ------------------------------------------------------------------ the EU/t ladder
 
 
