@@ -200,6 +200,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **The extractor builds against 2.8.4's GT again (#249).** #269 used two parts of GT's API that only
+  GT 5.09.54 (GTNH 2.9) has, the structure errors `HatchProbe` confirms a bare hatch adder with and
+  `IMetaTileEntity.getLocalNameKey()`, so `compileJava` failed against 2.8.4 and no 2.8.4 dump could
+  run. Both are now reached reflectively. A 2.9 dump is unchanged (a fresh one matches the installed
+  dump exactly). On 2.8.4 the confirm step abstains, since without error lists a pass or fail cannot
+  tell a new error from the shell's own, so a 2.8.4 dump records no hatch kind found only by a bare
+  adder (the kinds stay a lower bound).
 - **A `.schematic` export pastes every single-block machine the right way round (#249).** A GT basic
   machine points two ways, its working face (`mMainFacing`) and its output face (`mFacing`), and the
   export wrote only `mFacing`, as the front. On 2.9 a pasted machine therefore worked on its bottom
