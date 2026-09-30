@@ -27,6 +27,7 @@ from gtnh_solver.adapter import (
     Node,
     Plan,
     Recipe,
+    RecipeSection,
     RecipeSource,
     ResolvedBlock,
     ResolvedMachine,
@@ -429,6 +430,35 @@ def test_adapter_sizes_a_tower_from_the_recipes_fluid_outputs() -> None:
         # slots, so a 3-tall tower has 2 cells and a 6-tall one 5; before this was fixed both were
         # charged the 12-tall form's 11, a ceiling the reserved shape cannot host.
         assert machine.hatch_cells == expected_height - 1, f"{fluids} fluid outputs"
+
+
+def test_a_tower_time_sharing_recipes_is_sized_for_the_one_with_most_outputs() -> None:
+    """One tower runs every recipe it time-shares (a node's ``extraRecipes``), so it must be tall
+    enough for the one with the most fluid outputs, even when that is not the node's own."""
+    dataset = PhysicalDataset(
+        meta=load_physical_dataset(_DATA_DIR).meta,
+        machines={"Tower": to_physical(_tower_doc(range(3, 13)))},
+    )
+    recipes = [
+        Recipe(
+            id=rid,
+            machine_type="Tower",
+            eut=480.0,
+            duration_ticks=100.0,
+            outputs=[Resource(kind="fluid", id=f"{rid}:{i}", amount=1.0) for i in range(fluids)],
+        )
+        for rid, fluids in (("one", 1), ("five", 5))
+    ]
+    node = Node(
+        id="n",
+        recipe_id="one",
+        overclock_tier="MV",
+        extra_recipes=[RecipeSection(recipe_id="five")],
+    )
+    plan = Plan(schema_version=1, recipes=recipes, nodes=[node])
+    with pytest.warns(AdapterWarning, match="time-shares"):
+        ir = to_input_ir(plan, physical=dataset)
+    assert next(m for m in ir.machines if m.id == "n").footprint.sy == 6
 
 
 # ------------------------------------------------- slice-count form selection (GitHub #229)

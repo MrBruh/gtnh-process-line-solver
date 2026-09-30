@@ -219,6 +219,20 @@ class Recipe(BaseModel):
     machine_handlers: list[MachineHandler] = Field(default_factory=list)
 
 
+class RecipeSection(BaseModel):
+    """One more recipe a node's machine runs (arodoid's shared machine); see ``Node.extra_recipes``.
+
+    Only the recipe and its ingredient choices are per section. Machine count, tier, handler and
+    configuration are the node's, because every section runs on the same machines.
+    """
+
+    model_config = _CFG
+
+    recipe_id: str
+    #: As ``Node.recipe_input_overrides``, for this section's recipe.
+    recipe_input_overrides: dict[int, Resource] = Field(default_factory=dict)
+
+
 class Node(BaseModel):
     """A machine instance in the plan graph (references a recipe by id)."""
 
@@ -247,6 +261,11 @@ class Node(BaseModel):
     #: strings and coerce to ``int``; a non-numeric key is malformed and fails validation here
     #: rather than silently dropping an input the edges then reference.
     recipe_input_overrides: dict[int, Resource] = Field(default_factory=dict)
+    #: More recipes the same machines TIME-SHARE (the arodoid fork's shared machine: an LCR fed for
+    #: two reactions runs whichever its inputs allow). ``recipe_id`` is section 0 and these are
+    #: sections 1..n; the export addresses their ports with an ``r<n>:`` handle prefix. Empty on an
+    #: ordinary one-recipe node and on every MrBruh-fork plan. See ``core._sections``.
+    extra_recipes: list[RecipeSection] = Field(default_factory=list)
 
 
 class Storage(BaseModel):
