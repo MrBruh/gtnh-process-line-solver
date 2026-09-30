@@ -68,12 +68,12 @@ a line that shares only storages lays out exactly as before. A single-block mach
 is left unmerged too: it has no hatch to disagree about, and whether it should merge is a separate
 question this does not settle.
 
-**A single block with no face to spare sends its items out of one face, sorted by Item Filters**
-(#249, :func:`_merge_item_outputs`). A single block has five faces that can carry a connection, one
-each, so an Ore Washer with an item in, a fluid in, three item outputs and power cannot be built as
-the plan draws it, and a Macerator with an item in, three item outputs and power needs a route to
-reach every one of its five, top and bottom included, which in practice the routers rarely manage.
-In GT its items leave through one output face into one pipe, and an Item Filter per item (a block
+**A single block with several item outputs sends them out of one face, sorted by Item Filters**
+(#249, :func:`_merge_item_outputs`). A GT basic machine with item auto-output on ejects every item
+slot through its one output face, so a plan that draws a face per output is not what gets built;
+and a single block has only five faces that can carry a connection, one each, so an Ore Washer with
+an item in, a fluid in, three item outputs and power could not be built that way at all. In GT its
+items leave through one output face into one pipe, and an Item Filter per item (a block
 that takes items on every face but its back and pushes the ones in its slots out of its back) sorts
 them onto their own nets. The adapter builds exactly that, as ordinary IR, after
 the power synthesis and before the region is sized::
@@ -82,16 +82,15 @@ the power synthesis and before the region is sized::
     Washers 1-3 out:b --B--> Sink B  ==>  Fa out (back) --A--> Sink A
     Washers 1-3 out:c --C--> Sink C       Fb out (back) --B--> Sink B   (Fc likewise)
 
-It merges only what needs it and only what is safe to merge:
+It merges what is safe to merge:
 
-- the machine has **no face to spare**: at least as many connections as a single block has usable
-  faces, by the count ``placement.single_block_shortfalls`` reports from
-  (``ir.nets.connection_counts``), and two or more item outputs; all of them merge, since a basic
-  machine with item auto-output ejects every item slot through its output face. Merging at exactly
-  five and not only above it is measured, not assumed: on iron.json it is what lets every net of
-  the line route (3 of 4 seeds, 2026-09-28), while merging every multi-output single block adds so many filters that the
-  layout spreads and routing fails again. A machine with a face to spare keeps a face per output,
-  which GT builds with an Item Filter cover on each extra face (covers are not modelled yet);
+- the machine has **two or more item outputs** (items only: fluids are never merged, and a line
+  whose items ride ME has no pipe to sort), and all of them merge. This used to wait until the
+  machine had no face to spare, leaving the rest a face per output, which GT builds only with a
+  cover pulling each extra output out. With the filters shared per node (below), merging every
+  such machine costs nothing: on iron.json it took the filters from 6 to 10 and the median floor
+  plus route cells from 198 to 192, 16 of 16 seeds VALID either way, and no output face needs a
+  cover. Before the filters were shared, merging them all spread the layout until routing failed;
 - it is **proven** a single block: its handler says ``kind: "single"``, or a census dump for the
   plan's own pack misses it. A 1x1x1 node is more often a multiblock whose structure is missing,
   and filters on one would be nonsense, so a structure record, a ``multiblock`` handler or no
@@ -145,7 +144,6 @@ from gtnh_solver.ir import (
     RelativeFace,
 )
 from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
-from gtnh_solver.ir.nets import SINGLE_BLOCK_IO_FACES, connection_counts
 
 from ._errors import AdapterError, AdapterWarning
 from .plan import (
@@ -1131,9 +1129,10 @@ def _merge_item_outputs(
     A cluster's filters follow its last machine in the returned list, and the trunks follow the
     other nets, so a line that merges nothing comes back exactly as it went in.
     """
-    counts = connection_counts(nets, me_toggles)
+    if me_toggles.toggled(Commodity.ITEM):
+        return machines, nets  # items ride ME: no pipe, so nothing to sort
     cluster_of = dict(group_of or {})
-    mergeable = {m.id: _mergeable_outputs(m, counts, proven_single) for m in machines}
+    mergeable = {m.id: _mergeable_outputs(m, proven_single) for m in machines}
     #: cluster -> its merging machines, in list order. A cluster is the node a machine was expanded
     #: from, so the machines of one parallel node share one trunk and one filter per item.
     clusters: dict[str, list[Machine]] = {}
@@ -1216,20 +1215,14 @@ def _merge_item_outputs(
     return out_machines, [*_fold_nets(resourced, set(moved.values()), out_machines), *trunks]
 
 
-def _mergeable_outputs(
-    machine: Machine, counts: dict[str, int], proven_single: frozenset[str]
-) -> list[Port]:
+def _mergeable_outputs(machine: Machine, proven_single: frozenset[str]) -> list[Port]:
     """The item output ports :func:`_merge_item_outputs` merges on ``machine``, or none.
 
-    A machine merges when it is a single block with **no face to spare**, by the very count
-    ``placement.single_block_shortfalls`` reports from (at least :data:`SINGLE_BLOCK_IO_FACES`
-    connections, not only more), is proven a single block, and has two or more item outputs (one
-    needs no sorting). All of them merge: a basic machine with item auto-output on ejects every
-    item slot through its output face, so there is no merging some.
+    A machine merges when it is proven a single block and has two or more item outputs (one needs
+    no sorting), whether or not it has a face to spare. All of them merge: a basic machine with
+    item auto-output on ejects every item slot through its output face, so there is no merging some.
     """
     if machine.id not in proven_single or machine.footprint.volume != 1:
-        return []
-    if counts.get(machine.id, 0) < SINGLE_BLOCK_IO_FACES:
         return []
     outputs = [
         port

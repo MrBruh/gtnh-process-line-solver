@@ -5,9 +5,9 @@ in, a fluid in, three item outputs and power cannot be built as the plan draws i
 such a machine's items out of one face on a trunk and places an Item Filter per item to sort them
 (``adapter.core._merge_item_outputs``). What these pin:
 
-- **when** it merges: no face to spare by the solver's own count (five connections or more),
-  PROVEN a single block (a ``single`` handler, or a census miss for the plan's own pack), and two
-  or more item outputs;
+- **when** it merges: PROVEN a single block (a ``single`` handler, or a census miss for the plan's
+  own pack) with two or more item outputs, whether or not it has a face to spare, and never when
+  the line's items ride ME;
 - **the shape** every later stage relies on: filter and trunk ids, types, face pins, rates, and
   one trunk and one filter per item for a whole parallel node, shared by its machines;
 - **what moves**: each downstream net is sourced by its item's filter, nets one filter sources fold
@@ -424,17 +424,21 @@ def test_a_machine_with_no_face_to_spare_merges() -> None:
     assert connection_counts(ir.nets, ir.me_toggles)["w#1"] == SINGLE_BLOCK_IO_FACES - 1
 
 
-def test_a_machine_with_a_face_to_spare_is_untouched() -> None:
-    # The same two item outputs with the water on ME: four connections, so one face stays free and
-    # each output keeps a face of its own.
+def test_a_machine_with_a_face_to_spare_merges_too() -> None:
+    # The same two item outputs with the water on ME: four connections, a face to spare. It still
+    # ejects both items through one output face, so it merges; kept a face per output, the second
+    # would need a cover pulling it out.
+    unmerged = _adapt(
+        _washer_plan(items=("gt.dust.a", "gt.dust.b"), handler=None),
+        me_toggles=METoggles(fluids=True),
+    )
+    assert connection_counts(unmerged.nets, unmerged.me_toggles)["w#1"] == SINGLE_BLOCK_IO_FACES - 1
     ir = _adapt(_washer_plan(items=("gt.dust.a", "gt.dust.b")), me_toggles=METoggles(fluids=True))
-    assert connection_counts(ir.nets, ir.me_toggles)["w#1"] == SINGLE_BLOCK_IO_FACES - 1
-    assert not _filters(ir)
-    assert not _trunks(ir)
-    assert {"output:gt.dust.a", "output:gt.dust.b"} <= {
-        p.id for p in _machine(ir, "w#1").faces.ports
-    }
-    assert _net(ir, "e-gt.dust.a").endpoints[0] == _ref("w#1", "output:gt.dust.a")
+    assert [m.id for m in _filters(ir)] == ["item-filter:w:gt.dust.a", "item-filter:w:gt.dust.b"]
+    assert [t.items for t in _trunks(ir)] == [("gt.dust.a", "gt.dust.b")]
+    assert _net(ir, "e-gt.dust.a").endpoints[0] == _ref(
+        "item-filter:w:gt.dust.a", "output:gt.dust.a"
+    )
 
 
 def test_items_on_me_need_no_faces_and_no_merge() -> None:

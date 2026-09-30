@@ -636,6 +636,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **Every proven single block with two or more item outputs sends them out of one face to Item
+  Filters, not only one with no face to spare (`adapter/core.py`).** A GT basic machine ejects
+  every item slot through its one output face, so a machine left a face per output was a real
+  build only with a cover pulling each extra output out, which the solver neither models nor
+  exports. Merging those machines too used to cost more than it saved (a filter set per machine
+  spread iron.json until routing failed); with the filters shared per node it does not. Iron goes
+  from 6 filters to 10, with every one of its machines on a single output face, and over 16 seeds
+  at full effort stays 16 of 16 VALID with median floor plus route cells 198 to 192 (route 115 to
+  107, floor 82 to 84). A line whose items ride ME still merges nothing, and no shipped example
+  has such a machine, so they adapt exactly as before.
 - **The machines of a parallel node share one trunk and one Item Filter per item
   (`adapter/core.py`).** Each machine of a node used to get a trunk and a filter per item of its
   own, so iron.json's three Ore Washers had nine filters where three sort the same items, and every
