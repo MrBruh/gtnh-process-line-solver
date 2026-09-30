@@ -7,6 +7,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **A node whose machines time-share several recipes (the arodoid fork's shared machine) loads.**
+  A card can run more recipes on the same machines (`extraRecipes`, ports addressed `r<n>:`): an LCR
+  fed for two reactions runs whichever its inputs allow. The adapter read only the node's own
+  recipe, so an edge feeding another section named a port the machine did not have, and the load
+  died on `references unknown port` (a community plan whose Coke Ovens burn spruce and rubber wood).
+  Each machine now has every port any of its recipes uses and draws what the hungriest draws, and a
+  tower is reserved tall enough for the recipe with the most fluid outputs. The export does not say
+  how the machine's time splits between recipes, so each is taken to run an even share, and an
+  `AdapterWarning` says the rates are an estimate. The wire the export draws from each section to
+  the same place for a shared product is one connection, so it folds into one net.
 - **Every single block shows how its outputs leave it, in the preview and in the `.schematic`
   (#249).** GT auto-outputs a single block through one face only: a basic machine's output face
   (`mFacing`, items and fluids alike), a Super Tank's front, an Item Filter's back. A Super Chest

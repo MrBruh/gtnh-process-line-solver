@@ -50,6 +50,13 @@ calls for: a Coke Oven's slice count (``_trigger_stack``), a tower's fluid-outpu
 ``Net.throughput`` is the group's (:func:`_group_rate`), because one bus carries what all of them
 move. A single-machine node keeps its bare id, so nothing that predates this moves.
 
+**A node whose machines time-share several recipes stays one set of machines** (the arodoid
+fork's shared machine, ``extraRecipes``; ``_sections``). Each machine gets every port any of its
+recipes uses, draws what the hungriest draws, and moves the mean of what each recipe would move
+running flat out, because the export does not record how the machine's time splits between them
+(warned). The node's own recipe alone says which machine it is. Its edges repeat a connection for
+each recipe sharing a product, and a repeated connection is folded into one net.
+
 **Edges that meet at one multiblock port become one net** (#213). A plan draws an edge per
 consumer, so an output feeding two machines is two edges from one port; built as two nets they dock
 two terminals on the port, while the build has one hatch there, and the router and the validator
@@ -387,10 +394,13 @@ def to_input_ir(
         and physical.meta.pack_version == plan_pack_version(plan)
     )
     for node in plan.nodes:
-        recipe = recipes.get(node.recipe_id)
-        if recipe is None:
-            raise AdapterError(f"node {node.id!r} references unknown recipe {node.recipe_id!r}")
-        _check_input_overrides(recipe, node)
+        # Every recipe the node's machines run. The first is the node's own, and it alone says what
+        # machine this is (handler, controller, footprint); the rest are recipes it time-shares.
+        sections = _sections(node, recipes)
+        recipe = sections[0][0]
+        for section_recipe, section_node in sections:
+            _check_input_overrides(section_recipe, section_node)
+        _check_time_share(node, sections)
         _check_unmodelled_parallel(recipe, node)
         exported_key = _block_key_for(recipe, resolved_machines.get(node.id))
         record = _physical_record(recipe, node, physical, exported_key)
@@ -405,9 +415,13 @@ def to_input_ir(
         block_key = record.block_key if record is not None else exported_key
         # The built form is selected ONCE, and the footprint, hatch ceiling and hatch slots below
         # all read it, so they cannot describe different built forms of the same machine. The
-        # plan's slice count or the recipe's fluid-output count chooses it (`variant_for`).
+        # plan's slice count or the recipes' fluid-output count chooses it (`variant_for`): the most
+        # any section outputs, since one tower runs every recipe it time-shares.
         shape = (
-            record.variant_for(_fluid_output_count(recipe), _trigger_stack(recipe, node))
+            record.variant_for(
+                max(_fluid_output_count(section_recipe) for section_recipe, _ in sections),
+                _trigger_stack(recipe, node),
+            )
             if record is not None
             else None
         )
@@ -431,13 +445,18 @@ def to_input_ir(
                 hatch_cells=(shape.hatch_cells or None) if shape is not None else None,
                 # Empty when the dump recorded no slots, which reads as "unknown".
                 hatch_slots=shape.slots if shape is not None else (),
-                faces=FaceSpec(ports=_recipe_ports(recipe, node)),
+                faces=FaceSpec(ports=_node_ports(sections)),
                 voltage_tier=node.overclock_tier,
                 # Every machine keeps all four horizontal facings: occupied_cells rotates a
                 # non-cubic footprint now, so there is nothing left to pin against.
                 orientation_options=list(_DEFAULT_ORIENTATIONS),
-                # Per-machine EU/t the power synthesis sizes amperage from (see _node_eut).
-                eut=_node_eut(recipe, node, resolved_machines),
+                # Per-machine EU/t the power synthesis sizes amperage from (see _node_eut). A
+                # machine that time-shares recipes draws whichever one is running, so its cable
+                # must carry the hungriest.
+                eut=max(
+                    _node_eut(section_recipe, section_node, resolved_machines)
+                    for section_recipe, section_node in sections
+                ),
             )
             for instance_id in _instance_ids(node)
         )
@@ -558,6 +577,55 @@ def _instance_ids(node: Node) -> list[str]:
     if node.machine_count <= 1:
         return [node.id]
     return [f"{node.id}#{index + 1}" for index in range(node.machine_count)]
+
+
+#: A time-shared machine's recipes, each paired with the node as that recipe's section sees it.
+Sections = list[tuple[Recipe, Node]]
+
+
+def _sections(node: Node, recipes: dict[str, Recipe]) -> Sections:
+    """Every recipe ``node``'s machines run, each paired with the node as that section sees it.
+
+    Section 0 is the node itself. Sections 1..n are its ``extra_recipes`` (the arodoid fork's shared
+    machine), each the node with that section's recipe and ingredient choices swapped in. That
+    makes every section a plain ``(recipe, node)`` pair, so the per-recipe helpers (:func:`_rate`,
+    :func:`_effective_inputs`, :func:`_node_eut`, the override check) apply to it unchanged. Machine
+    count, tier, handler and configuration stay the node's, since every section runs on the same
+    machines. An ordinary node is one section, which keeps its mapping exactly as before.
+    """
+    ids = [node.recipe_id, *(section.recipe_id for section in node.extra_recipes)]
+    missing = [recipe_id for recipe_id in ids if recipe_id not in recipes]
+    if missing:
+        raise AdapterError(f"node {node.id!r} references unknown recipe {missing[0]!r}")
+    sections: Sections = [(recipes[node.recipe_id], node)]
+    for section in node.extra_recipes:
+        section_node = node.model_copy(
+            update={
+                "recipe_id": section.recipe_id,
+                "recipe_input_overrides": section.recipe_input_overrides,
+                "extra_recipes": [],
+            }
+        )
+        sections.append((recipes[section.recipe_id], section_node))
+    return sections
+
+
+def _check_time_share(node: Node, sections: Sections) -> None:
+    """Warn that a time-shared machine's rates rest on an assumed split (:func:`_node_rate`).
+
+    The fork's own solver decides how much of the machine's time each recipe gets and keeps the
+    answer, so the export carries none. The adapter takes an even split, which is exact only when
+    the plan balances that way; a builder reading the rates should know they are an estimate.
+    """
+    if len(sections) < 2:
+        return
+    warnings.warn(
+        f"node {node.id!r} time-shares {len(sections)} recipes on its machines, and the export does "
+        f"not say how their time splits; each is taken to run 1/{len(sections)} of the time, so "
+        f"its pipe rates are an estimate",
+        AdapterWarning,
+        stacklevel=3,
+    )
 
 
 def _classify_census_miss(recipe: Recipe, node: Node, single_block_ids: set[str]) -> None:
@@ -1026,23 +1094,27 @@ def _check_input_overrides(recipe: Recipe, node: Node) -> None:
         )
 
 
-def _recipe_ports(recipe: Recipe, node: Node) -> list[Port]:
-    """One input/output port per distinct recipe resource (deduped by id), each carrying the
-    throughput it moves (items/t or mB/t) so boundary rates - notably a dangling output's product,
-    which no net records - are reportable downstream."""
+def _node_ports(sections: Sections) -> list[Port]:
+    """One input/output port per distinct resource any section moves (deduped by id), each carrying
+    the throughput it moves (items/t or mB/t) so boundary rates - notably a dangling output's
+    product, which no net records - are reportable downstream.
+
+    A machine that time-shares recipes has every port any of them uses, since it is fed for all of
+    them; a port two recipes share (a common product) is one port, at their combined rate."""
     ports: dict[str, Port] = {}
-    for direction, pool, outputs in (
-        (IODirection.INPUT, _effective_inputs(recipe, node), False),
-        (IODirection.OUTPUT, recipe.outputs, True),
-    ):
-        for res in pool:
-            pid = _port_id(direction, res.id)
-            ports[pid] = Port(
-                id=pid,
-                commodity=_commodity(res.kind),
-                direction=direction,
-                rate=_rate(recipe, res.id, node, outputs=outputs),
-            )
+    for recipe, node in sections:
+        for direction, pool, outputs in (
+            (IODirection.INPUT, _effective_inputs(recipe, node), False),
+            (IODirection.OUTPUT, recipe.outputs, True),
+        ):
+            for res in pool:
+                pid = _port_id(direction, res.id)
+                ports[pid] = Port(
+                    id=pid,
+                    commodity=_commodity(res.kind),
+                    direction=direction,
+                    rate=_node_rate(sections, res.id, outputs=outputs),
+                )
     return list(ports.values())
 
 
@@ -1403,16 +1475,22 @@ def _edge_sides(
 def _edge_groups(
     edges: list[Edge], instances_by_node: dict[str, list[str]], multiblock_ids: set[str]
 ) -> list[list[Edge]]:
-    """Partition ``edges`` into the sets that must be one net: those meeting at a multiblock port.
+    """Partition ``edges`` into the sets that must be one net: those meeting at a multiblock port,
+    and those that repeat one connection.
 
     Union by transitive closure over the hatch-bearing ``(machine, port)`` pairs each edge touches,
     so an output feeding two consumers is one group and so is an input fed by two producers, and two
     such ports chained through a shared edge join into one. A port of any other machine joins
     nothing (see the module docstring for why storages and single blocks stay apart).
 
+    **An edge repeating another's source, target and resource is the same connection**, whatever
+    the machine. A time-shared machine (:func:`_sections`) draws one per recipe that makes a common
+    product, and it is still one pipe from one port to one place. Kept apart, a single block would
+    spend a face on each.
+
     Deterministic by construction: each group lists its edges in plan order, and the groups come
-    out in the plan order of their first edge. An edge that shares no multiblock port is a group of
-    one, which is what keeps every plan without such a port byte-identical to before.
+    out in the plan order of their first edge. An edge that shares no multiblock port and repeats no
+    other is a group of one, which is what keeps every plan without either byte-identical to before.
     """
     parent = list(range(len(edges)))
 
@@ -1422,16 +1500,21 @@ def _edge_groups(
             index = parent[index]
         return index
 
+    def union(index: int, other: int) -> None:
+        here, there = root(index), root(other)
+        # The lower index roots the union, so a group's root is its first edge in plan order.
+        parent[max(here, there)] = min(here, there)
+
     first_edge_at: dict[tuple[str, str], int] = {}
+    first_twin: dict[tuple[str, str, str, str], int] = {}
     for index, edge in enumerate(edges):
+        connection = (edge.source, edge.target, edge.resource_kind, edge.resource_id)
+        union(index, first_twin.setdefault(connection, index))
         producers, consumers = _edge_sides(edge, instances_by_node)
         for ref in (*producers, *consumers):
             if ref.machine_id not in multiblock_ids:
                 continue
-            here = root(index)
-            there = root(first_edge_at.setdefault((ref.machine_id, ref.port_id), index))
-            # The lower index roots the union, so a group's root is its first edge in plan order.
-            parent[max(here, there)] = min(here, there)
+            union(index, first_edge_at.setdefault((ref.machine_id, ref.port_id), index))
     groups: dict[int, list[Edge]] = {}
     for index, edge in enumerate(edges):
         groups.setdefault(root(index), []).append(edge)
@@ -1521,10 +1604,10 @@ def _throughput(edge: Edge, nodes_by_id: dict[str, Node], recipes: dict[str, Rec
     """
     source = nodes_by_id.get(edge.source)
     if source is not None:
-        return _group_rate(recipes[source.recipe_id], edge.resource_id, source, outputs=True)
+        return _group_rate(_sections(source, recipes), edge.resource_id, outputs=True)
     target = nodes_by_id.get(edge.target)
     if target is not None:
-        return _group_rate(recipes[target.recipe_id], edge.resource_id, target, outputs=False)
+        return _group_rate(_sections(target, recipes), edge.resource_id, outputs=False)
     return 0.0  # storage -> storage (no recipe to rate it against)
 
 
@@ -1548,14 +1631,27 @@ def _rate(recipe: Recipe, resource_id: str, node: Node, *, outputs: bool) -> flo
     return amount * node.parallel / duration
 
 
-def _group_rate(recipe: Recipe, resource_id: str, node: Node, *, outputs: bool) -> float:
-    """The rate the node's **whole group** moves: :func:`_rate` across all its machines.
+def _node_rate(sections: Sections, resource_id: str, *, outputs: bool) -> float:
+    """The rate **one machine** moves across every recipe it runs (:func:`_sections`).
+
+    The export does not say how a time-shared machine's time splits between its ``k`` recipes (the
+    fork's own solver works that out and keeps it), so each is taken to run ``1/k`` of the time and
+    the machine moves the mean of what each recipe would move running flat out. Warned where the
+    node is mapped (:func:`_check_time_share`). One recipe is ``k = 1``: exactly :func:`_rate`.
+    """
+    rates = [_rate(recipe, resource_id, node, outputs=outputs) for recipe, node in sections]
+    return sum(rates) / len(rates)
+
+
+def _group_rate(sections: Sections, resource_id: str, *, outputs: bool) -> float:
+    """The rate the node's **whole group** moves: :func:`_node_rate` across all its machines.
 
     What a net carries, because the node's machines share one bus. A three-machine node feeding a
     downstream node moves three times one machine's output through that pipe, and sizing the pipe
     from a single instance would under-provision it by the machine count.
     """
-    return _rate(recipe, resource_id, node, outputs=outputs) * node.machine_count
+    machine_count = sections[0][1].machine_count
+    return _node_rate(sections, resource_id, outputs=outputs) * machine_count
 
 
 #: Multiplier on the summed footprint floor area when sizing the region's side (leaves routing
