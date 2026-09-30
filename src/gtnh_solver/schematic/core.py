@@ -23,6 +23,15 @@ and the machine's identity is the ``mID`` inside the tile entity. That is what
 a wrong nibble rebuilds a cable as a machine. An ordinary casing is the other case entirely - its
 meta IS block metadata and it needs no tile entity.
 
+**A single block points two ways, and GT reads both** (#249, D18). A basic machine's working face
+is ``mMainFacing`` and ``mFacing`` is its OUTPUT face, the one it auto-outputs items and fluids
+through; a Super Tank auto-outputs out of its front. Which face that is comes from
+:func:`gtnh_solver.output_faces.output_faces`, the reading the previewer's arrows use too, so the
+file and the preview cannot disagree; every other output face is a cover, which a ``.schematic``
+does not carry, so :class:`SchematicWarning` names each (:func:`_single_block_tile`). Before this
+the export wrote only ``mFacing``, as the front: a 2.9 paste then worked on its bottom face and
+output out of its front.
+
 **Block ids are ours to choose.** ``SchematicaMapping`` maps registry name to the id used in this
 file, and Schematica remaps onto whatever the loading instance assigned, so the ids here are
 allocated compactly from 1 (air stays 0) rather than copied from any particular install. That
@@ -50,10 +59,13 @@ from typing import Any, Final
 
 from gtnh_solver.dataset.pipes import manifest_names
 from gtnh_solver.ir import Facing, InputIR, LayoutResult
+from gtnh_solver.ir.geometry import OPPOSITE_FACE
+from gtnh_solver.output_faces import BlockOutputs, CoverFace, output_faces
 from gtnh_solver.previewer.scene import build_scene
 from gtnh_solver.previewer.textures import (
     BlockCube,
     TextureManifest,
+    auto_output_faces,
     load_multiblock_docs,
     machine_cubes,
 )
@@ -105,12 +117,66 @@ _FRAME_MATERIAL_MASK: Final = 0xFFF
 #: found in LoaderMetaTileEntities for frames"), and the covered frame in both frame goldens.
 FRAME_MID_BASE: Final = 4096
 
+#: Every ``MTEBasicMachine`` subclass in GT5-Unofficial at both pinned tags (5.09.51.482 for 2.8.4,
+#: 5.09.54.20 for 2.9, which adds ``MTEDrawerFramer``), by the fully qualified name the texture
+#: manifest records as ``source_class``. The manifest names only a block's LEAF class, so a basic
+#: machine is known by being one of these, read off the class hierarchy in the source (every class
+#: that extends ``MTEBasicMachine``, transitively; the monorepo's addon packages included). A class
+#: missing here exports as it always did, facing its front, which is wrong only for a basic machine,
+#: so a pack bump that adds one should add it here.
+BASIC_MACHINE_CLASSES: Final = frozenset(
+    {
+        "bartworks.common.tileentities.debug.MTECreativeScanner",
+        "bartworks.common.tileentities.tiered.MTEBioLab",
+        "gregtech.api.metatileentity.implementations.MTEBasicMachineBronze",
+        "gregtech.api.metatileentity.implementations.MTEBasicMachineSteel",
+        "gregtech.api.metatileentity.implementations.MTEBasicMachineWithRecipe",
+        "gregtech.common.tileentities.machines.basic.MTEAdvSeismicProspector",
+        "gregtech.common.tileentities.machines.basic.MTEBetterJukebox",
+        "gregtech.common.tileentities.machines.basic.MTEBoxinator",
+        "gregtech.common.tileentities.machines.basic.MTEDrawerFramer",
+        "gregtech.common.tileentities.machines.basic.MTEIndustrialApiary",
+        "gregtech.common.tileentities.machines.basic.MTEMassfabricator",
+        "gregtech.common.tileentities.machines.basic.MTEMiner",
+        "gregtech.common.tileentities.machines.basic.MTENameRemover",
+        "gregtech.common.tileentities.machines.basic.MTEPotionBrewer",
+        "gregtech.common.tileentities.machines.basic.MTEPump",
+        "gregtech.common.tileentities.machines.basic.MTEReplicator",
+        "gregtech.common.tileentities.machines.basic.MTERockBreaker",
+        "gregtech.common.tileentities.machines.basic.MTEScanner",
+        "gregtech.common.tileentities.machines.steam.MTESteamAlloySmelterBronze",
+        "gregtech.common.tileentities.machines.steam.MTESteamAlloySmelterSteel",
+        "gregtech.common.tileentities.machines.steam.MTESteamCompressorBronze",
+        "gregtech.common.tileentities.machines.steam.MTESteamCompressorSteel",
+        "gregtech.common.tileentities.machines.steam.MTESteamExtractorBronze",
+        "gregtech.common.tileentities.machines.steam.MTESteamExtractorSteel",
+        "gregtech.common.tileentities.machines.steam.MTESteamForgeHammerBronze",
+        "gregtech.common.tileentities.machines.steam.MTESteamForgeHammerSteel",
+        "gregtech.common.tileentities.machines.steam.MTESteamFurnaceBronze",
+        "gregtech.common.tileentities.machines.steam.MTESteamFurnaceSteel",
+        "gregtech.common.tileentities.machines.steam.MTESteamMaceratorBronze",
+        "gregtech.common.tileentities.machines.steam.MTESteamMaceratorSteel",
+        "gtPlusPlus.xmod.gregtech.common.tileentities.machines.basic.MTEAtmosphericReconditioner",
+        "gtPlusPlus.xmod.gregtech.common.tileentities.machines.basic.MTEAutoChisel",
+    }
+)
+
+#: The Super and Quantum Tanks (``MTEDigitalTankBase``), which auto-output fluid out of their front
+#: face (``mFacing``) and nowhere else, once ``mOutputFluid`` is set.
+DIGITAL_TANK_CLASSES: Final = frozenset(
+    {
+        "gregtech.common.tileentities.storage.MTESuperTank",
+        "gregtech.common.tileentities.storage.MTEQuantumTank",
+    }
+)
+
 
 class SchematicWarning(UserWarning):
     """The file was written, but part of it will not rebuild faithfully in game.
 
-    Today that is only GT frame boxes, whose material a ``.schematic`` cannot carry into a paste
-    (#212); the file still records it, so the warning says where to read what to build.
+    GT frame boxes, whose material a ``.schematic`` cannot carry into a paste (#212); output faces
+    that need a cover, which a ``.schematic`` does not carry; and Item Filters, whose slots it does
+    not carry (#249). Each warning names what to build by hand and where.
     """
 
 
@@ -136,11 +202,12 @@ def _gt_tile(
 ) -> nbt.Compound:
     """The minimal tile entity GT needs to reconstruct this block.
 
-    Only the fields that decide *what the block is and which way it points*. The rest of what GT
-    writes (covers, colour, I/O disables, recipe locks, stored energy) is machine configuration,
-    which is the paste-fidelity half of #96 and deliberately absent: a build ghost wants the right
-    block in the right orientation, and inventing a half-configured machine would be a worse lie
-    than an unconfigured one.
+    Only the fields that decide *what the block is and which way it points*. A single block's
+    auto-output is added on top by :func:`_single_block_tile`, since which face it pushes through is
+    part of which way it points. The rest of what GT writes (covers, colour, recipe locks, stored
+    energy) is machine configuration, which is the paste-fidelity half of #96 and deliberately
+    absent: a build ghost wants the right block in the right orientation, and inventing a
+    half-configured machine would be a worse lie than an unconfigured one.
 
     **``eRotation`` / ``eFlip`` are deliberately not written.** A multiblock controller
     (``MTEEnhancedMultiBlockBase``) stores its StructureLib alignment in them, but they default to
@@ -256,6 +323,60 @@ def _cube_cell(
     )
 
 
+def _single_block_tile(
+    cell: Cell, source_class: str, front: Facing, outputs: BlockOutputs | None
+) -> Cell:
+    """``cell`` with the facing and auto-output its GT class needs, read from ``outputs``.
+
+    A **basic machine** (:data:`BASIC_MACHINE_CLASSES`) has two facings, and the old export wrote
+    only one. ``mMainFacing`` is its working face, the solver's front, and ``mFacing`` its OUTPUT
+    face, which it auto-outputs items and fluids through (``MTEBasicMachine`` 2.8.4 lines 481-515,
+    2.9 lines 514-547, and the Basic Forge Hammer in ``tests/golden/schematic/sand.schematic`` writes
+    exactly these tags, Int main facing and Short facing). What each tag must hold:
+
+    ====================== ====== =============================================================
+    tag                    value  why
+    ====================== ====== =============================================================
+    mMainFacing (Int)      front  2.9 loads it as written, and an absent tag reads DOWN (0)
+    mFacing (Short)        auto   the one face ``output_faces`` says it auto-outputs through,
+                                  else the face opposite its front (nothing leaves it)
+    mItemTransfer          0/1    what leaves through that face: GT pushes only when set
+    mFluidTransfer         0/1    (both load with ``getBoolean``, so absent is off)
+    mHasBeenUpdated        1      2.8.4's ``doDisplayThings`` flips ``mFacing`` to its back on
+                                  the first tick unless set; 2.9 has no such field and ignores it
+    mAllowInputFromOutputSide 0   the solver never docks an input on the output face
+    mDisableFilter         1      the field defaults on, but loads with ``getBoolean``, so an
+    mDisableMultiStack     1      absent tag would switch both off in a paste
+    ====================== ====== =============================================================
+
+    A **Super or Quantum Tank** auto-outputs fluid out of its front (``mFacing``) and only once
+    ``mOutputFluid`` is set (``MTEDigitalTankBase.onPostTick``), so a tank with an auto face faces
+    it. Everything else, an Item Filter included, keeps the facing :func:`_cube_cell` wrote: a
+    filter pushes out of the face opposite ``mFacing`` (``MTEBuffer.moveItems``), which is the
+    solver's back when ``mFacing`` is its front, with no toggle to set.
+    """
+    if cell.tile is None:
+        return cell
+    tile = nbt.Compound(cell.tile)
+    auto = outputs.auto_face if outputs is not None else None
+    if source_class in BASIC_MACHINE_CLASSES:
+        output = auto if auto is not None else OPPOSITE_FACE[front]
+        tile["mMainFacing"] = nbt.Int(FORGE_DIRECTION[front])
+        tile["mFacing"] = nbt.Short(FORGE_DIRECTION[output])
+        tile["mItemTransfer"] = nbt.Byte(int(outputs is not None and outputs.auto_items))
+        tile["mFluidTransfer"] = nbt.Byte(int(outputs is not None and outputs.auto_fluids))
+        tile["mHasBeenUpdated"] = nbt.Byte(1)
+        tile["mAllowInputFromOutputSide"] = nbt.Byte(0)
+        tile["mDisableFilter"] = nbt.Byte(1)
+        tile["mDisableMultiStack"] = nbt.Byte(1)
+    elif source_class in DIGITAL_TANK_CLASSES and auto is not None:
+        tile["mFacing"] = nbt.Short(FORGE_DIRECTION[auto])
+        tile["mOutputFluid"] = nbt.Byte(1)
+    else:
+        return cell
+    return Cell(cell.block, cell.data, tile)
+
+
 def _route_cell(
     raw: dict[str, Any], manifest: TextureManifest, origin: tuple[int, int, int]
 ) -> Cell:
@@ -308,15 +429,30 @@ def lower(
     size = tuple(int(bounds["max"][i]) - origin[i] for i in range(3))
     grid: dict[tuple[int, int, int], Cell] = {}
 
-    auto_out = {str(ac["source"]): str(ac["sourceFace"]) for ac in scene.get("autoConnections", [])}
+    auto_out = auto_output_faces(scene)
+    outputs = output_faces(problem, layout)
+    covers: list[tuple[str, tuple[int, int, int], CoverFace]] = []
+    filters: list[tuple[str, tuple[int, int, int], list[str]]] = []
     for machine in scene["machines"]:
         cubes = machine_cubes(machine, docs, manifest, auto_out)
         if not cubes:
             cubes = _stand_in_cubes(machine, manifest)
         front = Facing(str(machine.get("front", "north")))
+        single = len(cubes) == 1 and tuple(machine.get("size", (1, 1, 1))) == (1, 1, 1)
         for cube in cubes:
             cell = _cube_cell(cube, manifest, front, origin)
-            grid[tuple(cube.cell[i] - origin[i] for i in range(3))] = cell  # type: ignore[index]
+            key = tuple(cube.cell[i] - origin[i] for i in range(3))
+            if single:
+                machine_outputs = outputs.get(str(machine["id"]))
+                cell = _single_block_tile(
+                    cell, manifest.source_class(cube.block, cube.meta), front, machine_outputs
+                )
+                name = manifest.display_name(cube.block, cube.meta) or str(machine["type"])
+                if machine_outputs is not None:
+                    covers.extend((name, key, c) for c in machine_outputs.covers)  # type: ignore[misc]
+                if machine.get("filter_items"):
+                    filters.append((name, key, list(machine["filter_items"])))  # type: ignore[arg-type]
+            grid[key] = cell  # type: ignore[index]
 
     for route in scene["routes"]:
         for raw in route["cells"]:
@@ -325,6 +461,8 @@ def lower(
             grid[key] = cell  # type: ignore[index]
 
     _warn_about_frames(grid, manifest)
+    _warn_about_covers(covers)
+    _warn_about_filters(filters)
     return size, grid  # type: ignore[return-value]
 
 
@@ -349,6 +487,53 @@ def _warn_about_frames(grid: dict[tuple[int, int, int], Cell], manifest: Texture
     )
 
 
+def _warn_about_covers(covers: list[tuple[str, tuple[int, int, int], CoverFace]]) -> None:
+    """Name every output face that takes a cover, since a ``.schematic`` carries no covers.
+
+    GT auto-outputs a single block through one face only, and a Super Chest through none
+    (``output_faces``), so each other output face needs the cover named: a conveyor for items, a
+    pump for fluids. Grouped by cover, each with the block and where it stands in the file, so a
+    builder can walk the ghost and fit them.
+    """
+    if not covers:
+        return
+    by_cover: dict[str, list[str]] = {}
+    for name, (x, y, z), cover in sorted(covers, key=lambda c: (c[2].cover, c[1], c[2].face.value)):
+        by_cover.setdefault(cover.cover, []).append(
+            f"{cover.face.value} face of {name} at ({x}, {y}, {z})"
+        )
+    listed = "; ".join(
+        f"{kind} x{len(faces)}: {', '.join(faces)}" for kind, faces in by_cover.items()
+    )
+    warnings.warn(
+        f"{len(covers)} output face(s) need a cover, which a .schematic does not carry, so fit them "
+        "by hand: GT auto-outputs a single block through one face only, and a Super Chest through "
+        f"none. {listed}",
+        SchematicWarning,
+        stacklevel=3,
+    )
+
+
+def _warn_about_filters(filters: list[tuple[str, tuple[int, int, int], list[str]]]) -> None:
+    """Say what each Item Filter must let through, since a ``.schematic`` carries no inventory.
+
+    A filter's nine slots are what it sorts by (``MTEFilter.allowPutStack``); a pasted one is empty
+    and passes nothing, so the builder sets each from this list (#249).
+    """
+    if not filters:
+        return
+    listed = "; ".join(
+        f"{name} at ({x}, {y}, {z}): {', '.join(items)}"
+        for name, (x, y, z), items in sorted(filters, key=lambda f: f[1])
+    )
+    warnings.warn(
+        f"{len(filters)} Item Filter(s): a .schematic carries no inventory, so set each filter's "
+        f"slots to the item it lets through. {listed}",
+        SchematicWarning,
+        stacklevel=3,
+    )
+
+
 def _stand_in_cubes(machine: dict[str, Any], manifest: TextureManifest) -> list[BlockCube]:
     """The substitute block for a machine that resolves to none of its own.
 
@@ -359,6 +544,13 @@ def _stand_in_cubes(machine: dict[str, Any], manifest: TextureManifest) -> list[
     single block is one the texture manifest cannot name, while a bigger one is a multiblock whose
     structure was never dumped. Blaming the dump for the first sent #232's reader to the wrong fix.
     """
+    if machine.get("role") == "filter":
+        raise SchematicError(
+            f"{machine.get('type')!r} is not in {manifest.origin()}, so the Item Filter cannot be "
+            "exported; a texture dump from the extractor's server pass lacks the item filters "
+            "(GT builds their textures client-side), so run its client texture pass for this pack "
+            "(GitHub #249)"
+        )
     if machine.get("role") != "source":
         if tuple(machine.get("size", (1, 1, 1))) == (1, 1, 1):
             recipe_map = machine.get("recipe_map")

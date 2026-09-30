@@ -74,6 +74,7 @@ from gtnh_solver.previewer import write_preview
 from gtnh_solver.previewer.jar import cached_jar
 from gtnh_solver.previewer.textures import TextureManifest
 from gtnh_solver.schematic import SchematicError, read_schematic, write_schematic
+from gtnh_solver.schematic.read import Schematic
 from gtnh_solver.solver import Effort, solve
 from gtnh_solver.validator import validate
 
@@ -598,6 +599,35 @@ def _dataset_coverage(version: str | None) -> int:
     return 0
 
 
+#: ``ForgeDirection`` ordinal -> its name, for printing a tile entity's facings.
+_DIRECTION_NAME = {0: "down", 1: "up", 2: "north", 3: "south", 4: "west", 5: "east"}
+
+
+def _print_basic_machine_facings(schematic: Schematic) -> None:
+    """List every basic machine's working face, output face and what it auto-outputs (#249).
+
+    A basic machine is the tile that records ``mMainFacing``; its ``mFacing`` is the output face,
+    and ``mItemTransfer`` / ``mFluidTransfer`` say whether items and fluids leave through it. This
+    is what a pasted build does, so it is how an export is checked without hand-parsing it.
+    """
+    machines = [t for t in schematic.tile_entities if t.main_facing is not None]
+    if not machines:
+        return
+    print("\nbasic machines (working face -> output face, auto-output)")
+    for tile in sorted(machines, key=lambda t: t.pos):
+        auto = [
+            what
+            for what, tag in (("items", "mItemTransfer"), ("fluids", "mFluidTransfer"))
+            if tile.raw.get(tag)
+        ]
+        main = _DIRECTION_NAME.get(tile.main_facing or 0, str(tile.main_facing))
+        output = _DIRECTION_NAME.get(tile.facing or 0, str(tile.facing))
+        print(
+            f"  mID {tile.mid!s:<6} at {tile.pos}: {main} -> {output}, "
+            f"{' + '.join(auto) if auto else 'none'}"
+        )
+
+
 def _inspect_schematic(path: str, version: str | None) -> int:
     """Print what is in the ``.schematic`` at ``path``. Returns the process exit code.
 
@@ -654,6 +684,8 @@ def _inspect_schematic(path: str, version: str | None) -> int:
             else:
                 label = machine
         print(f"  {count:5d}  mID {mid!s:<6} {tile_id:<26} {label}")
+
+    _print_basic_machine_facings(schematic)
 
     if unresolved:
         print(

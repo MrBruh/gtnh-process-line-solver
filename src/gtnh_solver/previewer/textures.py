@@ -931,15 +931,31 @@ def _hatch_states(kind: str) -> tuple[str, str]:
     return _STATE, _STATE_ACTIVE
 
 
+def auto_output_faces(scene: Mapping[str, Any]) -> dict[str, str]:
+    """``machine id -> the face it auto-outputs through``, from each scene machine's ``outputs``.
+
+    That is ``output_faces``' reading (#249), shared with the viewer's arrows and the ``.schematic``
+    export, so a storage glyph (:func:`_glyph_steps`) turns to the face the exported block faces. A
+    block with no auto-output face (a Super Chest, a multiblock, a block nothing leaves) is absent.
+    """
+    faces: dict[str, str] = {}
+    for machine in scene.get("machines", []):
+        outputs = machine.get("outputs") or {}
+        if outputs.get("autoFace"):
+            faces[str(machine["id"])] = str(outputs["autoFace"])
+    return faces
+
+
 def _glyph_steps(machine: Mapping[str, Any], auto_out_face: Mapping[str, str] | None) -> int:
     """Clockwise yaw turns that orient a single-block machine's front glyph to the manifest NORTH.
 
-    A boundary-storage block (Super Tank / Super Chest) auto-outputs *from its front face*, so its
-    output glyph (``OVERLAY_STANK`` / ``OVERLAY_SCHEST``) should face the auto-output direction. The
-    placer's ``front`` does not track the eject face (it defaults every machine to NORTH), which
-    would leave that glyph pointing away from where the block actually ejects, so a storage block
-    with a *horizontal* auto-output orients to that face instead. Every other machine (and a storage
-    block with a vertical eject, which a side glyph can't point at) keeps its placed front.
+    A Super Tank auto-outputs *out of its front face* (``MTEDigitalTankBase``), so GT's front, and
+    with it the ``OVERLAY_STANK`` glyph, is its auto-output face: ``auto_out_face``
+    (:func:`auto_output_faces`), the face the ``.schematic`` export writes as its facing too. The
+    placer's ``front`` does not track that face (it defaults every machine to NORTH), so a storage
+    block with a *horizontal* auto-output face orients to it instead. A Super Chest never
+    auto-outputs (#249), has no such face, and keeps its placed front like every other machine (and
+    like a storage block with a vertical eject, which a side glyph can't point at).
     """
     if machine.get("role") == "storage" and auto_out_face:
         face = auto_out_face.get(str(machine.get("id")))
@@ -1219,12 +1235,9 @@ def texturize_scene(
 
     manifest = TextureManifest.load(mf_path)
 
-    # A boundary-storage block's output glyph should face the way it auto-outputs, not the placer's
-    # default front (see _glyph_steps). First auto-output per source machine wins (storage blocks
-    # have a single output).
-    auto_out_face: dict[str, str] = {}
-    for ac in scene.get("autoConnections", []):
-        auto_out_face.setdefault(ac["source"], ac["sourceFace"])
+    # A Super Tank's glyph faces the way it auto-outputs, not the placer's default front (see
+    # _glyph_steps), read from the same output reading the arrows and the export use.
+    auto_out_face = auto_output_faces(scene)
 
     # Expand every machine with a committed doc (or a single-block manifest entry) into per-block
     # cubes. A cube whose faces do not resolve is kept anyway - it renders as a neutral placeholder

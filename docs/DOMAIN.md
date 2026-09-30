@@ -70,10 +70,24 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
   right, up, down; output on back), and the validator checks that every trunk item has exactly one
   filter, that each filter's output carries only its items, and that nothing but its own output
   sits behind it (`FILTER_ITEM_UNSORTED`, `FILTER_BACK_NOT_ITS_OUTPUT`). The routers hold that
-  cell for the net the filter feeds: every other net, and every cable, treats it as a wall. Two limits: a filter faces
-  horizontally only, because every machine orientation is horizontal, so its back is never up or
-  down; and fluids are never merged, since GT has no fluid filter block. #248's Item Distributor
-  would ride the same face pins.
+  cell for the net the filter feeds: every other net, and every cable, treats it as a wall. Two
+  limits: a filter faces horizontally only, because every machine orientation is horizontal, so its
+  back is never up or down; and fluids are never merged, since GT has no fluid filter block. #248's
+  Item Distributor would ride the same face pins.
+- **A single block auto-outputs through one face; any other output face is a cover (#249).** A
+  basic machine pushes items and fluids out of its output face (`mFacing`) and nowhere else
+  (`MTEBasicMachine` 2.8.4 lines 583-610, 2.9 lines 612-633); its working face is `mMainFacing`, the
+  solver's front. A Super Tank pushes fluid out of its front (`MTEDigitalTankBase`, `mOutputFluid`),
+  an Item Filter out of its back with no toggle, and a Super Chest nowhere at all
+  (`MTEDigitalChestBase` only moves stock between its own slots), so taking items out of a Super
+  Chest always needs a conveyor cover. `output_faces` is the one reading of which face each single
+  block auto-outputs through (an auto-connection's face, else the face carrying the most outputs)
+  and which of its other output faces need a cover (a conveyor for items, a pump for fluids). The
+  previewer draws the auto-output arrow on that face on **every** single block, piped or not, so a
+  builder never reads a conveyor where none is meant, and an amber marker on each cover face; the
+  `.schematic` export writes that face as the block's output facing and warns about each cover,
+  since a `.schematic` carries no covers. A machine with a face to spare can still pipe two outputs
+  out of two faces (iron.json's Thermal Centrifuges): that build needs one cover, and says so.
 - **Required-I/O-face reachability is a HARD constraint** - a blocked required output face
   means the line doesn't run. "Convenient access" is a soft preference.
 

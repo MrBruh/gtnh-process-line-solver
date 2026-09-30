@@ -32,8 +32,6 @@ import gregtech.api.interfaces.tileentity.IGregTechTileEntity;
 import gregtech.api.metatileentity.BaseMetaTileEntity;
 import gregtech.api.metatileentity.implementations.MTEBasicHull;
 import gregtech.api.metatileentity.implementations.MTEMultiBlockBase;
-import gregtech.api.structure.error.StructureError;
-import gregtech.api.structure.error.TranslatableStructureError;
 
 /**
  * Answers "what kind of hatch may sit in this cell?" for one structure element.
@@ -76,6 +74,14 @@ import gregtech.api.structure.error.TranslatableStructureError;
  * </pre>
  *
  * <p>
+ * The confirm step needs GT's structure-error API ({@code gregtech.api.structure.error} and the
+ * {@code checkMachine} overload that fills a list of errors), which only GT 5.09.54 (GTNH 2.9) has, so it
+ * is reached reflectively and the extractor still compiles against 2.8.4's GT (#249). Without it a
+ * pass or fail cannot tell a new error from the one the bare shell already has, so the step abstains:
+ * a bare adder's kinds are then not recorded, which under-reports a cell (the dataset's kinds are a
+ * lower bound) rather than claiming one takes a hatch it refuses.
+ *
+ * <p>
  * The confirm step is what keeps a bare adder from over-reporting. An element's check accepts a hatch
  * that the machine as a whole then reads as a change of shape: a muffler on a Dangote Distillus ring
  * ends the tower at that layer, and an output hatch in a Distillation Tower's top centre tells it the
@@ -98,6 +104,21 @@ final class HatchProbe {
 
     /** How deep a chain's branches are walked: StructureLib chains nest, but only a few levels. */
     private static final int MAX_CHAIN_DEPTH = 8;
+
+    /** GT's structure errors, or null on a GT without them (2.8.4); see the class comment. */
+    private static final Class<?> STRUCTURE_ERROR = gtClass("gregtech.api.structure.error.StructureError");
+    private static final Class<?> TRANSLATABLE_ERROR = gtClass(
+        "gregtech.api.structure.error.TranslatableStructureError");
+    /** {@code checkMachine(base, stack, errors)}, the whole-machine check that lists its errors. */
+    private static final Method CHECK_WITH_ERRORS = gtMethod(
+        MTEMultiBlockBase.class,
+        "checkMachine",
+        IGregTechTileEntity.class,
+        ItemStack.class,
+        List.class);
+    /** Resolved on the public interface and record, since GT's other error classes are not public. */
+    private static final Method ERROR_ID = gtMethod(STRUCTURE_ERROR, "getId");
+    private static final Method ERROR_MESSAGE = gtMethod(TRANSLATABLE_ERROR, "message");
 
     /** A hatch to probe with: its kind, its item form for the filter, and its MTE for placing one. */
     private static final class Probe {
@@ -151,10 +172,33 @@ final class HatchProbe {
         }
         hull = findProbe(null, Collections.singletonList(MTEBasicHull.class));
         LOG.info(
-            "gtnh-extractor: hatch probe built for {} of {} kinds (element-check control: {})",
+            "gtnh-extractor: hatch probe built for {} of {} kinds (element-check control: {}; confirm: {})",
             probes.size(),
             HatchElement.values().length,
-            hull != null ? "machine hull" : "none, so bare adders go unprobed");
+            hull != null ? "machine hull" : "none, so bare adders go unprobed",
+            CHECK_WITH_ERRORS != null && ERROR_ID != null ? "checkMachine errors"
+                : "none, GT has no structure errors, so bare adders are not recorded");
+    }
+
+    /** A GT class by name, or null if this GT does not have it. */
+    private static Class<?> gtClass(String name) {
+        try {
+            return Class.forName(name, false, HatchProbe.class.getClassLoader());
+        } catch (ClassNotFoundException | LinkageError e) {
+            return null;
+        }
+    }
+
+    /** A public method of {@code owner}, or null if {@code owner} is null or this GT lacks the method. */
+    private static Method gtMethod(Class<?> owner, String name, Class<?>... parameters) {
+        if (owner == null) {
+            return null;
+        }
+        try {
+            return owner.getMethod(name, parameters);
+        } catch (NoSuchMethodException | SecurityException e) {
+            return null;
+        }
     }
 
     /**
@@ -330,16 +374,20 @@ final class HatchProbe {
 
     /**
      * What the machine's own structure check says about the world as it stands, or {@code null} if it
-     * cannot be asked (a controller that is not a GT multiblock base, or a check that throws).
+     * cannot be asked (a controller that is not a GT multiblock base, a check that throws, or a GT
+     * without structure errors, whose bare pass or fail cannot tell a new error from an old one).
      */
     private Verdict judge(Object controller) {
+        if (CHECK_WITH_ERRORS == null || ERROR_ID == null) {
+            return null;
+        }
         Verdict[] verdict = new Verdict[1];
         withScratch(controller, scratch -> {
             scratch.clearHatches();
-            List<StructureError> errors = new ArrayList<>();
-            scratch.checkMachine(scratch.getBaseMetaTileEntity(), null, errors);
+            List<Object> errors = new ArrayList<>();
+            CHECK_WITH_ERRORS.invoke(scratch, scratch.getBaseMetaTileEntity(), null, errors);
             Set<String> kinds = new TreeSet<>();
-            for (StructureError error : errors) {
+            for (Object error : errors) {
                 kinds.add(errorKind(error));
             }
             Map<HatchElement, Long> counts = new HashMap<>();
@@ -358,12 +406,19 @@ final class HatchProbe {
      * one while the other stands is not a new error, and "layers 2, 3 lack an output hatch" becoming
      * "layer 3 lacks one" is not either.
      */
-    private static String errorKind(StructureError error) {
-        String kind = String.valueOf(error.getId());
-        if (!(error instanceof TranslatableStructureError)) {
-            return kind;
+    private static String errorKind(Object error) {
+        String kind;
+        Object text;
+        try {
+            kind = String.valueOf(ERROR_ID.invoke(error));
+            if (ERROR_MESSAGE == null || !TRANSLATABLE_ERROR.isInstance(error)) {
+                return kind;
+            }
+            text = ERROR_MESSAGE.invoke(error);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return error.getClass()
+                .getName();
         }
-        Object text = ((TranslatableStructureError) error).message();
         try {
             // LangText is package-private in GT, so its record accessor is reached reflectively.
             Method key = text.getClass()

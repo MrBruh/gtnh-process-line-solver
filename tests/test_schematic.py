@@ -594,10 +594,13 @@ def test_frames_warn_naming_what_a_paste_will_get_wrong() -> None:
     assert "wrong material" in message
 
 
-def test_a_line_without_frames_does_not_warn() -> None:
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", schematic_core.SchematicWarning)
+def test_a_line_without_frames_does_not_warn_about_frames() -> None:
+    # The sand line still warns once, for the conveyor its input Super Chest needs (#249), which
+    # is a different warning; no frame box means no frame warning.
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", schematic_core.SchematicWarning)
         _sand_schematic()
+    assert not any("frame box" in str(w.message) for w in caught)
 
 
 def test_block_metadata_above_a_nibble_is_refused_rather_than_truncated() -> None:
