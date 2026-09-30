@@ -77,37 +77,45 @@ a line that shares only storages lays out exactly as before. A single-block mach
 is left unmerged too: it has no hatch to disagree about, and whether it should merge is a separate
 question this does not settle.
 
-**A single block with no face to spare sends its items out of one face, sorted by Item Filters**
-(#249, :func:`_merge_item_outputs`). A single block has five faces that can carry a connection, one
-each, so an Ore Washer with an item in, a fluid in, three item outputs and power cannot be built as
-the plan draws it, and a Macerator with an item in, three item outputs and power needs a route to
-reach every one of its five, top and bottom included, which in practice the routers rarely manage.
-In GT its items leave through one output face into one pipe, and an Item Filter per item (a block
+**A single block with several item outputs sends them out of one face, sorted by Item Filters**
+(#249, :func:`_merge_item_outputs`). A GT basic machine with item auto-output on ejects every item
+slot through its one output face, so a plan that draws a face per output is not what gets built;
+and a single block has only five faces that can carry a connection, one each, so an Ore Washer with
+an item in, a fluid in, three item outputs and power could not be built that way at all. In GT its
+items leave through one output face into one pipe, and an Item Filter per item (a block
 that takes items on every face but its back and pushes the ones in its slots out of its back) sorts
 them onto their own nets. The adapter builds exactly that, as ordinary IR, after
 the power synthesis and before the region is sized::
 
-    Washer  # 1 out:a --A--> Sink A         Washer#1 out:items --trunk#1 (a,b,c)--> F1a, F1b, F1c
-    Washer  # 1 out:b --B--> Sink B   ==>   F1a out (back) --A--> Sink A
-    Washer  # 1 out:c --C--> Sink C         F1b out (back) --B--> Sink B   (F1c likewise)
+    Washers 1-3 out:a --A--> Sink A       Washers 1-3 out:items --trunk (a,b,c)--> Fa, Fb, Fc
+    Washers 1-3 out:b --B--> Sink B  ==>  Fa out (back) --A--> Sink A
+    Washers 1-3 out:c --C--> Sink C       Fb out (back) --B--> Sink B   (Fc likewise)
 
-It merges only what needs it and only what is safe to merge:
+It merges what is safe to merge:
 
-- the machine has **no face to spare**: at least as many connections as a single block has usable
-  faces, by the count ``placement.single_block_shortfalls`` reports from
-  (``ir.nets.connection_counts``), and two or more item outputs; all of them merge, since a basic
-  machine with item auto-output ejects every item slot through its output face. Merging at exactly
-  five and not only above it is measured, not assumed: on iron.json it is what lets every net of
-  the line route (3 of 4 seeds, 2026-09-28), while merging every multi-output single block adds so many filters that the
-  layout spreads and routing fails again. A machine with a face to spare keeps a face per output,
-  which GT builds with an Item Filter cover on each extra face (covers are not modelled yet);
+- the machine has **two or more item outputs** (items only: fluids are never merged, and a line
+  whose items ride ME has no pipe to sort), and all of them merge. This used to wait until the
+  machine had no face to spare, leaving the rest a face per output, which GT builds only with a
+  cover pulling each extra output out. With the filters shared per node (below), merging every
+  such machine costs nothing: on iron.json it took the filters from 6 to 10 and the median floor
+  plus route cells from 198 to 192, 16 of 16 seeds VALID either way, and no output face needs a
+  cover. Before the filters were shared, merging them all spread the layout until routing failed;
 - it is **proven** a single block: its handler says ``kind: "single"``, or a census dump for the
   plan's own pack misses it. A 1x1x1 node is more often a multiblock whose structure is missing,
   and filters on one would be nonsense, so a structure record, a ``multiblock`` handler or no
   evidence at all leaves it unmerged, and one over the limit is reported short of faces;
-- each machine of a parallel node gets its own trunk and filters. One trunk shared by three washers
-  would carry nine streams through one pipe, and on 2.9 (where a basic machine's output face also
-  accepts recipe inputs) the siblings would take each other's outputs.
+- the machines of a parallel node **share one trunk and one filter per item**, the way the
+  maintainer builds iron.json's washers: every washer's output face on one pipe, the three filters
+  sorting all of them. A filter per machine instead multiplied the filters and, worse, the pipes out
+  of their backs, which run the same distance whichever machine fed them: on iron.json sharing took
+  the line from 15 to 16 of 16 seeds VALID and its median route cells from 193 to 115. A sibling's
+  output face does not take the others' items on 2.8.4, where ``mAllowInputFromOutputSide`` is off
+  by default. On 2.9 it is on by default and, with the machine's input filter also off by default,
+  it takes any item into an input slot that is empty or holds the same item: a machine kept stocked
+  never has such a slot, but one that runs dry can take a stray output into its only input slot and
+  jam (``MTEBasicMachine.allowPutStack``, 5.09.54.20 lines 965-979). The build step that rules it
+  out is a screwdriver right-click on each sibling's output face ("Input from Output Side
+  forbidden").
 
 Nets that end up sourced by the same filter fold into one (the #213 treatment): the filter's back
 feeds one pipe. **One census gap reads wrong here.** A controller whose extraction failed is absent
@@ -148,6 +156,7 @@ import json
 import math
 import re
 import warnings
+from collections.abc import Mapping
 from pathlib import Path
 
 from gtnh_solver.dataset import MachinePhysical, PhysicalDataset
@@ -526,7 +535,9 @@ def to_input_ir(
     toggles = me_toggles if me_toggles is not None else METoggles()
     # After the power synthesis, so a machine's power connection counts toward its faces, and before
     # the region is sized, so the filters it places are inside it.
-    machines, nets = _merge_item_outputs(machines, nets, frozenset(proven_single_ids), toggles)
+    machines, nets = _merge_item_outputs(
+        machines, nets, frozenset(proven_single_ids), toggles, group_of
+    )
     # After the output merge, which settles most machines it touches, so the input side merges only
     # what is still short of faces.
     machines, nets = _merge_item_inputs(machines, nets, frozenset(proven_single_ids), toggles)
@@ -1249,34 +1260,48 @@ def _merge_item_outputs(
     nets: list[Net],
     proven_single: frozenset[str],
     me_toggles: METoggles,
+    group_of: Mapping[str, str] | None = None,
 ) -> tuple[list[Machine], list[Net]]:
     """Send a full single block's item outputs out of one face, sorted by Item Filters (#249).
 
-    See the module docstring for when a machine merges and why. For each machine ``M`` that does:
+    See the module docstring for when a machine merges and why. Merging machines are grouped into
+    **clusters** by ``group_of`` (machine id -> the node it stands for; a machine it does not name is
+    a cluster of its own), and for each cluster ``C`` whose machines merge:
 
-    - ``M`` loses its item output ports and gains one, ``output:items``, rated at their sum;
-    - one Item Filter per item, ``item-filter:{M}:{item}``, taking the trunk on its input port (any
-      face but its back) and passing that one item out of its back (``Port.faces`` pins both);
-    - a trunk net ``item-trunk:{M}`` from ``output:items`` to every filter's input, naming its
-      items in ``Net.items``;
-    - every net that ``M`` sourced an item on is sourced by that item's filter instead, the
-      unconsumed-output buffers included, and nets left sourced by one filter fold into one
-      (:func:`_fold_nets`).
+    - each machine loses its item output ports and gains one, ``output:items``, rated at their sum;
+    - one Item Filter per item, ``item-filter:{C}:{item}``, taking the trunk on its input port (any
+      face but its back) and passing that one item out of its back (``Port.faces`` pins both),
+      rated at every machine's share of the item;
+    - a trunk net ``item-trunk:{C}`` from every machine's ``output:items`` to every filter's input,
+      naming its items in ``Net.items``;
+    - every net a machine sourced an item on is sourced by that item's filter instead, once however
+      many of the cluster's machines were on it, the unconsumed-output buffers included, and nets
+      left sourced by one filter fold into one (:func:`_fold_nets`).
 
-    Each filter follows its machine in the returned list, and the trunks follow the other nets, so a
-    line that merges nothing comes back exactly as it went in.
+    A single-machine node is a cluster of one under its bare id, so its ids are the machine's own.
+    A cluster's filters follow its last machine in the returned list, and the trunks follow the
+    other nets, so a line that merges nothing comes back exactly as it went in.
     """
-    counts = connection_counts(nets, me_toggles)
+    if me_toggles.toggled(Commodity.ITEM):
+        return machines, nets  # items ride ME: no pipe, so nothing to sort
+    cluster_of = dict(group_of or {})
+    mergeable = {m.id: _mergeable_outputs(m, proven_single) for m in machines}
+    #: cluster -> its merging machines, in list order. A cluster is the node a machine was expanded
+    #: from, so the machines of one parallel node share one trunk and one filter per item.
+    clusters: dict[str, list[Machine]] = {}
+    for m in machines:
+        if mergeable[m.id]:
+            clusters.setdefault(cluster_of.get(m.id, m.id), []).append(m)
+    merged_pid = _port_id(IODirection.OUTPUT, _MERGED_ITEMS)
     out_machines: list[Machine] = []
     trunks: list[Net] = []
     #: (M, output:item) -> (filter, output:item): where each merged output's nets are now sourced.
     moved: dict[MachineFaceRef, MachineFaceRef] = {}
     for machine in machines:
-        outputs = _mergeable_outputs(machine, counts, proven_single)
+        outputs = mergeable[machine.id]
         if not outputs:
             out_machines.append(machine)
             continue
-        merged_pid = _port_id(IODirection.OUTPUT, _MERGED_ITEMS)
         total = sum(port.rate or 0.0 for port in outputs)
         merged_ids = {port.id for port in outputs}
         kept = [port for port in machine.faces.ports if port.id not in merged_ids]
@@ -1297,49 +1322,60 @@ def _merge_item_outputs(
                 }
             )
         )
-        trunk_ends = [MachineFaceRef(machine_id=machine.id, port_id=merged_pid)]
-        for port in sorted(outputs, key=lambda p: _port_resource(p.id)):
-            item = _port_resource(port.id)
-            item_filter = _item_filter(machine.id, item, port.rate)
+        cluster = cluster_of.get(machine.id, machine.id)
+        members = clusters[cluster]
+        if machine is not members[-1]:
+            continue  # a cluster's filters and trunk follow its last machine
+        #: item -> the rate every member outputs it at, summed; None if any member's is unrecorded.
+        rates: dict[str, float | None] = {}
+        for member in members:
+            for port in mergeable[member.id]:
+                item = _port_resource(port.id)
+                so_far = rates.get(item, 0.0)
+                rates[item] = None if so_far is None or port.rate is None else so_far + port.rate
+        trunk_ends = [MachineFaceRef(machine_id=m.id, port_id=merged_pid) for m in members]
+        for item in sorted(rates):
+            item_filter = _item_filter(cluster, item, rates[item])
             out_machines.append(item_filter)
             trunk_ends.append(
                 MachineFaceRef(machine_id=item_filter.id, port_id=_port_id(IODirection.INPUT, item))
             )
-            moved[MachineFaceRef(machine_id=machine.id, port_id=port.id)] = MachineFaceRef(
-                machine_id=item_filter.id, port_id=port.id
-            )
+        for member in members:
+            for port in mergeable[member.id]:
+                item = _port_resource(port.id)
+                moved[MachineFaceRef(machine_id=member.id, port_id=port.id)] = MachineFaceRef(
+                    machine_id=f"item-filter:{cluster}:{item}", port_id=port.id
+                )
         trunks.append(
             Net(
-                id=f"item-trunk:{machine.id}",
+                id=f"item-trunk:{cluster}",
                 commodity=Commodity.ITEM,
-                items=tuple(sorted(_port_resource(port.id) for port in outputs)),
-                throughput=total,
+                items=tuple(sorted(rates)),
+                throughput=sum(sum(p.rate or 0.0 for p in mergeable[m.id]) for m in members),
                 endpoints=trunk_ends,
             )
         )
     if not moved:
         return machines, nets
+    # A parallel node's machines already share each downstream net, so their outputs all move to
+    # the one filter of their cluster: keep that filter on the net once.
     resourced = [
-        net.model_copy(update={"endpoints": [moved.get(ep, ep) for ep in net.endpoints]})
+        net.model_copy(
+            update={"endpoints": list(dict.fromkeys(moved.get(ep, ep) for ep in net.endpoints))}
+        )
         for net in nets
     ]
     return out_machines, [*_fold_nets(resourced, set(moved.values()), out_machines), *trunks]
 
 
-def _mergeable_outputs(
-    machine: Machine, counts: dict[str, int], proven_single: frozenset[str]
-) -> list[Port]:
+def _mergeable_outputs(machine: Machine, proven_single: frozenset[str]) -> list[Port]:
     """The item output ports :func:`_merge_item_outputs` merges on ``machine``, or none.
 
-    A machine merges when it is a single block with **no face to spare**, by the very count
-    ``placement.single_block_shortfalls`` reports from (at least :data:`SINGLE_BLOCK_IO_FACES`
-    connections, not only more), is proven a single block, and has two or more item outputs (one
-    needs no sorting). All of them merge: a basic machine with item auto-output on ejects every
-    item slot through its output face, so there is no merging some.
+    A machine merges when it is proven a single block and has two or more item outputs (one needs
+    no sorting), whether or not it has a face to spare. All of them merge: a basic machine with
+    item auto-output on ejects every item slot through its output face, so there is no merging some.
     """
     if machine.id not in proven_single or machine.footprint.volume != 1:
-        return []
-    if counts.get(machine.id, 0) < SINGLE_BLOCK_IO_FACES:
         return []
     outputs = [
         port
@@ -1517,10 +1553,11 @@ def _short_of_faces(
 ) -> set[str]:
     """The proven single blocks carrying more connections than they have usable faces.
 
-    By the count ``placement.single_block_shortfalls`` reports from. **More, not at least**, unlike
-    :func:`_mergeable_outputs`: the input side merges only a machine that cannot be built as drawn,
-    so every line that lays out today is left exactly as it is, and a feed run, which changes what a
-    builder pipes, is never built where a face per input would do.
+    By the count ``placement.single_block_shortfalls`` reports from. **More, not at least.** The
+    output side (:func:`_mergeable_outputs`) merges every multi-output single block whatever its
+    faces, because GT ejects through one output face anyway; the input side merges only a machine
+    that cannot be built as drawn, so every line that lays out today is left exactly as it is, and a
+    feed run, which changes what a builder pipes, is never built where a face per input would do.
     """
     counts = connection_counts(nets, me_toggles)
     return {

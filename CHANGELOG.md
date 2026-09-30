@@ -708,6 +708,30 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **Every proven single block with two or more item outputs sends them out of one face to Item
+  Filters, not only one with no face to spare (`adapter/core.py`).** A GT basic machine ejects
+  every item slot through its one output face, so a machine left a face per output was a real
+  build only with a cover pulling each extra output out, which the solver neither models nor
+  exports. Merging those machines too used to cost more than it saved (a filter set per machine
+  spread iron.json until routing failed); with the filters shared per node it does not. Iron goes
+  from 6 filters to 10, with every one of its machines on a single output face, and over 16 seeds
+  at full effort stays 16 of 16 VALID with median floor plus route cells 198 to 192 (route 115 to
+  107, floor 82 to 84). A line whose items ride ME still merges nothing, and no shipped example
+  has such a machine, so they adapt exactly as before.
+- **The machines of a parallel node share one trunk and one Item Filter per item
+  (`adapter/core.py`).** Each machine of a node used to get a trunk and a filter per item of its
+  own, so iron.json's three Ore Washers had nine filters where three sort the same items, and every
+  extra filter needed its own pipe out of its back to the same destination. They now share, the
+  way the maintainer builds that line: every washer's output face on one pipe (`item-trunk:{node}`,
+  one endpoint per machine) to one filter per item (`item-filter:{node}:{item}`, rated at the
+  machines' summed share). A single-machine node keeps its ids. Iron goes from 12 filters to 6 and,
+  over 16 seeds at full effort, from 15 to 16 VALID, with median route cells 193 to 115, pipe 155
+  to 82 and floor 140 to 82. Sand, parallel-sand and nitrobenzene solve to identical layouts.
+  Checked in GT's source: on 2.8.4 a machine's output face refuses input by default, so siblings
+  never take each other's items. On 2.9 the output face takes **any** item into an input slot that
+  is empty or holds the same item, not only recipe inputs as the adapter and `docs/DOMAIN.md` said
+  (both corrected): a stocked machine never has such a slot, but one that runs dry can take a stray
+  output and jam, which a screwdriver right-click on each sibling's output face rules out.
 - **A line of single blocks is annealed from a spaced lattice, not a single row
   (`placement/constructive.py`, `place(problem, lattice=True)`).** The region is square and wide
   (60 by 60 for iron.json's 30 blocks), so first-fit seeded every single-block line as one row,

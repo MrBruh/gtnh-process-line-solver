@@ -180,9 +180,10 @@ adapter, from the draw and the tier) or whether its structure can host them (the
 against `hatch_cells`).
 
 **A single block's item outputs may share one face (InputIR v4).** A single block has five faces
-that can carry a connection, one per connection. A machine with several item outputs that has no
-face to spare (an Ore Washer: item in, fluid in, three item outputs, power) is built in GT with one output
-face, one pipe, and an Item Filter per item sorting them. The adapter synthesizes exactly that as
+that can carry a connection, one per connection, and a basic machine ejects every item through
+one output face. A machine with several item outputs (an Ore Washer: item in, fluid in, three item
+outputs, power) is built in GT with one output face, one pipe, and an Item Filter per item sorting
+them; the machines of one parallel node share that pipe and those filters. The adapter synthesizes exactly that as
 ordinary IR: the machine gets one `output:items` port on a trunk net whose `items` lists what it
 carries, and each item gets a `Machine` of type "Ultra Low Voltage Item Filter" whose `filter_items`
 names it, whose input port takes the trunk on any face but its back and whose output port is pinned
