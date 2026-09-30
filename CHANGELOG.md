@@ -295,6 +295,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `AdapterWarning` naming the generators: they are placed and fed as the plan says, their EU is left
   unwired, and the line is powered by the synthesized source as before. Using a plan's generators
   as its power source is not done yet.
+- **A single-block machine runs at a tier a real block of it exists at.** arodoid stores a new
+  node's recipe draw tier, so a 2 EU/t Macerator recipe arrived as ULV although the lowest Macerator
+  is LV. arodoid's own solver runs it at LV, but the adapter took the stored ULV: iron.json's second
+  Macerator and its Centrifuge were laid out and powered as ULV machines, sized from the ULV runtime
+  variant. The handler's `availableTiers` now settles the tier the way arodoid does: the highest
+  real block at or below the stored tier that can run the recipe, else the lowest one that can. It
+  sets both the machine's `voltage_tier` and the runtime variant it draws from. Multiblocks,
+  handlers without the list and MrBruh-fork plans keep the stored tier.
 - **The extractor builds against 2.8.4's GT again (#249).** #269 used two parts of GT's API that only
   GT 5.09.54 (GTNH 2.9) has, the structure errors `HatchProbe` confirms a bare hatch adder with and
   `IMetaTileEntity.getLocalNameKey()`, so `compileJava` failed against 2.8.4 and no 2.8.4 dump could

@@ -1,7 +1,8 @@
 """Map a gtnh-factory-flow exported plan to the solver's ``InputIR``.
 
 Mapping (see docs/ARCHITECTURE.md, docs/IR.md):
-- ``node``    -> ``Machine`` (recipe.machineType -> type, overclockTier -> voltage_tier,
+- ``node``    -> ``Machine`` (recipe.machineType -> type, overclockTier -> voltage_tier
+                via ``_run_tier``,
                 recipe.eut * parallel -> eut); recipe inputs/outputs -> item/fluid ``Port``s.
                 ``machineCount`` must be 1 - multi-instance nodes are rejected (see below).
 - ``storage`` -> a boundary ``Machine`` typed **Super Chest** (items) or **Super Tank**
@@ -163,7 +164,7 @@ import warnings
 from collections.abc import Mapping
 from pathlib import Path
 
-from gtnh_solver.dataset import MachinePhysical, PhysicalDataset
+from gtnh_solver.dataset import VOLTAGE_BY_TIER, MachinePhysical, PhysicalDataset
 from gtnh_solver.ir import (
     CellBox,
     Commodity,
@@ -501,7 +502,7 @@ def to_input_ir(
                 # Empty when the dump recorded no slots, which reads as "unknown".
                 hatch_slots=shape.slots if shape is not None else (),
                 faces=FaceSpec(ports=_node_ports(sections)),
-                voltage_tier=node.overclock_tier,
+                voltage_tier=_run_tier(recipe, node),
                 # Every machine keeps all four horizontal facings: occupied_cells rotates a
                 # non-cubic footprint now, so there is nothing left to pin against.
                 orientation_options=list(_DEFAULT_ORIENTATIONS),
@@ -779,17 +780,17 @@ def _matched_variant(recipe: Recipe, node: Node) -> RuntimeVariant | None:
     (``tier-ev-perfect-oc``), so composing one from ``overclock_tier`` misses roughly half the nodes
     of a real plan while appearing to work.
 
-    Narrowed in two steps. The node's ``overclock_tier`` selects candidates; then, if those
-    candidates are coil-keyed, the node's ``coil_tier`` picks among them. A node that leaves
-    ``coil_tier`` empty against coil-keyed variants stays ambiguous, and ambiguity returns ``None``
-    rather than a guess, because every coil is a different heat bonus and so a different EU/t.
+    Narrowed in two steps. The node's run tier (:func:`_run_tier`, not the stored
+    ``overclock_tier``) selects candidates; then, if those candidates are coil-keyed, the node's
+    ``coil_tier`` picks among them. A node that leaves ``coil_tier`` empty against coil-keyed
+    variants stays ambiguous, and ambiguity returns ``None`` rather than a guess, because every coil
+    is a different heat bonus and so a different EU/t.
     """
     if recipe.runtime_calculation is None:
         return None
+    tier = _run_tier(recipe, node)
     candidates = [
-        variant
-        for variant in recipe.runtime_calculation.variants
-        if variant.overclock_tier == node.overclock_tier
+        variant for variant in recipe.runtime_calculation.variants if variant.overclock_tier == tier
     ]
     if node.coil_tier and any(variant.coil_tier is not None for variant in candidates):
         narrowed = [variant for variant in candidates if variant.coil_tier == node.coil_tier]
@@ -901,6 +902,49 @@ def _effective_handler(recipe: Recipe, node: Node) -> MachineHandler | None:
             if handler.id == node.machine_handler_id:
                 return handler
     return recipe.machine_handlers[0]
+
+
+def _run_tier(recipe: Recipe, node: Node) -> str:
+    """The voltage tier this node's machine runs at, which the stored ``overclock_tier`` can miss.
+
+    arodoid seeds a new node with its recipe's draw tier, so a 2 EU/t Macerator recipe can arrive
+    stored as ULV although the lowest Macerator block is LV. arodoid's own solver runs that node at
+    LV, and so does the game, because no ULV Macerator exists. Where the node's handler is a single
+    block listing ``availableTiers``, this answers the way arodoid's ``getRunVoltageTier`` does:
+    the highest real block at or below the stored tier that can run the recipe, else the lowest one
+    that can.
+
+    Anything else keeps the stored tier, since there is nothing to check it against: a multiblock
+    (its tier is its energy hatches, and running below the recipe's tier is a real build), a
+    handler without the list (older exports), or no handler at all (MrBruh-fork plans).
+    """
+    handler = _effective_handler(recipe, node)
+    if handler is None or handler.kind != "single" or not handler.available_tiers:
+        return node.overclock_tier
+    order = list(VOLTAGE_BY_TIER)
+    ladder = [order.index(tier) for tier in order if tier in handler.available_tiers]
+    if not ladder:
+        return node.overclock_tier
+    # The recipe needs whichever is higher: the tier the handler declares, or the tier of its draw.
+    minimum = max(
+        (
+            order.index(tier)
+            for tier in (handler.minimum_tier, _draw_tier(recipe.eut))
+            if tier in order
+        ),
+        default=0,
+    )
+    stored = order.index(node.overclock_tier) if node.overclock_tier in order else minimum
+    eligible = [index for index in ladder if index >= minimum]
+    at_or_below = [index for index in eligible if index <= stored]
+    if at_or_below:
+        return order[at_or_below[-1]]
+    return order[eligible[0] if eligible else ladder[-1]]
+
+
+def _draw_tier(eut: float) -> str:
+    """The lowest tier whose voltage covers a draw of ``eut``; ULV for a recipe drawing nothing."""
+    return next((tier for tier, volts in VOLTAGE_BY_TIER.items() if abs(eut) <= volts), "MAX")
 
 
 def _check_power_provenance(plan: Plan, producer: PlanProducer | None) -> None:

@@ -154,6 +154,11 @@ class MachineHandler(BaseModel):
     label: str = ""
     machine_type: str = ""
     minimum_tier: str = ""
+    #: The voltage tiers a real block of this single block's family exists at, e.g. LV through UMV
+    #: for the Macerator. Families can skip tiers (the Cold Trap is IV and ZPM only). Empty on a
+    #: multiblock, on older arodoid exports and on every MrBruh-fork plan. Read by
+    #: :func:`core._run_tier`, which settles a node's stored tier onto one of these.
+    available_tiers: list[str] = Field(default_factory=list)
     #: Handler-level overrides the recipe's own ``runtime_calculation`` does not account for, most
     #: importantly a parallel multiplier. See :class:`MachineConfigControl`.
     machine_config_controls: list[MachineConfigControl] = Field(default_factory=list)
@@ -245,7 +250,9 @@ class Node(BaseModel):
     #: to a float (:data:`MAX_PARALLEL`, :data:`MAX_MACHINE_COUNT`).
     machine_count: int = Field(default=1, ge=1, le=MAX_MACHINE_COUNT)
     parallel: int = Field(default=1, ge=1, le=MAX_PARALLEL)
-    overclock_tier: str  # LV/MV/HV/... -> IR voltage_tier
+    #: LV/MV/HV/... as stored. The IR's voltage_tier is :func:`core._run_tier` of it, which can
+    #: differ on a single block: a 2 EU/t recipe can be stored as ULV but runs in an LV machine.
+    overclock_tier: str
     #: Which of the recipe's :class:`MachineHandler` entries this node runs in. Empty means the
     #: default, the first entry; empty also on every MrBruh-fork plan, which emits no handlers.
     machine_handler_id: str = ""

@@ -40,6 +40,7 @@ from gtnh_solver.adapter.core import (
     _handler_parallel,
     _matched_variant,
     _node_eut,
+    _run_tier,
     _synthesized_eut,
 )
 
@@ -132,6 +133,63 @@ def test_no_variant_for_the_nodes_tier_is_no_match() -> None:
 
 def test_a_recipe_without_runtime_figures_has_no_match() -> None:
     assert _matched_variant(_recipe(), _node("EV")) is None
+
+
+# ------------------------------------------------------------------ the run tier
+
+#: The 2.9 Macerator family as arodoid exports it: a real block from LV through UMV.
+_MACERATOR_TIERS = ["LV", "MV", "HV", "EV", "IV", "LuV", "ZPM", "UV", "UHV", "UEV", "UIV", "UMV"]
+
+
+def _macerator(*variants: RuntimeVariant, kind: str = "single", ladder: bool = True) -> Recipe:
+    """iron.json's Macerator in miniature: a 2 EU/t recipe, so ULV by its draw alone."""
+    recipe = _recipe(*variants, eut=2.0, duration=400.0)
+    recipe.machine_handlers = [
+        MachineHandler(
+            id="macerator",
+            kind=kind,
+            label="Macerator",
+            minimum_tier="LV",
+            available_tiers=_MACERATOR_TIERS if ladder else [],
+        )
+    ]
+    return recipe
+
+
+def test_a_single_block_stored_below_its_lowest_block_runs_at_that_block() -> None:
+    # arodoid stored the recipe's draw tier on the node, but no ULV Macerator exists, so arodoid's
+    # own solver and the game both run it at LV.
+    assert _run_tier(_macerator(), _node("ULV")) == "LV"
+
+
+def test_the_run_tier_lands_the_machine_and_its_variant() -> None:
+    recipe = _macerator(
+        _variant("tier-ulv", "ULV", 2.0, 400.0), _variant("tier-lv", "LV", 8.0, 200.0)
+    )
+    plan = Plan(schema_version=1, recipes=[recipe], nodes=[_node("ULV")])
+    assert to_input_ir(plan).machines[0].voltage_tier == "LV"
+    variant = _matched_variant(recipe, _node("ULV"))
+    assert variant is not None
+    assert variant.eut == 8.0
+
+
+def test_a_tier_between_or_above_real_blocks_settles_on_one() -> None:
+    cold_trap = _recipe(eut=30000.0)
+    cold_trap.machine_handlers = [
+        MachineHandler(id="t", kind="single", minimum_tier="LuV", available_tiers=["IV", "ZPM"])
+    ]
+    # No LuV Cold Trap exists and an IV one cannot run a LuV recipe, so the ZPM one does.
+    assert _run_tier(cold_trap, _node("LuV")) == "ZPM"
+    assert _run_tier(_macerator(), _node("MAX")) == "UMV"
+    assert _run_tier(_macerator(), _node("HV")) == "HV"
+
+
+def test_a_tier_is_kept_where_nothing_can_check_it() -> None:
+    # A multiblock's tier is its energy hatches; an older export lists no tiers; a MrBruh-fork plan
+    # lists no handlers at all.
+    assert _run_tier(_macerator(kind="multiblock"), _node("ULV")) == "ULV"
+    assert _run_tier(_macerator(ladder=False), _node("ULV")) == "ULV"
+    assert _run_tier(_recipe(eut=2.0), _node("ULV")) == "ULV"
 
 
 # ------------------------------------------------------------------ the EU/t ladder
