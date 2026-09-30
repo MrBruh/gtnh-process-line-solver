@@ -15,7 +15,9 @@ Mapping (see docs/ARCHITECTURE.md, docs/IR.md):
                 recipe rate. **Edges sharing a multiblock port are one net** (``_edge_groups``):
                 in game one port is one hatch feeding one pipe network (#213).
 - ``power``   -> a source machine + shared-amperage net per voltage tier feed the powered
-                machines (``power`` submodule, docs/DOMAIN.md); the export carries no source.
+                machines (``power`` submodule, docs/DOMAIN.md); the export carries no source
+                this adapter uses. An arodoid generator's EU output, and the edges and storages
+                that carry it off, are dropped up front (``_without_generated_power``).
 
 **A node's EU/t and duration come from the best source the plan offers**, because the recipe's own
 ``eut``/``durationTicks`` are the values at its MINIMUM tier and a machine run above that draws 4x
@@ -157,6 +159,9 @@ _DEFAULT_ORIENTATIONS = list(HORIZONTAL_FACINGS_ORDERED)  # front defaults to th
 _STORAGE_TIER = "LV"  # storages are unpowered; placeholder tier to satisfy the contract
 
 _COMMODITY = {"item": Commodity.ITEM, "fluid": Commodity.FLUID}
+#: The resource kind an arodoid plan gives EU: a generator recipe's output, and the edges and
+#: storages that carry it off. Not a commodity any port carries; see :func:`_without_generated_power`.
+_POWER_KIND = "power"
 # Boundary I/O blocks that accept I/O covers on their faces (keeps covers off pipes).
 _STORAGE_TYPE = {"item": "Super Chest", "fluid": "Super Tank"}
 # Cross-check tolerance (relative AND absolute) between a v2 export's resolved EU/t figures and
@@ -352,6 +357,7 @@ def to_input_ir(
     that maps but states a line no layout can satisfy - the CLI keeps those apart, reporting the
     first as an unloadable export and the second as an infeasibility (#112).
     """
+    plan = _without_generated_power(plan)
     resolved_producer = resolve_producer(plan, producer)
     _check_power_provenance(plan, resolved_producer)
     _check_dataset_version(plan, physical)
@@ -870,6 +876,46 @@ def _check_resolved_power(plan: Plan, nets: list[Net]) -> None:
         )
 
 
+def _without_generated_power(plan: Plan) -> Plan:
+    """``plan`` without its EU flows: generator outputs, the edges carrying them and the storages
+    they drain into. Warns once, naming the generators, when there is anything to take out.
+
+    The arodoid fork models a generator as a recipe whose output is EU (``kind: "power"``), wired
+    like a product. Nothing in that planner consumes EU, so its wires only ever land on storages,
+    and its own balancer keeps EU out of the material books. The solver does not take a power source
+    from the plan yet (every line is powered by the one ``synthesize_power`` adds), so the
+    generators are placed and fed as the plan says and their EU is left unwired, rather than the
+    whole plan refused on a kind no port carries.
+
+    A copy, never a mutation: the caller's plan, and the recipes its nodes share, stay as parsed.
+    """
+    generators = sorted(
+        {r.machine_type for r in plan.recipes if any(o.kind == _POWER_KIND for o in r.outputs)}
+    )
+    power_edges = [e for e in plan.edges if e.resource_kind == _POWER_KIND]
+    power_storages = [s for s in plan.storages if s.kind == _POWER_KIND]
+    if not (generators or power_edges or power_storages):
+        return plan
+    warnings.warn(
+        f"plan generates its own EU ({', '.join(generators) or 'no generator recipe'}; "
+        f"{len(power_edges)} EU edge(s), {len(power_storages)} EU storage(s)), which the solver "
+        f"does not use as a power source yet: the generators are placed and fed, their EU is left "
+        f"unwired, and the line is powered by the synthesized source instead",
+        AdapterWarning,
+        stacklevel=3,
+    )
+    return plan.model_copy(
+        update={
+            "recipes": [
+                r.model_copy(update={"outputs": [o for o in r.outputs if o.kind != _POWER_KIND]})
+                for r in plan.recipes
+            ],
+            "edges": [e for e in plan.edges if e.resource_kind != _POWER_KIND],
+            "storages": [s for s in plan.storages if s.kind != _POWER_KIND],
+        }
+    )
+
+
 def _commodity(kind: str) -> Commodity:
     try:
         return _COMMODITY[kind]
@@ -897,32 +943,41 @@ def _port_resource(port_id: str) -> str:
 
 #: Forge's ``OreDictionary.WILDCARD_VALUE``. A recipe input spelled ``<registry>@32767`` accepts any
 #: metadata of that block/item ("any log"), and the node's override is the exporter recording which
-#: one the player actually feeds it ("oak log"). That narrowing is the only override this adapter
-#: applies; see :func:`_refines`.
+#: one the player actually feeds it ("oak log"). That narrowing, and picking one of the input's
+#: listed alternatives, are the only overrides this adapter applies; see :func:`_refines`.
 _WILDCARD_META = "32767"
 
 
 def _refines(source: Resource, override: Resource) -> bool:
-    """Whether ``override`` narrows ``source`` rather than replacing it.
+    """Whether ``override`` names something ``source`` already accepts, rather than replacing it.
 
-    True only for an override that names the same resource more precisely: the same ``kind``, the
-    same registry name, and a ``source`` whose metadata is the wildcard. An identical id is trivially
-    true and costs nothing to apply.
+    True for an override that the input itself or one of its listed ``alternatives`` accepts
+    (:func:`_accepts`). The alternatives are the ore-dictionary choices the arodoid exporter lists
+    on the input and offers the player: a Mixer's "Salt" takes GT's dust or HarvestCraft's salt,
+    and the node's override records which one this line feeds. The edge names that one, so refusing
+    it leaves the edge pointing at a port the machine does not have.
 
     **Everything else is a substitution and must not be applied.** Real plans contain overrides that
     name an entirely different resource at that index (``oxygen -> water``,
-    ``ammonia -> hydrochloricacid_gt5u``), always one the recipe already lists at the *next* index.
-    Applying those would drop a required input and duplicate another, silently shrinking the port
-    set; the adapter cannot tell a stale plan from a deliberate swap, so it keeps the recipe's own
-    input and says so (:func:`_check_input_overrides`).
+    ``ammonia -> hydrochloricacid_gt5u``), always one the recipe already lists at the *next* index
+    and never one of the input's alternatives. Applying those would drop a required input and
+    duplicate another, silently shrinking the port set; the adapter cannot tell a stale plan from a
+    deliberate swap, so it keeps the recipe's own input and says so (:func:`_check_input_overrides`).
     """
-    if source.kind != override.kind:
+    return any(_accepts(accepted, override) for accepted in (source, *source.alternatives))
+
+
+def _accepts(accepted: Resource, override: Resource) -> bool:
+    """Whether ``override`` is ``accepted`` itself, or ``accepted`` named more precisely: the same
+    ``kind``, the same registry name, and an ``accepted`` whose metadata is the wildcard. An
+    identical id is trivially true and costs nothing to apply."""
+    if accepted.kind != override.kind:
         return False
-    if source.id == override.id:
+    if accepted.id == override.id:
         return True
-    source_name, _, source_meta = source.id.partition("@")
+    accepted_name, _, accepted_meta = accepted.id.partition("@")
     override_name, _, _ = override.id.partition("@")
-    return source_name == override_name and source_meta == _WILDCARD_META
+    return accepted_name == override_name and accepted_meta == _WILDCARD_META
 
 
 def _effective_inputs(recipe: Recipe, node: Node) -> list[Resource]:
@@ -963,8 +1018,9 @@ def _check_input_overrides(recipe: Recipe, node: Node) -> None:
         warnings.warn(
             f"node {node.id!r} overrides input {index} of recipe {recipe.id!r} from "
             f"{source.kind}:{source.id} to {override.kind}:{override.id}, which substitutes a "
-            f"different resource rather than narrowing a wildcard; keeping the recipe's own input "
-            f"(applying it would drop {source.id} from the machine's ports)",
+            f"different resource rather than narrowing a wildcard or picking one of the input's "
+            f"alternatives; keeping the recipe's own input (applying it would drop {source.id} "
+            f"from the machine's ports)",
             AdapterWarning,
             stacklevel=3,
         )
