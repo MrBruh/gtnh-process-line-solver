@@ -878,8 +878,8 @@ def _iron_shaped_plan() -> Plan:
 
 
 def test_a_single_block_short_of_faces_is_merged_and_solves_or_says_why() -> None:
-    # [E2E] The adapter sends each washer's three items out of one face to three Item Filters, and
-    # the solver lays that line. Whether one minimal attempt lays it validly is a question of layout
+    # [E2E] The adapter sends the three washers' items out of one face each, onto one shared trunk
+    # to three Item Filters, and the solver lays that line. Whether one minimal attempt lays it validly is a question of layout
     # quality, which this suite does not judge; what it holds is that the answer is VALID and
     # validator-clean, or explicitly infeasible, and never a silently invalid layout.
     ir = to_input_ir(_iron_shaped_plan())
@@ -888,8 +888,8 @@ def test_a_single_block_short_of_faces_is_merged_and_solves_or_says_why() -> Non
     filters = [m for m in ir.machines if m.filter_items]
     trunks = [n for n in ir.nets if n.items]
     assert len(washers) == 3
-    assert len(filters) == 9
-    assert len(trunks) == 3
+    assert len(filters) == 3
+    assert len(trunks) == 1
     assert all(m.type == "Ultra Low Voltage Item Filter" for m in filters)
     for f in filters:
         (resource,) = f.filter_items
@@ -902,7 +902,7 @@ def test_a_single_block_short_of_faces_is_merged_and_solves_or_says_why() -> Non
     layout = solve(ir)
     if layout.status is LayoutStatus.VALID:
         assert validate(ir, layout).ok
-        assert sum(p.machine_id.startswith("item-filter:") for p in layout.placements) == 9
+        assert sum(p.machine_id.startswith("item-filter:") for p in layout.placements) == 3
     else:
         assert layout.infeasibility is not None  # incompleteness is never silent
         assert layout.infeasibility.constraint != "single_block_faces"

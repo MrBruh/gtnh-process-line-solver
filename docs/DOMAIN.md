@@ -39,8 +39,10 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
   each connection a face of its own, and the validator rejects two on one face
   (`terminal_face_contention`). Whether a basic machine's output face also takes input differs by
   pack: `mAllowInputFromOutputSide` is **off** by default on 2.8.4 (`MTEBasicMachine.java:118`)
-  and **on** by default on 2.9 (`:123`), where the output face accepts any valid recipe input, so a
-  layout that relied on either default would run on one pack only. And two **nets** never share a
+  and **on** by default on 2.9 (`:123`), where, with the machine's input filter also off by
+  default, the output face accepts any item into an input slot that is empty or holds the same item
+  (`allowPutStack`, 5.09.54.20 lines 965-979; only with the filter on is it limited to recipe
+  inputs). A layout that relied on either default would run on one pack only. And two **nets** never share a
   pipe block: a GT item pipe delivers to any wired inventory that accepts the stack, and nothing in
   a plan says two nets carry the same item, so a shared block would cross-feed them.
 - **A single block with no face to spare sends its item outputs out of one face, sorted by Item
@@ -62,11 +64,12 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
   might be a multiblock missing from the dataset is left as it is and reported. A machine with a
   face to spare keeps a face per output, which is a real build only with an Item Filter **cover**
   on each output face but its output face (`CoverItemFilter` pushes only matching stacks); covers
-  are not modelled or exported yet. Merging every multi-output single block would remove those
-  covers too, but on iron.json the extra filters spread the layout until routing fails again. Each
-  machine
-  instance gets its own trunk and filters, since on 2.9 a sibling's output face would take the
-  other's items. The filter's faces are pinned in the IR (`Port.faces`: input on front, left,
+  are not modelled or exported yet. The machines of a parallel node share one trunk and one filter
+  per item, which is how the maintainer builds iron.json's washers: every output face on one pipe,
+  the filters sorting all of them. On 2.8.4 a sibling's output face refuses the others' items. On
+  2.9 it takes any item into an empty input slot (above), so a stocked machine never does, but one
+  that runs dry can take a stray output and jam; a screwdriver right-click on each sibling's output
+  face ("Input from Output Side forbidden") rules it out. The filter's faces are pinned in the IR (`Port.faces`: input on front, left,
   right, up, down; output on back), and the validator checks that every trunk item has exactly one
   filter, that each filter's output carries only its items, and that nothing but its own output
   sits behind it (`FILTER_ITEM_UNSORTED`, `FILTER_BACK_NOT_ITS_OUTPUT`). The routers hold that
