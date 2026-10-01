@@ -24,8 +24,9 @@ from gtnh_solver.ir import (
     Machine,
     Placement,
 )
-from gtnh_solver.ir.geometry import front_on_boundary, in_region
-from gtnh_solver.placement import place
+from gtnh_solver.ir.geometry import front_on_boundary, in_region, occupied_cells
+from gtnh_solver.placement import PlacementResult, place
+from gtnh_solver.placement.constructive import _flow_order, _place, _seed_offers
 from gtnh_solver.validator import validate
 from tests._helpers import PLACEMENT_CODES, power_source
 
@@ -61,6 +62,11 @@ def _problem(
 
 def _as_layout(placements: Sequence[Placement]) -> LayoutResult:
     return LayoutResult(status=LayoutStatus.VALID, seed=0, placements=list(placements))
+
+
+def _cells(result: PlacementResult) -> dict[str, tuple[int, int, int]]:
+    """Each placed machine's origin, by id."""
+    return {p.machine_id: (p.cell.x, p.cell.y, p.cell.z) for p in result.placements}
 
 
 def test_places_all_machines_disjoint_and_in_bounds() -> None:
@@ -236,12 +242,117 @@ def test_the_lattice_seed_spills_past_a_window_the_region_clips() -> None:
     assert validate(problem, _as_layout(seeded.placements)).ok
 
 
-def test_the_lattice_seed_leaves_a_line_with_a_multiblock_alone() -> None:
-    problem = _problem(
-        [_machine("big", footprint=CellBox(sx=2, sy=1, sz=2)), _machine("a"), _machine("b")],
-        region=CellBox(sx=6, sy=1, sz=6),
+def _shelved(*machines: Machine, region: CellBox) -> InputIR:
+    """A line with a 2x1x2 multiblock (``big``) first, then ``machines``, which the seed shelves."""
+    return _problem(
+        [_machine("big", footprint=CellBox(sx=2, sy=1, sz=2)), *machines], region=region
     )
-    assert place(problem, lattice=True) == place(problem)
+
+
+def test_the_shelf_seed_spaces_a_line_with_a_multiblock() -> None:
+    # A channel after each machine, and a new row once the next would cross the shelf width: 5,
+    # the side of a square holding the 24 cells the three need with their gaps. The row starts an
+    # aisle behind the deepest machine of the last. The plain scan packs the same three in a row.
+    problem = _shelved(_machine("a"), _machine("b"), region=CellBox(sx=10, sy=1, sz=10))
+    seeded = place(problem, lattice=True)
+    assert seeded.ok
+    assert _cells(seeded) == {"big": (0, 0, 0), "a": (3, 0, 0), "b": (0, 0, 4)}
+    assert _cells(place(problem)) == {"big": (0, 0, 0), "a": (2, 0, 0), "b": (3, 0, 0)}
+    assert validate(problem, _as_layout(seeded.placements)).ok
+
+
+def test_a_machine_past_the_shelf_takes_the_plain_scan() -> None:
+    # b's row would start at z=4, past the far edge of a region 3 deep, so it is offered no slot
+    # and takes the first free cell of the plain scan: the channel after big.
+    problem = _shelved(_machine("a"), _machine("b"), region=CellBox(sx=5, sy=1, sz=3))
+    seeded = place(problem, lattice=True)
+    assert _cells(seeded) == {"big": (0, 0, 0), "a": (3, 0, 0), "b": (2, 0, 0)}
+    assert validate(problem, _as_layout(seeded.placements)).ok
+
+
+def test_the_spaced_seed_falls_back_to_the_plain_scan() -> None:
+    # Shelved first, a and b leave no 2x2 gap in a 4x1x2 region, so big is stranded; the plain
+    # scan packs a and b into the corner and seats it. The seed is the plain scan's, whole.
+    problem = _problem(
+        [_machine("a"), _machine("b"), _machine("big", footprint=CellBox(sx=2, sy=1, sz=2))],
+        region=CellBox(sx=4, sy=1, sz=2),
+    )
+    order = _flow_order(problem)
+    assert not _place(problem, order, _seed_offers(problem, order)).ok
+    seeded = place(problem, lattice=True)
+    assert seeded.ok
+    assert seeded == place(problem)
+
+
+def test_a_power_source_off_the_boundary_on_the_shelf_takes_a_boundary_slot() -> None:
+    # The source's shelf slot, (2, 0, 4), is inside the region, where no front reaches a wall, so
+    # it takes the first slot of the plain scan that puts its feed face on one: the channel after
+    # big, facing north.
+    problem = _shelved(
+        _machine("a"), _machine("b"), _machine("c"), _source(), region=CellBox(sx=10, sy=1, sz=10)
+    )
+    seeded = place(problem, lattice=True)
+    assert seeded.ok
+    assert _cells(seeded) == {
+        "big": (0, 0, 0),
+        "a": (3, 0, 0),
+        "b": (5, 0, 0),
+        "c": (0, 0, 4),
+        "src": (2, 0, 0),
+    }
+    src = next(p for p in seeded.placements if p.machine_id == "src")
+    assert src.orientation is Facing.NORTH
+    assert validate(problem, _as_layout(seeded.placements)).ok
+
+
+_FACINGS = st.sampled_from([Facing.NORTH, Facing.EAST])
+
+
+@given(
+    boxes=st.lists(
+        st.tuples(st.integers(1, 3), st.integers(1, 2), st.integers(1, 3), _FACINGS), max_size=8
+    ),
+    region=st.builds(CellBox, sx=st.integers(1, 6), sy=st.integers(1, 3), sz=st.integers(1, 6)),
+    reserved=st.sets(
+        st.tuples(st.integers(0, 5), st.integers(0, 2), st.integers(0, 5)), max_size=6
+    ),
+    source=st.booleans(),
+)
+def test_the_spaced_seed_places_whatever_the_plain_scan_places(
+    boxes: list[tuple[int, int, int, Facing]],
+    region: CellBox,
+    reserved: set[tuple[int, int, int]],
+    source: bool,
+) -> None:
+    # Any mix of footprints, turned or not, around reserved cells: the spaced seed never refuses a
+    # line the plain scan places, and what it lays is valid or explicitly infeasible.
+    machines = [
+        _machine(f"m{i}", footprint=CellBox(sx=x, sy=y, sz=z), orientations=[facing])
+        for i, (x, y, z, facing) in enumerate(boxes)
+    ]
+    held = sorted(c for c in reserved if in_region(c, region))
+    problem = _problem(
+        [*machines, _source()] if source else machines,
+        region=region,
+        reserved=[CellCoord(x=x, y=y, z=z) for x, y, z in held],
+    )
+    seeded = place(problem, lattice=True)
+    if place(problem).ok:
+        assert seeded.ok
+
+    footprints = {m.id: m.footprint for m in problem.machines}
+    cells = [
+        c
+        for p in seeded.placements
+        for c in occupied_cells(p.cell, footprints[p.machine_id], p.orientation)
+    ]
+    assert len(cells) == len(set(cells))  # never overlapping
+    assert all(in_region(c, region) for c in cells)  # never out of bounds
+    assert set(held).isdisjoint(cells)  # never on a reserved cell
+    if seeded.ok:
+        assert PLACEMENT_CODES.isdisjoint(validate(problem, _as_layout(seeded.placements)).codes())
+    else:
+        assert seeded.infeasibility is not None
 
 
 @given(

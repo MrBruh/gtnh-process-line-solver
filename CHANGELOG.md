@@ -743,6 +743,29 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **A line with a multiblock is annealed from spaced shelves, not a single row
+  (`placement/constructive.py`, `place(problem, lattice=True)`).** The spaced lattice (below) was
+  only for lines of single blocks, so a line with any multiblock still started as first-fit's
+  row, which the annealer was supposed to fold and on the larger community plans never did:
+  log-bug's 104 machines started 168 cells long and one deep and finished as a 150x6x6 strip
+  with machines boxed in by their neighbours, so nets went unrouted. Such a line now starts on
+  shelves: in flow order at each machine's first orientation, one free cell after each machine,
+  and a new row two cells behind the deepest machine of the last once the next would cross a
+  width of about the square root of the floor they need. Each machine is offered its own shelf
+  slot and takes the plain scan if that does not fit; if anything is left unplaced, the whole seed
+  is the plain scan, so a line that placed before still places. The start is far less crowded
+  (`crowded_machines`): log-bug 22 machines to 4, platline 23 to 14, nitrobenzene(1) 7 to 0,
+  titanium 5 to 4. Measured at full effort against main, seed by seed: ev-nitrobenzene's median
+  floor plus route cells go from 849 to 709 (better on 4 of 4 seeds) and untitled-design's from
+  486.5 to 422.5 (6 of 8); nitrobenzene(1) goes from 2000 to 1909.5 (2 of 4), its route cells
+  from 958.5 to 634 for a floor of 1292.5 instead of 972. gtnh-nitrobenzene (+0.5, 3 better and 4
+  worse) and hydrogen-line (+1, 4 and 4) come out about even, and titanium solves VALID on 4 of
+  16 seeds either way. Of the lines that still lay out partial, platline ends with 9.5 nets
+  unconnected instead of 15.5 and 9.5 machines crowded instead of 18.5, and log-bug ends about 30
+  by 35 instead of 150 long, with 8.5 crowded instead of 10.5 but 10.5 nets unconnected instead of
+  9.5. A better start also routes sooner: ev-nitrobenzene's median solve takes 47 s instead of
+  103 s, nitrobenzene(1)'s 99 s instead of 336 s. Lines of single blocks get exactly the lattice
+  they got, and the `--fast` path keeps the row.
 - **Every proven single block with two or more item outputs sends them out of one face to Item
   Filters, not only one with no face to spare (`adapter/core.py`).** A GT basic machine ejects
   every item slot through its one output face, so a machine left a face per output was a real

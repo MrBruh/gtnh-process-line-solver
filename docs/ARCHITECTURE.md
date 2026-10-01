@@ -74,8 +74,9 @@ doc as intent and reconcile.
   Generated data is local and version-namespaced (`data/<version>/`) with committed fixtures as the
   fallback (`dataset/roots.py`); how the extractor resolves a block's sprite is in
   [`dataset-extraction/texture-resolution.md`](dataset-extraction/texture-resolution.md).
-- **placement/** - simulated annealing + LNS ruin-and-recreate over a coarse cell grid;
-  orientation is a placement variable; cost = per-net wirelength (HPWL) + an auto-output reward
+- **placement/** - simulated annealing + LNS ruin-and-recreate over a coarse cell grid, started
+  from a spaced constructive seed (single blocks on a lattice, a line with a multiblock on
+  shelves, routing room between the machines either way); orientation is a placement variable; cost = per-net wirelength (HPWL) + an auto-output reward
   + an **objective-weighted compactness** term (floor footprint and/or bounding-box volume, the
   weights set by the selected objective). There is deliberately **no** per-layer / flat-build
   bias: height is paid only through the volume term. Power nets carry no base wirelength term; a

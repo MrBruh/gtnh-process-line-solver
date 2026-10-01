@@ -8,22 +8,58 @@ never overlapping. Orientation is the machine's first listed legal option. One p
 machine (multi-instance groups are Phase 2 - see ``Machine`` / docs/ROADMAP.md). No search, no
 compaction; that is Phase 2 (SA/LNS) too, docs/ROADMAP.md.
 
-**The annealer's seed** (``lattice=True``) lays a line of single blocks out on a spaced lattice
-instead: rows of ceil(sqrt(n)) blocks with a one-cell channel between neighbours, and a two-cell
-aisle between rows. Seeded as the plain row, a single-block line never leaves it: the region is
-square and wide, so first-fit lays one row along x, the first move off it doubles the floor area
-(which the annealer's starting temperature never accepts), and iron.json's 30 blocks came out as a
-one-block-deep wall with its pipes spilling out in front. Seeded packed solid, the anneal ends in a
-block the router cannot thread. The lattice is the middle: a near-square floor with routing room
-inside it. Each edge of it is held by a whole row or column of blocks, so the floor term barely
-moves it and the seed's spacing is what sets the build's size; rows one cell apart instead of two
-lost two of eight iron seeds to congestion. The fast path keeps the plain row, whose neighbours
-touch and so auto-feed.
+**The annealer's seed** (``lattice=True``) spaces the line out instead. Each machine is offered
+some origins first, then the plain scan as before, so a machine its offer cannot take still finds
+any free slot::
+
+    place(lattice=True):  offers  -->  fit each machine in flow order, offered origins first,
+                                       then the plain scan
+                                  -->  anything left unplaced?  -->  place() plain, from scratch
+
+    single blocks: the lattice              a line with a multiblock: shelves
+    (every machine offered every point)     (each machine offered its own slot)
+
+         x0  x2  x4                              x0      x4      x8
+    z0   a . b . c      . one-cell channel  z0   B B B . c . D D . e     |<- width W ->|
+         . . . . .                               B B B . . . D D
+         . . . . .      two-cell aisle           B B B . . . . .
+    z3   d . e . f                               . . . . . . . . . .     aisle behind the
+         . . . . .                               . . . . . . . . . .     row's deepest machine
+         . . . . .                          z5   F F . g . h . . .
+    z6   g . h
+
+A line of **single blocks** goes on a lattice: rows of ceil(sqrt(n)) blocks with a one-cell
+channel between neighbours and a two-cell aisle between rows, every machine taking the first free
+point. Seeded as the plain row, it never leaves it: the region is square and wide, so first-fit
+lays one row along x, the first move off it doubles the floor area (which the annealer's starting
+temperature never accepts), and iron.json's 30 blocks came out as a one-block-deep wall with its
+pipes spilling out in front. Seeded packed solid, the anneal ends in a block the router cannot
+thread. The lattice is the middle: a near-square floor with routing room inside it. Each edge of
+it is held by a whole row or column of blocks, so the floor term barely moves it and the seed's
+spacing is what sets the build's size; rows one cell apart instead of two lost two of eight iron
+seeds to congestion.
+
+A line **with any multiblock** goes on shelves, the same spacing for boxes of any size: walk the
+machines in flow order, each at its first orientation, a channel after each one, and start a new
+row behind the deepest machine of the last (and an aisle) once the next one would cross the shelf
+width W, about the square root of the floor the spaced boxes need. Each machine is offered only its
+own slot, and one that would cross the region's far edge is offered none. The lattice is the shelf
+of unit blocks, with W set by the count instead, which is what #272 measured. Seeded as the plain
+row, log-bug's 104 machines lay out 168 cells long and one deep, and the annealer never folded
+it: the full search finished a 150x6x6 strip with 7 machines boxed in by their neighbours
+(``feasibility.crowded_machines``), where the shelves start it with 4 crowded instead of 22.
+
+**The spaced seed never costs a line its feasibility.** Offers can strand a machine the plain scan
+would have seated (an early one taking cells a later, bigger one needed), so if anything is left
+unplaced the whole seed is laid again by the plain scan. The solver stops on a seed it cannot
+place, so a line the plain scan places is never refused because it was spaced. The fast path keeps
+the plain row, whose neighbours touch and so auto-feed.
 
 A **power source** additionally must sit with its front face flush on the region boundary: the
 front is its reserved external-feed face (the builder runs power in from outside the structure -
 docs/DOMAIN.md), so first-fit for a source scans for the first slot + orientation that puts the
-front on a region wall. The validator enforces the same rule independently.
+front on a region wall. The validator enforces the same rule independently. In the spaced seed it
+takes an offered slot only where that holds, and the plain boundary scan otherwise.
 
 It returns a :class:`PlacementResult`: either every instance placed, or a partial set plus an
 explicit :class:`~gtnh_solver.ir.Infeasibility` naming the machine that did not fit. It never
@@ -35,7 +71,7 @@ reserved-cell / bad-orientation violations.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 
 from gtnh_solver.ir import (
@@ -48,7 +84,13 @@ from gtnh_solver.ir import (
     Machine,
     Placement,
 )
-from gtnh_solver.ir.geometry import Cell, front_on_boundary, in_region, occupied_cells
+from gtnh_solver.ir.geometry import (
+    Cell,
+    front_on_boundary,
+    in_region,
+    occupied_cells,
+    rotated_footprint,
+)
 from gtnh_solver.ir.nets import net_sources_sinks, port_direction_map
 
 
@@ -68,16 +110,28 @@ class PlacementResult:
 def place(problem: InputIR, *, lattice: bool = False) -> PlacementResult:
     """Deterministically place every machine (one each) into the region.
 
-    ``lattice`` seeds a line of single blocks on the spaced lattice (module docstring); the
-    annealer asks for it, the fast path does not. A line with any multiblock ignores it.
+    ``lattice`` asks for the annealer's spaced seed (module docstring): single blocks on the
+    lattice, a line with a multiblock on shelves, and the plain scan if either strands a machine.
+    The annealer asks for it, the fast path does not.
     """
+    order = _flow_order(problem)
+    if lattice:
+        spaced = _place(problem, order, _seed_offers(problem, order))
+        if spaced.ok:
+            return spaced
+    return _place(problem, order, {})
+
+
+def _place(
+    problem: InputIR, order: Sequence[Machine], offers: Mapping[str, Sequence[CellCoord]]
+) -> PlacementResult:
+    """Fit each machine of ``order`` in turn, its ``offers`` origins first (:func:`_fit`)."""
     region = problem.bounding_region
     occupied: set[Cell] = {(c.x, c.y, c.z) for c in problem.reserved_cells}
     placements: list[Placement] = []
-    window = _lattice_window(problem) if lattice else None
 
-    for machine in _flow_order(problem):
-        fit = _fit(machine, region, occupied, window)
+    for machine in order:
+        fit = _fit(machine, region, occupied, offers.get(machine.id, ()))
         if fit is None:
             return PlacementResult(
                 placements=tuple(placements), infeasibility=_wont_fit(machine, region)
@@ -89,29 +143,68 @@ def place(problem: InputIR, *, lattice: bool = False) -> PlacementResult:
     return PlacementResult(placements=tuple(placements))
 
 
-#: A lattice window's ``(x, z)`` extent in cells, from the region's corner (:func:`_lattice_window`).
-_Window = tuple[int, int]
+#: The gaps of the spaced seed: a one-cell channel between neighbours in a row, a two-cell aisle
+#: between rows (module docstring).
+_CHANNEL = 1
+_AISLE = 2
+#: Origin strides of the single-block lattice along x and z: a unit block plus the gap after it.
+_LATTICE_STRIDE_X = 1 + _CHANNEL
+_LATTICE_STRIDE_Z = 1 + _AISLE
 
-#: Origin strides of the seed lattice along x and z: a one-cell channel between the blocks of a
-#: row, a two-cell aisle between rows (module docstring).
-_LATTICE_STRIDE_X = 2
-_LATTICE_STRIDE_Z = 3
+
+def _seed_offers(problem: InputIR, order: Sequence[Machine]) -> dict[str, tuple[CellCoord, ...]]:
+    """The origins each machine is offered first in the spaced seed: every lattice point for a
+    line of single blocks, or its own shelf slot for a line with a multiblock."""
+    if all(m.footprint.volume == 1 for m in order):
+        points = _lattice_points(problem.bounding_region, len(order))
+        return dict.fromkeys((m.id for m in order), points)
+    return _shelf_slots(problem.bounding_region, order)
 
 
-def _lattice_window(problem: InputIR) -> _Window | None:
-    """The corner window a single-block line is seeded in, or None to scan plainly.
+def _lattice_points(region: CellBox, count: int) -> tuple[CellCoord, ...]:
+    """The floor points a line of ``count`` single blocks is seeded on, row by row.
 
-    Rows of ceil(sqrt(n)) blocks, as many rows as that takes. A line with any multiblock keeps the
-    plain scan: its seed is a strip the annealer already folds (#254).
+    Rows of ceil(sqrt(n)) blocks, as many rows as that takes, clipped to the region.
     """
-    machines = problem.machines
-    if not machines or any(
-        (m.footprint.sx, m.footprint.sy, m.footprint.sz) != (1, 1, 1) for m in machines
-    ):
-        return None
-    per_row = math.isqrt(len(machines) - 1) + 1
-    rows = -(-len(machines) // per_row)  # ceiling division
-    return (per_row - 1) * _LATTICE_STRIDE_X + 1, (rows - 1) * _LATTICE_STRIDE_Z + 1
+    if count == 0:
+        return ()
+    per_row = math.isqrt(count - 1) + 1
+    rows = -(-count // per_row)  # ceiling division
+    wx = min((per_row - 1) * _LATTICE_STRIDE_X + 1, region.sx)
+    wz = min((rows - 1) * _LATTICE_STRIDE_Z + 1, region.sz)
+    return tuple(
+        CellCoord(x=x, y=0, z=z)
+        for z in range(0, wz, _LATTICE_STRIDE_Z)
+        for x in range(0, wx, _LATTICE_STRIDE_X)
+    )
+
+
+def _shelf_slots(region: CellBox, order: Sequence[Machine]) -> dict[str, tuple[CellCoord, ...]]:
+    """Each machine's shelf slot, walking ``order`` at each machine's first orientation.
+
+    A machine that would cross the region's far edge gets none, and is seated by the plain scan.
+    """
+    boxes = [(m.id, rotated_footprint(m.footprint, m.orientation_options[0])) for m in order]
+    width = _shelf_width(region, [box for _, box in boxes])
+    slots: dict[str, tuple[CellCoord, ...]] = {}
+    x = z = depth = 0  # depth: the deepest machine of the current row
+    for machine_id, box in boxes:
+        if x > 0 and x + box.sx > width:
+            x, z, depth = 0, z + depth + _AISLE, 0
+        if z + box.sz > region.sz:
+            continue
+        slots[machine_id] = (CellCoord(x=x, y=0, z=z),)
+        x += box.sx + _CHANNEL
+        depth = max(depth, box.sz)
+    return slots
+
+
+def _shelf_width(region: CellBox, boxes: Sequence[CellBox]) -> int:
+    """How wide a row of shelves runs: the side of a square holding every box with its channel
+    and aisle, at least the widest box, and at most the region."""
+    spaced = sum((b.sx + _CHANNEL) * (b.sz + _AISLE) for b in boxes)
+    widest = max(b.sx for b in boxes)
+    return min(max(widest, math.ceil(math.sqrt(spaced))), region.sx)
 
 
 def _wont_fit(machine: Machine, region: CellBox) -> Infeasibility:
@@ -145,7 +238,7 @@ def _wont_fit(machine: Machine, region: CellBox) -> Infeasibility:
 
 
 def _fit(
-    machine: Machine, region: CellBox, occupied: set[Cell], window: _Window | None = None
+    machine: Machine, region: CellBox, occupied: set[Cell], first: Sequence[CellCoord] = ()
 ) -> tuple[CellCoord, Facing] | None:
     """The first valid (origin, orientation) for ``machine``, or ``None`` if none exists.
 
@@ -153,17 +246,17 @@ def _fit(
     faces outside the build (``Machine.fronts_outside``: a power source's reserved external-feed
     face, a Crop Manager's field) must also put that front flush on the region boundary, so it
     takes the first free origin at which *some* legal orientation does that.
-    ``window`` puts the seed lattice's points first (:func:`_scan_origins`).
+    ``first`` are origins to try before the plain scan (:func:`_scan_origins`).
     """
     if not machine.fronts_outside:
         orientation = machine.orientation_options[0]
-        origin = _first_fit(machine, region, occupied, orientation, window)
+        origin = _first_fit(machine, region, occupied, orientation, first)
         return None if origin is None else (origin, orientation)
     # Origin-major, exactly as before. Whether an origin is free now depends on the orientation
     # (a turned non-cubic box covers different cells), so the fit test moves inside the orientation
     # loop rather than filtering origins ahead of it. For a cubic machine - every power source
     # today - the two orders pick the same slot.
-    for origin in _scan_origins(region, window):
+    for origin in _scan_origins(region, first):
         for orientation in machine.orientation_options:
             if _fits(machine, origin, orientation, region, occupied) and front_on_boundary(
                 origin, machine.footprint, orientation, region
@@ -177,33 +270,26 @@ def _first_fit(
     region: CellBox,
     occupied: set[Cell],
     orientation: Facing,
-    window: _Window | None = None,
+    first: Sequence[CellCoord] = (),
 ) -> CellCoord | None:
     """The first in-bounds, non-overlapping origin for ``machine`` at ``orientation``."""
-    return next(_free_origins(machine, region, occupied, orientation, window), None)
+    return next(_free_origins(machine, region, occupied, orientation, first), None)
 
 
-def _scan_origins(region: CellBox, window: _Window | None = None) -> Iterator[CellCoord]:
-    """Every origin in the region, in first-fit scan order.
+def _scan_origins(region: CellBox, first: Sequence[CellCoord] = ()) -> Iterator[CellCoord]:
+    """Every origin in the region, in first-fit scan order, after the ``first`` ones offered.
 
     Floor layer first (``y`` outer), then rows (``z``), then columns (``x``), so layouts fill the
-    ground before stacking - the buildable-compact bias, crudely. With a lattice ``window``, the
-    floor's lattice points inside it come first, in the same row order, then every other origin as
-    before, so a machine the lattice cannot take still finds any free slot.
+    ground before stacking - the buildable-compact bias, crudely. The offered origins come ahead of
+    that scan, which then skips them, so a machine its offers cannot take still finds any free slot.
     """
-    wx = wz = 0
-    if window is not None and region.sy > 0:
-        wx, wz = min(window[0], region.sx), min(window[1], region.sz)
-        for z in range(0, wz, _LATTICE_STRIDE_Z):
-            for x in range(0, wx, _LATTICE_STRIDE_X):
-                yield CellCoord(x=x, y=0, z=z)
+    yield from first
+    offered = {(c.x, c.y, c.z) for c in first}
     for y in range(region.sy):
         for z in range(region.sz):
             for x in range(region.sx):
-                on_lattice = not (x % _LATTICE_STRIDE_X or z % _LATTICE_STRIDE_Z)
-                if y == 0 and x < wx and z < wz and on_lattice:
-                    continue  # a lattice point, already offered
-                yield CellCoord(x=x, y=y, z=z)
+                if (x, y, z) not in offered:
+                    yield CellCoord(x=x, y=y, z=z)
 
 
 def _fits(
@@ -223,10 +309,10 @@ def _free_origins(
     region: CellBox,
     occupied: set[Cell],
     orientation: Facing,
-    window: _Window | None = None,
+    first: Sequence[CellCoord] = (),
 ) -> Iterator[CellCoord]:
     """Every in-bounds, non-overlapping origin for ``machine`` at ``orientation``, in scan order."""
-    for origin in _scan_origins(region, window):
+    for origin in _scan_origins(region, first):
         if _fits(machine, origin, orientation, region, occupied):
             yield origin
 
