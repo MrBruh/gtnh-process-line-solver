@@ -212,17 +212,50 @@ def test_an_outside_front_without_a_boundary_slot_is_explicitly_infeasible() -> 
     assert "Basic Crop Manager 'cm'" in result.infeasibility.detail
 
 
+def test_the_lattice_seed_spaces_a_single_block_line() -> None:
+    # The annealer's seed: rows of ceil(sqrt(7)) = 3 blocks, every other cell along x and every
+    # third along z, all on the floor. The fast path's plain scan still packs them into a row.
+    problem = _problem([_machine(f"m{i}") for i in range(7)], region=CellBox(sx=8, sy=2, sz=8))
+    seeded = place(problem, lattice=True)
+    assert seeded.ok
+    assert [(p.cell.x, p.cell.y, p.cell.z) for p in seeded.placements] == [
+        (x, 0, z) for z in (0, 3, 6) for x in (0, 2, 4)
+    ][:7]
+    assert {p.cell.z for p in place(problem).placements} == {0}
+
+
+def test_the_lattice_seed_spills_past_a_window_the_region_clips() -> None:
+    # Nine blocks want a 5x7 window; a 4x4 region clips it to four lattice points, and the rest take
+    # the first free cells of the plain scan, never a cell twice.
+    problem = _problem([_machine(f"m{i}") for i in range(9)], region=CellBox(sx=4, sy=1, sz=4))
+    seeded = place(problem, lattice=True)
+    assert seeded.ok
+    cells = [(p.cell.x, p.cell.z) for p in seeded.placements]
+    assert cells[:4] == [(0, 0), (2, 0), (0, 3), (2, 3)]
+    assert cells[4:] == [(1, 0), (3, 0), (0, 1), (1, 1), (2, 1)]
+    assert validate(problem, _as_layout(seeded.placements)).ok
+
+
+def test_the_lattice_seed_leaves_a_line_with_a_multiblock_alone() -> None:
+    problem = _problem(
+        [_machine("big", footprint=CellBox(sx=2, sy=1, sz=2)), _machine("a"), _machine("b")],
+        region=CellBox(sx=6, sy=1, sz=6),
+    )
+    assert place(problem, lattice=True) == place(problem)
+
+
 @given(
     sx=st.integers(min_value=1, max_value=5),
     sy=st.integers(min_value=1, max_value=3),
     sz=st.integers(min_value=1, max_value=5),
     n=st.integers(min_value=0, max_value=12),
+    lattice=st.booleans(),
 )
 def test_place_yields_valid_layout_or_explicit_infeasibility(
-    sx: int, sy: int, sz: int, n: int
+    sx: int, sy: int, sz: int, n: int, lattice: bool
 ) -> None:
     problem = _problem([_machine(f"m{i}") for i in range(n)], region=CellBox(sx=sx, sy=sy, sz=sz))
-    result = place(problem)
+    result = place(problem, lattice=lattice)
 
     # With 1x1x1 machines and no reserved cells, first-fit fills one cell each: feasible iff
     # the count fits the region's cell capacity.

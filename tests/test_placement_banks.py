@@ -90,7 +90,7 @@ def test_solve_returns_the_column_build_on_parallel_sand(psand: InputIR) -> None
     layout = solve(psand, seed=0)
     assert layout.status is LayoutStatus.VALID, layout.infeasibility
     assert (layout.metrics.footprint, layout.metrics.layers) == (12, 3)
-    assert structure_quality(psand, layout.placements, layout.routes, "footprint") == (12, 15, 36)
+    assert structure_quality(psand, layout.placements, layout.routes, "footprint") == (27, 12, 36)
 
 
 def test_a_column_layout_that_does_not_come_out_valid_leaves_the_line_to_the_grid(

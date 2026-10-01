@@ -36,8 +36,9 @@ cable room, and the recovery never rescued an attempt after that (#164), so it i
 where layout *quality* is judged: cheap placement-time proxies cannot see dock faces or shared cable
 taps, so the real per-segment cable cost is only knowable on a routed layout. The attempts form a
 grid - SA weight modes x seeds - where every attempt is fully routed + validated and the best VALID
-layout by the requested objective's quality ranking (compactness metric, then real route cells -
-pipes and cable - then the other metric) is kept, not first-valid-wins. The footprint weighting
+layout by the requested objective's quality ranking (compactness metric plus real route cells -
+pipes and cable - then the metric alone, then the other metric) is kept, not first-valid-wins. The
+footprint weighting
 always participates as the explorer: it generates the stacked, cable-dense candidates whose routed
 structure often wins the volume/balanced rankings too.
 

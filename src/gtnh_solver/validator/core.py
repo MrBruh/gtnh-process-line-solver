@@ -861,10 +861,10 @@ def _check_terminal_faces(problem: InputIR, layout: LayoutResult, out: list[Viol
     layout promises two connections where the block has one. The pack does not rescue the input and
     output pair either. A basic machine ejects through one output side, and whether it also accepts
     input there is ``mAllowInputFromOutputSide``, whose default differs by pack: off on 2.8.4
-    (``MTEBasicMachine``, GT5U 5.09.51.482 line 118) and on for valid recipe inputs on 2.9 (5.09.54.20
-    line 123). Off, the input side cannot work at all; on, the one pipe block on that face would
-    carry the machine's own output back into it alongside its feed, which is still one connection
-    doing the work of two.
+    (``MTEBasicMachine``, GT5U 5.09.51.482 line 118) and on on 2.9 (5.09.54.20 line 123), where it
+    takes any item while the machine's input filter is off, as it is by default. Off, the input side
+    cannot work at all; on, the one pipe block on that face would carry the machine's own output
+    back into it alongside its feed, which is still one connection doing the work of two.
 
     Keyed on ``(machine, dock cell)``, the same unit ``router._grid.claim_key`` uses for such a
     machine, but re-derived here rather than imported (``docs/ARCHITECTURE.md`` #4: shared rule
