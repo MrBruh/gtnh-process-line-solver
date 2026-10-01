@@ -29,6 +29,18 @@ Run it when benchmarking, or when a change seems to have cost layout quality it 
 placed so that a line runs as it does in game, the search has less room, and a layout can get a
 little bigger. Nothing in CI runs this tier.
 
+A tier of tests answers "is it still good enough"; whether a change made layouts **better** takes
+many seeds of real lines, paired. `tools/bench_layouts.py` runs `gtnh-solve` on plans x spaced
+seeds under any checkout's code, records each layout's floor, route cells and the solver's own
+ranking key, and `--compare A B` pairs two such runs seed by seed into wins, ties, losses and VALID
+flips. That table is the go/no-go for a placer, router or solver change:
+
+```bash
+python tools/bench_layouts.py examples/gtnh-parallel-sand.json --root ../main --out bench/main
+python tools/bench_layouts.py examples/gtnh-parallel-sand.json --out bench/branch
+python tools/bench_layouts.py --compare bench/main bench/branch
+```
+
 Two kinds of test sit between the tiers, and the rule for each:
 
 - **A test of the multi-start itself** (the ranking of attempts, the process pool, determinism
