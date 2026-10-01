@@ -7,6 +7,26 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **A producer standing against the consumer of a net it shares with others auto-outputs into it
+  (#270).** Auto-output used to cover only a net with one producer and one consumer, so three
+  Forge Hammers feeding one Super Chest were always piped, even with a hammer touching the chest.
+  Each producer ejects on its own, so the router now covers such a net producer by producer: one
+  standing against the consumer ejects into it and the rest share the pipe, which then docks only
+  them and the consumer; once every producer is covered there is no pipe. The consumer must be a
+  single block (a multiblock would need two input hatches for one port), and a single-block producer
+  must have no other output of the kind, since its output face ejects every slot of it. The
+  validator now checks each producer is reached once, by auto-output or as a terminal of the route
+  (`net_double_connected` and `missing_connection` per producer), which also refuses a net of
+  several producers that only one auto-connection covered, as it used to pass. The placer is not
+  rewarded for arranging it: measured on ev-nitrobenzene over 12 seeds, rewarding it came out 6
+  better and 6 worse (median floor plus route cells 847.5 to 858), while leaving it to the router
+  is 3 better, 7 the same, 2 worse (847.5 to 849.5), all 12 VALID either way. Lines with no such net
+  (iron, sand, nitrobenzene, parallel-sand) lay out exactly as before.
+
+  **Breaking for a consumer of the layout JSON:** `LAYOUT_RESULT_VERSION` is now 4. No field
+  changed, but a net may now have both a route and auto-connections, and the route's terminals
+  leave out the producers that auto-output, so a v3 consumer reading a net as one or the other can
+  drop half of it. A v3 layout is refused on read; re-solve its plan.
 - **`gtnh-solve --time-budget SECONDS` keeps searching while there is time (decision 6).** More
   attempts is the one lever that has always improved layouts, so a solve given a budget runs the
   usual grid of attempts and then more rounds of it, each with fresh seeds, while the time spent

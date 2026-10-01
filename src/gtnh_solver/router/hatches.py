@@ -183,24 +183,25 @@ def _routed_hatch(
     )
 
 
-def _auto_ports(problem: InputIR) -> dict[str, tuple[str, str]]:
-    """Net id -> ``(source port id, target port id)``, for the nets an auto-output can cover.
+def _auto_ports(problem: InputIR) -> dict[tuple[str, str], str]:
+    """``(net id, machine id)`` -> the port that machine attaches to the net through.
 
     ``AutoConnection`` names the two machines and faces but not the ports, since a free connection
     needs no terminal. A hatch does need one: the block that ejects is an *output* bus on the
     source and the block that receives is an *input* bus on the target, and which port each is
-    decides the kind. Only 1-source-1-sink nets are ever auto-assigned, so the pair is unambiguous.
+    decides the kind. Keyed per machine rather than per net, because a net with several producers
+    is auto-connected one producer at a time (#270), so its endpoints are not one pair.
     """
-    ports: dict[str, tuple[str, str]] = {}
+    ports: dict[tuple[str, str], str] = {}
     for net in problem.nets:
-        if len(net.endpoints) == 2:
-            ports[net.id] = (net.endpoints[0].port_id, net.endpoints[1].port_id)
+        for endpoint in net.endpoints:
+            ports.setdefault((net.id, endpoint.machine_id), endpoint.port_id)
     return ports
 
 
 def _auto_hatches(
     auto: AutoConnection,
-    port_of_auto: Mapping[str, tuple[str, str]],
+    port_of_auto: Mapping[tuple[str, str], str],
     machines: Mapping[str, Machine],
     by_machine: Mapping[str, Placement],
     claimed: dict[str, set[Cell]],
@@ -220,9 +221,11 @@ def _auto_hatches(
     at the source in ``solver._assemble``, so this should now be unreachable; it stays as a loud
     floor rather than a silent one, because the failure it guards is invisible in the artifact.
     """
-    ports = port_of_auto.get(auto.net_id)
-    if ports is None:
+    source_port = port_of_auto.get((auto.net_id, auto.source_machine_id))
+    target_port = port_of_auto.get((auto.net_id, auto.target_machine_id))
+    if source_port is None or target_port is None:
         return [], None
+    ports = (source_port, target_port)
     out: list[PlacedHatch] = []
     pair = _auto_pair(auto, ports, machines, by_machine, claimed)
     if pair is None:

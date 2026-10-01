@@ -15,6 +15,26 @@ Auto-output is preferred because it is what a player actually builds for a simpl
 adjacent machines feeding each other needs zero pipes. Pipes are only for what is left -
 non-adjacent endpoints, fan-out, or a machine with no free face for one.
 
+**A net with several producers and one consumer is covered producer by producer** (#270). Each
+producer ejects on its own, so one standing against the consumer can auto-output into it while the
+rest still share a pipe: the net is then routed over the producers left plus the consumer, and only
+needs no pipe at all once every producer is covered::
+
+    P1 -+                     P1 -+
+    P2 -+--pipe--> C   ==>    P2 -+--pipe--> C <== P3   (P3 stands against C and ejects into it)
+    P3 -+
+
+Fan-out has no such split: one producer's auto-output reaches one block, so a net with several
+consumers always pipes. Two more limits keep the split honest (:func:`auto_candidates`):
+
+- **the consumer is a single block.** On a multiblock each connection is a hatch, so a consumer
+  taking one producer free and the rest by pipe would need two input hatches for one port, one with
+  no terminal to agree with. A consumer here is in practice a Super Chest or Super Tank anyway;
+- **a single-block producer has no other output of the net's commodity.** Its auto-output face
+  ejects every output slot of that kind, so a second output would ride along into the consumer (an
+  empty Super Chest locks to whichever item arrives first). A multiblock ejects per hatch, so it is
+  exempt.
+
 **Two faces touching is not enough for a multiblock.** A multiblock ejects through an output
 hatch's own front face, and receives through an input bus's, so a free connection needs a
 *touching pair of casing cells* that can host those two hatches - not merely two bodies in
@@ -54,7 +74,10 @@ from gtnh_solver.ir import (
     Commodity,
     Facing,
     InputIR,
+    IODirection,
     Machine,
+    MachineFaceRef,
+    Net,
     Placement,
 )
 from gtnh_solver.ir.geometry import (
@@ -75,6 +98,10 @@ from . import hatches
 class AutoAssignment:
     """What auto-output covered, and the casing cells it spent doing so.
 
+    ``covered`` are the nets auto-output satisfies whole, which need no pipe. ``fed`` are the
+    producers it covers on the nets it does not (#270): net id -> those endpoints, which the net's
+    pipe then leaves out (:meth:`piped`).
+
     ``claimed`` is per machine and is what keeps a routed hatch off a cell an auto-output hatch is
     already standing on: the two are the same pool of casing blocks, and nothing else would notice,
     since a free connection lays no route cells at all.
@@ -82,15 +109,105 @@ class AutoAssignment:
 
     connections: tuple[AutoConnection, ...] = ()
     covered: frozenset[str] = frozenset()
-    # A factory, not a plain default: 3.11 rejects an unhashable default at class creation (#255).
+    # Factories, not plain defaults: 3.11 rejects an unhashable default at class creation (#255).
+    fed: Mapping[str, frozenset[MachineFaceRef]] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
     claimed: Mapping[str, frozenset[Cell]] = field(default_factory=lambda: MappingProxyType({}))
+
+    def piped(self, net: Net) -> Net:
+        """``net`` as its pipe sees it: without the producers that auto-output into its consumer.
+
+        The net itself when auto-output covers none of it. Its id is kept, so the route still
+        answers for the net; only its terminals are fewer.
+        """
+        fed = self.fed.get(net.id)
+        if not fed:
+            return net
+        return net.model_copy(update={"endpoints": [e for e in net.endpoints if e not in fed]})
+
+
+@dataclass(frozen=True, slots=True)
+class AutoCandidate:
+    """One producer of a net that may auto-output into the net's one consumer.
+
+    ``shared`` says the consumer also takes the net's other producers (#270), so it still needs a
+    pipe docked on it unless every one of them is covered too.
+    """
+
+    net_id: str
+    source: MachineFaceRef
+    sink: MachineFaceRef
+    shared: bool
+
+
+def auto_candidates(problem: InputIR) -> list[AutoCandidate]:
+    """Every producer that auto-output may cover, in net order and then endpoint order.
+
+    The rule on *which nets and producers* qualify, read by the router and by the placement reward
+    so they cannot drift apart (#107): a 1->1 net, or a producer of a net with several producers and
+    one single-block consumer that has no other output of the net's commodity (module docstring).
+    The reward takes only the 1->1 ones (``shared`` False; ``placement.search`` says why). Whether
+    the geometry then allows it is :func:`_auto_faces`'s question.
+    """
+    machines = {m.id: m for m in problem.machines}
+    port_dir = port_direction_map(problem)
+    return [
+        candidate
+        for net in problem.nets
+        for candidate in _net_candidates(problem, net, machines, port_dir)
+    ]
+
+
+def _net_candidates(
+    problem: InputIR,
+    net: Net,
+    machines: Mapping[str, Machine],
+    port_dir: dict[tuple[str, str], IODirection],
+) -> list[AutoCandidate]:
+    """:func:`auto_candidates` for one net."""
+    if net.commodity is Commodity.POWER or problem.me_toggles.toggled(net.commodity):
+        return []
+    sources, sinks = net_sources_sinks(net, port_dir)
+    if len(sinks) != 1 or not sources:
+        return []  # fan-out routes as a pipe: one producer's auto-output reaches one block
+    (sink,) = sinks
+    if len(sources) == 1:
+        return [AutoCandidate(net.id, sources[0], sink, shared=False)]
+    sink_m = machines.get(sink.machine_id)
+    if sink_m is None or sink_m.hatch_slots:
+        return []  # a multiblock consumer would need two hatches for one port
+    return [
+        AutoCandidate(net.id, source, sink, shared=True)
+        for source in sources
+        if _ejects_alone(machines.get(source.machine_id), net.commodity)
+    ]
+
+
+def _ejects_alone(machine: Machine | None, commodity: Commodity) -> bool:
+    """Whether ``machine`` auto-outputting ``commodity`` would eject that one output and nothing else.
+
+    A multiblock ejects per output hatch, so always. A single block ejects every output slot of
+    the kind through its one auto-output face, so only when it has a single output of it.
+    """
+    if machine is None:
+        return False
+    if machine.hatch_slots:
+        return True
+    outputs = [
+        port
+        for port in machine.faces.ports
+        if port.direction is IODirection.OUTPUT and port.commodity is commodity
+    ]
+    return len(outputs) == 1
 
 
 def assign_auto_outputs(problem: InputIR, placements: Sequence[Placement]) -> AutoAssignment:
-    """Connect each simple 1-source-1-sink net by auto-output where the geometry allows one.
+    """Connect each :func:`auto_candidates` producer by auto-output where the geometry allows one.
 
     "Allows one" means a touching pair of casing cells that can host the two hatches, not just two
-    machines in contact - see the module docstring.
+    machines in contact - see the module docstring. A net is covered once every producer on it is;
+    one with only some covered keeps a pipe for the rest (:attr:`AutoAssignment.fed`).
     """
     machines = {m.id: m for m in problem.machines}
     pose_by_id = {mid: pose_of(p) for mid, p in placement_index(placements).items()}
@@ -100,50 +217,67 @@ def assign_auto_outputs(problem: InputIR, placements: Sequence[Placement]) -> Au
     claimed: dict[str, set[Cell]] = {}  # multiblock sources/targets: the casing cells taken
     autos: list[AutoConnection] = []
     covered: set[str] = set()
+    fed: dict[str, frozenset[MachineFaceRef]] = {}
     for net in problem.nets:
-        if net.commodity is Commodity.POWER or problem.me_toggles.toggled(net.commodity):
+        candidates = _net_candidates(problem, net, machines, port_dir)
+        if not candidates:
             continue
-        sources, sinks = net_sources_sinks(net, port_dir)
-        if len(sources) != 1 or len(sinks) != 1:
-            continue  # crude: only simple 1->1 nets auto-output; fan-out routes as pipes
-        source, sink = sources[0], sinks[0]
-        source_m, sink_m = machines.get(source.machine_id), machines.get(sink.machine_id)
-        if source_m is None or sink_m is None:
-            continue
-        if source.machine_id in spent and not source_m.hatch_slots:
-            continue  # a single block has ONE auto-output face; the rest of its nets pipe
-
-        found = _auto_faces(
-            pose_by_id.get(source.machine_id),
-            source_m,
-            source.port_id,
-            pose_by_id.get(sink.machine_id),
-            sink_m,
-            sink.port_id,
-            claimed,
-        )
-        if found is None:
-            continue
-        source_face, target_face, source_cell, target_cell = found
-        spent.add(source.machine_id)
-        covered.add(net.id)
-        if source_m.hatch_slots:
-            claimed.setdefault(source.machine_id, set()).add(source_cell)
-        if sink_m.hatch_slots:
-            claimed.setdefault(sink.machine_id, set()).add(target_cell)
-        autos.append(
-            AutoConnection(
-                net_id=net.id,
-                source_machine_id=source.machine_id,
-                source_face=source_face,
-                target_machine_id=sink.machine_id,
-                target_face=target_face,
-            )
-        )
+        sources, _ = net_sources_sinks(net, port_dir)
+        ejecting: list[MachineFaceRef] = []
+        for candidate in candidates:
+            connection = _connect(candidate, machines, pose_by_id, spent, claimed)
+            if connection is not None:
+                autos.append(connection)
+                ejecting.append(candidate.source)
+        if len(ejecting) == len(sources):
+            covered.add(net.id)
+        elif ejecting:
+            fed[net.id] = frozenset(ejecting)
     return AutoAssignment(
         connections=tuple(autos),
         covered=frozenset(covered),
+        fed=MappingProxyType(fed),
         claimed=MappingProxyType({k: frozenset(v) for k, v in claimed.items()}),
+    )
+
+
+def _connect(
+    candidate: AutoCandidate,
+    machines: Mapping[str, Machine],
+    pose_by_id: Mapping[str, Pose],
+    spent: set[str],
+    claimed: dict[str, set[Cell]],
+) -> AutoConnection | None:
+    """The auto-connection ``candidate`` makes on these placements, spending what it uses; or None."""
+    source, sink = candidate.source, candidate.sink
+    source_m, sink_m = machines.get(source.machine_id), machines.get(sink.machine_id)
+    if source_m is None or sink_m is None:
+        return None
+    if source.machine_id in spent and not source_m.hatch_slots:
+        return None  # a single block has ONE auto-output face; the rest of its nets pipe
+    found = _auto_faces(
+        pose_by_id.get(source.machine_id),
+        source_m,
+        source.port_id,
+        pose_by_id.get(sink.machine_id),
+        sink_m,
+        sink.port_id,
+        claimed,
+    )
+    if found is None:
+        return None
+    source_face, target_face, source_cell, target_cell = found
+    spent.add(source.machine_id)
+    if source_m.hatch_slots:
+        claimed.setdefault(source.machine_id, set()).add(source_cell)
+    if sink_m.hatch_slots:
+        claimed.setdefault(sink.machine_id, set()).add(target_cell)
+    return AutoConnection(
+        net_id=candidate.net_id,
+        source_machine_id=source.machine_id,
+        source_face=source_face,
+        target_machine_id=sink.machine_id,
+        target_face=target_face,
     )
 
 

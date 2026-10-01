@@ -2,8 +2,8 @@
 
 Given placed machines, connect every non-ME net. The router is the geometry authority for *how* a
 net connects: it first decides which nets GT's free **auto-output** connection covers
-(``auto.assign_auto_outputs`` - adjacent 1-source-1-sink nets, one auto-output per machine) and
-routes only the rest.
+(``auto.assign_auto_outputs`` - adjacent 1-source-1-sink nets, and producer by producer on a net
+with one consumer; one auto-output per machine) and routes only the rest.
 
 Every routed net, **power included**, takes part in one **negotiated congestion** (the FPGA
 PathFinder scheme, GitHub #7), and each net is re-routed every round as a group Steiner tree whose
@@ -25,7 +25,8 @@ the maintainer's build.
 
     nets
       |  [1] auto-assign  router.auto: adjacent 1-source-1-sink nets take GT's free auto-output
-      |                   (one per machine); only the uncovered nets are routed.
+      |                   (one per machine), and so does each producer standing against the one
+      |                   consumer of a many-into-one net; only what is left is routed.
       v
       |  [2] round 1      every net (item, fluid and power) routes alone: the cheapest tree
       |                   docking all its endpoints, no other net priced in
@@ -168,11 +169,11 @@ def route(
     overlapping layout.
     """
     assignment = assign_auto_outputs(problem, placements)
+    # A net auto-output covers whole needs no pipe; one it covers in part is piped over the rest.
     nets = [
-        net
+        assignment.piped(net)
         for net in problem.nets
-        if net.id not in assignment.covered  # satisfied by auto-output, no pipe needed
-        and not problem.me_toggles.toggled(net.commodity)
+        if net.id not in assignment.covered and not problem.me_toggles.toggled(net.commodity)
     ]
     # A free connection still costs its two machines a casing cell each (an output hatch ejects
     # through its own front face), so no terminal may dock onto one of those blocks.
