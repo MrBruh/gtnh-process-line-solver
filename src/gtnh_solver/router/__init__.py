@@ -3,7 +3,8 @@
 The item/fluid router is :func:`route` (in ``core``). It owns the **auto-output vs pipe**
 decision: from the final placements + orientations it first assigns GT's free auto-output
 connections (:func:`assign_auto_outputs`, in ``auto`` - adjacent 1-source-1-sink item/fluid nets,
-one auto-output per machine, never power/ME) and routes only the nets left uncovered. Those nets,
+and each producer standing against the one consumer of a net it shares with others; one
+auto-output per machine, never power/ME) and routes only what is left uncovered. Those nets,
 **power included**, are routed together by negotiated congestion (PathFinder, GitHub #7): each net
 is a group Steiner tree whose dock cells are chosen by the same search that lays its path
 (``steiner``), contested cells are priced up round by round, and no cell ends up carrying two nets

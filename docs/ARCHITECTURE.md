@@ -90,7 +90,9 @@ doc as intent and reconcile.
 - **router/** - free-form routing on the **full-3D** cell grid (all six faces are neighbours);
   single-channel capacity; ME-toggle skipping; the shared-amperage power primitive. It owns the
   **auto-output vs pipe** decision (`router/auto.py`, `assign_auto_outputs`): adjacent
-  1-source-1-sink item/fluid nets take GT's free auto-output, only the rest are routed. Those
+  1-source-1-sink item/fluid nets take GT's free auto-output, and so does each producer standing
+  against the single-block consumer of a net it shares with other producers (#270), whose pipe
+  then serves only the rest; everything else is routed. Those
   nets, **power included**, are routed by one **negotiated congestion** (PathFinder-style,
   `router/core.py`) in which **docks are part of the negotiation** (#164): each net is re-routed
   every round as a group Steiner tree whose dock cells the same search chooses

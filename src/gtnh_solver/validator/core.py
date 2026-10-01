@@ -9,18 +9,21 @@ machines is caught (``report.ok is False``).
 
 What is checked now (needs only the IR):
   completeness/referential - every machine placed the right number of times with a legal
-  orientation; every physically-routed net routed exactly once; ME-toggled commodities not
-  routed; route commodity matches its net; a routed net has a consumer (>=1 INPUT endpoint,
-  any number of same-commodity producers) and one commodity across its endpoints.
+  orientation; every physically-routed net routed exactly once; every producer of a net reaches
+  it once, by auto-output into its one consumer or as a terminal of its route (a net with several
+  producers may mix the two, #270); ME-toggled commodities not routed; route commodity matches its
+  net; a routed net has a consumer (>=1 INPUT endpoint, any number of same-commodity producers)
+  and one commodity across its endpoints.
   geometry - machines in-bounds, non-overlapping, off reserved cells; routes in-bounds,
   contiguous (or, for a pipe with no segments, one block that every terminal shares), every
   segment a unit (+/-1) hop, never running through a machine body or a
   reserved cell, and no two nets' routes sharing a cell (crude single-channel capacity); pinned
   I/O actually sits on its net's route.
-  terminals - every net endpoint has a terminal, and every terminal pins one of the net's own
-  endpoints exactly once (no foreign or duplicate terminals), on a face its port may use (any but
-  the front, or exactly the faces a pinned port names) adjacent to its machine, with that terminal
-  cell on the route (the geometric + structural halves of required-I/O-face reachability). Terminals of different machines may share a cell (one pipe
+  terminals - every net endpoint has a terminal, but a producer that auto-outputs, and every
+  terminal pins one of the net's own endpoints exactly once (no foreign or duplicate terminals),
+  on a face its port may use (any but the front, or exactly the faces a pinned port names)
+  adjacent to its machine, with that terminal cell on the route (the geometric + structural halves
+  of required-I/O-face reachability). Terminals of different machines may share a cell (one pipe
   block wired to several neighbours), but two connections of one machine may not: on a multiblock
   they would need one casing cell, on a single block one face.
   hatches - a multiblock does no I/O of its own, so every connection is a block: each recorded
@@ -356,6 +359,8 @@ def _item_streams(
 
     Terminals that are foreign, duplicated or off the route are left out; ``_check_terminals``
     reports each of those. A net with no producer or no consumer on the route moves nothing here.
+    A net whose other producers auto-output into its consumer (#270) is counted as if the
+    consumer's whole intake came down the pipe, which can only over-state what the pipe carries.
     """
     adjacency = _route_adjacency(route)
     endpoints = {(e.machine_id, e.port_id) for e in net.endpoints}
@@ -688,27 +693,106 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
                     )
                 )
 
-    auto_ids = {ac.net_id for ac in layout.auto_connections}
+    fed = _fed_producers(problem, layout)
+    on_route: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    for r in layout.routes:
+        on_route[r.net_id].update((t.machine_id, t.port_id) for t in r.terminals)
     for net in problem.nets:
         if problem.me_toggles.toggled(net.commodity):
             continue
-        routed_here, auto_here = net.id in routed, net.id in auto_ids
-        if routed_here and auto_here:
-            out.append(
-                Violation(
-                    ViolationCode.NET_DOUBLE_CONNECTED,
-                    f"net {net.id!r} is both routed and auto-connected",
-                )
-            )
-        elif not routed_here and not auto_here:
+        routed_here = net.id in routed
+        _check_net_connected(
+            net, routed_here, fed.get(net.id, frozenset()), on_route[net.id], port_dir, out
+        )
+        if routed_here:
+            _check_routed_net_endpoints(net, port_dir, port_commodity, out)
+
+
+def _fed_producers(problem: InputIR, layout: LayoutResult) -> dict[str, frozenset[tuple[str, str]]]:
+    """Net id -> the producer endpoints ``(machine, port)`` an auto-connection ejects from.
+
+    Only a real producer of the net counts: an auto-connection from any other machine connects
+    nothing, and ``AUTO_OUTPUT_WRONG_ENDPOINTS`` reports it.
+    """
+    port_dir = port_direction_map(problem)
+    nets = {n.id: n for n in problem.nets}
+    fed: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    for ac in layout.auto_connections:
+        net = nets.get(ac.net_id)
+        if net is None:
+            continue
+        sources, _ = net_sources_sinks(net, port_dir)
+        fed[net.id].update(
+            (s.machine_id, s.port_id) for s in sources if s.machine_id == ac.source_machine_id
+        )
+    return {net_id: frozenset(keys) for net_id, keys in fed.items()}
+
+
+def _check_net_connected(
+    net: Net,
+    routed: bool,
+    fed: frozenset[tuple[str, str]],
+    on_route: set[tuple[str, str]],
+    port_dir: dict[tuple[str, str], IODirection],
+    out: list[Violation],
+) -> None:
+    """Every producer of ``net`` reaches its consumers once: by auto-output or by the net's route.
+
+    A net with one producer is either routed or auto-connected. One with several producers and a
+    single consumer may be both (#270): each producer standing against the consumer auto-outputs
+    into it, and the rest share the route. What is never right:
+
+    - **neither**: the net, or the producers no auto-connection covers, reach nothing
+      (``MISSING_CONNECTION``);
+    - **both for one producer**, a route over a net whose every producer already auto-outputs, or a
+      split on a net with several consumers, where one producer's auto-output reaches one block
+      (``NET_DOUBLE_CONNECTED``).
+    """
+    sources, sinks = net_sources_sinks(net, port_dir)
+    unfed = [(s.machine_id, s.port_id) for s in sources if (s.machine_id, s.port_id) not in fed]
+    if not routed:
+        if not fed:
             out.append(
                 Violation(
                     ViolationCode.MISSING_CONNECTION,
                     f"net {net.id!r} is neither routed nor auto-connected",
                 )
             )
-        if routed_here:
-            _check_routed_net_endpoints(net, port_dir, port_commodity, out)
+        elif unfed:
+            out.append(
+                Violation(
+                    ViolationCode.MISSING_CONNECTION,
+                    f"net {net.id!r} is auto-connected but not routed, so its producer(s) "
+                    f"{', '.join(repr(m) for m, _ in unfed)} reach nothing",
+                )
+            )
+        return
+    if not fed:
+        return
+    if not unfed:
+        out.append(
+            Violation(
+                ViolationCode.NET_DOUBLE_CONNECTED,
+                f"net {net.id!r} is both routed and auto-connected",
+            )
+        )
+    elif len(sinks) != 1:
+        out.append(
+            Violation(
+                ViolationCode.NET_DOUBLE_CONNECTED,
+                f"net {net.id!r} is both routed and auto-connected, but has {len(sinks)} "
+                f"consumers: a producer's auto-output reaches only one of them",
+            )
+        )
+    for machine_id, _ in sorted(fed & on_route):
+        out.append(
+            Violation(
+                ViolationCode.NET_DOUBLE_CONNECTED,
+                f"net {net.id!r} producer {machine_id!r} both auto-outputs and is a terminal of "
+                f"the net's route",
+                machine_id=machine_id,
+            )
+        )
 
 
 def _is_one_block_pipe(route: Route) -> bool:
@@ -1392,6 +1476,7 @@ def _check_terminals(problem: InputIR, layout: LayoutResult, out: list[Violation
     placement_by_machine = placement_index(layout.placements)
     nets = {n.id: n for n in problem.nets}
     ports = {(m.id, p.id): p for m in problem.machines for p in m.faces.ports}
+    fed = _fed_producers(problem, layout)
 
     for r in layout.routes:
         net = nets.get(r.net_id)
@@ -1402,8 +1487,11 @@ def _check_terminals(problem: InputIR, layout: LayoutResult, out: list[Violation
         route_cells = r.cells()
         endpoint_keys = {(ep.machine_id, ep.port_id) for ep in net.endpoints}
         have = {(t.machine_id, t.port_id) for t in r.terminals}
+        # A producer that auto-outputs into the consumer is not on the pipe (#270); whether its net
+        # may be split like that at all is _check_net_connected's question.
+        exempt = fed.get(r.net_id, frozenset())
         for ep in net.endpoints:
-            if (ep.machine_id, ep.port_id) not in have:
+            if (ep.machine_id, ep.port_id) not in have | exempt:
                 out.append(
                     Violation(
                         ViolationCode.MISSING_TERMINAL,

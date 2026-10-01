@@ -221,13 +221,14 @@ def _docked_connections(problem: InputIR, placements: Sequence[Placement]) -> li
     region = problem.bounding_region
 
     # The router's own auto-output decision, taken over the same placements: its covered nets are
-    # piped by nobody, and its claimed casing cells are spent before anything else docks.
+    # piped by nobody, a producer it feeds into a shared consumer docks nothing, and its claimed
+    # casing cells are spent before anything else docks.
     assignment = assign_auto_outputs(problem, placements)
     connections: list[_Connection] = []
     for net in problem.nets:
         if net.id in assignment.covered or problem.me_toggles.toggled(net.commodity):
             continue  # an auto-output or the ME network carries it: nothing to dock
-        for endpoint in net.endpoints:
+        for endpoint in assignment.piped(net).endpoints:
             placement = placement_by_machine.get(endpoint.machine_id)
             machine = machines.get(endpoint.machine_id)
             if placement is None or machine is None:

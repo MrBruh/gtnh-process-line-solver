@@ -35,7 +35,11 @@ from .geometry import Cell, CellCoord
 #: game (#165).
 #: v3 lets a pipe route be one block with no segments. The shape is unchanged, and yet a bump: a
 #: consumer that builds a route's blocks from its segments alone builds nothing for that pipe.
-LAYOUT_RESULT_VERSION = 3
+#: v4 lets a net be partly piped and partly auto-connected (#270): a producer standing against the
+#: net's one consumer auto-outputs, and the route's terminals leave it out. Unchanged in shape, and
+#: a bump for what an existing field means: a v3 consumer reads a net as either routed or
+#: auto-connected and can drop the half it does not expect.
+LAYOUT_RESULT_VERSION = 4
 
 #: Allowed GT cable thicknesses, smallest first (1x/2x/4x/8x/12x/16x; docs/DOMAIN.md). The single
 #: source: this contract enforces membership on every power route, and ``dataset`` re-exports the

@@ -119,8 +119,7 @@ from gtnh_solver.ir.geometry import (
     pose_of,
     rotated_footprint,
 )
-from gtnh_solver.ir.nets import net_sources_sinks, port_direction_map
-from gtnh_solver.router.auto import auto_output_possible
+from gtnh_solver.router.auto import auto_candidates, auto_output_possible
 
 from .constructive import PlacementResult, _fit, place
 from .feasibility import crowded_machines
@@ -621,28 +620,24 @@ class _AutoPair:
 
 
 def _auto_candidate_pairs(problem: InputIR) -> list[_AutoPair]:
-    """Directed auto-output candidates for the simple 1->1 item/fluid nets - the same nets the
-    router's auto-output assignment covers (power/ME never auto-feed).
+    """Directed auto-output candidates for the 1->1 item/fluid nets: the router's own candidates
+    (``router.auto.auto_candidates``; power/ME never auto-feed) less the shared ones.
 
     Which of them is *possible* is then asked of the router itself
     (``router.auto.auto_output_possible``), so the reward and the decision share one rule.
+
+    **A producer of a net it shares with others is not rewarded** for standing against the net's
+    consumer, though the router covers it when it does (#270). Measured, not assumed: rewarding it
+    pulled ev-nitrobenzene's multiblock producers against their tanks at the expense of every
+    other net, 6 better and 6 worse over 12 seeds with the median floor plus route cells from 847.5
+    to 858, while leaving it to the router was 3 better, 7 the same and 2 worse. Such a pair saves
+    only that producer's leg of a pipe the rest still need, not a whole pipe as a 1->1 pair does.
     """
-    port_dir = port_direction_map(problem)
-    pairs: list[_AutoPair] = []
-    for net in problem.nets:
-        if net.commodity is Commodity.POWER or problem.me_toggles.toggled(net.commodity):
-            continue
-        sources, sinks = net_sources_sinks(net, port_dir)
-        if len(sources) == 1 and len(sinks) == 1:
-            pairs.append(
-                _AutoPair(
-                    sources[0].machine_id,
-                    sources[0].port_id,
-                    sinks[0].machine_id,
-                    sinks[0].port_id,
-                )
-            )
-    return pairs
+    return [
+        _AutoPair(c.source.machine_id, c.source.port_id, c.sink.machine_id, c.sink.port_id)
+        for c in auto_candidates(problem)
+        if not c.shared
+    ]
 
 
 def _cost(

@@ -271,7 +271,12 @@ def test_solve_is_valid_or_explicitly_infeasible(
     """
     layout = solve(problem, seed=seed, optimize=optimize)
     event(f"status={layout.status.value}")
+    _assert_valid_or_explained(problem, layout)
 
+
+def _assert_valid_or_explained(problem: InputIR, layout: LayoutResult) -> None:
+    """The invariant itself, for :func:`test_solve_is_valid_or_explicitly_infeasible` and the
+    many-into-one variant below."""
     if layout.status is LayoutStatus.VALID:
         report = validate(problem, layout)
         assert report.ok, f"solve returned VALID for a layout the validator rejects:\n{report}"
@@ -282,6 +287,109 @@ def test_solve_is_valid_or_explicitly_infeasible(
         # The contract forbids the alternative (a non-VALID result must carry one), but that is
         # exactly the thing being promised, so it is asserted rather than assumed.
         assert layout.infeasibility is not None
+
+
+@st.composite
+def _many_into_one_problems(draw: st.DrawFn) -> InputIR:
+    """Two to four producers on one net into one consumer, the shape the general corpus all but
+    never draws (its sinks take one net each, so a net there has one producer).
+
+    The producers are drawn from the general machine strategy with an item output forced on, and
+    sometimes a second item output feeding a sink of its own, which keeps that producer to the
+    pipe (``router.auto``: its auto-output face would eject both). The consumer is one block or a
+    2x2 box, which has more sides to stand against. The region always has some slack and the net
+    carries at most an item a tick, because what is under test is how the net is split; the
+    general corpus already covers lines too big for their region or for any pipe, and drawn here
+    they buried the split under the same two refusals.
+    """
+    count = draw(st.integers(min_value=2, max_value=4))
+    out = Port(id="item:out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)
+    machines: list[Machine] = []
+    nets: list[Net] = []
+    for i in range(count):
+        drawn = draw(_machines(f"p{i}"))
+        ports = [p for p in drawn.faces.ports if p.id != "item:out"]
+        if draw(st.integers(min_value=0, max_value=3)) == 0:
+            ports.append(
+                Port(id="item:spare", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)
+            )
+            machines.append(_bare(f"t{i}", "item:in", IODirection.INPUT))
+            nets.append(
+                Net(
+                    id=f"spare-{i}",
+                    commodity=Commodity.ITEM,
+                    fluid_or_item="y",
+                    throughput=1.0,
+                    endpoints=[
+                        MachineFaceRef(machine_id=f"p{i}", port_id="item:spare"),
+                        MachineFaceRef(machine_id=f"t{i}", port_id="item:in"),
+                    ],
+                )
+            )
+        machines.append(drawn.model_copy(update={"faces": FaceSpec(ports=[*ports, out])}))
+    side = draw(st.integers(min_value=1, max_value=2))
+    machines.append(
+        _bare("s", "item:in", IODirection.INPUT).model_copy(
+            update={"footprint": CellBox(sx=side, sy=1, sz=side)}
+        )
+    )
+    nets.append(
+        Net(
+            id="shared",
+            commodity=Commodity.ITEM,
+            fluid_or_item="x",
+            throughput=draw(st.sampled_from((0.0, 0.25, 1.0))),
+            endpoints=[
+                *(MachineFaceRef(machine_id=f"p{i}", port_id="item:out") for i in range(count)),
+                MachineFaceRef(machine_id="s", port_id="item:in"),
+            ],
+        )
+    )
+    machines, nets = synthesize_power(machines, nets)
+    floor = math.ceil(math.sqrt(sum(m.footprint.sx * m.footprint.sz for m in machines)))
+    slack = draw(st.integers(min_value=1, max_value=4))
+    return InputIR(
+        bounding_region=CellBox(
+            sx=floor + slack, sy=draw(st.integers(min_value=1, max_value=2)), sz=floor + slack
+        ),
+        machines=machines,
+        nets=nets,
+    )
+
+
+def _bare(mid: str, port_id: str, direction: IODirection) -> Machine:
+    """An unpowered single block with one item port, turnable every way."""
+    return Machine(
+        id=mid,
+        type="t",
+        voltage_tier="LV",
+        faces=FaceSpec(ports=[Port(id=port_id, commodity=Commodity.ITEM, direction=direction)]),
+        orientation_options=list(HORIZONTAL_FACINGS_ORDERED),
+    )
+
+
+@pytest.mark.parametrize("optimize", [True, False])
+@settings(
+    max_examples=property_examples(100),
+    suppress_health_check=[HealthCheck.too_slow],
+)
+@given(problem=_many_into_one_problems(), seed=st.integers(min_value=0, max_value=3))
+def test_a_many_into_one_net_is_valid_or_explicitly_infeasible(
+    problem: InputIR, seed: int, optimize: bool
+) -> None:
+    """The same promise on a net several producers share into one consumer (#270), where each
+    producer standing against the consumer auto-outputs and the rest share a pipe.
+
+    The event says how the net ended up: some producer auto-outputting with a pipe for the rest
+    (``split``), every producer auto-outputting (``whole``), or all of it piped (``piped``). A run
+    that never reaches ``split`` proves nothing about the split.
+    """
+    layout = solve(problem, seed=seed, optimize=optimize)
+    event(f"status={layout.status.value}")
+    fed = "shared" in {a.net_id for a in layout.auto_connections}
+    piped = "shared" in {r.net_id for r in layout.routes}
+    event("net=" + ("split" if fed and piped else "whole" if fed else "piped"))
+    _assert_valid_or_explained(problem, layout)
 
 
 @settings(

@@ -32,6 +32,12 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
 - A machine **auto-outputs to a single face**, carrying **either items or fluids, not both**.
   A machine emitting both an item and a fluid output uses auto-output for one and a
   cover-driven output on another non-front face (or ME) for the other.
+- **Several machines can auto-output into one block**, each from its own side of it: a Super Chest
+  standing among three Forge Hammers takes from every hammer touching it, with no pipe. The solver
+  covers such a net producer by producer (#270): each producer standing against the consumer ejects
+  into it, and the rest share one pipe into it. Only when the consumer is a single block, since on a
+  multiblock each connection is a hatch, and only from a single block with no other output of the
+  kind, since its output face ejects every slot of that kind.
 - **One face is one connection, but one pipe block can serve several machines.** A pipe block
   wired to faces of several machines on the same net is a manifold, and a real build uses it
   freely: the maintainer's parallel-sand build puts 20 item connections on 12 pipe blocks that way

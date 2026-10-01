@@ -338,4 +338,18 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   layout solved without either serializes byte for byte as before. Metrics are advisory and
 #   `extra="allow"`, so a consumer that does not know the field loses nothing it needs to build;
 #   what it carries is how to reproduce a timed solve (`--rounds` that many, same seed).
+#
+# LayoutResult v4 (BREAKING) - a net may be PARTLY auto-connected. On a net with several producers
+#   and one consumer, each producer standing against the consumer ejects into it by auto-output (an
+#   `AutoConnection` of its own), and the net's `Route` carries terminals for the other producers
+#   and the consumer only; a net whose every producer is covered has no route at all. Until now
+#   each net was satisfied by exactly one of a route or an auto-connection, so three Forge Hammers
+#   feeding one Super Chest were always piped, even with a hammer standing against the chest.
+#   (GitHub #270.)
+#
+#   The shape is unchanged, and yet a bump, because what an existing field means changed: a v3
+#   consumer may read a net with an auto-connection as having no pipe and skip its route, or read
+#   a route as reaching every endpoint and look for a terminal on a producer that has none. Either
+#   way the build it describes is missing a connection, with nothing raising. A v3 layout is
+#   refused on parse, as every bump is; re-solve its plan.
 # ---------------------------------------------------------------------------
