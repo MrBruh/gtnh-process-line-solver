@@ -61,6 +61,7 @@ from gtnh_solver.placement import (
 from gtnh_solver.router import RouteResult, assign_auto_outputs, route
 from gtnh_solver.solver import Effort, solve
 from gtnh_solver.solver import core as solver_core
+from gtnh_solver.solver._structure import structure_quality
 from gtnh_solver.validator import ValidationReport, Violation, ViolationCode, validate
 from tests._helpers import at, consumer, hub_line, net, power_source, producer
 
@@ -101,13 +102,35 @@ def _structure_metrics(layout: LayoutResult) -> tuple[int, int, int]:
     return footprint, volume, len(power_cells)
 
 
+def test_the_ranking_trades_floor_area_against_route_cells() -> None:
+    # Stacked, the pair takes one floor cell but needs a two-block pipe up to the consumer; side by
+    # side, it takes two floor cells and auto-feeds with no pipe at all. Ranked on floor area
+    # first the stack won whatever its pipe cost; the blend (floor plus route cells) picks the
+    # pair that builds fewer blocks in all.
+    problem = InputIR(
+        bounding_region=CellBox(sx=4, sy=4, sz=4),
+        machines=[producer("a"), consumer("b")],
+        nets=[net("n", "a", "b")],
+    )
+    pipe = Route(
+        net_id="n",
+        commodity=Commodity.ITEM,
+        segments=[Segment(start=CellCoord(x=0, y=1, z=0), end=CellCoord(x=0, y=2, z=0), channel=0)],
+    )
+    stacked = structure_quality(problem, [at("a", 0, 0, 0), at("b", 0, 3, 0)], [pipe], "footprint")
+    side_by_side = structure_quality(problem, [at("a", 0, 0, 0), at("b", 1, 0, 0)], [], "footprint")
+    assert stacked == (1 + 2, 1, 4)
+    assert side_by_side == (2 + 0, 2, 2)
+    assert side_by_side < stacked
+
+
 @pytest.mark.full_solve
 def test_solve_sand_optimized_matches_or_beats_the_hand_built_target() -> None:
     # The acceptance target (docs/ROADMAP.md lane C): the maintainer hand-builds the sand line in
     # a 3x2x2 volume with 3 power cables, so the optimizer must find that or better - VALID, the
     # whole built structure (machines + routes) on a floor area <= 3x2 = 6 cells, and <= 3 power
     # cable cells. The quality-driven feedback loop is what finds it: it routes every attempt and
-    # keeps the best by (footprint, cable cells, volume) instead of returning the first valid.
+    # keeps the best by floor area plus route cells instead of returning the first valid.
     layout = solve(adapt_file(_SAND))
     assert layout.status is LayoutStatus.VALID
     footprint, _, cables = _structure_metrics(layout)
@@ -373,28 +396,30 @@ def _edge(nid: str, src: str, dst: str) -> Net:
 
 
 def test_the_multi_start_recovers_a_layout_a_single_attempt_leaves_partial() -> None:
-    # A tight single-layer fan-out graph where the seed-0 placement strands a net - the router
+    # A tight single-layer fan-out graph where the seed-3 placement strands a net - the router
     # cannot lay its pipe in the congested layout, so one assembly attempt is partial_invalid.
     # Another seed of the multi-start places it differently and routes cleanly: solve() returns
     # VALID where a single attempt did not. (The seed is whichever one the annealer happens to
     # strand: it was seed 1 while the LNS recreate priced compactness without the one-cell nudge,
-    # #254, and is seed 0 again with both.)
+    # #254, seed 0 with both, seed 1 again since an anneal returns the cheapest placement the
+    # crowding gate passes, and seed 3 since a single-block line starts from the spaced lattice,
+    # which routes seeds 0 to 2.)
     edges = [("m0", "m2"), ("m0", "m3"), ("m1", "m3"), ("m1", "m4"), ("m2", "m5"), ("m4", "m5")]
     problem = InputIR(
         bounding_region=CellBox(sx=7, sy=1, sz=7),
         machines=[_io_machine(f"m{i}") for i in range(6)],
         nets=[_edge(f"e{k}", a, b) for k, (a, b) in enumerate(edges)],
     )
-    first = optimize_placement(problem, seed=0)
-    single_attempt, failed = solver_core._assemble(problem, first.placements, 0)
+    first = optimize_placement(problem, seed=3)
+    single_attempt, failed = solver_core._assemble(problem, first.placements, 3)
     assert single_attempt.status is LayoutStatus.PARTIAL_INVALID  # one attempt cannot route it...
     assert failed  # ...and it names the net it could not lay
 
-    layout = solve(problem, effort="full")
+    layout = solve(problem, seed=3, effort="full")
     assert layout.status is LayoutStatus.VALID, layout.infeasibility  # ...another attempt does
     assert validate(problem, layout).ok
-    assert layout.seed != 0  # it took a later attempt, not attempt 0
-    assert solve(problem, effort="full") == layout  # still deterministic
+    assert layout.seed != 3  # it took a later attempt, not attempt 3
+    assert solve(problem, seed=3, effort="full") == layout  # still deterministic
 
 
 def test_solve_fork_auto_outputs_one_and_pipes_the_other() -> None:
@@ -853,8 +878,8 @@ def _iron_shaped_plan() -> Plan:
 
 
 def test_a_single_block_short_of_faces_is_merged_and_solves_or_says_why() -> None:
-    # [E2E] The adapter sends each washer's three items out of one face to three Item Filters, and
-    # the solver lays that line. Whether one minimal attempt lays it validly is a question of layout
+    # [E2E] The adapter sends the three washers' items out of one face each, onto one shared trunk
+    # to three Item Filters, and the solver lays that line. Whether one minimal attempt lays it validly is a question of layout
     # quality, which this suite does not judge; what it holds is that the answer is VALID and
     # validator-clean, or explicitly infeasible, and never a silently invalid layout.
     ir = to_input_ir(_iron_shaped_plan())
@@ -863,8 +888,8 @@ def test_a_single_block_short_of_faces_is_merged_and_solves_or_says_why() -> Non
     filters = [m for m in ir.machines if m.filter_items]
     trunks = [n for n in ir.nets if n.items]
     assert len(washers) == 3
-    assert len(filters) == 9
-    assert len(trunks) == 3
+    assert len(filters) == 3
+    assert len(trunks) == 1
     assert all(m.type == "Ultra Low Voltage Item Filter" for m in filters)
     for f in filters:
         (resource,) = f.filter_items
@@ -877,7 +902,7 @@ def test_a_single_block_short_of_faces_is_merged_and_solves_or_says_why() -> Non
     layout = solve(ir)
     if layout.status is LayoutStatus.VALID:
         assert validate(ir, layout).ok
-        assert sum(p.machine_id.startswith("item-filter:") for p in layout.placements) == 9
+        assert sum(p.machine_id.startswith("item-filter:") for p in layout.placements) == 3
     else:
         assert layout.infeasibility is not None  # incompleteness is never silent
         assert layout.infeasibility.constraint != "single_block_faces"

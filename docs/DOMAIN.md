@@ -39,15 +39,16 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
   each connection a face of its own, and the validator rejects two on one face
   (`terminal_face_contention`). Whether a basic machine's output face also takes input differs by
   pack: `mAllowInputFromOutputSide` is **off** by default on 2.8.4 (`MTEBasicMachine.java:118`)
-  and **on** by default on 2.9 (`:123`), where the output face accepts any valid recipe input, so a
-  layout that relied on either default would run on one pack only. And two **nets** never share a
+  and **on** by default on 2.9 (`:123`), where, with the machine's input filter also off by
+  default, the output face accepts any item into an input slot that is empty or holds the same item
+  (`allowPutStack`, 5.09.54.20 lines 965-979; only with the filter on is it limited to recipe
+  inputs). A layout that relied on either default would run on one pack only. And two **nets** never share a
   pipe block: a GT item pipe delivers to any wired inventory that accepts the stack, and nothing in
   a plan says two nets carry the same item, so a shared block would cross-feed them.
-- **A single block with no face to spare sends its item outputs out of one face, sorted by Item
-  Filters (#249).** Five usable faces, one per connection, is not enough for a machine like the
-  Ore Washer (item in, fluid in, three item outputs, power), and exactly enough is rarely buildable
-  either: a Macerator with an item in, three item outputs and power needs a route on every face,
-  top and bottom included. A GT basic machine with item
+- **A single block with several item outputs sends them out of one face, sorted by Item Filters
+  (#249).** Five usable faces, one per connection, is not enough for a machine like the Ore Washer
+  (item in, fluid in, three item outputs, power), and a machine that has faces to spare still
+  ejects through only one of them. A GT basic machine with item
   auto-output on ejects *every* item slot through its output face, so the build is one pipe from
   that face (the **trunk**) to one **Item Filter** per item. The filter
   (`MTEFilter` < `MTEBuffer`; the ULV one is mID 9240 in both packs and needs no power) takes items
@@ -55,18 +56,17 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
   stack at a time out of its **back** into whatever is there, with no toggle
   (`MTEBuffer.moveItems`). A GT item pipe skips an inventory that refuses a stack and never pushes
   back to the side it received from (`MTEItemPipe.sendItemStack`), so each item reaches the one
-  filter that takes it. The adapter builds this only for a machine that has no face to spare
-  (five connections or more, by the count `single_block_shortfalls` reports from), has at least two
-  item outputs, and is **proven** a single block
-  (its handler says `single`, or a census dataset for the plan's pack lacks it): a 1x1x1 box that
-  might be a multiblock missing from the dataset is left as it is and reported. A machine with a
-  face to spare keeps a face per output, which is a real build only with an Item Filter **cover**
-  on each output face but its output face (`CoverItemFilter` pushes only matching stacks); covers
-  are not modelled or exported yet. Merging every multi-output single block would remove those
-  covers too, but on iron.json the extra filters spread the layout until routing fails again. Each
-  machine
-  instance gets its own trunk and filters, since on 2.9 a sibling's output face would take the
-  other's items. The filter's faces are pinned in the IR (`Port.faces`: input on front, left,
+  filter that takes it. The adapter builds this for every machine that has at least two item
+  outputs and is **proven** a single block (its handler says `single`, or a census dataset for the
+  plan's pack lacks it): a 1x1x1 box that might be a multiblock missing from the dataset is left as
+  it is and reported. It used to merge only a machine with no face to spare, leaving the others a
+  face per output, which is a real build only with a cover pulling each extra output out; with the
+  filters shared per node that cost more than merging them all. The machines of a parallel node share one trunk and one filter
+  per item, which is how the maintainer builds iron.json's washers: every output face on one pipe,
+  the filters sorting all of them. On 2.8.4 a sibling's output face refuses the others' items. On
+  2.9 it takes any item into an empty input slot (above), so a stocked machine never does, but one
+  that runs dry can take a stray output and jam; a screwdriver right-click on each sibling's output
+  face ("Input from Output Side forbidden") rules it out. The filter's faces are pinned in the IR (`Port.faces`: input on front, left,
   right, up, down; output on back), and the validator checks that every trunk item has exactly one
   filter, that each filter's output carries only its items, and that nothing but its own output
   sits behind it (`FILTER_ITEM_UNSORTED`, `FILTER_BACK_NOT_ITS_OUTPUT`). The routers hold that
@@ -102,8 +102,9 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
   previewer draws the auto-output arrow on that face on **every** single block, piped or not, so a
   builder never reads a conveyor where none is meant, and an amber marker on each cover face; the
   `.schematic` export writes that face as the block's output facing and warns about each cover,
-  since a `.schematic` carries no covers. A machine with a face to spare can still pipe two outputs
-  out of two faces (iron.json's Thermal Centrifuges): that build needs one cover, and says so.
+  since a `.schematic` carries no covers. A machine can still pipe outputs out of two faces where
+  they are not merged (an item output beside a fluid one, or a 1x1x1 machine not proven a single
+  block): that build needs one cover, and says so.
 - **Required-I/O-face reachability is a HARD constraint** - a blocked required output face
   means the line doesn't run. "Convenient access" is a soft preference.
 

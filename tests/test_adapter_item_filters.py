@@ -5,10 +5,11 @@ in, a fluid in, three item outputs and power cannot be built as the plan draws i
 such a machine's items out of one face on a trunk and places an Item Filter per item to sort them
 (``adapter.core._merge_item_outputs``). What these pin:
 
-- **when** it merges: no face to spare by the solver's own count (five connections or more),
-  PROVEN a single block (a ``single`` handler, or a census miss for the plan's own pack), and two
-  or more item outputs;
-- **the shape** every later stage relies on: filter and trunk ids, types, face pins, rates;
+- **when** it merges: PROVEN a single block (a ``single`` handler, or a census miss for the plan's
+  own pack) with two or more item outputs, whether or not it has a face to spare, and never when
+  the line's items ride ME;
+- **the shape** every later stage relies on: filter and trunk ids, types, face pins, rates, and
+  one trunk and one filter per item for a whole parallel node, shared by its machines;
 - **what moves**: each downstream net is sourced by its item's filter, nets one filter sources fold
   into one, and a line that merges nothing (every shipped example) is untouched.
 """
@@ -213,10 +214,11 @@ def _assert_unmerged(ir: InputIR) -> None:
 # ------------------------------------------------------------------ the merged shape
 
 
-def test_a_flagged_single_block_merges_per_machine() -> None:
+def test_a_parallel_node_shares_one_trunk_and_one_filter_per_item() -> None:
+    # Three washers of one node: one trunk from all three output faces to three filters, not nine.
     ir = _adapt(_washer_plan())
-    assert len(_filters(ir)) == 9
-    assert [t.id for t in _trunks(ir)] == ["item-trunk:w#1", "item-trunk:w#2", "item-trunk:w#3"]
+    assert [m.id for m in _filters(ir)] == [f"item-filter:w:{item}" for item in sorted(_ITEMS)]
+    assert [t.id for t in _trunks(ir)] == ["item-trunk:w"]
     assert single_block_shortfalls(ir) == {}
 
 
@@ -240,12 +242,12 @@ def test_the_merged_machine_keeps_one_item_output_rated_at_the_sum() -> None:
 
 def test_each_filter_is_an_unpowered_ulv_item_filter_pinned_front_in_back_out() -> None:
     ir = _adapt(_washer_plan())
-    rate = next(
-        p.rate
-        for p in _machine(_adapt(_washer_plan(handler=None)), "w#2").faces.ports
-        if p.id == "output:gt.dust.a"
-    )
-    item_filter = _machine(ir, "item-filter:w#2:gt.dust.a")
+    unmerged = _adapt(_washer_plan(handler=None))
+    rates = [
+        next(p.rate for p in _machine(unmerged, f"w#{i}").faces.ports if p.id == "output:gt.dust.a")
+        for i in (1, 2, 3)
+    ]
+    item_filter = _machine(ir, "item-filter:w:gt.dust.a")
     assert item_filter.type == "Ultra Low Voltage Item Filter"
     assert item_filter.block_key == "gregtech:gt.blockmachines@9240"
     assert (item_filter.voltage_tier, item_filter.eut) == ("ULV", 0.0)
@@ -266,21 +268,25 @@ def test_each_filter_is_an_unpowered_ulv_item_filter_pinned_front_in_back_out() 
     )
     assert (passed.commodity, passed.direction) == (Commodity.ITEM, IODirection.OUTPUT)
     assert passed.faces == (RelativeFace.BACK,)
-    assert taken.rate == passed.rate == rate
+    # It sorts every machine's share of the item, so it is rated at their sum.
+    assert taken.rate == passed.rate == pytest.approx(sum(rate or 0.0 for rate in rates))
 
 
-def test_the_trunk_carries_every_item_from_the_machine_to_its_filters() -> None:
+def test_the_trunk_carries_every_item_from_the_machines_to_their_filters() -> None:
     ir = _adapt(_washer_plan())
-    trunk = _net(ir, "item-trunk:w#1")
+    trunk = _net(ir, "item-trunk:w")
     ordered = tuple(sorted(_ITEMS))
     assert trunk.commodity is Commodity.ITEM
     assert (trunk.items, trunk.fluid_or_item) == (ordered, None)
     assert trunk.endpoints == [
-        _ref("w#1", "output:items"),
-        *(_ref(f"item-filter:w#1:{item}", f"input:{item}") for item in ordered),
+        *(_ref(f"w#{i}", "output:items") for i in (1, 2, 3)),
+        *(_ref(f"item-filter:w:{item}", f"input:{item}") for item in ordered),
     ]
-    merged = next(p for p in _machine(ir, "w#1").faces.ports if p.id == "output:items")
-    assert trunk.throughput == pytest.approx(merged.rate or 0.0)
+    merged = [
+        next(p.rate for p in _machine(ir, f"w#{i}").faces.ports if p.id == "output:items")
+        for i in (1, 2, 3)
+    ]
+    assert trunk.throughput == pytest.approx(sum(rate or 0.0 for rate in merged))
 
 
 def test_each_filter_follows_its_machine() -> None:
@@ -289,11 +295,23 @@ def test_each_filter_follows_its_machine() -> None:
     assert ids[at : at + 4] == ["w", *(f"item-filter:w:{item}" for item in sorted(_ITEMS))]
 
 
+def test_a_parallel_nodes_filters_follow_its_last_machine() -> None:
+    ids = [m.id for m in _adapt(_washer_plan()).machines]
+    at = ids.index("w#1")
+    assert ids[at : at + 6] == [
+        "w#1",
+        "w#2",
+        "w#3",
+        *(f"item-filter:w:{item}" for item in sorted(_ITEMS)),
+    ]
+
+
 def test_downstream_nets_are_sourced_by_the_filters_at_the_same_rate() -> None:
     unmerged = _net(_adapt(_washer_plan(handler=None)), "e-gt.dust.a")
     net = _net(_adapt(_washer_plan()), "e-gt.dust.a")
+    # The three machines shared this net already; their one filter sources it once.
     assert net.endpoints == [
-        *(_ref(f"item-filter:w#{i}:gt.dust.a", "output:gt.dust.a") for i in (1, 2, 3)),
+        _ref("item-filter:w:gt.dust.a", "output:gt.dust.a"),
         _ref("drain-gt.dust.a", "input:gt.dust.a"),
     ]
     assert net.throughput == unmerged.throughput
@@ -307,7 +325,7 @@ def test_nets_one_filter_sources_fold_into_one() -> None:
     assert not any(n.id in {"e-gt.dust.a", "e-second"} for n in ir.nets)
     net = _net(ir, "e-gt.dust.a+e-second")
     assert net.endpoints == [
-        *(_ref(f"item-filter:w#{i}:gt.dust.a", "output:gt.dust.a") for i in (1, 2, 3)),
+        _ref("item-filter:w:gt.dust.a", "output:gt.dust.a"),
         _ref("drain-gt.dust.a", "input:gt.dust.a"),
         _ref("drain-2", "input:gt.dust.a"),
     ]
@@ -320,7 +338,7 @@ def test_an_unconsumed_output_is_collected_from_its_filters() -> None:
     ir = _adapt(_washer_plan(drained=()))
     buffer_net = _net(ir, "output-net:w:gt.dust.b")
     assert buffer_net.endpoints == [
-        *(_ref(f"item-filter:w#{i}:gt.dust.b", "output:gt.dust.b") for i in (1, 2, 3)),
+        _ref("item-filter:w:gt.dust.b", "output:gt.dust.b"),
         _ref("output-buffer:w:gt.dust.b", "input:gt.dust.b"),
     ]
 
@@ -330,7 +348,7 @@ def test_only_item_outputs_merge() -> None:
     ir = _adapt(_washer_plan(fluids=("sludge",)))
     ports = {p.id for p in _machine(ir, "w#1").faces.ports}
     assert {"output:items", "output:sludge"} <= ports
-    assert _net(ir, "item-trunk:w#1").items == tuple(sorted(_ITEMS))
+    assert _net(ir, "item-trunk:w").items == tuple(sorted(_ITEMS))
     assert _net(ir, "output-net:w:sludge").endpoints[0] == _ref("w#1", "output:sludge")
 
 
@@ -357,7 +375,7 @@ def test_a_merged_problem_round_trips_through_its_own_serialization() -> None:
 
 def test_a_census_miss_for_the_plans_own_pack_proves_a_single_block() -> None:
     ir = _adapt(_washer_plan(handler=None), physical=_dataset())
-    assert len(_filters(ir)) == 9
+    assert len(_filters(ir)) == 3
 
 
 def test_a_census_for_another_pack_proves_nothing() -> None:
@@ -401,22 +419,26 @@ def test_a_machine_with_no_face_to_spare_merges() -> None:
     assert connection_counts(unmerged.nets, unmerged.me_toggles)["w#1"] == SINGLE_BLOCK_IO_FACES
     assert not single_block_shortfalls(unmerged)
     ir = _adapt(_washer_plan(items=("gt.dust.a", "gt.dust.b")))
-    assert len(_filters(ir)) == 6
-    assert [t.items for t in _trunks(ir)] == [("gt.dust.a", "gt.dust.b")] * 3
+    assert len(_filters(ir)) == 2
+    assert [t.items for t in _trunks(ir)] == [("gt.dust.a", "gt.dust.b")]
     assert connection_counts(ir.nets, ir.me_toggles)["w#1"] == SINGLE_BLOCK_IO_FACES - 1
 
 
-def test_a_machine_with_a_face_to_spare_is_untouched() -> None:
-    # The same two item outputs with the water on ME: four connections, so one face stays free and
-    # each output keeps a face of its own.
+def test_a_machine_with_a_face_to_spare_merges_too() -> None:
+    # The same two item outputs with the water on ME: four connections, a face to spare. It still
+    # ejects both items through one output face, so it merges; kept a face per output, the second
+    # would need a cover pulling it out.
+    unmerged = _adapt(
+        _washer_plan(items=("gt.dust.a", "gt.dust.b"), handler=None),
+        me_toggles=METoggles(fluids=True),
+    )
+    assert connection_counts(unmerged.nets, unmerged.me_toggles)["w#1"] == SINGLE_BLOCK_IO_FACES - 1
     ir = _adapt(_washer_plan(items=("gt.dust.a", "gt.dust.b")), me_toggles=METoggles(fluids=True))
-    assert connection_counts(ir.nets, ir.me_toggles)["w#1"] == SINGLE_BLOCK_IO_FACES - 1
-    assert not _filters(ir)
-    assert not _trunks(ir)
-    assert {"output:gt.dust.a", "output:gt.dust.b"} <= {
-        p.id for p in _machine(ir, "w#1").faces.ports
-    }
-    assert _net(ir, "e-gt.dust.a").endpoints[0] == _ref("w#1", "output:gt.dust.a")
+    assert [m.id for m in _filters(ir)] == ["item-filter:w:gt.dust.a", "item-filter:w:gt.dust.b"]
+    assert [t.items for t in _trunks(ir)] == [("gt.dust.a", "gt.dust.b")]
+    assert _net(ir, "e-gt.dust.a").endpoints[0] == _ref(
+        "item-filter:w:gt.dust.a", "output:gt.dust.a"
+    )
 
 
 def test_items_on_me_need_no_faces_and_no_merge() -> None:

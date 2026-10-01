@@ -708,6 +708,68 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **Every proven single block with two or more item outputs sends them out of one face to Item
+  Filters, not only one with no face to spare (`adapter/core.py`).** A GT basic machine ejects
+  every item slot through its one output face, so a machine left a face per output was a real
+  build only with a cover pulling each extra output out, which the solver neither models nor
+  exports. Merging those machines too used to cost more than it saved (a filter set per machine
+  spread iron.json until routing failed); with the filters shared per node it does not. Iron goes
+  from 6 filters to 10, with every one of its machines on a single output face, and over 16 seeds
+  at full effort stays 16 of 16 VALID with median floor plus route cells 198 to 192 (route 115 to
+  107, floor 82 to 84). A line whose items ride ME still merges nothing, and no shipped example
+  has such a machine, so they adapt exactly as before.
+- **The machines of a parallel node share one trunk and one Item Filter per item
+  (`adapter/core.py`).** Each machine of a node used to get a trunk and a filter per item of its
+  own, so iron.json's three Ore Washers had nine filters where three sort the same items, and every
+  extra filter needed its own pipe out of its back to the same destination. They now share, the
+  way the maintainer builds that line: every washer's output face on one pipe (`item-trunk:{node}`,
+  one endpoint per machine) to one filter per item (`item-filter:{node}:{item}`, rated at the
+  machines' summed share). A single-machine node keeps its ids. Iron goes from 12 filters to 6 and,
+  over 16 seeds at full effort, from 15 to 16 VALID, with median route cells 193 to 115, pipe 155
+  to 82 and floor 140 to 82. Sand, parallel-sand and nitrobenzene solve to identical layouts.
+  Checked in GT's source: on 2.8.4 a machine's output face refuses input by default, so siblings
+  never take each other's items. On 2.9 the output face takes **any** item into an input slot that
+  is empty or holds the same item, not only recipe inputs as the adapter and `docs/DOMAIN.md` said
+  (both corrected): a stocked machine never has such a slot, but one that runs dry can take a stray
+  output and jam, which a screwdriver right-click on each sibling's output face rules out.
+- **A line of single blocks is annealed from a spaced lattice, not a single row
+  (`placement/constructive.py`, `place(problem, lattice=True)`).** The region is square and wide
+  (60 by 60 for iron.json's 30 blocks), so first-fit seeded every single-block line as one row,
+  and the anneal never left it: its first move off the row doubles the floor area, which the
+  starting temperature never accepts. Iron came out as a wall one block deep and 26 long on every
+  seed, with its pipes spilling out in front. The annealer now starts such a line on a lattice of
+  rows of ceil(sqrt(n)) blocks, one free cell between neighbours and two between rows, which
+  leaves routing room inside a near-square build. Packed solid instead, iron jammed in routing;
+  rows one cell apart lost two of eight seeds to congestion. Measured at full effort on iron:
+  machines span about 10 by 12 cells instead of 26 by 1, the median VALID layout needs 196 route
+  cells instead of 230 (169 pipe instead of 187) for 140 floor cells instead of 135, and over 16
+  seeds it solves VALID on 15 either way with 37 of 128 attempts VALID instead of 29. A line with
+  any multiblock and the `--fast` path keep the row, so nitrobenzene, ev-nitrobenzene and
+  parallel-sand solve to identical layouts; sand's layouts keep their metrics with a different
+  facing. Iron's full solves take longer (about 25 to 40 s against 18 to 33 s).
+- **A solve ranks its routed attempts on floor area plus route cells, not floor area first
+  (`solver/_structure.py`).** The quality key used to lead with the objective's compactness
+  metric and count pipe and cable blocks only to break a tie, so a layout one floor cell smaller
+  won however much more pipe it laid. It now leads with the metric plus every route cell, then the
+  metric alone, then the other metric, for every objective; each term counts blocks, so they add
+  with a weight of one. The power-source repair pass ranks on the same key, so a source's cable
+  is now weighed against the floor it grows. A sweep of weights 0.25 to 2 changed one layout:
+  iron.json seed 0 now returns 162 floor cells and 247 route cells instead of 150 and 262. The
+  other iron seeds, sand, parallel-sand, nitrobenzene and ev-nitrobenzene solve to the same
+  layouts. `structure_quality` of parallel-sand's column build reads `(27, 12, 36)`, was
+  `(12, 15, 36)`.
+- **An anneal hands back the cheapest placement the crowding gate passes, not the cheapest one
+  (`placement/search.py`).** The solver asks the gate of every attempt before routing and discards
+  a placement it proves crowded, while the placement cost only estimates crowding and misses some
+  of what the gate proves. On iron.json the cheapest state seen was gated on 50 of 64 anneals, so
+  most attempts were thrown away unrouted although the anneal had passed through uncrowded ones.
+  Now 16 of 64 are gated and the line solves VALID on 7 of 8 spaced seeds at full effort (3 of 8
+  before); the layout is still one block deep, which later placement work addresses. The gate is
+  asked once the anneal is done, cheapest accepted state first, so the walk itself is unchanged:
+  sand, parallel-sand, nitrobenzene (seeds 0 and 100) and ev-nitrobenzene (seed 0) solve to the
+  identical layouts. Iron's anneal takes about half again as long (0.7 s to about 1.1 s, most of
+  it the gate), nitrobenzene's no longer, and iron's solves take longer overall because more of
+  its attempts now reach routing.
 - **An item stream never needs more pipe insertions than the items it moves (#249).** The pipe
   capacity rule (#165, #190) charged every stream one insertion per 40 ticks, calibrated on the
   parallel sand build, where a plain tin pipe fed one Forge Hammer of three. GT counts an insertion
