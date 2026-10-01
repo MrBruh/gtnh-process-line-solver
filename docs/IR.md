@@ -235,7 +235,10 @@ LayoutResult
   routes: [Route]                        # nets connected by a pipe
   auto_connections: [AutoConnection]     # nets connected by adjacency (no pipe)
   hatches: [PlacedHatch]                 # every hatch/bus the build needs (v1)
-  metrics: { footprint, layers, buildability, congestion, ... }
+  metrics: { footprint, layers, buildability, congestion, rounds?, ... }
+                                         # rounds: how many rounds of the multi-start ran, only on
+                                         #  a solve given a time budget or a round count (absent,
+                                         #  not null, otherwise); --rounds that many replays it
   seed: int                              # for the seed-compare workflow
 
 Placement   { machine_id, cell: CellCoord, orientation: Facing }   # orientation horizontal only

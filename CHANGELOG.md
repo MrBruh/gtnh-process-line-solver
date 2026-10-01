@@ -7,6 +7,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`gtnh-solve --time-budget SECONDS` keeps searching while there is time (decision 6).** More
+  attempts is the one lever that has always improved layouts, so a solve given a budget runs the
+  usual grid of attempts and then more rounds of it, each with fresh seeds, while the time spent
+  plus the last round's duration still fits, and keeps the best layout of all of them (ties to
+  the earliest, so never worse than the same seed without a budget). The budget is a soft ceiling
+  read between rounds, so a solve can overrun it by about one round. The layout reports how many
+  rounds ran (`metrics.rounds`), the run prints how to replay it, and `--rounds N` runs exactly N
+  rounds, which reproduces a timed solve byte for byte. Opt-in: without either flag a solve is
+  unchanged, down to its JSON. `solve()` takes `time_budget=` and `rounds=` likewise.
 - **`tools/bench_layouts.py` benchmarks layout quality across seeds and pairs two runs.** It runs
   `gtnh-solve` on plans x spaced seeds under any checkout's code (checked to import from that
   checkout), records each layout's floor, layers, pipe and cable cells and the solver's own ranking

@@ -106,8 +106,9 @@ is demonstrably valid-but-bad (too large, unroutable, ugly). This is the recorde
 - **solver** - the place<->route **multi-start** (built: a grid of independent attempts in
   `solver/core.py`, run in a pool of processes when slow, that routes + validates every attempt
   and keeps the best VALID by quality)
-  plus the anytime wall-clock budget (still queued: today's grid is deterministic + bounded,
-  not a wall-clock timeout).
+  plus the anytime time budget (built, opt-in: `--time-budget` runs more rounds of the grid with
+  fresh seeds while they fit, a soft ceiling read between rounds, and `--rounds N` replays a
+  timed solve exactly; without either the grid is one deterministic, bounded round).
 - **power** - shared-amperage optimization (Steiner-like summing, thickness sizing, the 16x
   split/upgrade) beyond Phase 1's size-or-reject. Voltage loss is now modelled as a flat
   1 EU/block. Multi-source *count* has landed (a tier past 16x is bin-packed across several

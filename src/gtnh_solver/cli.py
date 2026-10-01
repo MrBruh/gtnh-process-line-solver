@@ -12,6 +12,8 @@ solved layout out::
     gtnh-solve plan.json --seed 3                 # pick the solver seed
     gtnh-solve plan.json --fast                   # skip optimization (instant, constructive)
     gtnh-solve plan.json --effort minimal         # one short attempt: a quick preview or check
+    gtnh-solve plan.json --time-budget 60         # keep searching, round after round, for ~60 s
+    gtnh-solve plan.json --rounds 3               # exactly 3 rounds (replays a timed run)
     gtnh-solve plan.json --objective volume       # what "compact" means: footprint|volume|balanced
     gtnh-solve plan.json --jobs 1                 # keep every attempt in one process
     gtnh-solve plan.json --me items --me fluids   # leave those to ME: no pipes laid for them
@@ -43,6 +45,7 @@ import argparse
 import contextlib
 import json
 import logging
+import math
 import os
 import sys
 import traceback
@@ -108,10 +111,18 @@ INTERNAL_ERROR_EXIT: Final = 3
 
 
 def _positive_int(text: str) -> int:
-    """An argparse type for a count that has to be at least 1 (``--jobs``)."""
+    """An argparse type for a count that has to be at least 1 (``--jobs``, ``--rounds``)."""
     value = int(text)
     if value < 1:
         raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
+    return value
+
+
+def _seconds(text: str) -> float:
+    """An argparse type for a finite, non-negative number of seconds (``--time-budget``)."""
+    value = float(text)
+    if not 0 <= value < math.inf:
+        raise argparse.ArgumentTypeError(f"must be a finite number of seconds >= 0, got {text}")
     return value
 
 
@@ -139,6 +150,27 @@ def build_parser() -> argparse.ArgumentParser:
             "how hard the optimizer works: full (the default) anneals 8 placements and keeps the "
             "best; minimal routes one short anneal, quick but a worse layout, for a preview or a "
             "check that the line solves; ignored with --fast"
+        ),
+    )
+    more = parser.add_mutually_exclusive_group()
+    more.add_argument(
+        "--time-budget",
+        type=_seconds,
+        metavar="SECONDS",
+        help=(
+            "keep searching for about SECONDS: after the usual attempts, run more rounds of them "
+            "with fresh seeds while the next round still fits, and keep the best layout of all. "
+            "Never worse than the same seed without it, and it may overrun by about one round. "
+            "Says how many rounds ran, so --rounds replays it; ignored with --fast"
+        ),
+    )
+    more.add_argument(
+        "--rounds",
+        type=_positive_int,
+        metavar="N",
+        help=(
+            "run exactly N rounds of attempts, each with fresh seeds (default: 1), the "
+            "deterministic form of --time-budget; ignored with --fast"
         ),
     )
     parser.add_argument(
@@ -248,6 +280,23 @@ def _note_me_toggles(toggles: METoggles) -> None:
     print(
         f"note: {', '.join(left)} nets left to ME (--me) - nothing is routed for them, and no ME "
         f"interface or endpoint is placed or drawn yet, so the builder must supply it",
+        file=sys.stderr,
+    )
+
+
+def _note_rounds(args: argparse.Namespace, layout: LayoutResult) -> None:
+    """Say how many rounds a timed solve searched, and how to get exactly this layout again.
+
+    How far a time budget gets depends on the machine and what else it is doing, so the same command
+    can return a different layout tomorrow. The round count is what pins it: the same seed with
+    ``--rounds`` that many is deterministic, and the layout's ``metrics.rounds`` carries it too.
+    """
+    rounds = layout.metrics.rounds
+    if args.time_budget is None or rounds is None:
+        return
+    print(
+        f"note: searched {rounds} round{'s' if rounds != 1 else ''} in --time-budget "
+        f"{args.time_budget:g}s; replay this layout with --seed {args.seed} --rounds {rounds}",
         file=sys.stderr,
     )
 
@@ -778,6 +827,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     _warn_if_plan_pack_undumped(plan, dataset_version, physical, problem)
     _note_me_toggles(problem.me_toggles)
+    if args.fast and (args.time_budget is not None or args.rounds is not None):
+        print(
+            "note: --fast lays one constructive placement; --time-budget/--rounds ignored",
+            file=sys.stderr,
+        )
 
     try:
         layout = solve(
@@ -788,7 +842,10 @@ def main(argv: list[str] | None = None) -> int:
             jobs=args.jobs,
             # None when not given, so the solver's own default applies (solver.DEFAULT_EFFORT).
             effort=args.effort,
+            time_budget=args.time_budget,
+            rounds=args.rounds,
         )
+        _note_rounds(args, layout)
         _warn_unmeasured_power_intake(problem, layout)
         # Serialized inside the guard: a layout the contract cannot dump is a bug in this program,
         # not a verdict about the plan.

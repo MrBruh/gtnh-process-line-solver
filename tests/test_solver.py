@@ -831,6 +831,156 @@ def test_no_effort_named_takes_the_default_when_solve_runs(monkeypatch: pytest.M
     assert len(anneals) == 1 + 8
 
 
+# ------------------------------------------------ more rounds: a time budget or a round count
+#
+# Without either a solve is round 0 alone, and every test above is the proof that nothing about
+# that changed: the same grid, the same pool decision, the same ranking.
+
+
+def _without_rounds(layout: LayoutResult) -> LayoutResult:
+    """``layout`` as a solve without a budget would have returned it: no ``rounds`` metric."""
+    return layout.model_copy(update={"metrics": layout.metrics.model_copy(update={"rounds": None})})
+
+
+def _ticking_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A clock that moves only when an attempt runs, one second each, so a full round takes 8."""
+    now = [0.0]
+    real = solver_core._attempt
+
+    def ticking(*args: object) -> solver_core._Attempt:
+        now[0] += 1.0
+        return real(*args)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(solver_core, "_now", lambda: now[0])
+    monkeypatch.setattr(solver_core, "_attempt", ticking)
+
+
+def test_a_time_budget_runs_the_rounds_that_fit(monkeypatch: pytest.MonkeyPatch) -> None:
+    # After round 0, 8 s spent plus 8 for the next fits in 20; after round 1, 16 + 8 does not. Round
+    # 1 anneals the seeds after round 0's, so the two rounds cover seeds 5 to 20 once each.
+    _ticking_clock(monkeypatch)
+    anneals, _ = _record_budgets(monkeypatch)
+    layout = solve(adapt_file(_SAND), seed=5, effort="full", time_budget=20.0)
+    assert anneals == [("footprint", s, None) for s in range(5, 21)]
+    assert layout.metrics.rounds == 2
+
+
+def test_rounds_replays_a_timed_solve_exactly(monkeypatch: pytest.MonkeyPatch) -> None:
+    _ticking_clock(monkeypatch)
+    ir = adapt_file(_SAND)
+    timed = solve(ir, seed=5, effort="full", time_budget=20.0)
+    assert timed.metrics.rounds == 2
+    assert solve(ir, seed=5, effort="full", rounds=2).model_dump() == timed.model_dump()
+
+
+def test_a_budget_of_nothing_runs_round_0_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Round 0 always runs, and is exactly the solve without a budget.
+    ir = adapt_file(_SAND)
+    anneals, _ = _record_budgets(monkeypatch)
+    layout = solve(ir, seed=5, effort="full", time_budget=0.0)
+    assert anneals == [("footprint", s, None) for s in range(5, 13)]
+    assert layout.metrics.rounds == 1
+    assert _without_rounds(layout) == solve(ir, seed=5, effort="full")
+
+
+def test_a_time_budget_stops_at_the_backstop() -> None:
+    assert solver_core._another_round(63, None, 1e9, elapsed=0.0, last=0.0)
+    assert not solver_core._another_round(
+        solver_core._MAX_BUDGET_ROUNDS, None, 1e9, elapsed=0.0, last=0.0
+    )
+    # ...which binds a budget only: asked for a round count, a solve runs exactly that many.
+    assert solver_core._another_round(100, 101, None, elapsed=0.0, last=0.0)
+    assert not solver_core._another_round(1, None, None, elapsed=0.0, last=0.0)
+
+
+@pytest.mark.parametrize(
+    ("objective", "effort", "grid"),
+    [
+        ("footprint", "minimal", [("footprint", 5), ("footprint", 6)]),
+        (
+            "volume",
+            "full",
+            [(mode, s) for s in range(5, 13) for mode in ("volume", "footprint")],
+        ),
+    ],
+)
+def test_each_round_moves_every_seed_on_by_one_rounds_worth(
+    monkeypatch: pytest.MonkeyPatch,
+    objective: Objective,
+    effort: Effort,
+    grid: list[tuple[Objective, int]],
+) -> None:
+    # A full volume round is seeds s..s+3 of each weighting, so round 1 starts at s+4.
+    anneals, _ = _record_budgets(monkeypatch)
+    solve(adapt_file(_SAND), seed=5, objective=objective, effort=effort, rounds=2)
+    assert [(mode, seed) for mode, seed, _ in anneals] == grid
+
+
+@pytest.mark.parametrize("seed", [0, 1])
+def test_more_rounds_never_rank_worse(seed: int) -> None:
+    # Ranked across rounds in grid order, ties to the earliest: a strictly better later attempt is
+    # the only thing that can replace round 0's layout.
+    ir = adapt_file(_SAND)
+    once = solve(ir, seed=seed, effort="full")
+    more = solve(ir, seed=seed, effort="full", rounds=3)
+    assert once.status is LayoutStatus.VALID
+    assert more.status is LayoutStatus.VALID
+    key_once = structure_quality(ir, once.placements, once.routes, "footprint")
+    key_more = structure_quality(ir, more.placements, more.routes, "footprint")
+    assert key_more <= key_once
+    if key_more == key_once:
+        assert _without_rounds(more) == once
+
+
+def test_rounds_share_the_pool_round_0_started(monkeypatch: pytest.MonkeyPatch) -> None:
+    _RecordingPool.created = []
+    monkeypatch.setattr(solver_core, "ProcessPoolExecutor", _RecordingPool)
+    monkeypatch.setattr(solver_core, "_POOL_AFTER_S", 0.0)
+    ir = adapt_file(_SAND)
+    pooled = solve(ir, seed=3, jobs=4, effort="full", rounds=3)
+    assert len(_RecordingPool.created) == 1
+    # Attempt 0 ran here, as ever; every later attempt of every round went to the one pool.
+    assert _RecordingPool.created[0].seeds == list(range(4, 3 + 3 * 8))
+    assert pooled == solve(ir, seed=3, effort="full", rounds=3)
+
+
+def test_rounds_after_a_quick_round_0_stay_in_this_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    _RecordingPool.created = []
+    monkeypatch.setattr(solver_core, "ProcessPoolExecutor", _RecordingPool)
+    monkeypatch.setattr(solver_core, "_POOL_AFTER_S", float("inf"))
+    solve(adapt_file(_SAND), jobs=4, effort="full", rounds=2)
+    assert _RecordingPool.created == []
+
+
+def test_a_line_that_does_not_fit_stops_at_round_0() -> None:
+    a = Machine(id="a", type="t", voltage_tier="LV", orientation_options=[Facing.NORTH])
+    b = Machine(id="b", type="t", voltage_tier="LV", orientation_options=[Facing.NORTH])
+    problem = InputIR(bounding_region=CellBox(sx=1, sy=1, sz=1), machines=[a, b], nets=[])
+    layout = solve(problem, effort="full", rounds=5)
+    assert layout.status is LayoutStatus.INFEASIBLE
+    assert layout.metrics.rounds == 1
+
+
+def test_the_fast_path_ignores_rounds() -> None:
+    layout = solve(adapt_file(_SAND), optimize=False, rounds=3)
+    assert layout.metrics.rounds is None
+
+
+@pytest.mark.parametrize(
+    "budget",
+    [
+        {"time_budget": 10.0, "rounds": 2},
+        {"rounds": 0},
+        {"time_budget": -1.0},
+        {"time_budget": float("inf")},
+        {"time_budget": float("nan")},
+    ],
+)
+def test_solve_refuses_a_budget_that_is_not_one(budget: dict[str, float]) -> None:
+    with pytest.raises(ValueError, match=r"time budget|rounds|time_budget"):
+        solve(adapt_file(_SAND), **budget)  # type: ignore[arg-type]
+
+
 # ----------------------------------------------------------------- merged item outputs (#249)
 
 

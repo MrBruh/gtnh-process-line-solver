@@ -18,7 +18,7 @@
 > without running anything.
 >
 > Still ahead: the multi-channel realizability invariant, power optimization beyond
-> size-or-reject, the anytime wall-clock budget, and pipe/cable textures. See
+> size-or-reject, and pipe/cable textures. See
 > [`docs/ROADMAP.md`](docs/ROADMAP.md) and [`CHANGELOG.md`](CHANGELOG.md).
 
 If you see any areas in the code or documentation that can be improved, feel free to contribute
