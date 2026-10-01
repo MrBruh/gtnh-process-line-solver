@@ -74,6 +74,22 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
   limits: a filter faces horizontally only, because every machine orientation is horizontal, so its
   back is never up or down; and fluids are never merged, since GT has no fluid filter block. #248's
   Item Distributor would ride the same face pins.
+- **A single block still short of faces takes its inputs through fewer of them (#277).** Real plans
+  draw machines that need more than five connections on the input side too: platline's Chemical
+  Reactors take one dust from two producers (a face per feed), and a fertilizer Mixer takes three
+  item inputs (a face each). GT builds both with fewer pipes. Two feeds of one input join one pipe
+  before the face. And a basic machine takes items on any face but its front and, with multi-stack
+  off (`mDisableMultiStack`, on by default and written by the `.schematic` export), keeps each kind
+  of item to one input slot (`MTEBasicMachine.allowPutStack`), so one pipe can carry all its item
+  inputs without one item filling every slot and starving the rest; a GT pipe pushes a stack only
+  where it is taken, so a full slot holds back its own producer and no other. The adapter does the
+  first for any input of a machine short of faces, and the second, a **feed run** (a merged run,
+  `Net.items`, whose consumer is the machine instead of filters), only for a machine still short
+  after it. Both apply only to a proven single block with **more** connections than faces, not
+  merely none to spare as on the output side, so a line that lays out today is left exactly as it
+  is. A feed run takes only nets that carry one item into that machine alone and that no Item
+  Filter sources, and only if every machine on it takes every item on it, so no item reaches a
+  machine that did not ask for it.
 - **A single block auto-outputs through one face; any other output face is a cover (#249).** A
   basic machine pushes items and fluids out of its output face (`mFacing`) and nowhere else
   (`MTEBasicMachine` 2.8.4 lines 583-610, 2.9 lines 612-633); its working face is `mMainFacing`, the

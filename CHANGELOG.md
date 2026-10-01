@@ -7,6 +7,20 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **A single block short of faces takes its inputs through fewer of them (#277).** Three community
+  plans drew single blocks needing six or seven connections on five faces, so they laid out
+  `partial_invalid` on `single_block_faces` whatever the effort: platline's Chemical Reactors take
+  one dust from two producers, a fertilizer Mixer takes three item inputs, and a Bio Diesel line's
+  Chemical Reactor takes two. The adapter now builds what GT does, in two steps, the second only
+  for a machine the first leaves short. The feeds of one input fold into one pipe (the #213
+  treatment, on a single block's input port), and a machine still short takes its item inputs on
+  one **feed run** into one `input:items` port: a GT basic machine takes items on any face but its
+  front, and with multi-stack off (the default, and what the `.schematic` export writes) keeps
+  each kind of item to one slot, so one pipe cannot starve an input. A feed run is a merged run
+  (`Net.items`) whose consumer is the machine, and the validator reads a merged run that reaches
+  no Item Filter as a feed rather than as unsorted. Only a proven single block with more
+  connections than faces is touched, so every line that lays out today is unchanged, and a feed
+  run takes only nets carrying one item into that machine alone and sourced by no Item Filter.
 - **A node whose machines time-share several recipes (the arodoid fork's shared machine) loads.**
   A card can run more recipes on the same machines (`extraRecipes`, ports addressed `r<n>:`): an LCR
   fed for two reactions runs whichever its inputs allow. The adapter read only the node's own

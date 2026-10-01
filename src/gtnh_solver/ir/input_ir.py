@@ -351,10 +351,12 @@ class Net(StrictModel):
     commodity: Commodity
     fluid_or_item: str | None = None  # which fluid/item; None for power and for a merged run
     #: The items a **merged run** carries (InputIR v4): one pipe taking every item a single
-    #: block ejects through one face to the Item Filters that sort them. An item net names what it
-    #: carries in exactly one of the two fields, ``fluid_or_item`` for one item and this for a merged
-    #: run, and never both; a fluid or power net never names ``items`` (GT has no fluid filter
-    #: block). Read what any net carries through :attr:`resources`.
+    #: block ejects through one face to the Item Filters that sort them (#249), or a **feed run**
+    #: taking a single block's item inputs from their producers into its one input face (#277),
+    #: which reaches no filter. An item net names what it carries in exactly one of the two
+    #: fields, ``fluid_or_item`` for one item and this for a merged run, and never both; a fluid or
+    #: power net never names ``items`` (GT has no fluid filter block). Read what any net carries
+    #: through :attr:`resources`.
     items: tuple[str, ...] = ()
     throughput: float = Field(ge=0.0)
     endpoints: list[MachineFaceRef] = Field(min_length=1)

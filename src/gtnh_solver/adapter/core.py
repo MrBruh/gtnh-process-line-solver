@@ -114,6 +114,27 @@ feeds one pipe. **One census gap reads wrong here.** A controller whose extracti
 from a census that otherwise lists every multiblock (2.8.4 ``gt.blockmachines@14003``; 2.9 ``14003``
 and ``15755``), so a handler-less node naming one reads as a single block and would be merged.
 
+**A single block still short of faces takes its inputs through fewer of them** (#277,
+:func:`_merge_item_inputs`), after the output side. Real plans draw machines that need more than
+five: an input fed from two places spends a face on each feed (platline's Chemical Reactors), and
+a Mixer's three item inputs spend three. GT builds both with fewer pipes, in two steps, the second
+only for a machine the first leaves short::
+
+    S1 -a--> M in:a        S1, S2 -a--> M in:a          (1) two feeds of one input: one pipe
+    S2 -a--> M in:a   ==>
+    Sa -a--> M in:a        Sa, Sb, Sc -(a,b,c)--> M in:items   (2) its item inputs: one feed run
+    Sb -b--> M in:b
+    Sc -c--> M in:c
+
+A GT basic machine takes items on any face but its front, and with multi-stack off (the default,
+and what the ``.schematic`` export writes) keeps each kind of item to one input slot, so one pipe
+carrying all its inputs cannot fill every slot with one item. It merges only a proven single block
+that is **short** of faces (more connections than faces, not merely none to spare), so every line
+that lays out today is untouched, and a feed run only takes nets that carry one item into that
+machine alone, sourced by no Item Filter: a run feeding anything else would hand it items it never
+asked for. The feed run is a merged run (``Net.items``) whose consumer is the machine rather than
+filters, which the validator reads as a feed.
+
 Still crude-on-purpose for Phase 1 (docs/ROADMAP.md): all four horizontal orientations for every
 machine, non-square bases included (``occupied_cells`` rotates the reserved box); and hint-derived
 face constraints stay on the dataset record. The InputIR's own referential-integrity check is the
@@ -506,6 +527,9 @@ def to_input_ir(
     # After the power synthesis, so a machine's power connection counts toward its faces, and before
     # the region is sized, so the filters it places are inside it.
     machines, nets = _merge_item_outputs(machines, nets, frozenset(proven_single_ids), toggles)
+    # After the output merge, which settles most machines it touches, so the input side merges only
+    # what is still short of faces.
+    machines, nets = _merge_item_inputs(machines, nets, frozenset(proven_single_ids), toggles)
     region = _bounding_region([m.footprint for m in machines])
     return InputIR(bounding_region=region, machines=machines, nets=nets, me_toggles=toggles)
 
@@ -1376,21 +1400,23 @@ def _item_filter(machine_id: str, item: str, rate: float | None) -> Machine:
     )
 
 
-def _fold_nets(
-    nets: list[Net], filter_outputs: set[MachineFaceRef], machines: list[Machine]
-) -> list[Net]:
-    """Fold the nets that share a filter's output into one, the #213 treatment for a filter's back.
+def _fold_nets(nets: list[Net], shared: set[MachineFaceRef], machines: list[Machine]) -> list[Net]:
+    """Fold the nets that meet at one of the ``shared`` ports into one, the #213 treatment.
 
-    A plan draws an edge per consumer, so an output feeding two machines was two nets off one port.
-    That was fine on a single block's own output (a face each), but a filter pushes out of its back
-    alone, into one pipe, so the nets it now sources are one net. Grouped by transitive closure over
-    the ``filter_outputs`` endpoints they share:
+    A plan draws an edge per consumer, so an output feeding two machines was two nets off one port,
+    and an input fed by two producers two nets onto one. That costs a face per net on a single block,
+    which is fine while it has faces to spare. Two ports are folded this way, each where one pipe is
+    what GT builds: a filter's back, which pushes into one pipe alone (:func:`_merge_item_outputs`),
+    and an input port of a single block short of faces (:func:`_merge_item_inputs`). Grouped by
+    transitive closure over the ``shared`` endpoints they meet at:
 
     - **id**: the member ids joined with ``+``, in net order;
     - **endpoints**: every producer, then every consumer, each once and in net order;
     - **throughput**: each distinct producer's port rate counted once, which for a fan-out off
-      three washers' filters is the three filters' rates, the same figure each member carried. It
-      falls back to the largest member's throughput if a producer's rate is unknown.
+      three washers' filters is the three filters' rates, the same figure each member carried, and
+      for an input fed from two places is what both send. It falls back to the largest member's
+      throughput if a producer's rate is unknown. A producer that also feeds a port outside the
+      fold is counted whole, which can only over-state the flow.
 
     A net sharing nothing is returned unchanged, in place; a folded net takes its first member's.
     """
@@ -1405,7 +1431,7 @@ def _fold_nets(
     first_net_at: dict[MachineFaceRef, int] = {}
     for index, net in enumerate(nets):
         for ref in net.endpoints:
-            if ref not in filter_outputs:
+            if ref not in shared:
                 continue
             here, there = root(index), root(first_net_at.setdefault(ref, index))
             parent[max(here, there)] = min(here, there)
@@ -1444,6 +1470,199 @@ def _fold_nets(
             )
         )
     return folded
+
+
+def _merge_item_inputs(
+    machines: list[Machine],
+    nets: list[Net],
+    proven_single: frozenset[str],
+    me_toggles: METoggles,
+) -> tuple[list[Machine], list[Net]]:
+    """Bring a single block that is short of faces within them, on its input side (#277).
+
+    See the module docstring for when a machine merges and why. Two steps, the second only for a
+    machine the first leaves short:
+
+    1. **One input, one pipe.** The nets meeting at one input port of a short machine fold into one
+       (:func:`_fold_nets`): two producers of one item or fluid join one pipe before the face.
+    2. **Every item input, one pipe.** A machine still short takes its item inputs through one face,
+       on one **feed run** (:func:`_feed_item_inputs`).
+
+    A line with no machine short of faces comes back exactly as it went in.
+    """
+    short = _short_of_faces(machines, nets, proven_single, me_toggles)
+    if not short:
+        return machines, nets
+    directions = {(m.id, p.id): p.direction for m in machines for p in m.faces.ports}
+    inputs = {
+        ref
+        for net in nets
+        if net.commodity is not Commodity.POWER and not me_toggles.toggled(net.commodity)
+        for ref in net.endpoints
+        if ref.machine_id in short
+        and directions[(ref.machine_id, ref.port_id)] is IODirection.INPUT
+    }
+    nets = _fold_nets(nets, inputs, machines)
+    short = _short_of_faces(machines, nets, proven_single, me_toggles)
+    if not short or me_toggles.toggled(Commodity.ITEM):
+        return machines, nets
+    return _feed_item_inputs(machines, nets, short)
+
+
+def _short_of_faces(
+    machines: list[Machine],
+    nets: list[Net],
+    proven_single: frozenset[str],
+    me_toggles: METoggles,
+) -> set[str]:
+    """The proven single blocks carrying more connections than they have usable faces.
+
+    By the count ``placement.single_block_shortfalls`` reports from. **More, not at least**, unlike
+    :func:`_mergeable_outputs`: the input side merges only a machine that cannot be built as drawn,
+    so every line that lays out today is left exactly as it is, and a feed run, which changes what a
+    builder pipes, is never built where a face per input would do.
+    """
+    counts = connection_counts(nets, me_toggles)
+    return {
+        machine.id
+        for machine in machines
+        if machine.id in proven_single
+        and machine.footprint.volume == 1
+        and counts.get(machine.id, 0) > SINGLE_BLOCK_IO_FACES
+    }
+
+
+def _feed_item_inputs(
+    machines: list[Machine], nets: list[Net], short: set[str]
+) -> tuple[list[Machine], list[Net]]:
+    """Step 2 of :func:`_merge_item_inputs`: each short machine's item inputs arrive on one feed run.
+
+    GT allows it. A basic machine takes items on any face but its front, and with multi-stack off,
+    the default and what the ``.schematic`` export writes, it keeps each kind of item to one input
+    slot (``MTEBasicMachine.allowPutStack``), so one item cannot fill every slot and starve the
+    rest. A pipe pushes a stack only where it is taken (``MTEItemPipe.sendItemStack``), so a full
+    slot holds back its own producer and no other.
+
+    **Only a net that can carry other items safely joins:** one carrying a single item to short
+    machines and nothing else, so no other consumer is handed items it never asked for, and sourced
+    by no Item Filter, whose output must carry its own items only. The candidates are grouped by the
+    machines they feed, transitively, so a parallel node's machines, which share their nets, share
+    one run. A group merges only if it carries two items or more and every machine on it takes every
+    one of them; otherwise it is left as it was, and a machine that stays short is reported by the
+    placement exactly as before. For each group that merges:
+
+    - each machine on it swaps the item input ports the run replaces for one, ``input:items``, rated
+      at their sum;
+    - the run's id joins its members' with ``+``; its endpoints are every producer, then each
+      machine's ``input:items``; its throughput is the members' sum, since each carries its own item.
+    """
+    ports = {(m.id, p.id): p for m in machines for p in m.faces.ports}
+    filters = {m.id for m in machines if m.filter_items}
+    merged_pid = _port_id(IODirection.INPUT, _MERGED_ITEMS)
+
+    def is_input(ref: MachineFaceRef) -> bool:
+        return ports[(ref.machine_id, ref.port_id)].direction is IODirection.INPUT
+
+    candidates: list[int] = []
+    for index, net in enumerate(nets):
+        if net.commodity is not Commodity.ITEM or net.items:
+            continue
+        sinks = [ref for ref in net.endpoints if is_input(ref)]
+        sources = [ref for ref in net.endpoints if not is_input(ref)]
+        if (
+            sinks
+            and all(ref.machine_id in short for ref in sinks)
+            and not any(ref.machine_id in filters for ref in sources)
+        ):
+            candidates.append(index)
+
+    parent = {index: index for index in candidates}
+
+    def root(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]  # path halving
+            index = parent[index]
+        return index
+
+    first_net_on: dict[str, int] = {}
+    for index in candidates:
+        for ref in nets[index].endpoints:
+            if is_input(ref):
+                here, there = root(index), root(first_net_on.setdefault(ref.machine_id, index))
+                parent[max(here, there)] = min(here, there)
+    groups: dict[int, list[int]] = {}
+    for index in candidates:
+        groups.setdefault(root(index), []).append(index)
+
+    #: net index -> the feed run standing in its place, or None where a run's later member was.
+    replaced: dict[int, Net | None] = {}
+    #: machine -> the item input port ids its run replaces.
+    swapped: dict[str, set[str]] = {}
+    for members in groups.values():
+        group = [nets[index] for index in members]
+        items = sorted(
+            {_port_resource(ref.port_id) for net in group for ref in net.endpoints if is_input(ref)}
+        )
+        producers: list[MachineFaceRef] = []
+        takes: dict[str, set[str]] = {}
+        for net in group:
+            for ref in net.endpoints:
+                if is_input(ref):
+                    takes.setdefault(ref.machine_id, set()).add(ref.port_id)
+                elif ref not in producers:
+                    producers.append(ref)
+        wanted = {_port_id(IODirection.INPUT, item) for item in items}
+        if len(items) < 2 or any(port_ids != wanted for port_ids in takes.values()):
+            continue
+        clash = [mid for mid in takes if (mid, merged_pid) in ports and merged_pid not in wanted]
+        if clash:
+            # Only a FLUID input literally named "items" could hold the id; no GT fluid is, but a
+            # silent clash would wire the run to the fluid, so these machines stay as they are.
+            warnings.warn(
+                f"machine {clash[0]!r} already has a port {merged_pid!r} that is not an item "
+                f"input, so its item inputs cannot arrive on one run; it keeps one face per input",
+                AdapterWarning,
+                stacklevel=4,
+            )
+            continue
+        replaced[members[0]] = Net(
+            id="+".join(net.id for net in group),
+            commodity=Commodity.ITEM,
+            items=tuple(items),
+            throughput=sum(net.throughput for net in group),
+            endpoints=[
+                *producers,
+                *(MachineFaceRef(machine_id=mid, port_id=merged_pid) for mid in takes),
+            ],
+        )
+        replaced.update(dict.fromkeys(members[1:]))
+        for mid, port_ids in takes.items():
+            swapped.setdefault(mid, set()).update(port_ids)
+    if not replaced:
+        return machines, nets
+
+    out_nets: list[Net] = []
+    for index, net in enumerate(nets):
+        if index not in replaced:
+            out_nets.append(net)
+        elif (run := replaced[index]) is not None:
+            out_nets.append(run)
+    out_machines: list[Machine] = []
+    for machine in machines:
+        replaced_ports = swapped.get(machine.id)
+        if not replaced_ports:
+            out_machines.append(machine)
+            continue
+        gone = [port for port in machine.faces.ports if port.id in replaced_ports]
+        kept = [port for port in machine.faces.ports if port.id not in replaced_ports]
+        feed = Port(
+            id=merged_pid,
+            commodity=Commodity.ITEM,
+            direction=IODirection.INPUT,
+            rate=sum(port.rate or 0.0 for port in gone),
+        )
+        out_machines.append(machine.model_copy(update={"faces": FaceSpec(ports=[*kept, feed])}))
+    return out_machines, out_nets
 
 
 def _edge_sides(
