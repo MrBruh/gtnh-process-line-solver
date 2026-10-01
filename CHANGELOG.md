@@ -7,6 +7,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`tools/bench_layouts.py` benchmarks layout quality across seeds and pairs two runs.** It runs
+  `gtnh-solve` on plans x spaced seeds under any checkout's code (checked to import from that
+  checkout), records each layout's floor, layers, pipe and cable cells and the solver's own ranking
+  key (floor plus route cells, pinned equal to `structure_quality` by a test), and optionally splits
+  route cells into trunk, filter output, cable and other. `--compare A B` pairs two runs seed by
+  seed into wins, ties, losses and VALID flips, the go/no-go table for a placer, router or solver
+  change. It warns when seeds are spaced closer than one solve's attempts and when a plan solved
+  without its pack's dump.
 - **A crop card is one Crop Manager on the edge of the build, an input like the power source
   (#282).** An arodoid crop card's `machineCount` is the crop sticks planted, and the adapter made
   each one a 1x1x1 "Crop Farm" machine: a community Bio Diesel plan's Canola card was 359
