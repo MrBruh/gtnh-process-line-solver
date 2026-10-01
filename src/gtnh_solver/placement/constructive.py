@@ -13,7 +13,7 @@ some origins first, then the plain scan as before, so a machine its offer cannot
 any free slot::
 
     place(lattice=True):  offers  -->  fit each machine in flow order, offered origins first,
-                                       then the plain scan
+                                       then the plain scan; lift a busy single block
                                   -->  anything left unplaced?  -->  place() plain, from scratch
 
     single blocks: the lattice              a line with a multiblock: shelves
@@ -49,11 +49,27 @@ row, log-bug's 104 machines lay out 168 cells long and one deep, and the anneale
 it: the full search finished a 150x6x6 strip with 7 machines boxed in by their neighbours
 (``feasibility.crowded_machines``), where the shelves start it with 4 crowded instead of 22.
 
+**A busy single block is lifted off the floor.** On the floor a single block loses its down face,
+and its front carries no I/O, so it has four faces left for its connections: with five it can
+never dock them all there, and with four it has no face to spare for a neighbour. Such blocks are
+most of what the crowding gate (``feasibility.crowded_machines``) still finds in a spaced seed. So
+in the spaced seed a single block with ``_LIFT_CONNECTIONS`` (four) or more connections takes its
+slot as before, then moves one cell up, and the slot below it is held empty for its down face.
+Every other machine lands where it would have::
+
+    side view of a row      y1   . . B . .      B: a busy block, its down face now usable
+                            y0   a . _ . c      _: its slot, held empty
+
+On the community plans that leaves bio-diesel's and log-bug's seeds with no machine crowded instead
+of 8 and 4, and platline's with 1 instead of 14. Lifting only blocks with five connections left 2,
+2 and 3, and solved worse on every line it changed (``search`` has the numbers).
+
 **The spaced seed never costs a line its feasibility.** Offers can strand a machine the plain scan
 would have seated (an early one taking cells a later, bigger one needed), so if anything is left
 unplaced the whole seed is laid again by the plain scan. The solver stops on a seed it cannot
-place, so a line the plain scan places is never refused because it was spaced. The fast path keeps
-the plain row, whose neighbours touch and so auto-feed.
+place, so a line the plain scan places is never refused because it was spaced. The fallback lifts
+nothing, and neither does the fast path, which keeps the plain row, whose neighbours touch and so
+auto-feed.
 
 A **power source** additionally must sit with its front face flush on the region boundary: the
 front is its reserved external-feed face (the builder runs power in from outside the structure -
@@ -71,7 +87,7 @@ reserved-cell / bad-orientation violations.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 
 from gtnh_solver.ir import (
@@ -91,7 +107,7 @@ from gtnh_solver.ir.geometry import (
     occupied_cells,
     rotated_footprint,
 )
-from gtnh_solver.ir.nets import net_sources_sinks, port_direction_map
+from gtnh_solver.ir.nets import connection_counts, net_sources_sinks, port_direction_map
 
 
 @dataclass(frozen=True)
@@ -111,21 +127,25 @@ def place(problem: InputIR, *, lattice: bool = False) -> PlacementResult:
     """Deterministically place every machine (one each) into the region.
 
     ``lattice`` asks for the annealer's spaced seed (module docstring): single blocks on the
-    lattice, a line with a multiblock on shelves, and the plain scan if either strands a machine.
-    The annealer asks for it, the fast path does not.
+    lattice, a line with a multiblock on shelves, busy single blocks lifted off the floor, and the
+    plain scan if any of that strands a machine. The annealer asks for it, the fast path does not.
     """
     order = _flow_order(problem)
     if lattice:
-        spaced = _place(problem, order, _seed_offers(problem, order))
+        spaced = _place(problem, order, _seed_offers(problem, order), _busy_blocks(problem))
         if spaced.ok:
             return spaced
     return _place(problem, order, {})
 
 
 def _place(
-    problem: InputIR, order: Sequence[Machine], offers: Mapping[str, Sequence[CellCoord]]
+    problem: InputIR,
+    order: Sequence[Machine],
+    offers: Mapping[str, Sequence[CellCoord]],
+    lift: Collection[str] = frozenset(),
 ) -> PlacementResult:
-    """Fit each machine of ``order`` in turn, its ``offers`` origins first (:func:`_fit`)."""
+    """Fit each machine of ``order`` in turn, its ``offers`` origins first (:func:`_fit`), and
+    raise the ones in ``lift`` off the floor once they have their slot (:func:`_lifted`)."""
     region = problem.bounding_region
     occupied: set[Cell] = {(c.x, c.y, c.z) for c in problem.reserved_cells}
     placements: list[Placement] = []
@@ -137,6 +157,8 @@ def _place(
                 placements=tuple(placements), infeasibility=_wont_fit(machine, region)
             )
         origin, orientation = fit
+        if machine.id in lift:
+            origin = _lifted(machine, origin, orientation, region, occupied)
         occupied.update(occupied_cells(origin, machine.footprint, orientation))
         placements.append(Placement(machine_id=machine.id, cell=origin, orientation=orientation))
 
@@ -205,6 +227,40 @@ def _shelf_width(region: CellBox, boxes: Sequence[CellBox]) -> int:
     spaced = sum((b.sx + _CHANNEL) * (b.sz + _AISLE) for b in boxes)
     widest = max(b.sx for b in boxes)
     return min(max(widest, math.ceil(math.sqrt(spaced))), region.sx)
+
+
+#: How many connections make a single block busy enough to lift off the floor in the spaced seed
+#: (module docstring): it has four faces there, so four connections leave it none to spare.
+_LIFT_CONNECTIONS = 4
+
+
+def _busy_blocks(problem: InputIR) -> frozenset[str]:
+    """The single blocks the spaced seed lifts: at least ``_LIFT_CONNECTIONS`` connections, a port
+    that may use the down face at the block's first orientation (a pinned one may not), and a front
+    that stays inside the build (one facing outside sits on the boundary wherever it can)."""
+    counts = connection_counts(problem.nets, problem.me_toggles)
+    return frozenset(
+        m.id
+        for m in problem.machines
+        if m.footprint.volume == 1
+        and not m.fronts_outside
+        and counts.get(m.id, 0) >= _LIFT_CONNECTIONS
+        and any(
+            Facing.DOWN in m.allowed_faces(p.id, m.orientation_options[0]) for p in m.faces.ports
+        )
+    )
+
+
+def _lifted(
+    machine: Machine, origin: CellCoord, orientation: Facing, region: CellBox, occupied: set[Cell]
+) -> CellCoord:
+    """``origin`` raised one cell off the floor if the cell above is free, holding the floor cell
+    empty in ``occupied`` so no later machine takes it; else ``origin`` as it was."""
+    above = CellCoord(x=origin.x, y=origin.y + 1, z=origin.z)
+    if origin.y != 0 or not _fits(machine, above, orientation, region, occupied):
+        return origin
+    occupied.add((origin.x, origin.y, origin.z))
+    return above
 
 
 def _wont_fit(machine: Machine, region: CellBox) -> Infeasibility:

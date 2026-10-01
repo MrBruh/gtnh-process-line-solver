@@ -48,7 +48,7 @@ itself: the anneal takes exactly the path it always did, and only the state it r
 When no state passes, it returns the cheapest one, and the solver's own gate and fallback decide
 as before.
 
-    initial = constructive.place(lattice=True)   # a valid seed, spaced: a lattice or shelves
+    initial = constructive.place(lattice=True)   # a valid seed, spaced, busy blocks lifted
     repeat for a seeded budget:
         cand = with prob p_lns:  ruin (remove a related cluster) + recreate (greedy re-insert,
                                  priced on nets, auto-output and how much it grows the build)
@@ -76,6 +76,17 @@ and platline with 14 instead of 23. At full effort platline then ends with 9.5 u
 instead of 15.5 and log-bug about 30 by 35, and of the lines that solve, ev-nitrobenzene's median
 floor plus route cells fall from 849 to 709 and untitled-design's from 486.5 to 422.5, with
 gtnh-nitrobenzene and hydrogen-line about even.
+
+**A busy single block starts off the floor.** On the floor it has four faces for connections (no
+down, and no I/O on its front), so one with four or more has none to spare; ``constructive``
+lifts it one cell and holds the cell below it empty. That takes bio-diesel's seed from 8 crowded
+machines to none and platline's from 14 to 1. At full effort titanium and salty-root then solve
+VALID on 16 of 16 seeds instead of 4 and 2, iron's median floor plus route cells fall from 191.5
+to 166.5, and log-bug ends with 2 unconnected nets instead of about 10. Lifting only blocks with
+five connections was worse on every one of those lines: it made the spread start pass the
+crowding gate where the compact states the walk reached did not, so many anneals handed the start
+back and titanium's layouts came out twice the size. Nothing here keeps a lifted block up: a move
+may set it back on the floor, where the face-shortfall term charges for it.
 
 **The nudge** shifts one machine by one cell. Relocate draws a cell anywhere in the region, which
 almost never lands anywhere useful (under 2% of relocates are accepted), so without a nudge the

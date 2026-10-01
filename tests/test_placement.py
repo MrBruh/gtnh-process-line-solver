@@ -17,16 +17,23 @@ from hypothesis import strategies as st
 from gtnh_solver.ir import (
     CellBox,
     CellCoord,
+    Commodity,
+    FaceSpec,
     Facing,
     InputIR,
+    IODirection,
     LayoutResult,
     LayoutStatus,
     Machine,
+    MachineFaceRef,
+    Net,
     Placement,
+    Port,
+    RelativeFace,
 )
 from gtnh_solver.ir.geometry import front_on_boundary, in_region, occupied_cells
-from gtnh_solver.placement import PlacementResult, place
-from gtnh_solver.placement.constructive import _flow_order, _place, _seed_offers
+from gtnh_solver.placement import PlacementResult, crowded_machines, place
+from gtnh_solver.placement.constructive import _busy_blocks, _flow_order, _place, _seed_offers
 from gtnh_solver.validator import validate
 from tests._helpers import PLACEMENT_CODES, power_source
 
@@ -353,6 +360,132 @@ def test_the_spaced_seed_places_whatever_the_plain_scan_places(
         assert PLACEMENT_CODES.isdisjoint(validate(problem, _as_layout(seeded.placements)).codes())
     else:
         assert seeded.infeasibility is not None
+
+
+def _busy_star(
+    spokes: int,
+    *,
+    region: CellBox,
+    hub: IODirection = IODirection.OUTPUT,
+    pinned: tuple[RelativeFace, ...] | None = None,
+) -> InputIR:
+    """A single-block hub with one item connection to each of ``spokes`` single blocks.
+
+    The hub's port runs ``hub`` (an output feeds the spokes, so the hub comes first in flow
+    order; an input is fed by them, so it comes last), and may be ``pinned`` to some faces."""
+    spoke = IODirection.INPUT if hub is IODirection.OUTPUT else IODirection.OUTPUT
+
+    def block(mid: str, direction: IODirection, faces: tuple[RelativeFace, ...] | None) -> Machine:
+        port = Port(id="io", commodity=Commodity.ITEM, direction=direction, faces=faces)
+        return Machine(
+            id=mid,
+            type="gt.machine",
+            voltage_tier="LV",
+            orientation_options=[Facing.NORTH],
+            faces=FaceSpec(ports=[port]),
+        )
+
+    return InputIR(
+        bounding_region=region,
+        machines=[block("hub", hub, pinned), *(block(f"s{i}", spoke, None) for i in range(spokes))],
+        nets=[
+            Net(
+                id=f"n{i}",
+                commodity=Commodity.ITEM,
+                fluid_or_item="x",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="hub", port_id="io"),
+                    MachineFaceRef(machine_id=f"s{i}", port_id="io"),
+                ],
+            )
+            for i in range(spokes)
+        ],
+    )
+
+
+_ROOM = CellBox(sx=8, sy=2, sz=8)
+
+
+def test_the_spaced_seed_lifts_a_busy_single_block_off_the_floor() -> None:
+    # Four connections, and four faces for them on the floor (no down, no I/O on the front), so
+    # none to spare: the hub takes the first lattice point, moves one cell up, and the point stays
+    # empty under it for its down face. The spokes take the points they take without the lift, not
+    # the held one.
+    seeded = place(_busy_star(4, region=_ROOM), lattice=True)
+    assert _cells(seeded) == {
+        "hub": (0, 1, 0),
+        "s0": (2, 0, 0),
+        "s1": (4, 0, 0),
+        "s2": (0, 0, 3),
+        "s3": (2, 0, 3),
+    }
+
+
+def test_a_block_with_three_connections_stays_on_the_floor() -> None:
+    # Four faces leave one to spare for three connections.
+    assert _cells(place(_busy_star(3, region=_ROOM), lattice=True))["hub"] == (0, 0, 0)
+
+
+def test_a_busy_block_stays_on_the_floor_of_a_region_one_cell_high() -> None:
+    flat = CellBox(sx=8, sy=1, sz=8)
+    assert _cells(place(_busy_star(5, region=flat), lattice=True))["hub"] == (0, 0, 0)
+
+
+def test_the_plain_scan_never_lifts() -> None:
+    assert {p.cell.y for p in place(_busy_star(5, region=_ROOM)).placements} == {0}
+
+
+def test_a_busy_block_pinned_off_its_down_face_stays_on_the_floor() -> None:
+    # Lifted, it would gain a face its port may not use.
+    problem = _busy_star(5, region=_ROOM, pinned=(RelativeFace.UP, RelativeFace.BACK))
+    assert _cells(place(problem, lattice=True))["hub"] == (0, 0, 0)
+
+
+def test_a_lifted_busy_block_is_not_crowded_where_on_the_floor_it_is() -> None:
+    # Fed by its spokes, the hub comes last and takes an inner lattice point. Lifted, it docks its
+    # five connections on its four sides and below; on the floor, the gate proves it cannot.
+    problem = _busy_star(5, region=CellBox(sx=8, sy=3, sz=8), hub=IODirection.INPUT)
+    seeded = place(problem, lattice=True)
+    assert _cells(seeded)["hub"] == (4, 1, 3)
+    assert crowded_machines(problem, seeded.placements) == ()
+    floor = [
+        p.model_copy(update={"cell": CellCoord(x=4, y=0, z=3)}) if p.machine_id == "hub" else p
+        for p in seeded.placements
+    ]
+    assert crowded_machines(problem, floor) == ("hub",)
+
+
+@given(
+    spokes=st.integers(0, 6),
+    region=st.builds(CellBox, sx=st.integers(1, 4), sy=st.integers(1, 4), sz=st.integers(1, 4)),
+    hub=st.sampled_from([IODirection.OUTPUT, IODirection.INPUT]),
+)
+def test_the_lift_raises_only_the_busy_block_and_holds_its_cell(
+    spokes: int, region: CellBox, hub: IODirection
+) -> None:
+    # The seed is valid or explicitly infeasible, and places whatever the plain scan places. On
+    # the spaced path the lift moves the hub, and only ever one cell up from the slot it takes
+    # without the lift, leaving that slot empty.
+    problem = _busy_star(spokes, region=region, hub=hub)
+    seeded = place(problem, lattice=True)
+    assert seeded.ok is place(problem).ok
+    cells = _cells(seeded)
+    assert len(set(cells.values())) == len(cells)  # never overlapping (every block is 1x1x1)
+    assert all(in_region(c, region) for c in cells.values())
+    if seeded.ok:
+        assert PLACEMENT_CODES.isdisjoint(validate(problem, _as_layout(seeded.placements)).codes())
+    else:
+        assert seeded.infeasibility is not None
+
+    order = _flow_order(problem)
+    offers = _seed_offers(problem, order)
+    lifted = _cells(_place(problem, order, offers, _busy_blocks(problem)))
+    level = _cells(_place(problem, order, offers))
+    if "hub" in lifted and lifted["hub"] != level["hub"]:
+        x, y, z = level["hub"]
+        assert lifted["hub"] == (x, y + 1, z)
+        assert (x, y, z) not in lifted.values()
 
 
 @given(

@@ -743,6 +743,24 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **The annealer's seed lifts a busy single block off the floor (`placement/constructive.py`).**
+  On the floor a single block has no down face, and its front carries no I/O, so it has four faces
+  for its connections: with five it can never dock them all, with four it has none to spare, and
+  such blocks were most of what the crowding gate still found in a spaced seed. In the spaced seed
+  a single block with four or more connections now takes its slot as before, moves one cell up,
+  and the slot below it is held empty for its down face; every other machine lands where it would
+  have. The plain-scan fallback and `--fast` lift nothing. On the seed, crowded machines go from 8
+  to none on bio-diesel, 1 to none on iron, and on the shelves 4 to none on log-bug and 14 to 1 on
+  platline. Measured at full effort against main, seed by seed: titanium solves VALID on 16 of 16
+  seeds instead of 4 (on the 4 it solved, 2 better and 2 worse) and salty-root on 16 instead of 2 (on its two old VALID seeds, median floor plus
+  route cells 127 to 83.5), and iron stays 16 of 16 with a median of 166.5 instead of 191.5 (10
+  seeds better, 6 worse). Of the lines still partial, log-bug ends with 2 unconnected nets instead
+  of 9.5 and none crowded instead of 10.5, and platline with 4.5 unconnected instead of 15.5.
+  Bio-diesel's crowding is gone too (8 unconnected nets to 1, 5 crowded to none), but it spreads
+  wider (floor 131 to 192) and the net left is its ULV power run, now too long for the voltage.
+  Lifting only blocks with five connections was worse on every line it changed: it made the
+  spread start itself pass the gate where the compact states an anneal reached did not, so many
+  anneals handed back the start, and titanium's VALID layouts came out twice the size.
 - **A line with a multiblock is annealed from spaced shelves, not a single row
   (`placement/constructive.py`, `place(problem, lattice=True)`).** The spaced lattice (below) was
   only for lines of single blocks, so a line with any multiblock still started as first-fit's
