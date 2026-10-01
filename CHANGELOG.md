@@ -279,6 +279,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **Optimizing is never worse than `--fast` (#132).** The optimizer anneals away from the
+  constructive placement `--fast` lays, and its floor term can prefer stacking machines so one is
+  left with only its front free, which no cable docks on. When every attempt came out partial it
+  returned the best partial, even where `--fast` laid the same line VALID. It now lays the `--fast`
+  layout as a last candidate and returns it when it is VALID. Only a solve with no VALID attempt
+  pays for it, and not when the crowding gate proves the `--fast` placement cannot dock, which is
+  the costly case (137 s on a community bio-diesel line whose whole search takes 41 s). On the
+  property tests' generated lines at the suite's minimal effort, `--fast` beat the optimizer on 1
+  of 300 and now on none; at full effort it already beat it on none. Every solve that finds a VALID
+  layout is unchanged.
 - **A plan whose node picks one of an input's ore-dictionary alternatives loads.** The arodoid
   exporter lists on each recipe input every resource it accepts (`alternatives`: a Mixer's Salt
   takes GT's dust or HarvestCraft's salt), and a node's `recipeInputOverrides` records the one the

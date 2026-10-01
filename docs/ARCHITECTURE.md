@@ -113,7 +113,9 @@ doc as intent and reconcile.
   keeps the best VALID layout by a quality ranking, a partial one ranked by the nets it left
   unrouted, counting the power net of any machine validation proves starved of power, which is a
   placement defect rather than a bug. No attempt depends on another, so a slow line runs them in
-  a pool of processes - `solver/core.py`). A bank-column layout, where the
+  a pool of processes - `solver/core.py`). When no attempt is VALID it lays the `--fast` layout,
+  unless the crowding gate proves that one cannot dock, and returns it if VALID, so optimizing is
+  never worse than not (#132). A bank-column layout, where the
   line has one, is routed first and ranked with the grid's attempts: a candidate, never a
   verdict. It also owns the **power-source
   repair pass** (`solver/repair.py`): the annealer has no gradient on a source (a 1x1x1 block

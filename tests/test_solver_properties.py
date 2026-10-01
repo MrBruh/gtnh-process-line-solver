@@ -413,6 +413,24 @@ def test_solve_is_deterministic_for_a_given_problem_and_seed(problem: InputIR, s
     assert first.model_dump() == second.model_dump()
 
 
+@settings(
+    max_examples=property_examples(100),
+    suppress_health_check=[HealthCheck.too_slow],
+)
+@given(problem=_problems(), seed=st.integers(min_value=0, max_value=3))
+def test_optimizing_is_never_worse_than_the_fast_path(problem: InputIR, seed: int) -> None:
+    """Where the fast path lays a VALID layout, so does the optimizer (#132).
+
+    The optimizer anneals away from the constructive placement the fast path lays, and its cost can
+    prefer a stacked placement that buries the one face a cable docks on. With no VALID attempt it
+    lays the fast path's layout itself, so the "optimize or not" control can only help. At the
+    suite's minimal effort, its single attempt, which is where the gap showed (1 in 300 of this
+    corpus before the fallback).
+    """
+    if solve(problem, seed=seed, optimize=False).status is LayoutStatus.VALID:
+        assert solve(problem, seed=seed).status is LayoutStatus.VALID
+
+
 # ------------------------------------------------------------------------- arbitrary layouts (2)
 
 _LAYOUT_CELLS = st.builds(
