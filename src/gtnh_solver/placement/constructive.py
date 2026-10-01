@@ -81,6 +81,16 @@ def _wont_fit(machine: Machine, region: CellBox) -> Infeasibility:
             ),
             suggested_relaxation="enlarge bounding_region, or free cells along its boundary",
         )
+    if machine.outside_front:
+        return Infeasibility(
+            constraint="outside_front",
+            detail=(
+                f"{machine.type} {machine.id!r} has no free slot with its front, which faces "
+                f"outside the build, on the boundary of the {region.sx}x{region.sy}x{region.sz} "
+                f"region"
+            ),
+            suggested_relaxation="enlarge bounding_region, or free cells along its boundary",
+        )
     return Infeasibility(
         constraint="bounding_region",
         detail=(
@@ -94,11 +104,12 @@ def _wont_fit(machine: Machine, region: CellBox) -> Infeasibility:
 def _fit(machine: Machine, region: CellBox, occupied: set[Cell]) -> tuple[CellCoord, Facing] | None:
     """The first valid (origin, orientation) for ``machine``, or ``None`` if none exists.
 
-    A normal machine takes the first free origin with its first legal orientation. A power
-    source must also put its front face - the reserved external-feed face - flush on the region
-    boundary, so it takes the first free origin at which *some* legal orientation does that.
+    A normal machine takes the first free origin with its first legal orientation. One whose front
+    faces outside the build (``Machine.fronts_outside``: a power source's reserved external-feed
+    face, a Crop Manager's field) must also put that front flush on the region boundary, so it
+    takes the first free origin at which *some* legal orientation does that.
     """
-    if not machine.is_power_source:
+    if not machine.fronts_outside:
         orientation = machine.orientation_options[0]
         origin = _first_fit(machine, region, occupied, orientation)
         return None if origin is None else (origin, orientation)

@@ -25,7 +25,7 @@ from .enums import HORIZONTAL_FACINGS, Commodity, Facing, IODirection, RelativeF
 from .geometry import CellBox, CellCoord, allowed_faces
 
 #: Bump on any breaking change to the input contract; record it in ``ir/__init__.py``.
-INPUT_IR_VERSION = 4
+INPUT_IR_VERSION = 5
 
 
 class Port(StrictModel):
@@ -208,6 +208,18 @@ class Machine(StrictModel):
     #: else), so the validator checks the filter's output against it and a builder reads it to
     #: configure the block.
     filter_items: tuple[str, ...] = ()
+    #: Whether this machine stands for something built OUTSIDE the layout, which it faces with its
+    #: front (InputIR v5): a Crop Manager, the block a crop card's output comes from, whose field is
+    #: not part of the build (#282). Like a power source's feed face, that front lies flush on the
+    #: region boundary. A power source needs no flag (:attr:`fronts_outside` reads its port).
+    outside_front: bool = False
+
+    @property
+    def fronts_outside(self) -> bool:
+        """Whether this machine's front faces outside the build, so placement puts it flush on the
+        region boundary and the validator holds it there: a power source's feed face, or a machine
+        flagged :attr:`outside_front`. The one reading of that rule, for every stage."""
+        return self.outside_front or self.is_power_source
 
     @field_validator("filter_items")
     @classmethod

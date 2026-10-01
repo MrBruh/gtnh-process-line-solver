@@ -983,6 +983,32 @@ def test_power_source_buried_mid_region_is_flagged() -> None:
     assert ViolationCode.POWER_FEED_NOT_ON_BOUNDARY in validate(problem, layout).codes()
 
 
+def _lone_crop_manager(cell: CellCoord, orientation: Facing) -> tuple[InputIR, LayoutResult]:
+    """A placed Crop Manager (#282): no power port, its front flagged as facing outside."""
+    problem, layout = _lone_source(cell, orientation)
+    manager = problem.machines[0].model_copy(
+        update={"type": "Basic Crop Manager", "outside_front": True, "faces": FaceSpec()}
+    )
+    return problem.model_copy(update={"machines": [manager]}), layout
+
+
+def test_an_outside_front_on_the_boundary_passes() -> None:
+    assert validate(*_lone_crop_manager(_coord(1, 0, 0), Facing.NORTH)).ok
+
+
+def test_an_outside_front_facing_the_interior_is_flagged_with_its_own_code() -> None:
+    # The power-feed rule, for a machine that is not a power source: its own code and message.
+    problem, layout = _lone_crop_manager(_coord(1, 0, 1), Facing.NORTH)
+    report = validate(problem, layout)
+    assert ViolationCode.OUTSIDE_FRONT_NOT_ON_BOUNDARY in report.codes()
+    assert ViolationCode.POWER_FEED_NOT_ON_BOUNDARY not in report.codes()
+    (violation,) = [
+        v for v in report.violations if v.code is ViolationCode.OUTSIDE_FRONT_NOT_ON_BOUNDARY
+    ]
+    assert violation.message.startswith("Basic Crop Manager 'src' front face north")
+    assert violation.machine_id == "src"
+
+
 def test_power_source_at_a_wall_facing_the_interior_is_flagged() -> None:
     # Touching the boundary is not enough: the FRONT face is the reserved feed entry, so a source
     # on the west wall facing east (into the room) still has no external feed face.

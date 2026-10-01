@@ -437,31 +437,44 @@ def _hops_from(adjacency: Mapping[Cell, set[Cell]], start: Cell) -> dict[Cell, i
 
 
 def _check_power_feed(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
-    """A power source's front face is its reserved external-feed face: it must lie flush on the
-    region boundary, so the builder can run power in from outside the structure (docs/DOMAIN.md).
+    """A front that faces outside the build must lie flush on the region boundary
+    (``Machine.fronts_outside``; docs/DOMAIN.md): a power source's, its reserved external-feed
+    face, so the builder can run power in from outside the structure; and a Crop Manager's, which
+    faces its field, built outside the line (#282).
 
     Re-derived from geometry alone, independent of the placer's rule: step every body cell one
     cell in the orientation direction; any stepped cell that is neither part of the body nor
     outside the region proves the front plane faces the interior. The front face carries no
-    internal cable regardless (TERMINAL_ON_FRONT_FACE), so this check is what makes the feed
-    reservation real - a source buried mid-region has no face left for the external feed.
+    internal connection regardless (TERMINAL_ON_FRONT_FACE), so this check is what makes the
+    reservation real: a source buried mid-region has no face left for what comes from outside.
     """
     machines = {m.id: m for m in problem.machines}
     region = problem.bounding_region
     for pl in layout.placements:
         m = machines.get(pl.machine_id)
-        if m is None or not m.is_power_source:
+        if m is None or not m.fronts_outside:
             continue
         dx, dy, dz = FACE_DELTAS[pl.orientation]
         body = body_cells(pl.cell, m.footprint, pl.orientation)
         front_plane = ((x + dx, y + dy, z + dz) for x, y, z in body)
-        if any(c not in body and in_region(c, region) for c in front_plane):
+        if not any(c not in body and in_region(c, region) for c in front_plane):
+            continue
+        if m.is_power_source:
             out.append(
                 Violation(
                     ViolationCode.POWER_FEED_NOT_ON_BOUNDARY,
                     f"power source {pl.machine_id!r} front (feed) face "
                     f"{pl.orientation.value} faces the region interior, not the boundary "
                     f"(the external power feed must enter from outside)",
+                )
+            )
+        else:
+            out.append(
+                Violation(
+                    ViolationCode.OUTSIDE_FRONT_NOT_ON_BOUNDARY,
+                    f"{m.type} {pl.machine_id!r} front face {pl.orientation.value} faces the "
+                    f"region interior, not the boundary (what it stands for is built outside)",
+                    machine_id=pl.machine_id,
                 )
             )
 

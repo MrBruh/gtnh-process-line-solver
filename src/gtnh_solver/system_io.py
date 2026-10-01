@@ -6,7 +6,8 @@ here instead: the single source, pure over the ``InputIR`` + the ``LayoutResult`
 formats it.
 
 - **inputs**: a boundary storage (Super Chest/Tank) that *only* sources the line - nothing feeds it,
-  so the builder fills it. Each carries the resource + its typed rate.
+  so the builder fills it - or a Crop Manager (``Machine.outside_front``, #282), which puts out
+  what its field outside the build yields. Each carries the resource + its typed rate.
 - **outputs**: the product the line makes - normally a boundary storage that only *sinks* (a
   synthesized collection buffer, #16), or, as a fallback, a machine OUTPUT port no net consumes.
 - **power**: the summed ``eut`` the placed machines draw, plus the amperage each synthetic source
@@ -122,7 +123,8 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
         dirs = {p.direction for p in machine.faces.ports}
         only_sources = IODirection.INPUT not in dirs and IODirection.OUTPUT in dirs
 
-        if is_boundary_storage(machine.type) and only_sources:
+        # A Crop Manager is an input too: what its field outside the build yields (#282).
+        if (is_boundary_storage(machine.type) or machine.outside_front) and only_sources:
             for port in out_ports:
                 src = net_by_source.get((machine.id, port.id))
                 resource = (net_resource(src) if src else None) or port_resource(port)

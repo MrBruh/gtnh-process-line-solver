@@ -908,12 +908,12 @@ def test_a_body_reads_the_machine_as_placement_sees_it() -> None:
         body = _body(machine)
         assert body.machine is machine
         assert body.orientations == tuple(machine.orientation_options)
-        assert body.is_power_source == machine.is_power_source
+        assert body.fronts_outside == machine.fronts_outside
         assert body.port_ids == tuple(port.id for port in machine.faces.ports)
         for facing in Facing:
             box = rotated_footprint(machine.footprint, facing)
             assert body.sizes[facing] == (box.sx, box.sy, box.sz)
-    assert _body(source).is_power_source
+    assert _body(source).fronts_outside
     assert _body(wide).sizes[Facing.EAST] == (1, 1, 3)
 
 

@@ -182,6 +182,36 @@ def test_non_source_machine_may_sit_mid_region() -> None:
     assert result.placements[0].cell == CellCoord(x=1, y=0, z=1)
 
 
+def _crop_manager(mid: str = "cm") -> Machine:
+    """A machine facing outside the build (#282): a Crop Manager, the block a crop card's output
+    comes from, its field outside the line. It has no power port; the flag alone pins its front."""
+    return _machine(
+        mid, orientations=[Facing.SOUTH, Facing.NORTH, Facing.EAST, Facing.WEST]
+    ).model_copy(update={"type": "Basic Crop Manager", "outside_front": True})
+
+
+def test_an_outside_front_lands_on_the_boundary_like_a_feed_face() -> None:
+    # Its first orientation (south) faces the interior from the corner first-fit finds, so the
+    # placer must turn it, exactly as it turns a power source's feed face onto the wall.
+    problem = _problem([_machine("a"), _crop_manager()])
+    result = place(problem)
+    assert result.ok
+    cm = next(p for p in result.placements if p.machine_id == "cm")
+    machine = next(m for m in problem.machines if m.id == "cm")
+    assert front_on_boundary(cm.cell, machine.footprint, cm.orientation, problem.bounding_region)
+    assert validate(problem, _as_layout(result.placements)).ok
+
+
+def test_an_outside_front_without_a_boundary_slot_is_explicitly_infeasible() -> None:
+    ring = [CellCoord(x=x, y=0, z=z) for x in range(3) for z in range(3) if (x, z) != (1, 1)]
+    problem = _problem([_crop_manager()], region=CellBox(sx=3, sy=1, sz=3), reserved=ring)
+    result = place(problem)
+    assert not result.ok
+    assert result.infeasibility is not None
+    assert result.infeasibility.constraint == "outside_front"
+    assert "Basic Crop Manager 'cm'" in result.infeasibility.detail
+
+
 @given(
     sx=st.integers(min_value=1, max_value=5),
     sy=st.integers(min_value=1, max_value=3),
