@@ -24,6 +24,7 @@ from gtnh_solver.ir import (
     Machine,
     MachineFaceRef,
     Net,
+    PipeSize,
     Placement,
     Port,
     Terminal,
@@ -197,6 +198,34 @@ def test_a_many_into_one_net_with_every_producer_against_the_consumer_needs_no_p
 def test_the_split_layout_validates() -> None:
     problem, placements = _three_into_one()
     report = validate(problem, _layout(problem, placements))
+    assert report.ok, str(report)
+
+
+def test_a_split_pipe_is_charged_for_what_its_own_producers_send() -> None:
+    # Three producers of 0.01 items/t into a consumer taking 0.03. With a ejecting straight into s,
+    # the pipe carries b's and c's 0.02, which a normal pipe holds (0.4 insertions per 40 ticks
+    # each). Charged for s's whole intake instead, its shared blocks needed 1.2 and were refused:
+    # the shape a #277 feed run took when one of its storages stood against the Mixer.
+    def rated(mid: str, port: str, direction: IODirection, rate: float) -> Machine:
+        return machine(
+            mid, [Port(id=port, commodity=Commodity.ITEM, direction=direction, rate=rate)]
+        )
+
+    problem = InputIR(
+        bounding_region=_REGION,
+        machines=[
+            *(rated(p, "out", IODirection.OUTPUT, 0.01) for p in ("a", "b", "c")),
+            rated("s", "in", IODirection.INPUT, 0.03),
+        ],
+        nets=[_shared("a", "b", "c").model_copy(update={"throughput": 0.03})],
+    )
+    placements = [at("a", 3, 0, 4), at("b", 8, 0, 7), at("c", 8, 0, 1), at("s", 4, 0, 4)]
+    layout = _layout(problem, placements)
+    (pipe,) = layout.routes
+    assert pipe.material is not None
+    assert pipe.material.size is PipeSize.NORMAL
+    assert {t.machine_id for t in pipe.terminals} == {"b", "c", "s"}
+    report = validate(problem, layout)
     assert report.ok, str(report)
 
 

@@ -288,6 +288,7 @@ def _check_item_pipe_throughput(
     """
     nets = {n.id: n for n in problem.nets}
     ports = {(m.id, p.id): p for m in problem.machines for p in m.faces.ports}
+    fed = _fed_producers(problem, layout)
     for r in layout.routes:
         material = r.material
         if r.commodity is not Commodity.ITEM or material is None or material.size is None:
@@ -303,7 +304,7 @@ def _check_item_pipe_throughput(
 
         demand: dict[Cell, float] = defaultdict(float)
         paying: dict[Cell, list[_ItemStream]] = defaultdict(list)
-        for stream in _item_streams(r, net, ports):
+        for stream in _item_streams(r, net, ports, split=bool(fed.get(net.id))):
             # The validator's OWN rounding, not dataset.endpoint_insertions: one insertion, since a
             # consumer that is never reached never runs, and one per further stack moved; but never
             # more than the items the stream moves, since GT counts only an insertion that moved one.
@@ -334,7 +335,7 @@ def _check_item_pipe_throughput(
 
 
 def _item_streams(
-    route: Route, net: Net, ports: Mapping[tuple[str, str], Port]
+    route: Route, net: Net, ports: Mapping[tuple[str, str], Port], *, split: bool = False
 ) -> list[_ItemStream]:
     """``route``'s streams: its producers matched to its consumers, nearest pair first.
 
@@ -359,8 +360,9 @@ def _item_streams(
 
     Terminals that are foreign, duplicated or off the route are left out; ``_check_terminals``
     reports each of those. A net with no producer or no consumer on the route moves nothing here.
-    A net whose other producers auto-output into its consumer (#270) is counted as if the
-    consumer's whole intake came down the pipe, which can only over-state what the pipe carries.
+    A ``split`` net, some of whose producers auto-output into its consumer (#270), moves only what
+    the producers on the pipe send: the consumer's intake also counts what the others eject into it
+    directly, so reading the flow off it would charge the pipe for items that never enter it.
     """
     adjacency = _route_adjacency(route)
     endpoints = {(e.machine_id, e.port_id) for e in net.endpoints}
@@ -381,7 +383,7 @@ def _item_streams(
 
     supply, supplied = _endpoint_shares([rate for _, rate in senders], net.throughput)
     wanted, consumed = _endpoint_shares([rate for _, rate in targets], net.throughput)
-    flow = max(supplied, consumed)  # items/t the whole net moves
+    flow = supplied if split else max(supplied, consumed)  # items/t the pipe moves
     hops = {cell: _hops_from(adjacency, cell) for cell, _ in senders}
     pairs = sorted(
         (hops[s][k], i, j)
