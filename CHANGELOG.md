@@ -15,7 +15,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   read between rounds, so a solve can overrun it by about one round. The layout reports how many
   rounds ran (`metrics.rounds`), the run prints how to replay it, and `--rounds N` runs exactly N
   rounds, which reproduces a timed solve byte for byte. Opt-in: without either flag a solve is
-  unchanged, down to its JSON. `solve()` takes `time_budget=` and `rounds=` likewise.
+  unchanged, down to its JSON. `solve()` takes `time_budget=` and `rounds=` likewise. Measured on
+  iron at twice the default's median time (26 s), over 16 seeds: 5 better, 11 the same, none
+  worse, the median floor plus route cells from 191.5 to 176.5, all 16 still VALID. Parallel-sand
+  is unchanged (its bank-column layout wins every round).
 - **`tools/bench_layouts.py` benchmarks layout quality across seeds and pairs two runs.** It runs
   `gtnh-solve` on plans x spaced seeds under any checkout's code (checked to import from that
   checkout), records each layout's floor, layers, pipe and cable cells and the solver's own ranking

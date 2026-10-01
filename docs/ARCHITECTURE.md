@@ -200,12 +200,16 @@ doc as intent and reconcile.
    that grid, each with fresh seeds, while the time spent plus the last round's duration still fits
    in S, and ranks every round's attempts together, ties to the earliest, so it is never worse than
    the same seed without a budget. The clock is read between rounds only, so a solve can overrun
-   by about one round, which matters on a line whose attempts are long (ev-nitrobenzene's take
-   about 30 s); a hard timeout that abandons a round half-way would rank a different set of
-   attempts on every machine. How many rounds a timed solve reached is reported
-   (`LayoutMetrics.rounds`), and `rounds=N` (`--rounds N`) replays it exactly. More attempts is
-   the one lever that has always paid: doubling them improved 8 of 16 parallel-sand solves. Its
-   attempts run in a pool of processes
+   by up to one round, and round 0 always runs whatever the budget. That matters on a line whose
+   attempts are long: ev-nitrobenzene's take about 30 s, so one round of eight in a pool of four
+   takes about 85 s, a budget under about 170 s buys no second round, and any budget can end up to
+   85 s late. A hard timeout that abandoned a round half-way would rank a different set of attempts
+   on every machine. How many rounds a timed solve reached is reported (`LayoutMetrics.rounds`),
+   and `rounds=N` (`--rounds N`) replays it exactly. More attempts is the one lever that has always
+   paid: doubling them improved 8 of 16 parallel-sand solves, and on iron a budget of twice the
+   default's median time (26 s) improved 5 of 16 seeds and worsened none, its median key from 191.5
+   to 176.5 (floor plus route cells), every seed still VALID. Its attempts run in a pool of
+   processes
    (`solve(jobs=...)`, `gtnh-solve --jobs`, one per CPU by default) once the first one shows the
    line is slow enough to pay for starting them: on 4 cores, nitrobenzene solves in 6.5 s instead
    of 13.0 s and ev-nitrobenzene in 31.7 s instead of 56.5 s, and the layout is the same whatever

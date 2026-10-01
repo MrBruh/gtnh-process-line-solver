@@ -151,9 +151,18 @@ def test_sand_with_items_on_me_solves_valid_with_no_item_routing(
         objective: Objective,
         jobs: int,
         effort: Effort | None,
+        time_budget: float | None,
+        rounds: int | None,
     ) -> LayoutResult:
         layout = solve(
-            problem, seed=seed, optimize=optimize, objective=objective, jobs=jobs, effort=effort
+            problem,
+            seed=seed,
+            optimize=optimize,
+            objective=objective,
+            jobs=jobs,
+            effort=effort,
+            time_budget=time_budget,
+            rounds=rounds,
         )
         solved.append((problem, layout))
         return layout
