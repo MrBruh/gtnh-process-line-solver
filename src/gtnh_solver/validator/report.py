@@ -71,6 +71,9 @@ class ViolationCode(str, Enum):
     POWER_FEED_NOT_ON_BOUNDARY = (
         "power_feed_not_on_boundary"  # a source's front (feed) face is not on the region boundary
     )
+    OUTSIDE_FRONT_NOT_ON_BOUNDARY = (
+        "outside_front_not_on_boundary"  # a Crop Manager's front, facing outside, is not either
+    )
     HATCH_CELLS_EXCEEDED = (
         "hatch_cells_exceeded"  # more connections wired to a machine than its structure can host
     )

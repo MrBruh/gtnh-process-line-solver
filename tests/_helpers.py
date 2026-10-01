@@ -12,9 +12,10 @@ Reconciled drift (chose the form that keeps every caller green):
   form); the single-sink ITEM callers (test_solver) use the defaults. ``net`` is variadic in its
   sinks, so a 1->1 net is just the no-extra-sink case. ``type_`` / ``fluid`` keep the few callers
   that pin a specific machine type or resource name (previewer) exact.
-- ``PLACEMENT_CODES`` is the full seven-code set; test_adapter previously used a six-code subset
-  (it omitted ``POWER_FEED_NOT_ON_BOUNDARY``), so asserting that code absent there too is a
-  correct strengthening, not a new failure - the sand placement never trips it.
+- ``PLACEMENT_CODES`` is the full placement-code set; test_adapter previously used a six-code
+  subset (it omitted ``POWER_FEED_NOT_ON_BOUNDARY``), so asserting that code absent there too is a
+  correct strengthening, not a new failure - the sand placement never trips it. The outside-front
+  code (#282) joined it with the rule it generalizes.
 - ``power_source`` carries the ``Power Source (LV)`` boilerplate. Its port id and orientation set
   legitimately differ by caller (power-routing nets key off ``power:out``; the placement suite
   seats the feed face from any of the four horizontals), so both stay parameters.
@@ -53,6 +54,7 @@ PLACEMENT_CODES: frozenset[ViolationCode] = frozenset(
         ViolationCode.PLACEMENT_COUNT_MISMATCH,
         ViolationCode.UNKNOWN_MACHINE,
         ViolationCode.POWER_FEED_NOT_ON_BOUNDARY,
+        ViolationCode.OUTSIDE_FRONT_NOT_ON_BOUNDARY,
     }
 )
 

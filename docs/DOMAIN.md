@@ -385,6 +385,16 @@ where load **sums** along shared segments (Steiner-tree-like):
   layout reserves **the source's front face as the external feed entry**: placement pins that
   face flush on the region boundary (validator-enforced), internal cables use the other five
   faces, and the builder runs power in through the wall the front touches.
+- **A crop card is an input on the edge too, through its Crop Manager (#282).** An arodoid crop
+  card's `machineCount` is the number of crop sticks planted, never a machine count, and the field
+  is not part of the line. So the field is not simulated: a card harvested by a Crop Manager (the
+  `crop-manager` handler) becomes one block, its tier's Crop Manager (`cropManagerTier`, "1" LV
+  to "8" UV as the fork reads it; CropsNH's `MTECropManager`, GT machine ids 28001 up), putting
+  out the whole card's yield. Like the power source, its front faces outside the build
+  (`Machine.outside_front`) and sits flush on the region boundary, where the builder lays the
+  field. It takes no inputs (the seed is planted, not piped) and draws nothing (its upkeep is not
+  simulated either). An Industrial Farm card is a multiblock and keeps its one-machine-per-crop
+  mapping for now.
 
 ## Cables and pipes as blocks
 

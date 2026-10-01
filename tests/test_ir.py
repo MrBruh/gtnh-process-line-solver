@@ -307,6 +307,22 @@ def test_a_power_sources_output_rate_is_not_a_draw_to_account_for() -> None:
     assert m.power_input_ports == []
 
 
+# --------------------------------------------------------------------------- outside fronts (v5)
+
+
+def test_a_front_faces_outside_for_a_power_source_or_a_flagged_machine_only() -> None:
+    # #282: one reading of the boundary rule. A power source needs no flag (its port says what it
+    # is), a Crop Manager carries the flag, and any other machine's front faces the build.
+    power_out = Port(id="po", commodity=Commodity.POWER, direction=IODirection.OUTPUT)
+    source = _machine(ports=[power_out])
+    manager = _machine().model_copy(update={"outside_front": True})
+    assert source.fronts_outside
+    assert manager.fronts_outside
+    assert not manager.is_power_source
+    assert not _machine().fronts_outside
+    assert not _machine().outside_front
+
+
 # --------------------------------------------------------------------------- face pins (v4)
 
 _HORIZONTAL = (Facing.NORTH, Facing.EAST, Facing.SOUTH, Facing.WEST)

@@ -72,6 +72,11 @@ Machine
                                     #  behaviour did, so no bump).
   filter_items: [str]               # the items an Item Filter lets through (its nine slots in
                                     #  game); empty for every other machine. InputIR v4 (#249).
+  outside_front: bool               # it stands for something built OUTSIDE the layout, which it
+                                    #  faces with its front: a Crop Manager, whose field is not
+                                    #  part of the build. Placement puts that front flush on the
+                                    #  region boundary, as for a power source's feed face; read
+                                    #  both through Machine.fronts_outside. InputIR v5 (#282)
 
   Machine.allowed_faces(port_id, orientation) -> set[Facing] is the ONE reading of the face
   rule, shared by the router, placement, the crowding gate and the validator: an unpinned port

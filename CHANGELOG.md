@@ -7,6 +7,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **A crop card is one Crop Manager on the edge of the build, an input like the power source
+  (#282).** An arodoid crop card's `machineCount` is the crop sticks planted, and the adapter made
+  each one a 1x1x1 "Crop Farm" machine: a community Bio Diesel plan's Canola card was 359
+  placeholder boxes in a line of 394 machines, and a crop line could not be exported at all. The
+  field is not simulated now. A card harvested by a Crop Manager becomes that one block, its
+  tier's Crop Manager (`cropManagerTier`, LV by default), putting out the whole card's yield with
+  no inputs and no draw, and the Bio Diesel line is 36 machines. Like the power source, its front
+  faces outside the build, where the field is, so it stands on the region boundary
+  (**InputIR v5**: `Machine.outside_front`, read with the power source's feed face through
+  `Machine.fronts_outside`; placement keeps it there and the validator reports
+  `outside_front_not_on_boundary` otherwise). The previewer's system I/O lists its yield as an
+  input. It is drawn and exported as the real block (`MTECropManager`, GT machine ids 28001 up):
+  the extractor now loads CropsNH 2.0.91, pinned in `gtnh.lock.json`, so a 2.9 texture dump
+  records all twelve managers. Re-dump to pick them up. Industrial Farm crop cards, a multiblock,
+  keep today's mapping.
 - **A single block short of faces takes its inputs through fewer of them (#277).** Three community
   plans drew single blocks needing six or seven connections on five faces, so they laid out
   `partial_invalid` on `single_block_faces` whatever the effort: platline's Chemical Reactors take

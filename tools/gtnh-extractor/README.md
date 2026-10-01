@@ -314,7 +314,7 @@ Commands (run from `tools/gtnh-extractor/`):
 printf 'n\ny\n' | ./gradlew runServer \
   -PtextureOut=../../out/textures-run \
   -PpackVersion=2.9.0-beta-2 \
-  "-PmodVersions=GT5-Unofficial=5.09.54.20,StructureLib=1.4.42"
+  "-PmodVersions=GT5-Unofficial=5.09.54.20,StructureLib=1.4.42,CropsNH=2.0.91"
 ```
 
 Run properties (`build.gradle.kts` forwards them into the server JVM as `gtnhextractor.*` system
@@ -383,7 +383,7 @@ export JAVA_HOME="/c/Users/<you>/AppData/Local/Programs/Eclipse Adoptium/jdk-25.
 ./gradlew runClient \
   -PtextureOut=../../out/textures-client \
   -PpackVersion=2.9.0-beta-2 \
-  "-PmodVersions=GT5-Unofficial=5.09.54.20,StructureLib=1.4.42"
+  "-PmodVersions=GT5-Unofficial=5.09.54.20,StructureLib=1.4.42,CropsNH=2.0.91"
 ```
 
 Then click **Singleplayer -> Create New World -> Create New World**. The dump fires the moment the
@@ -393,7 +393,7 @@ JVM.
 **Or skip the clicking entirely** with `-PautoWorld=true`, which makes the run unattended:
 
 ```sh
-./gradlew runClient -PautoWorld=true   -PtextureOut=../../out/textures-client   -PpackVersion=2.9.0-beta-2   "-PmodVersions=GT5-Unofficial=5.09.54.20,StructureLib=1.4.42"
+./gradlew runClient -PautoWorld=true   -PtextureOut=../../out/textures-client   -PpackVersion=2.9.0-beta-2   "-PmodVersions=GT5-Unofficial=5.09.54.20,StructureLib=1.4.42,CropsNH=2.0.91"
 ```
 
 `ClientProxy` waits for the main menu, then makes the same `Minecraft.launchIntegratedServer` call

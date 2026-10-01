@@ -18,6 +18,10 @@ Mapping (see docs/ARCHITECTURE.md, docs/IR.md):
                 machines (``power`` submodule, docs/DOMAIN.md); the export carries no source
                 this adapter uses. An arodoid generator's EU output, and the edges and storages
                 that carry it off, are dropped up front (``_without_generated_power``).
+- crop card -> one Crop Manager on the region boundary, its front facing the field outside the
+                build, putting out what the whole card yields: an input to the line, like the
+                power source (``_crop_cards_as_managers``, #282). Its ``machineCount`` is crop
+                sticks planted, which are not simulated.
 
 **A node's EU/t and duration come from the best source the plan offers**, because the recipe's own
 ``eut``/``durationTicks`` are the values at its MINIMUM tier and a machine run above that draws 4x
@@ -199,6 +203,26 @@ _COMMODITY = {"item": Commodity.ITEM, "fluid": Commodity.FLUID}
 #: The resource kind an arodoid plan gives EU: a generator recipe's output, and the edges and
 #: storages that carry it off. Not a commodity any port carries; see :func:`_without_generated_power`.
 _POWER_KIND = "power"
+#: The handler a crop card runs on when a Crop Manager harvests it (the arodoid fork's
+#: ``CROP_HARVESTER_MANAGER_ID``); its other, ``crop-industrial-farm``, is a multiblock. See
+#: :func:`_crop_cards_as_managers`.
+_CROP_MANAGER_HANDLER = "crop-manager"
+#: The node control choosing the manager's tier. Its keys are tier indexes, "1" (LV) to "8" (UV),
+#: which the fork parses as such and clamps to that range, an unset or unreadable one reading LV.
+_CROP_MANAGER_TIER_CONTROL = "cropManagerTier"
+#: Each tier's Crop Manager, as (voltage tier, block name), in key order: CropsNH registers them LV
+#: through UV and names them ``cropsnh_tooltip.cropManager.name.<tier>``, as the fork lists them.
+#: The name is the machine's ``type``, which the previewer and the ``.schematic`` export draw by.
+_CROP_MANAGERS: tuple[tuple[str, str], ...] = (
+    ("LV", "Basic Crop Manager"),
+    ("MV", "Advanced Crop Manager"),
+    ("HV", "Advanced Crop Manager II"),
+    ("EV", "Advanced Crop Manager III"),
+    ("IV", "Advanced Crop Manager IV"),
+    ("LuV", "Elite Crop Manager"),
+    ("ZPM", "Elite Crop Manager II"),
+    ("UV", "Ultimate Crop Manager"),
+)
 # Boundary I/O blocks that accept I/O covers on their faces (keeps covers off pipes).
 _STORAGE_TYPE = {"item": "Super Chest", "fluid": "Super Tank"}
 # Cross-check tolerance (relative AND absolute) between a v2 export's resolved EU/t figures and
@@ -395,6 +419,7 @@ def to_input_ir(
     first as an unloadable export and the second as an infeasibility (#112).
     """
     plan = _without_generated_power(plan)
+    plan, crop_managers = _crop_cards_as_managers(plan)
     resolved_producer = resolve_producer(plan, producer)
     _check_power_provenance(plan, resolved_producer)
     _check_dataset_version(plan, physical)
@@ -487,6 +512,8 @@ def to_input_ir(
                     _node_eut(section_recipe, section_node, resolved_machines)
                     for section_recipe, section_node in sections
                 ),
+                # A crop card's Crop Manager faces its field, outside the build (#282).
+                outside_front=node.id in crop_managers,
             )
             for instance_id in _instance_ids(node)
         )
@@ -1017,6 +1044,76 @@ def _without_generated_power(plan: Plan) -> Plan:
             "storages": [s for s in plan.storages if s.kind != _POWER_KIND],
         }
     )
+
+
+def _crop_cards_as_managers(plan: Plan) -> tuple[Plan, frozenset[str]]:
+    """``plan`` with each crop card a Crop Manager harvests made one Crop Manager block (#282).
+
+    A crop card's ``machineCount`` is the number of crop sticks planted, never a machine count (the
+    fork says so of its own cards), and the field they grow in is not part of the build: the line
+    receives what the field yields, the way it receives power from a source it does not build. So
+    the card becomes the one block that yield comes out of, which the layout puts on its edge
+    facing outside, like a power source (``Machine.outside_front``, set on the node ids returned):
+
+    - one machine of its tier's Crop Manager type (:data:`_CROP_MANAGERS`, by the card's
+      ``cropManagerTier``, an LV one by default), at that voltage tier;
+    - putting out what the whole card yields: each output times the crops planted;
+    - with no inputs and no draw: the seed is planted rather than piped, and neither the field nor
+      the manager's upkeep is simulated. So an edge into the card (a seed feed) has no port to land
+      on and is dropped with it.
+
+    A card on any other handler (an Industrial Farm is a multiblock) is left as it was. A copy,
+    never a mutation: the caller's plan and the recipes its nodes share stay as parsed, and each
+    converted card gets a recipe of its own, ``{recipe id}@{node id}``.
+    """
+    recipes = {r.id: r for r in plan.recipes}
+    nodes: list[Node] = []
+    own_recipes: list[Recipe] = []
+    managers: set[str] = set()
+    for node in plan.nodes:
+        recipe = recipes.get(node.recipe_id)
+        handler = _effective_handler(recipe, node) if recipe is not None else None
+        if recipe is None or handler is None or handler.id != _CROP_MANAGER_HANDLER:
+            nodes.append(node)
+            continue
+        tier, block = _CROP_MANAGERS[_crop_manager_tier(node) - 1]
+        own = recipe.model_copy(
+            update={
+                "id": f"{recipe.id}@{node.id}",
+                "machine_type": block,
+                "eut": 0.0,
+                "runtime_calculation": None,
+                "inputs": [],
+                "outputs": [
+                    out.model_copy(update={"amount": out.amount * node.machine_count})
+                    for out in recipe.outputs
+                ],
+            }
+        )
+        own_recipes.append(own)
+        nodes.append(
+            node.model_copy(
+                update={"recipe_id": own.id, "machine_count": 1, "overclock_tier": tier}
+            )
+        )
+        managers.add(node.id)
+    if not managers:
+        return plan, frozenset()
+    edges = [edge for edge in plan.edges if edge.target not in managers]
+    return (
+        plan.model_copy(
+            update={"recipes": [*plan.recipes, *own_recipes], "nodes": nodes, "edges": edges}
+        ),
+        frozenset(managers),
+    )
+
+
+def _crop_manager_tier(node: Node) -> int:
+    """The card's Crop Manager tier as the fork reads it: ``cropManagerTier`` parsed as an index,
+    1 (LV) to :data:`_CROP_MANAGERS`' last, clamped into that range, unset or unreadable reading 1."""
+    key = node.machine_config_tiers.get(_CROP_MANAGER_TIER_CONTROL, "")
+    index = int(key) if key.strip().isdigit() else 1
+    return min(max(index, 1), len(_CROP_MANAGERS))
 
 
 def _commodity(kind: str) -> Commodity:

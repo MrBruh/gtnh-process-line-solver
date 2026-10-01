@@ -48,6 +48,15 @@ dependencies {
     // Pinned from DreamAssemblerXXL manifest 2.9.0-beta-2; matches GT5U's transitive requirement.
     implementation("com.github.GTNewHorizons:StructureLib:1.4.42:dev")
 
+    // CropsNH - its Crop Managers are GT machines (MTECropManager, ids 28001+), which the texture
+    // pass dumps like any other once the mod is loaded, so a crop card's manager can be drawn and
+    // exported (#282). Pinned from DreamAssemblerXXL manifest 2.9.0-beta-2. Its POM depends on an
+    // older GT5U, and that edge would bring back the ThaumicTinkerer subtree excluded above, so
+    // exclude it here too.
+    implementation("com.github.GTNewHorizons:CropsNH:2.0.91:dev") {
+        exclude group: "com.github.GTNewHorizons", module: "ThaumicTinkerer"
+    }
+
     // JUnit 4, for the ASM icon-name matcher only (#98). Deliberately a SEPARATE suite from the
     // project's pytest gate: run it with `./gradlew test` from this directory. It is not wired
     // into CI, because the extractor is a local-only tool whose real gate is a dump run, and the

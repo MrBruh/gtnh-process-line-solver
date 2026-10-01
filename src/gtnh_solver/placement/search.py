@@ -251,7 +251,7 @@ class _Body:
 
     ``Machine`` is a pydantic model, and on Python 3.14+ every field read off one takes the slow,
     unspecialized path (#256), while the search reads a machine's footprint, facings and ports per
-    candidate and per cost evaluation. So it reads them from here instead. ``is_power_source`` is
+    candidate and per cost evaluation. So it reads them from here instead. ``fronts_outside`` is
     the extreme case: a property that rescans the machine's ports on every read, for an answer that
     never changes during a solve.
 
@@ -271,7 +271,7 @@ class _Body:
     #: an Item Filter.
     shells: Mapping[Facing, tuple[Cell, ...]]
     orientations: tuple[Facing, ...]
-    is_power_source: bool
+    fronts_outside: bool
     #: The ports a router will dock: on some net whose commodity is not on the ME network. A port on
     #: no net, or riding ME, is docked by nobody, so it asks for no cell - the rule the exact gate
     #: (``placement.feasibility``) already applies, and the cheap term must not tax what it exempts.
@@ -311,7 +311,7 @@ def _body(machine: Machine, docked: Collection[str] | None = None) -> _Body:
         sizes=sizes,
         shells=shells,
         orientations=tuple(machine.orientation_options),
-        is_power_source=machine.is_power_source,
+        fronts_outside=machine.fronts_outside,
         port_ids=tuple(port.id for port in ports),
         port_shells=port_shells,
     )
@@ -966,10 +966,11 @@ def _center(p: Pose, body: _Body) -> tuple[float, float, float]:
 
 
 def _feed_ok(body: _Body, origin: Cell, orientation: Facing, bounds: Size) -> bool:
-    """Whether placing ``body`` here honors the power-source feed rule (trivially true for
-    non-sources): a source's front face is its reserved external-feed face and must lie flush on
-    the region boundary (docs/DOMAIN.md; validator-enforced)."""
-    return not body.is_power_source or box_front_on_boundary(
+    """Whether placing ``body`` here honors the outside-front rule (trivially true for a machine
+    without one): a power source's front is its reserved external-feed face, and a Crop Manager's
+    faces its field outside the build (#282), so either must lie flush on the region boundary
+    (``Machine.fronts_outside``; docs/DOMAIN.md; validator-enforced)."""
+    return not body.fronts_outside or box_front_on_boundary(
         origin, body.sizes[orientation], orientation, bounds
     )
 

@@ -321,4 +321,14 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   one that reads only `fluid_or_item` finds a merged run naming nothing. Existing machines and
 #   nets are unchanged in shape (every new field defaults to the old meaning), but a v3 payload is
 #   still refused on parse, per the #38 rule above; re-adapt the plan.
+#
+# InputIR v5 (BREAKING) - a machine may stand for something built OUTSIDE the layout. One field,
+#   for GitHub #282: a crop card is an input to the line, like the power source, so the adapter
+#   places one Crop Manager whose output feeds the line and whose field is not part of the build.
+#   - `Machine.outside_front: bool`, whether its front faces outside the build. Like a power
+#     source's feed face, that front lies flush on the region boundary; placement keeps it there
+#     and the validator holds it there. Read through `Machine.fronts_outside`, which also covers a
+#     power source (known by its power output port, so it needs no flag).
+#   Breaking by the same rule: a v4 consumer that ignores the flag places a Crop Manager anywhere,
+#   its field face buried among the line's machines. A v4 payload is refused on parse.
 # ---------------------------------------------------------------------------
