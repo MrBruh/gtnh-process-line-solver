@@ -49,18 +49,32 @@ feedback measured as no better than none: over 53 solves on five lines, their se
 no two solves share an attempt, 45 returned the same layout without it, 6 a better one and 2 a
 worse one. Dropping it is what lets the attempts run side by side::
 
-    the grid of (weighting, seed) attempts         each one: anneal -> gate -> _assemble
+    round 0: the grid of (weighting, seed) attempts     each one: anneal -> gate -> _assemble
       attempt 0, in this process, timed
       the rest: in a pool of ``jobs`` processes when attempt 0 took longer than a pool takes to
                 start (_POOL_AFTER_S), else in turn, in this process
-    rank in grid order: the best VALID layout, else the fewest unrouted nets, else lay the first
-    placement the gate turned away
+    round r (only with a time budget or a round count): the same grid, its seeds moved on by r
+      seeds per weighting, every attempt in the pool round 0 started, else in turn here
+    rank in grid order, round by round: the best VALID layout, else the fewest unrouted nets, else
+    lay the first placement the gate turned away
     a partial layout's reason names any single block with more connections than faces, the cause
     no placement can fix (placement.single_block_shortfalls), ahead of the routers' own words
 
 An attempt returns the same thing whichever process runs it, and the ranking reads the attempts in
 grid order, so a given input and ``seed`` yields the same layout whatever ``jobs`` is and however
 the timing falls. The clock only decides whether a pool is worth starting.
+
+**More rounds is the one lever that has always paid** - doubling the attempts improved 8 of 16
+parallel-sand solves - so a caller with time to spare can buy more of the same search
+(docs/ARCHITECTURE.md #6). ``rounds=N`` runs N rounds; ``time_budget=S`` runs round 0 and then
+another round only while the time spent so far plus the last round's duration still fits in S, up
+to ``_MAX_BUDGET_ROUNDS``. The budget is a soft ceiling, checked between rounds only, so a solve
+overruns it by at most about one round. Round r's grid is round 0's with every seed moved on by
+r times the seeds per weighting, so no two rounds anneal the same seed, and ties keep the earliest
+attempt across rounds as within one: a budgeted solve is never worse on the ranking than the same
+seed without a budget. Which rounds a timed solve reached depends on the clock, so the layout
+reports them (``LayoutMetrics.rounds``) and ``rounds=`` that many replays it exactly. Without
+either, a solve is round 0 alone, exactly as before.
 
 One candidate comes from outside the grid. A line that is one chain of banks of parallel single
 blocks has a compact layout the annealer does not reach, each bank a column and each pair of stages
@@ -86,8 +100,10 @@ worse, and just as validated::
 
 from __future__ import annotations
 
+import math
 import time
 from concurrent.futures import ProcessPoolExecutor
+from contextlib import ExitStack
 from dataclasses import dataclass
 from typing import Literal
 
@@ -152,6 +168,16 @@ _BUDGETS: dict[Effort, _Budget] = {
 #: one, and nitrobenzene and ev-nitrobenzene solve 2.0x and 1.8x faster than one attempt at a time.
 _POOL_AFTER_S = 1.0
 
+#: The most rounds a time budget runs, whatever it allows. A backstop for a quick line, whose rounds
+#: take a fraction of a second: a long budget would otherwise spread one solve over thousands of
+#: seeds. 64 rounds of a full grid is 512 attempts. ``rounds=`` is not capped: it asks for exactly
+#: that many.
+_MAX_BUDGET_ROUNDS = 64
+
+#: The clock the time budget and the pool decision read, named so a test can stand in a fake one,
+#: the way it sets ``_POOL_AFTER_S``.
+_now = time.perf_counter
+
 
 def solve(
     problem: InputIR,
@@ -161,6 +187,8 @@ def solve(
     objective: Objective = "footprint",
     jobs: int = 1,
     effort: Effort | None = None,
+    time_budget: float | None = None,
+    rounds: int | None = None,
 ) -> LayoutResult:
     """Produce a layout for ``problem``; deterministic for a given ``problem`` + ``seed``.
 
@@ -188,10 +216,41 @@ def solve(
     ``effort`` sets the optimized path's budgets (module docstring): ``full`` searches for the best
     layout, ``minimal`` runs every stage once on small budgets. None takes :data:`DEFAULT_EFFORT`.
     The fast path ignores it, having only the one attempt.
+
+    ``time_budget`` (seconds) and ``rounds`` buy more of the same search, round after round of the
+    grid with fresh seeds (module docstring): ``rounds`` runs exactly that many, ``time_budget`` as
+    many as fit, a soft ceiling checked between rounds. Give at most one. Either way the layout says
+    how many rounds ran in ``metrics.rounds``, and ``rounds=`` that many replays a timed solve
+    exactly; with neither, a solve is the one round it always was and ``metrics.rounds`` stays None.
+    The fast path ignores both.
     """
+    if time_budget is not None and rounds is not None:
+        raise ValueError("give a time budget or a round count, not both")
+    if rounds is not None and rounds < 1:
+        raise ValueError(f"rounds must be at least 1, got {rounds}")
+    if time_budget is not None and not 0 <= time_budget < math.inf:
+        raise ValueError(f"time_budget must be a finite number of seconds >= 0, got {time_budget}")
     if not optimize:
         return _with_shortfall_reason(problem, _solve_fast(problem, seed, objective))
     budget = _BUDGETS[effort or DEFAULT_EFFORT]
+    layout, done = _search(problem, seed, objective, jobs, budget, time_budget, rounds)
+    if time_budget is None and rounds is None:
+        return layout
+    return layout.model_copy(update={"metrics": layout.metrics.model_copy(update={"rounds": done})})
+
+
+def _search(
+    problem: InputIR,
+    seed: int,
+    objective: Objective,
+    jobs: int,
+    budget: _Budget,
+    time_budget: float | None,
+    rounds: int | None,
+) -> tuple[LayoutResult, int]:
+    """The optimized path: the bank-column candidate, then the grid round by round, ranked (module
+    docstring). Returns the layout and how many rounds ran."""
+    started = _now()
     # The first placement the gate turned away, kept as a parachute. The gate is a heuristic about
     # geometry and the routers are the authority, so it is only ever allowed to pick BETTER
     # attempts - never to declare a line unsolvable that the routers would in fact have solved.
@@ -220,30 +279,45 @@ def solve(
         ("footprint",) if objective == "footprint" else (objective, "footprint")
     )
     seeds = -(-budget.attempts // len(sa_modes))  # ceiling division
-    grid = [(mode, seed + i) for i in range(seeds) for mode in sa_modes][: budget.attempts]
-    # Read in grid order, whichever process ran what, so ties keep the earliest attempt.
-    for attempt in _run_attempts(problem, grid, objective, jobs, budget):
-        if attempt.infeasibility is not None:
-            # The machines do not fit the region at all - seed-independent, so no attempt can.
-            return LayoutResult(
-                status=LayoutStatus.INFEASIBLE,
-                seed=attempt.seed,
-                infeasibility=attempt.infeasibility,
-            )
-        if attempt.layout is None:
-            gated = gated or attempt.gated
-            continue
-        if attempt.layout.status is LayoutStatus.VALID:
-            # Valid, but maybe not the best the other seeds found: rank it on the real, routed
-            # structure (ties keep the earliest attempt).
-            quality = _quality(problem, attempt.layout, objective)
-            if best_quality is None or quality < best_quality:
-                best_valid, best_quality = attempt.layout, quality
-        elif best_partial is None or len(attempt.failed_nets) < best_failures:
-            best_partial, best_failures = attempt.layout, len(attempt.failed_nets)
+    done = 0  # rounds run so far
+    with ExitStack() as pools:
+        runner = _Rounds(problem, objective, jobs, budget, pools)
+        while True:
+            # Round ``done``'s grid: round 0's, every seed moved on by ``done`` seeds per weighting,
+            # so no two rounds anneal the same seed.
+            grid = [(mode, seed + done * seeds + i) for i in range(seeds) for mode in sa_modes][
+                : budget.attempts
+            ]
+            round_started = _now()
+            # Read in grid order, whichever process ran what, so ties keep the earliest attempt.
+            for attempt in runner.run(grid):
+                if attempt.infeasibility is not None:
+                    # The machines do not fit the region at all - seed-independent, so no attempt
+                    # can, and this is round 0's first attempt.
+                    infeasible = LayoutResult(
+                        status=LayoutStatus.INFEASIBLE,
+                        seed=attempt.seed,
+                        infeasibility=attempt.infeasibility,
+                    )
+                    return infeasible, done + 1
+                if attempt.layout is None:
+                    gated = gated or attempt.gated
+                    continue
+                if attempt.layout.status is LayoutStatus.VALID:
+                    # Valid, but maybe not the best the other seeds found: rank it on the real,
+                    # routed structure (ties keep the earliest attempt).
+                    quality = _quality(problem, attempt.layout, objective)
+                    if best_quality is None or quality < best_quality:
+                        best_valid, best_quality = attempt.layout, quality
+                elif best_partial is None or len(attempt.failed_nets) < best_failures:
+                    best_partial, best_failures = attempt.layout, len(attempt.failed_nets)
+            done += 1
+            now = _now()
+            if not _another_round(done, rounds, time_budget, now - started, now - round_started):
+                break
 
     if best_valid is not None:
-        return best_valid
+        return best_valid, done
     if best_partial is None:
         # Every attempt was turned away, so nothing was ever routed. Do NOT report the crowding as
         # the verdict: the gate is a model of the routers' docking rules, and it has been wrong
@@ -253,8 +327,23 @@ def solve(
         # changed nothing else.
         assert gated is not None  # the only path that skips every attempt sets it
         layout, _ = _assemble(problem, gated, seed, objective, max_rounds=budget.negotiation_rounds)
-        return _with_shortfall_reason(problem, layout)
-    return _with_shortfall_reason(problem, best_partial)
+        return _with_shortfall_reason(problem, layout), done
+    return _with_shortfall_reason(problem, best_partial), done
+
+
+def _another_round(
+    done: int, rounds: int | None, time_budget: float | None, elapsed: float, last: float
+) -> bool:
+    """Whether a solve that has run ``done`` rounds starts another (module docstring).
+
+    ``rounds`` asks for exactly that many. A ``time_budget`` admits another round while the time
+    spent so far plus the last round's duration, the best guess at the next one's, still fits, up
+    to ``_MAX_BUDGET_ROUNDS``. With neither, round 0 is the whole search."""
+    if rounds is not None:
+        return done < rounds
+    if time_budget is None or done >= _MAX_BUDGET_ROUNDS:
+        return False
+    return elapsed + last <= time_budget
 
 
 def _with_shortfall_reason(problem: InputIR, layout: LayoutResult) -> LayoutResult:
@@ -340,32 +429,66 @@ def _attempt(
     return _Attempt(attempt_seed, layout=layout, failed_nets=failed_nets)
 
 
-def _run_attempts(
-    problem: InputIR,
-    grid: list[tuple[Objective, int]],
-    objective: Objective,
-    jobs: int,
-    budget: _Budget,
-) -> list[_Attempt]:
-    """Every attempt of ``grid``, in grid order (module docstring).
+class _Rounds:
+    """Runs one solve's rounds of attempts, each round's in grid order (module docstring).
 
-    Attempt 0 runs here and is timed. When it took longer than a pool takes to start
-    (``_POOL_AFTER_S``) and ``jobs`` allows, the rest run in a pool of up to ``jobs`` processes;
-    otherwise they run here in turn. A line whose machines do not fit the region stops at attempt 0,
-    since every seed starts from the same constructive placement.
+    Round 0 decides whether the attempts are worth a process pool: attempt 0 runs here and is timed,
+    and when it took longer than a pool takes to start (``_POOL_AFTER_S``) and ``jobs`` allows, the
+    rest of the round runs in a pool of up to ``jobs`` processes; otherwise in turn, here. A line
+    whose machines do not fit the region stops at attempt 0, since every seed starts from the same
+    constructive placement. A pool round 0 starts stays open on ``pools`` for every later round, so a
+    solve starts at most one, and a later round runs all its attempts there, or all of them here.
     """
-    (first_mode, first_seed), rest = grid[0], grid[1:]
-    started = time.perf_counter()
-    first = _attempt(problem, first_mode, first_seed, objective, budget)
-    if first.infeasibility is not None or not rest:
-        return [first]
-    if jobs > 1 and time.perf_counter() - started > _POOL_AFTER_S:
-        with ProcessPoolExecutor(max_workers=min(jobs, len(rest))) as pool:
-            futures = [
-                pool.submit(_attempt, problem, mode, s, objective, budget) for mode, s in rest
-            ]
-            return [first, *(future.result() for future in futures)]
-    return [first, *(_attempt(problem, mode, s, objective, budget) for mode, s in rest)]
+
+    def __init__(
+        self,
+        problem: InputIR,
+        objective: Objective,
+        jobs: int,
+        budget: _Budget,
+        pools: ExitStack,
+    ) -> None:
+        self._problem = problem
+        self._objective = objective
+        self._jobs = jobs
+        self._budget = budget
+        self._pools = pools
+        self._pool: ProcessPoolExecutor | None = None
+        self._first = True
+
+    def run(self, grid: list[tuple[Objective, int]]) -> list[_Attempt]:
+        """Every attempt of ``grid``, in grid order."""
+        if self._first:
+            self._first = False
+            return self._first_round(grid)
+        if self._pool is not None:
+            return self._pooled(self._pool, grid)
+        return [self._here(mode, s) for mode, s in grid]
+
+    def _first_round(self, grid: list[tuple[Objective, int]]) -> list[_Attempt]:
+        (first_mode, first_seed), rest = grid[0], grid[1:]
+        started = _now()
+        first = self._here(first_mode, first_seed)
+        if first.infeasibility is not None or not rest:
+            return [first]
+        if self._jobs > 1 and _now() - started > _POOL_AFTER_S:
+            self._pool = self._pools.enter_context(
+                ProcessPoolExecutor(max_workers=min(self._jobs, len(rest)))
+            )
+            return [first, *self._pooled(self._pool, rest)]
+        return [first, *(self._here(mode, s) for mode, s in rest)]
+
+    def _here(self, mode: Objective, attempt_seed: int) -> _Attempt:
+        return _attempt(self._problem, mode, attempt_seed, self._objective, self._budget)
+
+    def _pooled(
+        self, pool: ProcessPoolExecutor, grid: list[tuple[Objective, int]]
+    ) -> list[_Attempt]:
+        futures = [
+            pool.submit(_attempt, self._problem, mode, s, self._objective, self._budget)
+            for mode, s in grid
+        ]
+        return [future.result() for future in futures]
 
 
 def _layout_metrics(

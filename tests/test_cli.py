@@ -232,6 +232,88 @@ def test_cli_rejects_fewer_than_one_job(
     assert not solve_calls  # rejected at parse time, before any solving work
 
 
+def test_cli_time_budget_and_rounds_reach_the_solver(
+    capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    assert main([_SAND, "--time-budget", "1.5"]) == 0
+    _published(capsys.readouterr().out)
+    assert (solve_calls[-1]["time_budget"], solve_calls[-1]["rounds"]) == (1.5, None)
+    assert main([_SAND, "--rounds", "3"]) == 0
+    _published(capsys.readouterr().out)
+    assert (solve_calls[-1]["time_budget"], solve_calls[-1]["rounds"]) == (None, 3)
+
+
+def test_cli_without_a_budget_publishes_the_layout_as_before(
+    capsys: pytest.CaptureFixture[str],
+    solve_calls: list[dict[str, object]],
+    sand_layout: LayoutResult,
+) -> None:
+    # Opt-in: with neither flag the solver gets neither, and the layout it returns is published
+    # exactly as it was before rounds existed, with no `rounds` metric in the JSON at all.
+    assert main([_SAND]) == 0
+    captured = capsys.readouterr()
+    assert (solve_calls[-1]["time_budget"], solve_calls[-1]["rounds"]) == (None, None)
+    assert captured.out == cli_module._layout_json(sand_layout) + "\n"
+    assert "rounds" not in json.loads(captured.out)["metrics"]
+    assert "searched" not in captured.err
+
+
+def test_cli_takes_a_time_budget_or_rounds_not_both(
+    capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    with pytest.raises(SystemExit):
+        main([_SAND, "--time-budget", "10", "--rounds", "2"])
+    assert "not allowed with" in capsys.readouterr().err
+    assert not solve_calls
+
+
+@pytest.mark.parametrize(
+    ("flag", "value"),
+    [
+        ("--time-budget", "-1"),
+        ("--time-budget", "inf"),
+        ("--time-budget", "nan"),
+        ("--rounds", "0"),
+    ],
+)
+def test_cli_rejects_a_budget_that_is_not_one(
+    capsys: pytest.CaptureFixture[str],
+    solve_calls: list[dict[str, object]],
+    flag: str,
+    value: str,
+) -> None:
+    with pytest.raises(SystemExit):
+        main([_SAND, flag, value])
+    assert flag in capsys.readouterr().err
+    assert not solve_calls
+
+
+def test_cli_names_the_rounds_a_timed_solve_searched(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, sand_layout: LayoutResult
+) -> None:
+    # How far a budget gets depends on the clock, so the run says how to get this layout again.
+    timed = sand_layout.model_copy(
+        update={"metrics": sand_layout.metrics.model_copy(update={"rounds": 3})}
+    )
+    monkeypatch.setattr(cli_module, "solve", lambda problem, **kwargs: timed)
+    assert main([_SAND, "--seed", "7", "--time-budget", "60"]) == 0
+    captured = capsys.readouterr()
+    assert _published(captured.out).metrics.rounds == 3
+    assert "searched 3 rounds" in captured.err
+    assert "--seed 7 --rounds 3" in captured.err
+    # Asked for rounds outright, there is nothing to replay: the command already is the replay.
+    assert main([_SAND, "--rounds", "3"]) == 0
+    assert "searched" not in capsys.readouterr().err
+
+
+def test_cli_fast_says_it_ignores_a_budget(
+    capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    assert main([_SAND, "--fast", "--rounds", "2"]) == 0
+    assert "--time-budget/--rounds ignored" in capsys.readouterr().err
+    assert solve_calls[-1]["optimize"] is False
+
+
 def test_cli_preview_writes_self_contained_html(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
 ) -> None:

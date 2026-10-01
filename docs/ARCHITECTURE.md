@@ -123,8 +123,8 @@ doc as intent and reconcile.
   miss entirely (a load two cells clear of the nearest usable wall yields no candidate at all).
   The aim only shortlists; routing decides, so this is the same decision as the missing
   placement-cost term, not a reversal of it - cable is judged where it is knowable, on a routed
-  layout. *(Phase 2: the anytime **wall-clock** budget; today it runs a deterministic bounded grid
-  keyed off the seed, not a timeout.)*
+  layout. The grid is deterministic and bounded, keyed off the seed; a caller with time to spare
+  buys more rounds of it with a time budget (decision 6).
   Within one attempt the order is fixed: hold one dock cell per power endpoint, lay the pipes,
   lay power (through the repair pass), place hatches, validate. Power goes last, so every pipe
   cell is a wall to it, and a held dock *cell* is not a held *path*: a pipe can detour around it
@@ -194,9 +194,22 @@ doc as intent and reconcile.
    timeout). The power router uses **A\*** (not Lee BFS) with a Manhattan heuristic on the
    bounded grid; the negotiation grows each net's tree with a priced multi-source Dijkstra that
    stops as soon as no unexplored dock cell can serve its endpoints more cheaply.
-   *(Phase 2: the wall-clock/timeout budget. `solve()` already returns the best VALID layout by
-   its quality ranking, but over a **deterministic bounded** multi-start grid keyed off the seed,
-   not a wall-clock timeout - see `solver/core.py`. Its attempts run in a pool of processes
+   *(The budget is built, opt-in and **soft**. `solve()` returns the best VALID layout by its
+   quality ranking over a **deterministic bounded** multi-start grid keyed off the seed - see
+   `solver/core.py`. `solve(time_budget=S)` (`gtnh-solve --time-budget S`) then runs more rounds of
+   that grid, each with fresh seeds, while the time spent plus the last round's duration still fits
+   in S, and ranks every round's attempts together, ties to the earliest, so it is never worse than
+   the same seed without a budget. The clock is read between rounds only, so a solve can overrun
+   by up to one round, and round 0 always runs whatever the budget. That matters on a line whose
+   attempts are long: ev-nitrobenzene's take about 30 s, so one round of eight in a pool of four
+   takes about 85 s, a budget under about 170 s buys no second round, and any budget can end up to
+   85 s late. A hard timeout that abandoned a round half-way would rank a different set of attempts
+   on every machine. How many rounds a timed solve reached is reported (`LayoutMetrics.rounds`),
+   and `rounds=N` (`--rounds N`) replays it exactly. More attempts is the one lever that has always
+   paid: doubling them improved 8 of 16 parallel-sand solves, and on iron a budget of twice the
+   default's median time (26 s) improved 5 of 16 seeds and worsened none, its median key from 191.5
+   to 176.5 (floor plus route cells), every seed still VALID. Its attempts run in a pool of
+   processes
    (`solve(jobs=...)`, `gtnh-solve --jobs`, one per CPU by default) once the first one shows the
    line is slow enough to pay for starting them: on 4 cores, nitrobenzene solves in 6.5 s instead
    of 13.0 s and ev-nitrobenzene in 31.7 s instead of 56.5 s, and the layout is the same whatever

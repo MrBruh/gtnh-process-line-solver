@@ -11,7 +11,16 @@ amperage of the shared-amperage net (docs/DOMAIN.md).
 
 from __future__ import annotations
 
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from typing import Any
+
+from pydantic import (
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from ._base import StrictModel, check_contract_version
 from .enums import Commodity, Facing, LayoutStatus, PipeFamily, PipeSize
@@ -228,6 +237,17 @@ class LayoutMetrics(StrictModel):
     layers: int | None = None
     buildability: float | None = None
     congestion: float | None = None
+    #: How many rounds of the multi-start ran, set only on a solve given a time budget or a round
+    #: count (``solver.solve``), so ``--rounds`` this many replays a timed solve exactly. Left out
+    #: of the dump while None, so a layout solved without either serializes exactly as before.
+    rounds: int | None = Field(default=None, ge=1)
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_rounds(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        data: dict[str, Any] = handler(self)
+        if self.rounds is None:
+            data.pop("rounds", None)
+        return data
 
 
 class Infeasibility(StrictModel):

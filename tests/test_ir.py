@@ -7,6 +7,7 @@ tests pin both the guarantees and the non-guarantees.
 
 from __future__ import annotations
 
+import json
 import math
 
 import pytest
@@ -849,6 +850,19 @@ def test_infeasible_layout_requires_infeasibility() -> None:
 def test_metrics_allow_extra_fields() -> None:
     m = LayoutMetrics(footprint=4, vertical_runs=2)
     assert m.model_dump()["vertical_runs"] == 2
+
+
+def test_metrics_state_rounds_only_when_a_solve_counted_them() -> None:
+    # Set only on a budgeted solve, and absent rather than null otherwise, so every layout solved
+    # without a budget dumps exactly as it did before the field existed.
+    assert "rounds" not in LayoutMetrics(footprint=4).model_dump(mode="json")
+    assert "rounds" not in json.loads(LayoutMetrics(footprint=4).model_dump_json())
+    counted = LayoutMetrics(footprint=4, rounds=3)
+    assert counted.model_dump(mode="json")["rounds"] == 3
+    assert LayoutMetrics.model_validate_json(counted.model_dump_json()).rounds == 3
+    assert LayoutMetrics.model_validate({"footprint": 4}).rounds is None
+    with pytest.raises(ValidationError):
+        LayoutMetrics(rounds=0)  # a solve runs at least round 0
 
 
 # --------------------------------------------------------------------------- serialization
