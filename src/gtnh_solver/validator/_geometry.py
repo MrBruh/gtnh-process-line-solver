@@ -30,6 +30,7 @@ __all__ = [
     "in_region",
     "is_connected",
     "is_unit_step",
+    "placed_slots",
     "usable_faces",
 ]
 
@@ -104,6 +105,19 @@ def hatch_cells(
 ) -> dict[Cell, tuple[str, ...]]:
     """Where each recorded hatch slot lands once the machine is placed and turned, to its kinds.
 
+    :func:`placed_slots`, read for the kinds alone.
+    """
+    return {
+        cell: slot.kinds
+        for cell, slot in placed_slots(origin, footprint, orientation, slots).items()
+    }
+
+
+def placed_slots(
+    origin: CellCoord, footprint: CellBox, orientation: Facing, slots: Iterable[HatchSlot]
+) -> dict[Cell, HatchSlot]:
+    """Where each recorded hatch slot lands once the machine is placed and turned, to the slot.
+
     The validator's own re-derivation, from the convention rather than from
     ``ir.geometry.rotated_slot`` (see the module docstring). A slot offset is measured from the
     machine's **unrotated** minimum corner, so it turns with the structure and is then re-anchored,
@@ -121,7 +135,7 @@ def hatch_cells(
     """
     turns = _QUARTER_TURNS_FROM_NORTH.get(orientation, 0)
     sx, sz = footprint.sx, footprint.sz
-    placed: dict[Cell, tuple[str, ...]] = {}
+    placed: dict[Cell, HatchSlot] = {}
     for slot in slots:
         dx, dy, dz = slot.offset.as_tuple()
         if turns == 1:
@@ -132,7 +146,7 @@ def hatch_cells(
             x, z = dz, sx - 1 - dx
         else:
             x, z = dx, dz
-        placed[(origin.x + x, origin.y + dy, origin.z + z)] = slot.kinds
+        placed[(origin.x + x, origin.y + dy, origin.z + z)] = slot
     return placed
 
 

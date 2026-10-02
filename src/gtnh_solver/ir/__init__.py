@@ -363,4 +363,26 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   a route as reaching every endpoint and look for a terminal on a producer that has none. Either
 #   way the build it describes is missing a connection, with nothing raising. A v3 layout is
 #   refused on parse, as every bump is; re-solve its plan.
+#
+# InputIR v6 (BREAKING) - a tower's fluid outputs are tied to their layers. GT fills a Distillation
+#   Tower by layer, not first fit: recipe fluid output `i` goes only to the output hatches on the
+#   tower's `i`-th layer above the base, and the tower does not form while any layer has none
+#   (`MTEDistillationTower.addFluidOutputs`, `checkMachine`). Two fields, for GitHub #299:
+#   - `HatchSlot.output_layer: int | None`, the per-layer output list GT files a hatch in that
+#     cell under, from the dump (dataset schema v3). `Machine.output_layers` collects them.
+#   - `Port.output_layer: int | None`, the layer a tower's fluid output port is filled from: the
+#     fluid's place among the recipe's fluid outputs. Only a fluid output may name one, it must be
+#     a layer the slots record, and on a machine whose slots record layers every fluid output names
+#     one. `Machine.hatch_slots_for` then gives such a port exactly its kind's slots on that layer,
+#     with no fallback.
+#   Breaking by omission, the rule `hatches` set: a v5 consumer that ignores the fields docks a
+#   tower's output hatches on any layer, so each product leaves through whichever hatch GT fills
+#   with another, and a layer left without a hatch keeps the tower from forming. A v5 payload is
+#   refused on parse; re-adapt the plan.
+#
+# LayoutResult v4 (additive, no version bump) - a `PlacedHatch` with `port_id = None` is an upkeep
+#   hatch (maintenance, muffler) OR a spare output hatch: GT forms a tower only with an output
+#   hatch on every layer, so a layer no product uses gets one that receives nothing (#299). The
+#   shape is unchanged and every such hatch is a real block to place; a consumer that reads
+#   `port_id = None` as "upkeep" only mislabels the spare, and builds the same structure.
 # ---------------------------------------------------------------------------

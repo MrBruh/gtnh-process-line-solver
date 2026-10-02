@@ -25,6 +25,7 @@ from gtnh_solver.ir import (
     LayoutStatus,
     Machine,
     MachineFaceRef,
+    METoggles,
     Net,
     PlacedHatch,
     Placement,
@@ -33,10 +34,11 @@ from gtnh_solver.ir import (
     Terminal,
 )
 from gtnh_solver.router import assign_auto_outputs, place_hatches, route, vent_cells
+from gtnh_solver.router.hatches import _layer_hatches
 from gtnh_solver.solver import solve
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
-from tests._helpers import at
+from tests._helpers import at, layered_tower
 
 _REGION = CellBox(sx=14, sy=6, sz=14)
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
@@ -451,3 +453,98 @@ def test_the_shipped_lines_place_a_hatch_for_every_multiblock_port() -> None:
                 assert "Maintenance" in kinds, f"{name}: {machine.type} has no maintenance hatch"
             if "Muffler" in recorded:
                 assert "Muffler" in kinds, f"{name}: {machine.type} pollutes with no muffler"
+            # A tower layer no product uses gets one spare output hatch, and only such a layer.
+            owned = {p.output_layer for p in machine.faces.ports if p.output_layer is not None}
+            spares = [
+                h
+                for h in layout.hatches
+                if h.machine_id == machine.id and h.kind == "OutputHatch" and h.port_id is None
+            ]
+            assert len(spares) == len(machine.output_layers - owned), f"{name}: {machine.id}"
+
+
+# ------------------------------------------------------------- spare output hatches (#299)
+
+
+def _one_product_tower(**kwargs: object) -> tuple[InputIR, list[Placement]]:
+    """A two-layer tower making one fluid: GT still wants an output hatch on its second layer."""
+    tower = layered_tower(outputs=["water"], layers=2)
+    problem = InputIR(bounding_region=_REGION, machines=[tower], nets=[], **kwargs)
+    return problem, [at(tower.id, 2, 0, 2)]
+
+
+def test_a_tower_layer_no_product_uses_gets_a_spare_output_hatch() -> None:
+    # checkMachine refuses a tower with a layer without output hatch, so the one-product tower,
+    # still two layers tall, needs a hatch on layer 2 that receives nothing (#299).
+    problem, placements = _one_product_tower()
+    plan = place_hatches(problem, placements, [], [])
+
+    assert plan.ok
+    (spare,) = [h for h in plan.hatches if h.kind == "OutputHatch"]
+    assert spare.port_id is None  # it serves no net
+    assert spare.cell.y == 2  # layer 2 is the second storey above the base, at y = 0
+    assert spare.facing is not Facing.NORTH  # never through the controller's front
+
+
+def test_a_layer_a_product_owns_gets_no_spare() -> None:
+    # Layer 1 is the water port's: its own hatch serves it. If that hatch is missing, the port lost
+    # its connection, which the validator reports; a spare there would hide that.
+    problem, placements = _one_product_tower()
+    plan = place_hatches(problem, placements, [], [])
+    spares = [h for h in plan.hatches if h.kind == "OutputHatch"]
+    assert [s.cell.y for s in spares] == [2]
+
+
+def test_spares_are_placed_before_the_upkeep_hatches() -> None:
+    # The tower's second layer has one cell, which also takes the maintenance hatch; the base
+    # takes maintenance as well. Placed first, the spare gets the cell it needs, and the
+    # maintenance hatch goes to the base.
+    tower = layered_tower(outputs=["water"], layers=2)
+    keep = (0, 2, 1)
+    slots = tuple(
+        s.model_copy(update={"kinds": ("Maintenance", "OutputHatch")})
+        if s.offset.as_tuple() == keep
+        else s
+        for s in tower.hatch_slots
+        if s.output_layer != 1 or s.offset.as_tuple() == keep
+    )
+    tower = tower.model_copy(update={"hatch_slots": slots, "hatch_cells": len(slots)})
+    problem = InputIR(bounding_region=_REGION, machines=[tower], nets=[])
+    plan = place_hatches(problem, [at(tower.id, 2, 0, 2)], [], [])
+
+    assert plan.ok
+    kinds = [h.kind for h in plan.hatches]
+    assert kinds.index("OutputHatch") < kinds.index("Maintenance")
+    by_kind = {h.kind: h.cell.as_tuple() for h in plan.hatches}
+    assert by_kind["OutputHatch"] == (2, 2, 3)
+    assert by_kind["Maintenance"][1] == 0
+
+
+def test_no_spare_while_fluids_go_over_me() -> None:
+    # The layout draws no ME output hatches, so it cannot say which layers they cover.
+    problem, placements = _one_product_tower(me_toggles=METoggles(fluids=True))
+    plan = place_hatches(problem, placements, [], [])
+    assert not [h for h in plan.hatches if h.kind == "OutputHatch"]
+
+
+def test_a_layer_with_no_cell_left_for_its_spare_is_a_shortfall() -> None:
+    # Layer 2 keeps one cell, and another hatch already holds it: nothing is left for the spare.
+    tower = layered_tower(outputs=["water"], layers=2)
+    taken = {(0, 2, 0)}  # the one cell layer 2 keeps, already spent on another hatch
+    slots = tuple(
+        s for s in tower.hatch_slots if s.output_layer != 1 or s.offset.as_tuple() in taken
+    )
+    tower = tower.model_copy(update={"hatch_slots": slots, "hatch_cells": len(slots)})
+    problem = InputIR(bounding_region=_REGION, machines=[tower], nets=[])
+    placement = at(tower.id, 2, 0, 2)
+    other = PlacedHatch(
+        machine_id=tower.id, kind="Energy", cell=CellCoord(x=2, y=2, z=2), facing=Facing.WEST
+    )
+    claimed = {(2, 2, 2)}
+
+    spares, short = _layer_hatches(tower, placement, {tower.id: claimed}, [other], problem)
+    assert spares == []
+    (shortfall,) = short
+    assert shortfall.constraint == "hatch_budget"
+    assert "output layer 2" in shortfall.detail
+    assert "every layer" in shortfall.detail

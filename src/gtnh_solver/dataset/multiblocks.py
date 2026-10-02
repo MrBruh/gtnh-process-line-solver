@@ -91,12 +91,16 @@ _UPKEEP_HATCHES = ("Maintenance", "Muffler")
 class VariantShape:
     """One built form of a machine: how big it is and how many fluid outputs it can route.
 
-    ``output_layers`` counts the distinct y-layers carrying a cell that accepts an ``OutputHatch``.
-    For a layer-indexed machine that IS its routable-output capacity: a Distillation Tower sends the
-    recipe's fluid output ``i`` to layer ``i`` and nowhere else, so a tower with fewer layers than
-    the recipe has fluid outputs silently voids the remainder (it is still a legal build, which is
-    why nothing catches it at runtime). 0 when the dump recorded no hatch slots (a pre-v2 dump, or a
-    machine whose adders expose no item filter) - which reads as "unknown", not "cannot output".
+    ``output_layers`` counts the output layers the dump recorded (dataset schema v3,
+    ``HatchSlot.output_layer``), or, for a machine that records none, the distinct y-layers carrying
+    a cell that accepts an ``OutputHatch``. For a layer-indexed machine that IS its routable-output
+    capacity: a Distillation Tower sends the recipe's fluid output ``i`` to layer ``i`` and nowhere
+    else, so a tower with fewer layers than the recipe has fluid outputs silently voids the
+    remainder (it is still a legal build, which is why nothing catches it at runtime). The recorded
+    layers are the better count where they exist: a tower's base and top centre take an output hatch
+    but feed no layer, and a Mega tower's layer is a five-high band. 0 when the dump recorded no
+    hatch slots (a pre-v2 dump, or a machine whose adders expose no item filter) - which reads as
+    "unknown", not "cannot output".
     """
 
     footprint: CellBox
@@ -423,7 +427,8 @@ def _hatch_slots(variant: Variant, min_corner: tuple[int, int, int]) -> tuple[Ha
     and what ``ir.geometry.occupied_cells`` expands from, so the translation happens once, here.
 
     Sorted, and ``kinds`` sorted within each slot, so a layout built from this is reproducible: the
-    dump's own order is whatever StructureLib's element visit produced.
+    dump's own order is whatever StructureLib's element visit produced. A slot's output layer passes
+    through as recorded: it is GT's own list index, which no re-anchoring changes.
     """
     return tuple(
         sorted(
@@ -435,6 +440,7 @@ def _hatch_slots(variant: Variant, min_corner: tuple[int, int, int]) -> tuple[Ha
                         z=slot.d[2] - min_corner[2],
                     ),
                     kinds=tuple(sorted(slot.kinds)),
+                    output_layer=slot.output_layer,
                 )
                 for slot in variant.hatch_slots
             ),
@@ -505,7 +511,8 @@ def _variant_shapes(doc: MultiblockDoc) -> tuple[VariantShape, ...]:
     shapes = []
     for variant in doc.variants:
         min_corner, size = _extent(b.d for b in variant.blocks)
-        output_layers = {
+        recorded = {s.output_layer for s in variant.hatch_slots if s.output_layer is not None}
+        output_layers = recorded or {
             slot.d[1] - min_corner[1] for slot in variant.hatch_slots if _OUTPUT_HATCH in slot.kinds
         }
         hatch_cells, energy_hatch_cells, upkeep_hatch_count = _hatch_counts(variant)

@@ -25,7 +25,7 @@ from .enums import HORIZONTAL_FACINGS, Commodity, Facing, IODirection, RelativeF
 from .geometry import CellBox, CellCoord, allowed_faces
 
 #: Bump on any breaking change to the input contract; record it in ``ir/__init__.py``.
-INPUT_IR_VERSION = 5
+INPUT_IR_VERSION = 6
 
 
 class Port(StrictModel):
@@ -72,6 +72,14 @@ class Port(StrictModel):
     #: of its back and nowhere else (``MTEBuffer``), so its output port is pinned to ``(back,)``.
     #: Read it through :meth:`Machine.allowed_faces`, never directly, so there is one reading of it.
     faces: tuple[RelativeFace, ...] | None = None
+    #: The output layer GT fills this port's fluid from, on a machine that fills its outputs by layer
+    #: (InputIR v6, #299): GT's own per-layer list index, which is the fluid's place among the
+    #: recipe's fluid outputs. A Distillation Tower hands recipe fluid output ``i`` to the hatches on
+    #: its ``i``-th layer above the base and to no others, so this port's hatch may stand only on a
+    #: slot of that layer (:meth:`Machine.hatch_slots_for`). ``None`` everywhere else: an item, power
+    #: or input port, and any port of a machine that fills its outputs first fit. Only a fluid
+    #: output may carry one, and it must name a layer the machine's slots record.
+    output_layer: int | None = Field(default=None, ge=0)
 
     @field_validator("faces")
     @classmethod
@@ -85,6 +93,17 @@ class Port(StrictModel):
         if len(value) != len(set(value)):
             raise ValueError("a port's faces must not repeat")
         return value
+
+    @model_validator(mode="after")
+    def _check_output_layer(self) -> Port:
+        if self.output_layer is not None and (
+            self.commodity is not Commodity.FLUID or self.direction is not IODirection.OUTPUT
+        ):
+            raise ValueError(
+                f"only a fluid output port may name an output layer; {self.id!r} is a "
+                f"{self.commodity.value} {self.direction.value}"
+            )
+        return self
 
 
 class FaceSpec(StrictModel):
@@ -126,6 +145,12 @@ class HatchSlot(FrozenModel):
 
     offset: CellCoord
     kinds: tuple[str, ...] = Field(min_length=1)
+    #: Which of the machine's per-layer output lists an output hatch here is filed under (InputIR
+    #: v6, #299), as the dump recorded it (dataset schema v3): GT's own index, from 0, which is the
+    #: recipe fluid output the hatch receives. ``None`` for a cell in no list: one that takes no
+    #: output hatch, any cell of a machine that fills its outputs first fit, and a tower's top centre
+    #: or base. A tower forms only with an output hatch on every layer (:attr:`Machine.output_layers`).
+    output_layer: int | None = Field(default=None, ge=0)
 
 
 #: Which ``gregtech.api.enums.HatchElement`` kinds could host a port's hatch, by what the port
@@ -260,6 +285,15 @@ class Machine(StrictModel):
         )
 
     @property
+    def output_layers(self) -> frozenset[int]:
+        """The output layers this machine's slots record, empty for one that fills first fit.
+
+        A machine with any is a tower that fills its fluid outputs by layer, and GT forms it only
+        with an output hatch on each of them, a layer no product uses included (#299).
+        """
+        return frozenset(s.output_layer for s in self.hatch_slots if s.output_layer is not None)
+
+    @property
     def power_input_ports(self) -> list[Port]:
         """This machine's power INPUT ports - its energy hatches, in declaration order."""
         return [
@@ -287,12 +321,31 @@ class Machine(StrictModel):
           machine that certainly takes power.
 
         An unknown ``port_id`` names no kinds and therefore lands in the third case, permissive.
+
+        A port with an :attr:`Port.output_layer` is the exception, and a strict one: exactly the
+        slots of its kind on that layer, with no fallback (#299). GT fills a tower by layer, so a
+        hatch anywhere else receives a different product or none, and an empty answer means no cell
+        can host the port, which the router reports rather than docking it on the wrong layer.
         """
         if not self.hatch_slots:
             return None
         kinds = frozenset(self.hatch_kinds_for(port_id))
+        layer = self._output_layer(port_id)
+        if layer is not None:
+            return tuple(
+                s
+                for s in self.hatch_slots
+                if s.output_layer == layer and not kinds.isdisjoint(s.kinds)
+            )
         matching = tuple(s for s in self.hatch_slots if not kinds.isdisjoint(s.kinds))
         return matching or self.hatch_slots
+
+    def _output_layer(self, port_id: str) -> int | None:
+        """The output layer ``port_id`` names, or None for an unknown port or one with no layer."""
+        for port in self.faces.ports:
+            if port.id == port_id:
+                return port.output_layer
+        return None
 
     def hatch_kinds_for(self, port_id: str) -> tuple[str, ...]:
         """The ``HatchElement`` kinds that could host ``port_id``, empty for an unknown port."""
@@ -338,7 +391,29 @@ class Machine(StrictModel):
                 raise ValueError(
                     f"power input port rates sum to {total} EU/t but the machine draws {self.eut}"
                 )
+        self._check_output_layers()
         return self
+
+    def _check_output_layers(self) -> None:
+        """A port's layer must be one the slots record, and a layered machine names every fluid
+        output's: a tower's output with no layer would dock on any of them (#299)."""
+        layers = self.output_layers
+        for port in self.faces.ports:
+            if port.output_layer is not None and port.output_layer not in layers:
+                raise ValueError(
+                    f"port {port.id!r} names output layer {port.output_layer}, which none of the "
+                    f"machine's hatch slots records (layers: {sorted(layers)})"
+                )
+            if (
+                layers
+                and port.output_layer is None
+                and port.commodity is Commodity.FLUID
+                and port.direction is IODirection.OUTPUT
+            ):
+                raise ValueError(
+                    f"fluid output port {port.id!r} names no output layer, but the machine fills "
+                    f"its outputs by layer (layers: {sorted(layers)})"
+                )
 
 
 class MachineFaceRef(FrozenModel):

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.dataset import load_physical_dataset
-from gtnh_solver.hatch_locks import LOCK_SLOT, fills_by_layer, hatch_locks
+from gtnh_solver.hatch_locks import LOCK_SLOT, hatch_layers, hatch_locks
 from gtnh_solver.ir import (
     CellBox,
     CellCoord,
@@ -27,7 +27,7 @@ from gtnh_solver.ir import (
     PlacedHatch,
     Port,
 )
-from tests._helpers import at
+from tests._helpers import at, layered_tower
 
 _ROOT = Path(__file__).resolve().parents[1]
 _FIXTURE_DATASET = _ROOT / "data" / "multiblocks"
@@ -43,14 +43,18 @@ def _port(direction: IODirection, resource: str, commodity: Commodity = _FLUID) 
 
 
 def _multi(ports: list[Port], *, recipe_map: str | None = None) -> Machine:
+    """A multiblock with ``ports``; one whose ports name output layers is a tower with that many."""
+    layers = {p.output_layer for p in ports if p.output_layer is not None}
+    tower = layered_tower(outputs=(), layers=max(layers) + 1) if layers else None
     return Machine(
         id="m",
         type="t",
         voltage_tier="LV",
         orientation_options=[Facing.NORTH],
-        footprint=CellBox(sx=3, sy=3, sz=3),
+        footprint=tower.footprint if tower is not None else CellBox(sx=3, sy=3, sz=3),
         faces=FaceSpec(ports=ports),
         recipe_map=recipe_map,
+        hatch_slots=tower.hatch_slots if tower is not None else (),
     )
 
 
@@ -104,21 +108,84 @@ def test_a_product_with_two_hatches_is_still_one_product() -> None:
     assert _locks(machine, ("OutputHatch", "output:water"), ("OutputHatch", "output:water")) == {}
 
 
-def test_a_tower_that_fills_by_layer_is_never_locked() -> None:
-    """A Distillation Tower sends output ``i`` to layer ``i`` whatever is locked, and a lock that
-    disagrees voids the product, so it gets none however many products it has. So does every
-    machine on the distillation tower map (the Dangote Distillus and the Mega towers) and the Sparge
-    Tower."""
-    ports = [_port(_OUT, "benzene"), _port(_OUT, "phenol"), _port(_OUT, "creosote")]
-    hatches = [("OutputHatch", p.id) for p in ports]
-    for recipe_map in ("gt.recipe.distillationtower", "gtpp.recipe.lftr.sparging"):
-        tower = _multi(ports, recipe_map=recipe_map)
-        assert fills_by_layer(tower)
-        assert _locks(tower, *hatches) == {}
-    # The same machine on any other map fills first fit, and needs all three.
-    chemical_plant = _multi(ports, recipe_map="gtpp.recipe.chemicalplant")
-    assert not fills_by_layer(chemical_plant)
+def _layered(*outputs: tuple[str, int | None], commodity: Commodity = _FLUID) -> list[Port]:
+    """Output ports the way the adapter names a tower's: each fluid with the layer it fills."""
+    return [
+        Port(
+            id=f"output:{name}",
+            commodity=commodity,
+            direction=_OUT,
+            output_layer=layer if commodity is _FLUID else None,
+        )
+        for name, layer in outputs
+    ]
+
+
+def test_a_tower_layer_with_one_product_is_never_locked() -> None:
+    """A Distillation Tower sends output ``i`` to layer ``i`` whatever is locked (#299), and a lock
+    that disagrees voids the product, so a layer carrying one product needs none, however many
+    layers the tower has. The rule follows the port's layer, not the machine's recipe map."""
+    tower = _multi(_layered(("benzene", 0), ("phenol", 1), ("creosote", 2)))
+    hatches = [("OutputHatch", p.id) for p in tower.faces.ports]
+    assert _locks(tower, *hatches) == {}
+    # The same three products filled first fit (no layers) compete for every hatch.
+    chemical_plant = _multi(
+        [_port(_OUT, "benzene"), _port(_OUT, "phenol"), _port(_OUT, "creosote")]
+    )
     assert set(_locks(chemical_plant, *hatches).values()) == {"benzene", "phenol", "creosote"}
+
+
+def test_two_time_shared_products_on_one_layer_are_both_locked() -> None:
+    # Two recipes the tower time-shares put different fluids at index 0, so both fill layer 0,
+    # first fit among its hatches: each hatch must be locked to its own product.
+    tower = _multi(_layered(("ethane", 0), ("butane", 0), ("propane", 1)))
+    hatches = [("OutputHatch", p.id) for p in tower.faces.ports]
+    assert _locks(tower, *hatches) == {0: "ethane", 1: "butane"}
+
+
+def test_a_towers_output_buses_fill_first_fit_and_are_locked() -> None:
+    # A tower fills only its fluids by layer; two item products share its buses first fit.
+    tower = _multi([*_layered(("tar", 0)), _port(_OUT, "ash", _ITEM), _port(_OUT, "coke", _ITEM)])
+    locks = _locks(
+        tower,
+        ("OutputHatch", "output:tar"),
+        ("OutputBus", "output:ash"),
+        ("OutputBus", "output:coke"),
+    )
+    assert locks == {1: "ash", 2: "coke"}
+
+
+def test_a_spare_output_hatch_is_never_locked() -> None:
+    # It stands on a layer no product uses so the tower forms, and serves no port.
+    tower = _multi(_layered(("water", 0)))
+    assert _locks(tower, ("OutputHatch", "output:water"), ("OutputHatch", None)) == {}
+
+
+def test_each_output_hatch_on_a_tower_reports_the_layer_it_stands_on() -> None:
+    # ``hatch_layers`` reads the slot under each hatch, a spare's included; a hatch off the
+    # layers (the top centre here) and every hatch of a first-fit machine has none.
+    tower = layered_tower(outputs=["water"], layers=2)
+    problem = InputIR(bounding_region=CellBox(sx=8, sy=4, sz=8), machines=[tower])
+
+    def out(x: int, y: int, z: int, port: str | None) -> PlacedHatch:
+        return PlacedHatch(
+            machine_id=tower.id,
+            kind="OutputHatch",
+            cell=CellCoord(x=x, y=y, z=z),
+            facing=Facing.WEST,
+            port_id=port,
+        )
+
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[at(tower.id, 2, 0, 2)],
+        hatches=[out(2, 1, 3, "output:water"), out(2, 2, 3, None), out(3, 2, 3, None)],
+    )
+    assert hatch_layers(problem, layout) == {
+        (tower.id, (2, 1, 3)): 0,
+        (tower.id, (2, 2, 3)): 1,
+    }
 
 
 def test_input_and_upkeep_hatches_are_never_locked() -> None:
@@ -152,7 +219,8 @@ def test_each_kind_names_the_slot_gt_sets_its_lock_in() -> None:
 def test_the_nitrobenzene_line_locks_only_the_reactor_making_two_fluids() -> None:
     """The real line's machines, with their structures from the committed fixtures: the reactor
     making nitric acid and water is the only one with two products of a kind. The Distillation
-    Tower's five products fill by layer, and every other machine makes one product of each kind.
+    Tower's five products each fill a layer of their own, and every other machine makes one product
+    of each kind.
 
     Every output port gets its hatch (one port is one hatch, docs/DOMAIN.md), which is what any
     VALID layout of the line holds; which casing cell each lands on does not change the answer, so
@@ -175,6 +243,6 @@ def test_the_nitrobenzene_line_locks_only_the_reactor_making_two_fluids() -> Non
     assert sorted(locks.values()) == ["nitricacid", "water"]
     machines = {m.id: m for m in problem.machines}
     assert {machines[machine_id].type for machine_id, _ in locks} == {"Large Chemical Reactor"}
-    towers = [m for m in multiblocks if fills_by_layer(m)]
+    towers = [m for m in multiblocks if m.output_layers]
     # The tower making five products, and the one making distilled water: neither is locked.
     assert sorted(len([p for p in m.faces.ports if p.direction is _OUT]) for m in towers) == [1, 5]

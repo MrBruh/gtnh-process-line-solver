@@ -34,7 +34,7 @@ from gtnh_solver.ir import (
     Port,
 )
 from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
-from gtnh_solver.ir.geometry import Cell
+from gtnh_solver.ir.geometry import FACE_DELTAS, Cell
 from gtnh_solver.ir.output import (
     LayoutResult,
     Route,
@@ -42,11 +42,11 @@ from gtnh_solver.ir.output import (
     Terminal,
 )
 from gtnh_solver.router import claims_by_machine, route, route_power
-from gtnh_solver.router._grid import claim_key, dock_candidates
+from gtnh_solver.router._grid import claim_key, dock_candidates, hatch_faces
 from gtnh_solver.solver.core import _assemble
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
-from tests._helpers import at, power_source
+from tests._helpers import at, layered_tower, power_source
 
 #: The committed fixture sample, named so a test can pin it instead of inheriting
 #: whichever dataset this checkout happens to resolve.
@@ -617,3 +617,58 @@ def test_a_free_connection_gets_both_its_hatches() -> None:
     assert ("m0", "OutputBus") in kinds  # the source ejects through its own bus
     assert ("m1", "InputBus") in kinds  # and the target receives through its own
     assert validate(problem, layout).ok
+
+
+# ---------------------------------------------------------- output layers: a tower fills by layer
+
+
+def test_a_layered_port_docks_only_beside_its_own_layer() -> None:
+    # GT hands recipe fluid output i to the hatches on output layer i alone (#299), so the port
+    # filled from layer 1 may only dock against a ring cell of layer 1: world y = 2, since the
+    # tower stands on y = 0 and layer 1 is the second storey above its base.
+    tower = layered_tower(outputs=["a", "b"], layers=2)
+    for port, y in (("output:a", 1), ("output:b", 2)):
+        candidates = _dock(tower, port)
+        assert candidates, port
+        hosts = {
+            tuple(c - d for c, d in zip(t.cell.as_tuple(), FACE_DELTAS[t.face], strict=True))
+            for t in candidates
+        }
+        assert {host[1] for host in hosts} == {y}, port
+
+
+def _energized_tower() -> Machine:
+    """A tower whose layer rings also take energy and maintenance hatches, as 2.9's does."""
+    tower = layered_tower(outputs=["a"], layers=2)
+    slots = tuple(
+        s.model_copy(update={"kinds": ("Energy", "Maintenance", "OutputHatch")})
+        if s.output_layer is not None
+        else s
+        for s in tower.hatch_slots
+    )
+    power = Port(id="power:in", commodity=Commodity.POWER, direction=IODirection.INPUT)
+    return tower.model_copy(
+        update={
+            "hatch_slots": slots,
+            "faces": FaceSpec(ports=[*tower.faces.ports, power]),
+        }
+    )
+
+
+def test_an_energy_hatch_ignores_the_layers() -> None:
+    # Only a fluid output names a layer. Power takes any Energy-capable cell, whatever its layer.
+    tower = _energized_tower()
+    hosts = tower.hatch_slots_for("power:in")
+    assert hosts is not None
+    assert {s.offset.y for s in hosts} == {0, 1, 2}
+    assert {s.output_layer for s in hosts} == {None, 0, 1}
+
+
+def test_a_maintenance_hatch_ignores_the_layers() -> None:
+    tower = _energized_tower()
+    placement = at(tower.id, *_ORIGIN)
+    faces = hatch_faces(placement, tower, "Maintenance")
+    assert {cell[1] for cell, _, _ in faces} == {0, 1, 2}
+    # ...while a spare output hatch asked for layer 1 gets layer 1's ring alone.
+    spare = hatch_faces(placement, tower, "OutputHatch", 1)
+    assert {cell[1] for cell, _, _ in spare} == {2}

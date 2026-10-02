@@ -24,6 +24,7 @@ Reconciled drift (chose the form that keeps every caller green):
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 
 from gtnh_solver.dataset import DatasetMeta, MachinePhysical, PhysicalDataset
 from gtnh_solver.dataset.schema import SCHEMA_VERSION
@@ -33,6 +34,7 @@ from gtnh_solver.ir import (
     Commodity,
     FaceSpec,
     Facing,
+    HatchSlot,
     InputIR,
     IODirection,
     Machine,
@@ -166,6 +168,66 @@ def power_source(
         faces=FaceSpec(
             ports=[Port(id=port_id, commodity=Commodity.POWER, direction=IODirection.OUTPUT)]
         ),
+    )
+
+
+#: The cells of a 3x3 tower layer around its hollow core, as ``(x, z)`` from the minimum corner.
+_RING = tuple((x, z) for x in range(3) for z in range(3) if (x, z) != (1, 1))
+
+
+def layered_tower(
+    mid: str = "tower",
+    outputs: Sequence[str] = ("a",),
+    *,
+    layers: int = 2,
+    inputs: Sequence[str] = (),
+    port_layers: Sequence[int | None] | None = None,
+) -> Machine:
+    """A Distillation Tower in miniature, ``layers + 1`` tall, whose slots record output layers.
+
+    Built the way the dump records GT's (#299): the base takes input hatches, energy and
+    maintenance on every cell but the controller's (the front centre); ring ``i`` above it is
+    output layer ``i - 1`` and takes output hatches only; the top centre takes an output hatch that
+    feeds no layer. Fluid output ``k`` of ``outputs`` is filled from layer ``k`` unless
+    ``port_layers`` says otherwise, which is how a test builds a machine the IR must refuse.
+    """
+    slots = [
+        HatchSlot(offset=CellCoord(x=x, y=0, z=z), kinds=("Energy", "InputHatch", "Maintenance"))
+        for x in range(3)
+        for z in range(3)
+        if (x, z) != (1, 0)
+    ]
+    slots += [
+        HatchSlot(
+            offset=CellCoord(x=x, y=layer + 1, z=z), kinds=("OutputHatch",), output_layer=layer
+        )
+        for layer in range(layers)
+        for x, z in _RING
+    ]
+    slots.append(HatchSlot(offset=CellCoord(x=1, y=layers, z=1), kinds=("OutputHatch",)))
+    named = list(port_layers) if port_layers is not None else list(range(len(outputs)))
+    ports = [
+        Port(id=f"input:{name}", commodity=Commodity.FLUID, direction=IODirection.INPUT)
+        for name in inputs
+    ]
+    ports += [
+        Port(
+            id=f"output:{name}",
+            commodity=Commodity.FLUID,
+            direction=IODirection.OUTPUT,
+            output_layer=layer,
+        )
+        for name, layer in zip(outputs, named, strict=True)
+    ]
+    return Machine(
+        id=mid,
+        type="Distillation Tower",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        footprint=CellBox(sx=3, sy=layers + 1, sz=3),
+        faces=FaceSpec(ports=ports),
+        hatch_slots=tuple(slots),
+        hatch_cells=len(slots),
     )
 
 
