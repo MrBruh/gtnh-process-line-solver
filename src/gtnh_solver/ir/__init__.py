@@ -385,4 +385,11 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   hatch on every layer, so a layer no product uses gets one that receives nothing (#299). The
 #   shape is unchanged and every such hatch is a real block to place; a consumer that reads
 #   `port_id = None` as "upkeep" only mislabels the spare, and builds the same structure.
+#
+# InputIR v6 (additive, no version bump) - added `InputIR.resource_colors: dict[str, str]`, the
+#   plan's colour for each fluid and item the problem moves (raw id -> "#rrggbb", the exporter's
+#   `dominantColor`), which the previewer draws as a swatch where it has no icon (#297). Display
+#   only, like `resource_names`. Values are lowercased and anything but `#` and six hex digits is
+#   refused on parse, so a consumer may put one into a stylesheet as it is.
+#
 # ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@ What this contract guarantees (checked here) vs. what it does NOT:
 from __future__ import annotations
 
 import math
+import re
 
 from pydantic import Field, field_validator, model_validator
 
@@ -26,6 +27,9 @@ from .geometry import CellBox, CellCoord, allowed_faces
 
 #: Bump on any breaking change to the input contract; record it in ``ir/__init__.py``.
 INPUT_IR_VERSION = 6
+
+#: What :attr:`InputIR.resource_colors` holds, once lowercased: ``#`` and six hex digits.
+_HEX_COLOR = re.compile(r"#[0-9a-f]{6}")
 
 
 class Port(StrictModel):
@@ -520,6 +524,12 @@ class InputIR(StrictModel):
     #: other field keys a resource by its raw id, and nothing may join on a name. A resource with
     #: no entry is shown by its id. Empty for a problem built from a plan that names nothing.
     resource_names: dict[str, str] = Field(default_factory=dict)
+    #: The colour the plan's exporter gives each fluid and item this problem moves, raw id ->
+    #: ``"#rrggbb"`` (factory-flow's ``dominantColor``, the average of its in-game icon), lowercased
+    #: on the way in (#297). Display only, like :attr:`resource_names`: the previewer draws it as a
+    #: swatch where it has no icon to show. Anything but six hex digits is refused, so a value can
+    #: go into a stylesheet as it is.
+    resource_colors: dict[str, str] = Field(default_factory=dict)
     #: The GTNH pack the plan was balanced against ("2.9.0-beta-2"), or ``None`` when the plan does
     #: not say one or names two. GT's defaults differ between packs in ways a build has to know
     #: (``output_faces.output_side_takes_input``, #278). It changes no geometry, and nothing may
@@ -530,6 +540,15 @@ class InputIR(StrictModel):
     @classmethod
     def _check_version(cls, value: int) -> int:
         return check_contract_version(value, INPUT_IR_VERSION, "InputIR")
+
+    @field_validator("resource_colors")
+    @classmethod
+    def _check_resource_colors(cls, value: dict[str, str]) -> dict[str, str]:
+        colors = {resource: color.lower() for resource, color in value.items()}
+        for resource, color in colors.items():
+            if not _HEX_COLOR.fullmatch(color):
+                raise ValueError(f"resource {resource!r} has colour {color!r}, not '#rrggbb'")
+        return colors
 
     @model_validator(mode="after")
     def _check_referential_integrity(self) -> InputIR:

@@ -1032,3 +1032,23 @@ def test_a_layered_port_whose_layer_has_no_slot_of_its_kind_gets_none_not_all() 
     )
     tower = tower.model_copy(update={"hatch_slots": energy_only})
     assert tower.hatch_slots_for("output:b") == ()
+
+
+# --------------------------------------------------------------------------- resource colours
+
+
+def test_resource_colours_are_lowercased() -> None:
+    ir = InputIR(
+        bounding_region=CellBox(sx=1, sy=1, sz=1), resource_colors={"liquid_toluene": "#70AB0F"}
+    )
+    assert ir.resource_colors == {"liquid_toluene": "#70ab0f"}
+
+
+@pytest.mark.parametrize(
+    "bad", ["", "red", "#abc", "#abcdef0", "#ghijkl", "abcdef1", "#abcdef\n", "#abc;}x{"]
+)
+def test_a_resource_colour_must_be_six_hex_digits(bad: str) -> None:
+    # The previewer puts the value into a stylesheet as it is, so the contract refuses anything
+    # that is not plainly a colour.
+    with pytest.raises(ValidationError, match="#rrggbb"):
+        InputIR(bounding_region=CellBox(sx=1, sy=1, sz=1), resource_colors={"x": bad})
