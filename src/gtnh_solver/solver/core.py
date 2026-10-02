@@ -55,8 +55,8 @@ worse one. Dropping it is what lets the attempts run side by side::
                 start (_POOL_AFTER_S), else in turn, in this process
     round r (only with a time budget or a round count): the same grid, its seeds moved on by r
       seeds per weighting, every attempt in the pool round 0 started, else in turn here
-    rank in grid order, round by round: the best VALID layout, else the fewest unrouted nets, else
-    lay the first placement the gate turned away
+    rank in grid order, round by round: the best VALID layout, else the fast path's layout if that
+    is VALID (#132), else the fewest unrouted nets, else lay the first placement the gate turned away
     a partial layout's reason names any single block with more connections than faces, the cause
     no placement can fix (placement.single_block_shortfalls), ahead of the routers' own words
 
@@ -197,7 +197,8 @@ def solve(
     - ``True`` (default): the annealed placer (SA + LNS) in a multi-start of independent
       attempts. Every bounded attempt is fully routed, and the best VALID layout by the
       ``objective``'s quality ranking is returned - tighter, lower-wire layouts at the cost of
-      seconds of CPU. If no attempt is fully valid, the best partial is returned.
+      seconds of CPU. If no attempt is fully valid, the fast path's layout is returned when it is
+      VALID, so this is never worse than ``False``; else the best partial.
     - ``False`` (**fast**): a single constructive first-fit placement, no optimization and no
       multi-start - near-instant and simple. Its layout is still validated, so it is VALID or an
       explicit partial/infeasibility, never silently invalid; but it will not cluster machines for
@@ -318,6 +319,19 @@ def _search(
 
     if best_valid is not None:
         return best_valid, done
+    # No attempt came out VALID. The fast path's layout is the constructive placement every attempt
+    # anneals away from, assembled as it stands, and it can be VALID where none of them is: stacking
+    # wins the floor term and buries the one face a cable could dock on. So it is laid here exactly
+    # as the fast path lays it (_solve_fast), and a VALID one is returned: optimizing is then never
+    # worse than not, by construction rather than by luck (#132). It passes the crowding gate first,
+    # like every attempt: a placement the gate names a machine in cannot dock, so cannot be VALID,
+    # and routing one anyway is the costly case, 137 s of a congested negotiation on a community
+    # bio-diesel line whose fast layout has 17 crowded machines, against 41 s for its whole search.
+    constructive = place(problem)
+    if constructive.ok and not crowded_machines(problem, constructive.placements):
+        fast, _ = _assemble(problem, constructive.placements, seed, objective, repair=False)
+        if fast.status is LayoutStatus.VALID:
+            return fast, done
     if best_partial is None:
         # Every attempt was turned away, so nothing was ever routed. Do NOT report the crowding as
         # the verdict: the gate is a model of the routers' docking rules, and it has been wrong

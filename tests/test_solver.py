@@ -13,9 +13,10 @@ ranking, the pool) pass ``effort="full"``, since one attempt has nothing to rank
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Sequence
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import pytest
 
@@ -30,6 +31,7 @@ from gtnh_solver.adapter import (
     adapt_file,
     to_input_ir,
 )
+from gtnh_solver.adapter.power import synthesize_power
 from gtnh_solver.ir import (
     CellBox,
     CellCoord,
@@ -235,6 +237,69 @@ def test_optimize_recovers_a_congested_line_fast_mode_leaves_partial() -> None:
     )
     assert solve(problem, optimize=True).status is LayoutStatus.VALID
     assert solve(problem, optimize=False).status is not LayoutStatus.VALID
+
+
+def _stacked_line() -> InputIR:
+    """Issue #132's case B: two unpowered blocks and two powered ones at two tiers in a 3x2x4 box.
+
+    The floor term rewards stacking them, and a stacked machine can be left with only its front
+    free, which no cable docks on; the constructive placement lays them flat and is VALID.
+    """
+
+    def block(mid: str, tier: str, eut: float, sx: int, sz: int) -> Machine:
+        return Machine(
+            id=mid,
+            type="t",
+            voltage_tier=tier,
+            eut=eut,
+            footprint=CellBox(sx=sx, sy=1, sz=sz),
+            orientation_options=[Facing.NORTH],
+            faces=FaceSpec(ports=[]),
+        )
+
+    machines, nets = synthesize_power(
+        [
+            block("m0", "LV", 0.0, 2, 1),
+            block("m1", "LV", 0.0, 2, 1),
+            block("m2", "LV", 8.0, 1, 2),
+            block("m3", "MV", 8.0, 1, 1),
+        ],
+        [],
+    )
+    return InputIR(bounding_region=CellBox(sx=3, sy=2, sz=4), machines=machines, nets=nets)
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_optimizing_is_never_worse_than_the_fast_path(seed: int) -> None:
+    # The suite's one short attempt stacks this line on seeds 3 and 4, and m2's cable then has no
+    # face to dock on; the fast path's flat layout is VALID, so the optimizer returns it (#132).
+    problem = _stacked_line()
+    assert solve(problem, optimize=False).status is LayoutStatus.VALID
+    assert solve(problem, seed=seed).status is LayoutStatus.VALID
+
+
+def test_with_no_valid_attempt_the_optimizer_returns_the_fast_layout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Every attempt is made to come out partial, so the only VALID layout left is the fast path's,
+    # and it is the one returned: exactly that layout, not a re-annealed or repaired one.
+    real = solver_core._attempt
+
+    def partial(*args: Any, **kwargs: Any) -> Any:
+        attempt = real(*args, **kwargs)
+        if attempt.layout is None:
+            return attempt
+        failed = attempt.layout.model_copy(
+            update={
+                "status": LayoutStatus.PARTIAL_INVALID,
+                "infeasibility": Infeasibility(constraint="routing", detail="forced by the test"),
+            }
+        )
+        return dataclasses.replace(attempt, layout=failed, failed_nets=("forced",))
+
+    monkeypatch.setattr(solver_core, "_attempt", partial)
+    problem = _stacked_line()
+    assert solve(problem, seed=3) == solve(problem, seed=3, optimize=False)
 
 
 def test_solve_returns_valid_or_explicit_infeasibility(

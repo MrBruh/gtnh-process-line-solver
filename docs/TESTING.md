@@ -74,7 +74,8 @@ correctness. The strategy works around this with three layers:
    infeasibility report - never a silently-invalid layout.** This is the one invariant that
    must always hold. It lives in `tests/test_solver_properties.py`, over generated `InputIR`s
    on both the annealed and the `--fast` path, alongside the fuzz that holds `validate` to its
-   never-raises contract (the downgrade that makes the invariant true calls it). **Read the
+   never-raises contract (the downgrade that makes the invariant true calls it), and the promise
+   that the annealed path is VALID wherever `--fast` is (#132). **Read the
    outcome mix, not just the exit code:** the tests `event()` their status, so
    `--hypothesis-show-statistics` says whether the generated space still reaches valid,
    partial-invalid *and* infeasible layouts. A change that quietly made everything infeasible
