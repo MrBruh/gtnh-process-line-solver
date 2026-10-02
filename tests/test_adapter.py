@@ -191,12 +191,13 @@ def test_me_toggles_pass_through_to_the_input_ir() -> None:
     assert adapt_file(_SAND, me_toggles=toggles).me_toggles == toggles
 
 
-def test_me_toggles_change_nothing_else_the_mapping_produces() -> None:
-    # Leaving a commodity to ME is a routing decision, not a different line: the machines, the
+def test_item_and_fluid_toggles_change_nothing_else_the_mapping_produces() -> None:
+    # Leaving items or fluids to ME is a routing decision, not a different line: the machines, the
     # storages and the synthesized power are the same, and only the toggles differ. The stages
-    # downstream skip a toggled net themselves.
+    # downstream skip a toggled net themselves. Power is the exception: on ME it has no source at
+    # all (#225, pinned in test_cli_me).
     plain = adapt_file(_SAND)
-    on_me = adapt_file(_SAND, me_toggles=METoggles(items=True, fluids=True, power=True))
+    on_me = adapt_file(_SAND, me_toggles=METoggles(items=True, fluids=True))
     assert on_me.model_copy(update={"me_toggles": METoggles()}) == plain
 
 

@@ -401,10 +401,12 @@ def test_scene_says_a_flow_left_to_me_arrives_over_me() -> None:
 
 
 def test_scene_says_power_left_to_me_arrives_over_me() -> None:
-    # The other commodity on its own: no cable is laid, the feed spec is still stated (the ME side
-    # has to deliver it), and the item flows, still auto-output, are not flagged.
+    # The other commodity on its own: no cable is laid and no source block stands unconnected
+    # (#225), the feed spec is still stated from the machines' energy ports (the ME side has to
+    # deliver it), and the item flows, still auto-output, are not flagged.
     scene = _sand_scene(METoggles(power=True))
     assert scene["routes"] == []
+    assert not any(m["role"] == "source" for m in scene["machines"])
     io = scene["io"]
     assert io["power"]["me"] is True
     assert io["power"]["byTier"] == {"LV": {"volts": 32, "amps": 2}}

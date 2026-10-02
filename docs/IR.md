@@ -309,7 +309,8 @@ result carries no infeasibility; `infeasible`/`partial_invalid` must carry one.
   `hatch_cells` can host (`HATCH_CELLS_EXCEEDED`).
 - `me_toggles` removes a commodity from physical routing (no `Route` for that commodity today - a
   toggled commodity is simply skipped everywhere). Placing the ME endpoint that replaces it on a
-  machine face is Phase 2.
+  machine face is Phase 2. With power toggled the adapter emits no power source and no power net
+  at all (#225); the powered machines keep their power ports, which state the draw.
 
 ## Versioning
 

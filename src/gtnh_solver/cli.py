@@ -481,7 +481,13 @@ def _warn_unmeasured_power_intake(problem: InputIR, layout: LayoutResult) -> Non
     run says plainly how much of its power intake went unchecked. On stderr, like the dataset
     warnings, so the layout JSON on stdout stays parseable; it is a coverage note, not a defect, and
     it does not touch the exit code.
+
+    Silent when power is left to ME (#225): no cable is laid, so there is nothing for the gate to
+    measure, and blaming a missing amp ceiling would give the wrong reason. The ``--me`` note
+    (:func:`_note_me_toggles`) already says power is the builder's to supply.
     """
+    if problem.me_toggles.toggled(Commodity.POWER):
+        return
     unmeasured = validate(problem, layout).unverified_power_intake
     if not unmeasured:
         return

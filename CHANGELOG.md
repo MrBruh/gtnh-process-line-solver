@@ -279,6 +279,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **`--me power` places no power source, and stops blaming a missing amp ceiling (#225).** With
+  power left to ME no cable is laid, yet the adapter still synthesized a `Power Source (<tier>)`
+  per tier, so the layout placed one connected to nothing and the preview and `.schematic` showed
+  it (exported as the Debug Power Generator stand-in). The adapter now drops the sources and their
+  nets under a power toggle. Each powered machine keeps its energy ports, so the preview still
+  states the draw per tier, and the export's own power total is still cross-checked before the
+  nets go. The `note: power intake unmeasured ... no per-connection amp ceiling is known` line no
+  longer prints under `--me power`, where the reason was wrong: no cable is laid to measure, and
+  the `--me` note already says power is the builder's to supply. Without `--me power` nothing
+  changes.
 - **An item pipe is never laid thinner than its busiest block needs (#200).** The router sized a
   whole item run from its endpoints alone: the larger side's sum of insertions, on the premise that
   every stream meets at one point, so the figure could only oversize. It could undersize. When a
