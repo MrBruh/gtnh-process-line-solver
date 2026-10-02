@@ -35,6 +35,7 @@ import gregtech.api.interfaces.IHeatingCoil;
 import gregtech.api.interfaces.metatileentity.IMetaTileEntity;
 import gregtech.api.metatileentity.BaseMetaTileEntity;
 import gregtech.api.metatileentity.implementations.MTEHatch;
+import gregtech.api.threads.RunnableMachineUpdate;
 import gregtech.api.util.GTLanguageManager;
 import gregtech.common.misc.GTStructureChannels;
 
@@ -251,6 +252,25 @@ final class StructureDumper {
      */
     int run(File datasetOut, String packVersion, java.util.Map<String, String> modVersions, String extractorSha)
         throws java.io.IOException {
+        // GT answers every GT block placed or broken with a machine-block update that walks the
+        // blocks around it (GregTechAPI.causeMachineUpdate). On 2.8.4 that update runs on a thread
+        // pool (RunnableMachineUpdate, "GT_MachineBlockUpdate") and reads tile entities in the very
+        // cells the dump is building in, with no tick lock held during a server-started handler, so
+        // the dump raced it. It cost the hatch probe's layer step whole forms of the Distillation
+        // Tower and the Mega tower in a 2.8.4 census, never the same ones twice (#299). Nothing the
+        // dump reads needs those updates, so this thread posts none; 2.9 queues them for the next
+        // server tick instead, where this changes nothing.
+        boolean machineUpdates = RunnableMachineUpdate.isCurrentThreadEnabled();
+        RunnableMachineUpdate.setCurrentThreadEnabled(false);
+        try {
+            return dumpAll(datasetOut, packVersion, modVersions, extractorSha);
+        } finally {
+            RunnableMachineUpdate.setCurrentThreadEnabled(machineUpdates);
+        }
+    }
+
+    private int dumpAll(File datasetOut, String packVersion, java.util.Map<String, String> modVersions,
+        String extractorSha) throws java.io.IOException {
         File multiblocksDir = new File(datasetOut, "multiblocks");
         multiblocksDir.mkdirs();
 

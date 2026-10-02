@@ -855,7 +855,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   found by their type, so GT's Distillation Tower, the Dangote Distillus, the Sparge Tower and the
   Mega towers are all read the same way, and a machine that fills its outputs first fit records no
   layer. A tower's top centre and its base feed no layer. A probe that cannot give a whole answer
-  records no layer for the form and says why in the doc's `failures`. The committed tower fixtures
+  records no layer for the form and says why in the doc's `failures`. The dump now also keeps GT's
+  machine-block updates off its own thread: on 2.8.4 they run on a thread pool that reads the cells
+  being built, which raced the probe and cost random forms of the Distillation Tower and the Mega
+  tower their layers in a 2.8.4 census, while either dumped alone came out whole. The committed tower fixtures
   carry their layers, and the loader refuses a v2 dump, since one would read as a tower with no
   layers: re-run the extractor for each local `data/<version>/` (`tools/gtnh-extractor/README.md`).
   Nothing in the solver reads the field yet.

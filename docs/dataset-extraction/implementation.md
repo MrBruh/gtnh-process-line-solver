@@ -86,7 +86,11 @@ into a scratch region halfway up the world (origin `8, 128, 8`, controller facin
   records no layers. Every cell is restored afterwards. An answer that cannot be whole is dropped
   with a note in the doc's `failures`: a list holding no probe hatch (an incomplete fill) or a
   check that throws leaves the form without layers, and a cell filed under two lists gets none.
-- **Robustness.** `preloadRegion()` force-loads the scratch chunks up front to dodge a re-entrant
+- **Robustness.** GT's machine-block updates are off for the dump thread
+  (`RunnableMachineUpdate.setCurrentThreadEnabled(false)`): GT answers every GT block placed or
+  broken with one, and on 2.8.4 it runs on a thread pool that reads the cells the dump is building
+  in, which cost the layer probe random forms of two towers in a 2.8.4 census (#299).
+  `preloadRegion()` force-loads the scratch chunks up front to dodge a re-entrant
   `"Already decorating!!"` decorator cascade; hard caps bound the stack sweep (16), variant count
   (also 16, pinned to the sweep so it is non-binding: at 6 it rejected 16 of 191 legitimately
   parametric controllers), hinted cells (20000), scan dimension (80), and substitution entries (128)
