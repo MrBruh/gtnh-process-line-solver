@@ -215,6 +215,8 @@ final class StructureDumper {
     private Object emptyHatchSource;
     /** Set once the empty supply cannot be built, so we do not retry it per construct. */
     private boolean emptyHatchSourceFailed;
+    /** New-cell visits by GT's own structure checks inside block passes, ignored (see ElementRecorder). */
+    private long nestedVisitsIgnored;
 
     // Set -PdebugMeta=<id> to dump what the hint pass captured for one controller (diagnostics only).
     private final int debugMeta = parseIntProp("gtnhextractor.debugMeta", -1);
@@ -353,6 +355,9 @@ final class StructureDumper {
         if (hatchProbe != null) {
             LOG.info("gtnh-extractor: hatch probe: {}", hatchProbe.summary());
         }
+        LOG.info(
+            "gtnh-extractor: {} new-cell visit(s) by GT's own structure checks inside a build ignored",
+            nestedVisitsIgnored);
         return written;
     }
 
@@ -639,6 +644,7 @@ final class StructureDumper {
         try {
             withoutHatchSupply(() -> controller.construct(blockTrigger, false));
         } finally {
+            nestedVisitsIgnored += recorder.nestedIgnored();
             if (instrumented) {
                 try {
                     MinecraftForge.EVENT_BUS.unregister(recorder);

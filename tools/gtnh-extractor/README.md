@@ -66,9 +66,13 @@ schema-v3 dataset:
 - `RecordingProxy` captures hint particles headlessly (the server's normal proxy no-ops
   them); `ElementRecorder` + `HatchProbe` ask each visited `IStructureElement` which hatch
   kinds it accepts, so a slot carries its `HatchElement` names (this is what schema v2 added:
-  `variants[].hatch_slots`). An element whose item filter names no kind, such as a hatch adder
-  built from a bare method reference, is asked through its own structure check instead, with a
-  real hatch of each kind standing in the cell (#227: the Distillation Tower ring's energy hatches).
+  `variants[].hatch_slots`). Only the build's own walk names a cell's element: from GT 5.09.54.133
+  each hatch element runs the controller's whole structure check from inside the build, and a visit
+  made under that `checkStructure` is ignored, since it can reach cells the build has not (or never)
+  placed and name them with another piece's element. An element whose item filter names no kind,
+  such as a hatch adder built from a bare method reference, is asked through its own structure
+  check instead, with a real hatch of each kind standing in the cell (#227: the Distillation Tower
+  ring's energy hatches).
   A kind found that way is kept only if the machine's own `checkMachine`, run over the whole shell
   with the hatch in place, counts the hatch as that kind and reports no kind of error the bare shell
   did not already have: a muffler on a Dangote Distillus ring passes the element's check but ends
