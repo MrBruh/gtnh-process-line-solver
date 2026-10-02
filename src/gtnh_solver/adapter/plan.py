@@ -52,6 +52,10 @@ class Resource(BaseModel):
     kind: str  # "item" | "fluid"
     id: str
     amount: float = 0.0
+    #: The name the exporter shows for it ("Toluene" for ``liquid_toluene``), read from the game
+    #: by the exporter. Display only: it names the resource for a person reading the preview and
+    #: never keys anything (``core._resource_names``). Empty when the export has none.
+    display_name: str = ""
     #: Every resource a recipe INPUT accepts in this one's place, as the arodoid exporter lists it
     #: from the ore dictionary ("Salt": GT's dust and HarvestCraft's salt), the input's own id
     #: included. What a node's override may pick (``core._refines``). Empty on an output and on
@@ -296,6 +300,10 @@ class Edge(BaseModel):
     target: str
     resource_kind: str  # "item" | "fluid"
     resource_id: str
+    #: The display name of ``resource_id`` as the exporter labels this edge ("Toluene"). Both forks
+    #: label every edge. Display only, and preferred over a recipe's ``display_name`` for the same
+    #: id (``core._resource_names``). Empty when the export has none.
+    label: str = ""
 
 
 class AppInfo(BaseModel):

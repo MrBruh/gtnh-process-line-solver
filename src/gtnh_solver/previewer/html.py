@@ -10,8 +10,8 @@ the machine name on the front face and, since a textured cube shows no name, a h
 floats above whatever the pointer picks out (raycast): a machine's name, a Super Chest/Tank's name
 AND what it holds, or - hovering a pipe or cable - the resource that route carries, its commodity
 and its rate, which is the only way to tell one noodle of a crossing bundle from the next (#155).
-Resource ids are shown verbatim as the plan carries them, never a display name invented here; a
-state control swaps every machine between
+Resource ids are shown verbatim as the plan carries them, behind the plan's own display name
+where it has one (#296), never a name invented here; a state control swaps every machine between
 its idle and running
 skin where the two differ (the running tiles ride ``scene.atlas.active``, default idle); routes
 (cables and
@@ -590,7 +590,7 @@ const centerById = {}, sizeById = {}, expandedById = {};
 const hoverables = [];
 const nameById = Object.fromEntries(SCENE.machines.map((m) => [m.id, m.type]));
 const contentsById = Object.fromEntries(SCENE.machines.map((m) => [m.id, m.contents || []]));
-const filterItemsById = Object.fromEntries(SCENE.machines.map((m) => [m.id, m.filter_items || []]));
+const filterLabelsById = Object.fromEntries(SCENE.machines.map((m) => [m.id, m.filter_labels || []]));
 for (const m of SCENE.machines) {
   const [sx, sy, sz] = m.size;
   const pos = new THREE.Vector3(m.cell[0] + sx / 2, m.cell[1] + sy / 2, m.cell[2] + sz / 2);
@@ -920,20 +920,21 @@ const _COMMODITY_ORDER = { item: 0, fluid: 1, power: 2 };
 function netsByReadingOrder() {
   return [...SCENE.routes].sort((a, b) =>
     (_COMMODITY_ORDER[a.commodity] - _COMMODITY_ORDER[b.commodity]) ||
-    String(a.resource || '').localeCompare(String(b.resource || '')) ||
+    String(a.label || '').localeCompare(String(b.label || '')) ||
     String(a.netId).localeCompare(String(b.netId)));
 }
 // One net's row. A <button>, not a styled span: soloing is an action, so it should be reachable by
-// keyboard and announced as pressable without inventing ARIA for a div. The label is the same
-// verbatim resource id the hover tag and the system-i/o panel print, appended through textContent
-// like every other value out of the plan (#111) - a net named `<img src=x onerror=...>` stays text.
+// keyboard and announced as pressable without inventing ARIA for a div. The label is the same one
+// the hover tag and the system-i/o panel print (the plan's display name with the verbatim id, #296),
+// appended through textContent like every other value out of the plan (#111) - a net named
+// `<img src=x onerror=...>` stays text.
 function netRow(r) {
   const sfx = perSecond ? '/s' : '/t';
   const button = el('button');
   button.className = 'net';
   if (r.netId === solo) button.classList.add('on');
   button.setAttribute('aria-pressed', String(r.netId === solo));
-  button.append(swatch(r.color), r.resource || r.commodity);
+  button.append(swatch(r.color), r.label || r.commodity);
   if (r.rate != null) button.append('   ' + rateText(r.rate) + ' ' + r.unit + sfx);
   button.addEventListener('click', () => {
     solo = r.netId === solo ? null : r.netId;   // pressing the soloed net again clears it
@@ -1008,9 +1009,9 @@ function renderLegend() {
     const io = SCENE.io, sfx = perSecond ? '/s' : '/t';
     const sys = section(panel, 'system i/o');
     for (const i of io.inputs)
-      row(sys, 'in: ' + i.resource + (i.rate != null ? ' (' + rateText(i.rate) + ' ' + i.unit + sfx + ')' : '') + viaMe(i));
+      row(sys, 'in: ' + i.label + (i.rate != null ? ' (' + rateText(i.rate) + ' ' + i.unit + sfx + ')' : '') + viaMe(i));
     for (const o of io.outputs)
-      row(sys, 'out: ' + o.resource + (o.rate != null ? ' (' + rateText(o.rate) + ' ' + o.unit + sfx + ')' : '') + viaMe(o));
+      row(sys, 'out: ' + o.label + (o.rate != null ? ' (' + rateText(o.rate) + ' ' + o.unit + sfx + ')' : '') + viaMe(o));
     // Power: total EU/t supplied plus the per-tier feed spec, the full tier voltage x amps to
     // supply (how a GT source is fed). The total is that feed (tier voltage x amps), so it matches
     // the breakdown, e.g. 'power: 96 EU/t (LV 32V x 3A)' where 96 = 32 x 3.
@@ -1071,14 +1072,14 @@ function machineHover(id) {
   return {
     lines: () => [
       nameById[id],
-      ...contentsById[id].map((c) => c.flow + ': ' + c.resource + viaMe(c)),
-      ...filterItemsById[id].map((item) => 'lets through: ' + item),
+      ...contentsById[id].map((c) => c.flow + ': ' + c.label + viaMe(c)),
+      ...filterLabelsById[id].map((item) => 'lets through: ' + item),
     ],
     anchor: [c.x, c.y + s[1] / 2 + 0.15, c.z],
   };
 }
 // A cover marker's tag: which cover, on which machine's which face, and what it lets out.
-const resourceByNet = Object.fromEntries(SCENE.routes.map((r) => [r.netId, r.resource]));
+const resourceByNet = Object.fromEntries(SCENE.routes.map((r) => [r.netId, r.label]));
 function coverHover(what, at) {
   const c = what.cover;
   const carried = c.nets.map((n) => resourceByNet[n]).filter((r) => r);
@@ -1094,16 +1095,17 @@ function coverHover(what, at) {
 function routeHover(r, cell) {
   return { lines: () => routeLines(r), anchor: [cell[0] + 0.5, cell[1] + 1 + 0.15, cell[2] + 0.5] };
 }
-// A route's tag: the resource it carries, then its commodity and rate. Resource ids are shown
-// EXACTLY as the plan carries them (`gregtech:gt.metaitem.01@2032`, `minecraft:log@32767`), the
-// same way the system-i/o panel prints them - an id a builder can search NEI for beats a display
-// name we would have to author from memory (#155, and see route_blocks on GT material names). A
-// power net names no fluid or item, so there its commodity is the headline instead.
+// A route's tag: the resource it carries, then its commodity and rate. The resource is its scene
+// `label`, the same one the system-i/o panel prints: the id EXACTLY as the plan carries it
+// (`gregtech:gt.metaitem.01@2032`, `minecraft:log@32767`), behind the plan's own display name
+// where it has one (#296). Never a name authored here: an id a builder can search NEI for beats
+// one written from memory (#155, and see route_blocks on GT material names). A power net names no
+// fluid or item, so there its commodity is the headline instead.
 function routeLines(r) {
   const sfx = perSecond ? '/s' : '/t';
   const rate = r.rate != null ? rateText(r.rate) + ' ' + r.unit + sfx : '';
   const detail = ((r.resource ? r.commodity + '   ' : '') + rate).trim();
-  return detail ? [r.resource || r.commodity, detail] : [r.resource || r.commodity];
+  return detail ? [r.label || r.commodity, detail] : [r.label || r.commodity];
 }
 function pickAt(ev) {
   const rect = renderer.domElement.getBoundingClientRect();

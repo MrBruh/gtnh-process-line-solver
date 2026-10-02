@@ -5,7 +5,8 @@ geometry in the ``InputIR``; a renderer needs it all in one place. ``build_scene
 into a plain dict the three.js viewer can draw with no further lookups (machine boxes, the hatches
 and buses built into each one's casing, what a boundary storage holds, routes as the blocks they
 are built from - each cell with the sides that connect, its gauge and GT's real cross-section
-(``route_blocks``) - plus the resource each route carries at what rate, the raw
+(``route_blocks``) - plus the resource each route carries at what rate (by its raw id, and by a
+``label`` that puts the plan's own display name in front of it, #296), the raw
 segments and terminals behind them, auto-output links, how each single block's outputs leave it
 (``output_faces``: the one face it auto-outputs through and the faces that need a cover), the
 region, a legend, and the ``io`` boundary summary - inputs to load, outputs to collect, summed
@@ -16,7 +17,7 @@ WebGL last mile stays a thin static template while the mapping here is pure and 
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from gtnh_solver.dataset import tier_voltage
@@ -37,8 +38,10 @@ from gtnh_solver.route_blocks import route_cells
 from gtnh_solver.system_io import (
     RATE_STEM,
     is_boundary_storage,
+    net_label,
     net_resource,
     port_resource,
+    resource_label,
     system_io,
 )
 
@@ -134,6 +137,7 @@ _STORAGE_FLOW = {IODirection.OUTPUT: "in", IODirection.INPUT: "out"}
 def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
     """Flatten ``problem`` + ``layout`` into the self-contained scene dict the viewer renders."""
     machines = {m.id: m for m in problem.machines}
+    names = problem.resource_names
     types = sorted({m.type for m in problem.machines})
     color_for_type = {t: _MACHINE_PALETTE[i % len(_MACHINE_PALETTE)] for i, t in enumerate(types)}
 
@@ -175,11 +179,15 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
             "role": _role(machines[pl.machine_id]),
             # What a boundary storage holds, so a hover can tell four identical Super Tanks apart
             # (GitHub #155). Empty for every other machine - a machine's ports are its recipe, not
-            # its contents. Resource ids verbatim, exactly as the plan carries them.
-            "contents": _contents(machines[pl.machine_id], problem.me_toggles),
+            # its contents. Resource ids verbatim, exactly as the plan carries them, each with the
+            # ``label`` a person reads (``system_io.resource_label``, #296).
+            "contents": _contents(machines[pl.machine_id], problem.me_toggles, names),
             # The items an Item Filter lets through (#249), which is how its slots must be set in
-            # game; the hover lists them. Empty for every other machine.
+            # game; the hover lists them by ``filter_labels``. Empty for every other machine.
             "filter_items": list(machines[pl.machine_id].filter_items),
+            "filter_labels": [
+                resource_label(item, names) for item in machines[pl.machine_id].filter_items
+            ],
             # How this single block's outputs leave it (``output_faces``): the one face it
             # auto-outputs through, which the viewer marks with the arrow whether it ejects into a
             # neighbour or into a pipe, and every other output face, which takes a cover and gets a
@@ -228,11 +236,14 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
                 # the net's resource (``None`` on power, which names no fluid or item; a merged
                 # item run's several, comma separated) and its typed throughput, with ``unit`` the
                 # stem the viewer suffixes /t or /s onto - the same shape ``io`` below uses. The
-                # resource id is verbatim, exactly as the plan carries it: mapping
-                # ``gregtech:gt.metaitem.01@2032`` to a name would mean authoring a table from
-                # memory (the reason ``route_blocks`` keeps GT's unlocalized spellings), and an id a
-                # builder can search NEI for beats a guessed name.
+                # resource id is verbatim, exactly as the plan carries it, and ``label`` is what
+                # the viewer shows: the id with the plan's own display name in front where it
+                # has one, "Toluene (liquid_toluene)" (#296). Never a name authored here: mapping
+                # ``gregtech:gt.metaitem.01@2032`` to one would mean a table from memory (the
+                # reason ``route_blocks`` keeps GT's unlocalized spellings), and an id a builder
+                # can search NEI for beats a guessed name, which is why the id stays in the label.
                 "resource": net_resource(net) if net is not None else None,
+                "label": net_label(net, names) if net is not None else None,
                 "rate": net.throughput if net is not None else None,
                 "unit": RATE_STEM[route.commodity],
                 "color": _COMMODITY_COLOR[route.commodity],
@@ -300,10 +311,12 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
         # ``rate`` is per-tick; ``unit`` is the stem (items/mB/EU) so the viewer can append /t or
         # /s for its toggle. ``me`` says the commodity rides ME (``--me``): the solver routes
         # nothing for it and no ME block is drawn yet, so the panel has to say how the flow gets
-        # there, or a chest with no pipe reads as a line that forgot one.
+        # there, or a chest with no pipe reads as a line that forgot one. ``label`` is the resource
+        # as the panel prints it (``system_io.resource_label``, #296).
         "inputs": [
             {
                 "resource": f.resource,
+                "label": resource_label(f.resource, names),
                 "rate": f.rate,
                 "unit": RATE_STEM[f.commodity],
                 "me": me.toggled(f.commodity),
@@ -313,6 +326,7 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
         "outputs": [
             {
                 "resource": f.resource,
+                "label": resource_label(f.resource, names),
                 "rate": f.rate,
                 "unit": RATE_STEM[f.commodity],
                 "me": me.toggled(f.commodity),
@@ -406,9 +420,10 @@ def _content_bounds(
     return {"min": [v for v in lo if v is not None], "max": [v for v in hi if v is not None]}
 
 
-def _contents(machine: Machine, me: METoggles) -> list[dict[str, Any]]:
-    """What a boundary storage holds: each resource its ports carry, which way it flows, and ``me``
-    when that commodity rides ME (the io panel's flag, so the hover says what the panel says).
+def _contents(machine: Machine, me: METoggles, names: Mapping[str, str]) -> list[dict[str, Any]]:
+    """What a boundary storage holds: each resource its ports carry (with the ``label`` the hover
+    prints, from ``names``), which way it flows, and ``me`` when that commodity rides ME (the io
+    panel's flag, so the hover says what the panel says).
 
     A Super Chest/Tank is a buffer for one resource, and the port it exposes is the only record of
     which - ``adapter.core`` encodes it into the port id (``"input:liquid_toluene"``) and
@@ -427,7 +442,12 @@ def _contents(machine: Machine, me: METoggles) -> list[dict[str, Any]]:
         if port.commodity is Commodity.POWER:  # a hatch, not something the buffer holds
             continue
         resource, flow = port_resource(port), _STORAGE_FLOW[port.direction]
-        entry = {"resource": resource, "flow": flow, "me": me.toggled(port.commodity)}
+        entry = {
+            "resource": resource,
+            "label": resource_label(resource, names),
+            "flow": flow,
+            "me": me.toggled(port.commodity),
+        }
         seen.setdefault((resource, flow), entry)
     return list(seen.values())
 

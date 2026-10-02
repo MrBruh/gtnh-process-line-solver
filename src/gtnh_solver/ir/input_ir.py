@@ -440,6 +440,11 @@ class InputIR(StrictModel):
     pinned: list[PinnedIO] = Field(default_factory=list)
     reserved_cells: list[CellCoord] = Field(default_factory=list)
     me_toggles: METoggles = Field(default_factory=METoggles)
+    #: Display names for the fluids and items this problem moves, raw id -> name ("liquid_toluene"
+    #: -> "Toluene"), as the plan's exporter read them from the game (#296). Display only: every
+    #: other field keys a resource by its raw id, and nothing may join on a name. A resource with
+    #: no entry is shown by its id. Empty for a problem built from a plan that names nothing.
+    resource_names: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("version")
     @classmethod

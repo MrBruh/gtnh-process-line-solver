@@ -25,6 +25,11 @@ InputIR
   pinned: [PinnedIO]                # fixed input/output chest locations
   reserved_cells: [CellCoord]       # off-limits cells
   me_toggles: { items: bool, fluids: bool, power: bool }   # per-commodity (default all false)
+  resource_names: { str: str }      # raw resource id -> display name ("liquid_toluene" ->
+                                    #  "Toluene"), as the plan's exporter read it from the game,
+                                    #  for the resources this problem moves. Display only: nothing
+                                    #  joins on a name, and an id with no entry is shown as the id.
+                                    #  InputIR v5 (additive, #296).
 
 Machine
   id: str

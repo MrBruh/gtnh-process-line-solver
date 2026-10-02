@@ -36,8 +36,10 @@ from gtnh_solver.system_io import (
     BoundaryFlow,
     SystemIO,
     is_boundary_storage,
+    net_label,
     net_resource,
     port_resource,
+    resource_label,
     system_io,
 )
 
@@ -400,3 +402,24 @@ def test_a_net_is_labelled_by_what_it_carries_a_merged_run_by_all_of_it() -> Non
     assert net_resource(merged) == "a, b, c"
     assert net_resource(single) == "a"
     assert net_resource(power) is None
+
+
+def test_a_resource_is_labelled_by_its_plan_name_with_its_id_beside_it() -> None:
+    """The label a person reads (#296): the plan's display name, then the raw id a builder searches
+    NEI for. With no name, or a name that only repeats the id, the id alone, as before."""
+    names = {"liquid_toluene": "Toluene", "water": "water"}
+    assert resource_label("liquid_toluene", names) == "Toluene (liquid_toluene)"
+    assert resource_label("benzene", names) == "benzene"  # the plan names it nothing
+    assert resource_label("water", names) == "water"  # the name adds nothing to the id
+    assert resource_label("liquid_toluene", {}) == "liquid_toluene"
+
+
+def test_a_net_label_names_each_resource_in_the_pipe() -> None:
+    here = [MachineFaceRef(machine_id="m", port_id="p")]
+    merged = Net(
+        id="t", commodity=Commodity.ITEM, items=("a", "b", "c"), throughput=0.3, endpoints=here
+    )
+    power = Net(id="p", commodity=Commodity.POWER, throughput=8.0, endpoints=here)
+    names = {"a": "Alpha", "c": "Gamma"}
+    assert net_label(merged, names) == "Alpha (a), b, Gamma (c)"
+    assert net_label(power, names) is None

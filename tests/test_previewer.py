@@ -284,9 +284,14 @@ def test_scene_route_carries_the_resource_it_moves_and_at_what_rate(
 
     fluids = [r for r in scene["routes"] if r["commodity"] == "fluid"]
     assert fluids, "the nitrobenzene line carries fluids; that is what it is the fixture for"
+    names = problem.resource_names
     for route in fluids:
         # Verbatim, exactly the id the plan carries - no display name invented here (#155).
         assert route["resource"] == resource_of[route["netId"]]
+        # ...and the label puts the plan's own name in front of it (#296). Every fluid this
+        # line moves is named in its plan, so every label carries both.
+        resource = route["resource"]
+        assert route["label"] == f"{names[resource]} ({resource})"
         assert route["rate"] == pytest.approx(rate_of[route["netId"]])
         assert route["unit"] == "mB"  # stem only; the viewer appends /t or /s, as it does for io
 
@@ -294,6 +299,7 @@ def test_scene_route_carries_the_resource_it_moves_and_at_what_rate(
     # commodity is the whole answer there, and the rate is the EU/t the net moves.
     power = next(r for r in scene["routes"] if r["commodity"] == "power")
     assert power["resource"] is None
+    assert power["label"] is None
     assert power["rate"] == pytest.approx(rate_of[power["netId"]])
     assert power["unit"] == "EU"
 
@@ -311,6 +317,7 @@ def test_scene_route_whose_net_is_gone_says_nothing_about_what_it_carries() -> N
     layout = LayoutResult(status=LayoutStatus.VALID, seed=0, routes=[route])
     (scene_route,) = build_scene(problem, layout)["routes"]
     assert scene_route["resource"] is None
+    assert scene_route["label"] is None
     assert scene_route["rate"] is None
     assert scene_route["unit"] == "items"  # the commodity is the route's own, so this still stands
 
@@ -365,10 +372,17 @@ def test_scene_reports_system_io() -> None:
     io = _sand_scene()["io"]
     assert len(io["inputs"]) == 1
     assert io["inputs"][0]["resource"] == "minecraft:stone"
+    assert io["inputs"][0]["label"] == "Stone (minecraft:stone)"  # the plan's name, #296
     assert io["inputs"][0]["rate"] == pytest.approx(0.1)
     assert io["inputs"][0]["unit"] == "items"  # stem only; the viewer appends /t or /s
     assert io["outputs"] == [
-        {"resource": "minecraft:sand", "rate": pytest.approx(0.1), "unit": "items", "me": False}
+        {
+            "resource": "minecraft:sand",
+            "label": "Sand (minecraft:sand)",
+            "rate": pytest.approx(0.1),
+            "unit": "items",
+            "me": False,
+        }
     ]
     # the power feed per tier: the FULL LV tier voltage (32, not the hammers' 16 EU/t draw) x the
     # amps to supply - what a GT source is fed. The hammers' fractional loads (~0.53 A each at
@@ -450,7 +464,10 @@ def test_scene_storage_contents_skip_its_power_connection() -> None:
     problem = InputIR(bounding_region=CellBox(sx=4, sy=2, sz=4), machines=[tank])
     layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=[at("t", 0, 0, 0)])
     (placed,) = build_scene(problem, layout)["machines"]
-    assert placed["contents"] == [{"resource": "water", "flow": "out", "me": False}]
+    # No resource names in a hand-built problem, so the label is the bare id.
+    assert placed["contents"] == [
+        {"resource": "water", "label": "water", "flow": "out", "me": False}
+    ]
 
 
 def test_scene_names_an_item_filter_and_what_it_lets_through() -> None:
@@ -471,7 +488,11 @@ def test_scene_names_an_item_filter_and_what_it_lets_through() -> None:
         }
     )
     washer = machine("w", [], type_="Ore Washer")
-    problem = InputIR(bounding_region=CellBox(sx=4, sy=2, sz=4), machines=[item_filter, washer])
+    problem = InputIR(
+        bounding_region=CellBox(sx=4, sy=2, sz=4),
+        machines=[item_filter, washer],
+        resource_names={"gt.dust.stone": "Stone Dust"},
+    )
     layout = LayoutResult(
         status=LayoutStatus.VALID,
         seed=0,
@@ -481,9 +502,32 @@ def test_scene_names_an_item_filter_and_what_it_lets_through() -> None:
     by_id = {m["id"]: m for m in scene["machines"]}
     assert by_id[item_filter.id]["role"] == "filter"
     assert by_id[item_filter.id]["filter_items"] == ["gt.dust.stone"]
+    # The hover lists them by label: the plan's name, with the id that goes in the slot (#296).
+    assert by_id[item_filter.id]["filter_labels"] == ["Stone Dust (gt.dust.stone)"]
     assert by_id["w"]["role"] == "machine"
     assert by_id["w"]["filter_items"] == []
+    assert by_id["w"]["filter_labels"] == []
     assert "'lets through: '" in render_html(scene)
+
+
+def test_the_viewer_prints_each_resource_by_its_label() -> None:
+    """Every surface that names a resource prints the scene's ``label`` (#296), not the bare id: a
+    route's tag and the nets panel, a storage's contents, an Item Filter's slots, a cover's tag and
+    the system i/o panel. The template is the untested last mile, so this pins that it reads the
+    field the scene tests check rather than the raw ``resource`` beside it."""
+    scene = _sand_scene()
+    held = {c["label"] for m in scene["machines"] for c in m["contents"]}
+    assert held == {"Stone (minecraft:stone)", "Sand (minecraft:sand)"}
+    page = render_html(scene)
+    for reads in (
+        "r.label || r.commodity",  # a route's tag and its nets-panel row
+        "c.flow + ': ' + c.label",  # a storage's contents
+        "m.filter_labels",  # an Item Filter's slots
+        "[r.netId, r.label]",  # what a cover lets out
+        "'in: ' + i.label",  # the system i/o panel
+        "'out: ' + o.label",
+    ):
+        assert reads in page, reads
 
 
 def test_the_nitrobenzene_super_tanks_are_individually_identifiable(
