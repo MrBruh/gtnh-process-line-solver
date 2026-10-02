@@ -445,6 +445,11 @@ class InputIR(StrictModel):
     #: other field keys a resource by its raw id, and nothing may join on a name. A resource with
     #: no entry is shown by its id. Empty for a problem built from a plan that names nothing.
     resource_names: dict[str, str] = Field(default_factory=dict)
+    #: The GTNH pack the plan was balanced against ("2.9.0-beta-2"), or ``None`` when the plan does
+    #: not say one or names two. GT's defaults differ between packs in ways a build has to know
+    #: (``output_faces.output_side_takes_input``, #278). It changes no geometry, and nothing may
+    #: read ``None`` as a particular pack.
+    pack_version: str | None = None
 
     @field_validator("version")
     @classmethod

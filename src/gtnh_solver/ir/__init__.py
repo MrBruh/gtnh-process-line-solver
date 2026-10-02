@@ -338,6 +338,11 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   its raw id, and nothing joins on a name. Not breaking by omission either: a consumer that
 #   ignores it shows bare ids, which is what every consumer did before, and builds nothing wrong.
 #
+# InputIR v5 (additive, no version bump) - added `InputIR.pack_version: str | None`, the GTNH pack
+#   the plan was balanced against (the adapter's `plan_pack_version`), for GT defaults that differ
+#   between packs (#278: a 2.9 basic machine takes input through its output face, a 2.8.4 one does
+#   not). It changes no geometry; a consumer that ignores it only loses pack-specific build advice.
+#
 # LayoutResult v3 (additive, no version bump) - added `LayoutMetrics.rounds: int | None`, how many
 #   rounds of the multi-start a solve ran. Set only when the solve was given a time budget or a
 #   round count (`gtnh-solve --time-budget` / `--rounds`), and left out of the dump while None, so a

@@ -28,6 +28,7 @@ from gtnh_solver.adapter import (
     Resource,
     RuntimeCalculation,
     RuntimeVariant,
+    adapt_file,
     describe_markers,
     detect_producer,
     load_plan,
@@ -122,6 +123,16 @@ def test_committed_arodoid_fixture_detects_despite_schema_version_1(path: Path) 
     assert plan.schema_version == 1
     assert plan.resolved is None
     assert detect_producer(plan) is PlanProducer.ARODOID_V1
+
+
+@pytest.mark.parametrize(
+    ("path", "pack"),
+    [(_SAND, "2.8.4"), (_PARALLEL_SAND, "2.9.0-beta-2")],
+    ids=lambda v: v.name if isinstance(v, Path) else v,
+)
+def test_the_problem_carries_the_pack_its_plan_was_balanced_against(path: Path, pack: str) -> None:
+    # GT's defaults differ between packs in ways a build must know (#278), so the problem says which.
+    assert adapt_file(path).pack_version == pack
 
 
 # ------------------------------------------------------------------ detection, branches

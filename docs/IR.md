@@ -30,6 +30,11 @@ InputIR
                                     #  for the resources this problem moves. Display only: nothing
                                     #  joins on a name, and an id with no entry is shown as the id.
                                     #  InputIR v5 (additive, #296).
+  pack_version: str | null          # the GTNH pack the plan was balanced against
+                                    #  ("2.9.0-beta-2"), null when it states none or two. GT's
+                                    #  defaults differ between packs in ways a build must know
+                                    #  (output_faces.output_side_takes_input). No geometry
+                                    #  reads it. InputIR v5 (additive, #278).
 
 Machine
   id: str

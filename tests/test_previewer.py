@@ -648,6 +648,70 @@ def test_scene_names_an_item_filter_and_what_it_lets_through() -> None:
     assert "'lets through: '" in render_html(scene)
 
 
+def _two_machines_on_one_output_pipe(pack: str) -> dict[str, Any]:
+    """The scene of two Macerators whose outputs share one pipe block into a Super Chest."""
+    out = Port(id="output:x", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)
+    machines = [machine("m1", [out], type_="Macerator"), machine("m2", [out], type_="Macerator")]
+    chest = machine(
+        "c",
+        [Port(id="input:x", commodity=Commodity.ITEM, direction=IODirection.INPUT)],
+        type_="Super Chest",
+    )
+    shared = Net(
+        id="x",
+        commodity=Commodity.ITEM,
+        fluid_or_item="x",
+        throughput=1.0,
+        endpoints=[
+            MachineFaceRef(machine_id="m1", port_id="output:x"),
+            MachineFaceRef(machine_id="m2", port_id="output:x"),
+            MachineFaceRef(machine_id="c", port_id="input:x"),
+        ],
+    )
+    cell = CellCoord(x=1, y=0, z=0)
+    pipe = Route(
+        net_id="x",
+        commodity=Commodity.ITEM,
+        terminals=[
+            Terminal(machine_id="m1", port_id="output:x", face=Facing.EAST, cell=cell),
+            Terminal(machine_id="m2", port_id="output:x", face=Facing.WEST, cell=cell),
+            Terminal(machine_id="c", port_id="input:x", face=Facing.NORTH, cell=cell),
+        ],
+        segments=[],
+    )
+    problem = InputIR(
+        bounding_region=CellBox(sx=4, sy=2, sz=4),
+        machines=[*machines, chest],
+        nets=[shared],
+        pack_version=pack,
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[at("m1", 0, 0, 0), at("m2", 2, 0, 0), at("c", 1, 0, 1)],
+        routes=[pipe],
+    )
+    return build_scene(problem, layout)
+
+
+def test_the_scene_marks_a_machine_that_must_refuse_input_through_its_output_face() -> None:
+    """Two machines' outputs on one pipe: on 2.9 each takes the other's output through its output
+    face unless set not to, so the scene flags both for the red arrow and the hover (#278); a 2.8.4
+    plan, whose machines already refuse it, flags neither."""
+    flagged = {
+        m["id"]: m["outputs"]["forbidInput"]
+        for m in _two_machines_on_one_output_pipe("2.9.0-beta-2")["machines"]
+        if m["outputs"]
+    }
+    assert flagged == {"m1": True, "m2": True}
+    on_28 = _two_machines_on_one_output_pipe("2.8.4")["machines"]
+    assert not any(m["outputs"]["forbidInput"] for m in on_28 if m["outputs"])
+    page = render_html(_two_machines_on_one_output_pipe("2.9.0-beta-2"))
+    assert "forbidById[id] ? FORBID_LINES : []" in page  # the machine's hover, and its red arrow's
+    assert "'output face: set Input from Output Side forbidden'" in page
+    assert "'(screwdriver it, not sneaking, until chat says so)'" in page
+
+
 def test_the_viewer_prints_each_resource_by_its_label() -> None:
     """Every surface that names a resource prints the scene's ``label`` (#296), not the bare id: a
     route's tag and the nets panel, a storage's contents, an Item Filter's slots, a cover's tag,
@@ -919,6 +983,7 @@ def test_scene_marks_a_piped_single_block_output_as_its_auto_face() -> None:
         "autoItems": True,
         "autoFluids": False,
         "covers": [],
+        "forbidInput": False,  # alone on its pipe, so nothing else's output can come back in (#278)
     }
     assert by_id["c"]["outputs"] is None
 

@@ -506,6 +506,9 @@ def _outputs_entry(block: BlockOutputs | None) -> dict[str, Any] | None:
         "covers": [
             {"face": c.face.value, "cover": c.cover, "nets": list(c.net_ids)} for c in block.covers
         ],
+        # Its output face shares a pipe with another machine's outputs on a pack where it takes
+        # input there, so the builder must set "Input from Output Side forbidden" (#278).
+        "forbidInput": block.forbid_input_from_output,
     }
 
 

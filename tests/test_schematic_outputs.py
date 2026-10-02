@@ -335,6 +335,81 @@ def test_no_covers_and_no_filters_warn_nothing() -> None:
         warnings.simplefilter("error", schematic_core.SchematicWarning)
         schematic_core._warn_about_covers([])
         schematic_core._warn_about_filters([])
+        schematic_core._warn_about_output_side([])
+
+
+# ------------------------------------------------- input through the output face (#278)
+
+
+def _hammers_on_one_pipe(pack: str) -> tuple[InputIR, LayoutResult]:
+    """Two hammers either side of one pipe block, both feeding it item x for the chest south of it."""
+    hammers = [_hammer(mid, [_port("output:x", IODirection.OUTPUT)]) for mid in ("h1", "h2")]
+    chest = _storage("c", "Super Chest", [_port("in", IODirection.INPUT)])
+    net = Net(
+        id="x",
+        commodity=Commodity.ITEM,
+        fluid_or_item="x",
+        throughput=1.0,
+        endpoints=[
+            MachineFaceRef(machine_id="h1", port_id="output:x"),
+            MachineFaceRef(machine_id="h2", port_id="output:x"),
+            MachineFaceRef(machine_id="c", port_id="in"),
+        ],
+    )
+    pipe_at = CellCoord(x=1, y=0, z=0)
+    pipe = Route(
+        net_id="x",
+        commodity=Commodity.ITEM,
+        terminals=[
+            Terminal(machine_id="h1", port_id="output:x", face=Facing.EAST, cell=pipe_at),
+            Terminal(machine_id="h2", port_id="output:x", face=Facing.WEST, cell=pipe_at),
+            Terminal(machine_id="c", port_id="in", face=Facing.NORTH, cell=pipe_at),
+        ],
+        segments=[],
+        material=RouteMaterial(family=PipeFamily.ITEM_PIPE, material="tin", size=PipeSize.NORMAL),
+    )
+    problem = InputIR(
+        bounding_region=CellBox(sx=4, sy=2, sz=4),
+        machines=[*hammers, chest],
+        nets=[net],
+        pack_version=pack,
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id="h1", cell=CellCoord(x=0, y=0, z=0), orientation=Facing.NORTH),
+            Placement(machine_id="h2", cell=CellCoord(x=2, y=0, z=0), orientation=Facing.NORTH),
+            Placement(machine_id="c", cell=CellCoord(x=1, y=0, z=1), orientation=Facing.NORTH),
+        ],
+        routes=[pipe],
+    )
+    return problem, layout
+
+
+def _output_side_warnings(pack: str) -> list[str]:
+    problem, layout = _hammers_on_one_pipe(pack)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", schematic_core.SchematicWarning)
+        build_schematic(problem, layout, manifest=_manifest())
+    return [str(w.message) for w in caught if "share an output pipe" in str(w.message)]
+
+
+def test_machines_sharing_an_output_pipe_are_named_with_the_setting_to_reach_on_29() -> None:
+    """A ghost-built 2.9 basic machine takes input through its output face, so the export names each
+    one on a shared pipe and the state to set it to (#278). The file itself writes the setting off,
+    which a machine placed by hand from the ghost does not inherit."""
+    (message,) = _output_side_warnings("2.9.0-beta-2")
+    assert message.startswith("2 machine(s) share an output pipe")
+    assert 'until chat says "Input from Output Side forbidden"' in message
+    assert message.endswith(
+        "Basic Forge Hammer at (0, 0, 0), east face; Basic Forge Hammer at (2, 0, 0), west face"
+    )
+
+
+def test_a_28_export_names_no_machine_for_the_setting() -> None:
+    # 2.8.4 machines already refuse it, and the same click would allow it.
+    assert _output_side_warnings("2.8.4") == []
 
 
 # ----------------------------------------------------------------------------- item filters
