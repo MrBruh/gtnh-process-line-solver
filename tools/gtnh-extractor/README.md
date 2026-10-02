@@ -227,7 +227,8 @@ the pass never registers icons and never stubs the register. (Feeding the blocks
 class cannot implement an interface that does not exist on this side. It was measured and removed;
 texture-resolution.md records it as a dead end so it is not retried.) Icon *names* are taken instead
 from the `Textures.BlockIcons` enum constants' `name()` (or a custom container's `mIconName` plus
-`mModID`), which map 1:1 to the PNGs under `assets/<modid>/textures/blocks/`. Up front,
+`mModID`, which CropsNH spells `iconName` and `modID` from 2.0.114), which map 1:1 to the PNGs
+under `assets/<modid>/textures/blocks/`. Up front,
 `populateIconNames()` injects a name-carrying `NamedIcon` into every `BlockIcons.mIcon` field **and**
 into every custom icon container queued in `GregTechAPI.sGTBlockIconload` (the queue GT drains
 client-side and never runs on a server, which is why those blocks answer `getIcon` with null), so any

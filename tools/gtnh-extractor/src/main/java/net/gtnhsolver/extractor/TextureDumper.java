@@ -984,7 +984,7 @@ final class TextureDumper {
         // in a client JVM it names itself. Server-side this reads back our own injected NamedIcon -
         // the same answer the routes below produce - or nothing at all, so those routes remain the
         // server's real answer and nothing about a server run changes.
-        NamedIcon sprite = spriteIcon(readField(container, "mIcon"));
+        NamedIcon sprite = spriteIcon(readField(container, CONTAINER_ICON));
         if (sprite != null) {
             int colon = sprite.iconName.indexOf(':');
             return new String[] { sprite.iconName.substring(0, colon), sprite.iconName.substring(colon + 1) };
@@ -997,14 +997,22 @@ final class TextureDumper {
         if (fieldName != null) {
             return new String[] { ICON_DOMAIN, "iconsets/" + fieldName };
         }
-        Object mIconName = readField(container, "mIconName");
+        Object mIconName = readField(container, CONTAINER_ICON_NAME);
         if (!(mIconName instanceof String) || ((String) mIconName).isEmpty()) {
             return null;
         }
-        Object modId = readField(container, "mModID");
+        Object modId = readField(container, CONTAINER_MOD_ID);
         String fallback = modId instanceof String && !((String) modId).isEmpty() ? (String) modId : ICON_DOMAIN;
         return splitIconName((String) mIconName, fallback);
     }
+
+    // A custom icon container's three fields, under each spelling a holder uses. GT's own and GT++'s
+    // keep the m-prefixed names; CropsNH's CustomIcon had them up to 2.0.91 and renamed them to icon,
+    // iconName and modID at 2.0.114, so reading only the old names would leave every CropsNH machine
+    // overlay unnamed. The first spelling a holder declares is the one read or written.
+    private static final String[] CONTAINER_ICON = { "mIcon", "icon" };
+    private static final String[] CONTAINER_ICON_NAME = { "mIconName", "iconName" };
+    private static final String[] CONTAINER_MOD_ID = { "mModID", "modID" };
 
     /**
      * Split a raw icon name into {@code {domain, relative-path}}, falling back to
@@ -1909,7 +1917,7 @@ final class TextureDumper {
                 skipped++;
                 continue;
             }
-            if (writeField(r, "mIcon", new NamedIcon(ref[0] + ":" + ref[1], assetPath(ref[0], ref[1])))) {
+            if (writeField(r, CONTAINER_ICON, new NamedIcon(ref[0] + ":" + ref[1], assetPath(ref[0], ref[1])))) {
                 ok++;
             } else {
                 skipped++;
@@ -2698,6 +2706,52 @@ final class TextureDumper {
             }
         }
         return false;
+    }
+
+    /** {@link #readField} on the first of {@code names} the owner declares, or null if it declares none. */
+    private static Object readField(Object owner, String[] names) {
+        Field f = firstDeclaredField(owner, names);
+        try {
+            return f == null ? null : f.get(owner);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** {@link #writeField} on the first of {@code names} the owner declares; whether the write landed. */
+    private static boolean writeField(Object owner, String[] names, Object value) {
+        Field f = firstDeclaredField(owner, names);
+        if (f == null) {
+            return false;
+        }
+        try {
+            f.set(owner, value);
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * The first of {@code names}, in order, that the owner's class or a superclass declares, made
+     * accessible; null if none is. Declared, not merely non-null: a holder's own field is the one meant
+     * even while it still holds null.
+     */
+    private static Field firstDeclaredField(Object owner, String[] names) {
+        for (String name : names) {
+            for (Class<?> c = owner.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+                try {
+                    Field f = c.getDeclaredField(name);
+                    f.setAccessible(true);
+                    return f;
+                } catch (NoSuchFieldException e) {
+                    // keep walking up
+                } catch (Throwable t) {
+                    return null;
+                }
+            }
+        }
+        return null;
     }
 
     private static boolean boolField(Object owner, String name) {
