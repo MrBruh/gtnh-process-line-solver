@@ -89,7 +89,7 @@ from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 from gtnh_solver.ir.output import CABLE_THICKNESSES
 from gtnh_solver.solver import solve
 from gtnh_solver.validator import validate
-from tests._helpers import property_examples
+from tests._helpers import layered_tower, property_examples
 
 # ------------------------------------------------------------------------------------- problems
 
@@ -389,6 +389,115 @@ def test_a_many_into_one_net_is_valid_or_explicitly_infeasible(
     fed = "shared" in {a.net_id for a in layout.auto_connections}
     piped = "shared" in {r.net_id for r in layout.routes}
     event("net=" + ("split" if fed and piped else "whole" if fed else "piped"))
+    _assert_valid_or_explained(problem, layout)
+
+
+def _tank(mid: str, port_id: str, direction: IODirection) -> Machine:
+    """A single block with one fluid port, turnable every way: a tank fed by a tower, or a feed."""
+    return Machine(
+        id=mid,
+        type="t",
+        voltage_tier="LV",
+        faces=FaceSpec(ports=[Port(id=port_id, commodity=Commodity.FLUID, direction=direction)]),
+        orientation_options=list(HORIZONTAL_FACINGS_ORDERED),
+    )
+
+
+@st.composite
+def _tower_problems(draw: st.DrawFn) -> InputIR:
+    """One tower that fills its outputs by layer (#299), each product piped to a tank of its own.
+
+    Two to four layers and one product up to one per layer, so some layers are left to a spare
+    output hatch; sometimes a fed input and a power draw, which compete for the base; sometimes a
+    ring cut down to a cell or three; and rarely fluids over ME, where no spare is asked for. The
+    general corpus never draws a machine whose slots record layers, which is what this adds.
+    """
+    layers = draw(st.integers(min_value=2, max_value=4))
+    products = draw(st.integers(min_value=1, max_value=layers))
+    fed = draw(st.booleans())
+    tower = layered_tower(
+        outputs=[f"f{i}" for i in range(products)], layers=layers, inputs=["feed"] if fed else ()
+    )
+    # Sometimes each layer keeps only its first few ring cells, so a product's hatch, a spare and
+    # the pipes around them compete for too little: the shortfalls this corpus would otherwise skip.
+    ring = draw(st.sampled_from((8, 8, 3, 1)))
+    kept: dict[int | None, int] = {}
+    slots = []
+    for slot in tower.hatch_slots:
+        if slot.output_layer is not None:
+            kept[slot.output_layer] = kept.get(slot.output_layer, 0) + 1
+            if kept[slot.output_layer] > ring:
+                continue
+        slots.append(slot)
+    tower = tower.model_copy(
+        update={
+            "eut": draw(st.sampled_from((0.0, 30.0, 120.0))),
+            "orientation_options": list(HORIZONTAL_FACINGS_ORDERED),
+            "hatch_slots": tuple(slots),
+            "hatch_cells": len(slots),
+        }
+    )
+    machines = [tower]
+    nets: list[Net] = []
+    for i in range(products):
+        machines.append(_tank(f"t{i}", "fluid:in", IODirection.INPUT))
+        nets.append(
+            Net(
+                id=f"f{i}",
+                commodity=Commodity.FLUID,
+                fluid_or_item=f"f{i}",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="tower", port_id=f"output:f{i}"),
+                    MachineFaceRef(machine_id=f"t{i}", port_id="fluid:in"),
+                ],
+            )
+        )
+    if fed:
+        machines.append(_tank("feeder", "fluid:out", IODirection.OUTPUT))
+        nets.append(
+            Net(
+                id="feed",
+                commodity=Commodity.FLUID,
+                fluid_or_item="feed",
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="feeder", port_id="fluid:out"),
+                    MachineFaceRef(machine_id="tower", port_id="input:feed"),
+                ],
+            )
+        )
+    machines, nets = synthesize_power(machines, nets)
+    floor = math.ceil(math.sqrt(sum(m.footprint.sx * m.footprint.sz for m in machines)))
+    slack = draw(st.integers(min_value=1, max_value=4))
+    return InputIR(
+        bounding_region=CellBox(
+            sx=floor + slack,
+            sy=layers + draw(st.integers(min_value=1, max_value=3)),
+            sz=floor + slack,
+        ),
+        machines=machines,
+        nets=nets,
+        me_toggles=METoggles(fluids=draw(st.integers(min_value=0, max_value=5)) == 0),
+    )
+
+
+@pytest.mark.parametrize("optimize", [True, False])
+@settings(
+    max_examples=property_examples(100),
+    suppress_health_check=[HealthCheck.too_slow],
+)
+@given(problem=_tower_problems(), seed=st.integers(min_value=0, max_value=3))
+def test_a_tower_that_fills_by_layer_is_valid_or_explicitly_infeasible(
+    problem: InputIR, seed: int, optimize: bool
+) -> None:
+    """The same promise on a tower that fills its outputs by layer (#299): every product's hatch on
+    its own layer and every layer holding an output hatch, a spare where no product uses it, or an
+    explicit reason why not. The events say how many spares a layout needed."""
+    layout = solve(problem, seed=seed, optimize=optimize)
+    event(f"status={layout.status.value}")
+    spares = sum(1 for h in layout.hatches if h.kind == "OutputHatch" and h.port_id is None)
+    event(f"spares={spares}")
     _assert_valid_or_explained(problem, layout)
 
 

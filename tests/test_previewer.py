@@ -48,7 +48,7 @@ from gtnh_solver.previewer.scene import (
     block_face_cover,
 )
 from gtnh_solver.solver import solve
-from tests._helpers import at, consumer, machine, net, producer
+from tests._helpers import at, consumer, layered_tower, machine, net, producer
 
 _SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
 
@@ -433,7 +433,7 @@ def _hatched(
     recipe_map: str | None,
     *hatches: tuple[str, str | None],
     names: dict[str, str] | None = None,
-    keys: tuple[str, ...] = ("label", "flow", "resource", "lock", "lockSlot", "byLayer"),
+    keys: tuple[str, ...] = ("label", "flow", "resource", "lock", "lockSlot", "layer", "spare"),
 ) -> list[dict[str, Any]]:
     """The scene's hatch entries for one multiblock with ``(kind, port id)`` hatches along x,
     each cut down to ``keys``.
@@ -495,8 +495,8 @@ def test_scene_hatch_says_what_it_moves_and_what_it_must_be_locked_to() -> None:
         ("Energy", "power:in"),
         ("Maintenance", None),
     )
-    locked = {"lockSlot": "Locked Fluid slot", "byLayer": False}
-    unlocked = {"lock": None, "lockSlot": None, "byLayer": False}
+    locked = {"lockSlot": "Locked Fluid slot", "layer": None, "spare": False}
+    unlocked = {"lock": None, "lockSlot": None, "layer": None, "spare": False}
     assert entries == [
         {"label": "Input Hatch", "flow": "in", "resource": "water", **unlocked},
         {"label": "Output Hatch", "flow": "out", "resource": "nitricacid", "lock": "nitricacid"}
@@ -527,19 +527,49 @@ def test_scene_hatch_labels_what_it_moves_and_its_lock_like_every_other_surface(
     ]
 
 
-def test_scene_tower_outputs_say_they_fill_by_layer_and_take_no_lock() -> None:
-    # A Distillation Tower sends output i to layer i, and a lock that disagrees voids the product.
-    entries = _hatched(
-        "gt.recipe.distillationtower",
-        ("InputHatch", "input:creosote"),
-        ("OutputHatch", "output:benzene"),
-        ("OutputHatch", "output:phenol"),
+def test_scene_tower_outputs_name_their_layer_and_a_spare_says_what_it_is() -> None:
+    """A tower fills output i from layer i (#299): each output hatch carries the layer it stands
+    on, so its hover can say to leave it unlocked, and a spare on a layer no product uses says it
+    is one. Layers are GT's index here, from 0; the hover numbers them from 1."""
+    tower = layered_tower(outputs=["benzene"], layers=2, inputs=["creosote"])
+    problem = InputIR(bounding_region=CellBox(sx=8, sy=4, sz=8), machines=[tower])
+
+    def hatch(kind: str, cell: tuple[int, int, int], port: str | None) -> PlacedHatch:
+        return PlacedHatch(
+            machine_id=tower.id,
+            kind=kind,
+            cell=CellCoord(x=cell[0], y=cell[1], z=cell[2]),
+            facing=Facing.WEST,
+            port_id=port,
+        )
+
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[at(tower.id, 2, 0, 2)],
+        hatches=[
+            hatch("InputHatch", (2, 0, 3), "input:creosote"),
+            hatch("OutputHatch", (2, 1, 3), "output:benzene"),
+            hatch("OutputHatch", (2, 2, 3), None),
+            hatch("Maintenance", (2, 0, 4), None),
+        ],
     )
-    assert [(e["resource"], e["lock"], e["byLayer"]) for e in entries] == [
-        ("creosote", None, False),
-        ("benzene", None, True),
-        ("phenol", None, True),
+    (scene_machine,) = build_scene(problem, layout)["machines"]
+    assert [
+        (h["resource"], h["lock"], h["layer"], h["spare"]) for h in scene_machine["hatches"]
+    ] == [
+        ("creosote", None, None, False),
+        ("benzene", None, 0, False),
+        (None, None, 1, True),
+        (None, None, None, False),
     ]
+
+
+def test_the_hatch_hover_numbers_a_towers_layers_and_names_a_spare() -> None:
+    html = render_html(_sand_scene())
+    assert "'spare for output layer ' + (h.layer + 1)" in html
+    assert "'output layer ' + (h.layer + 1)" in html
+    assert "filled by layer, leave unlocked" in html
 
 
 @pytest.mark.parametrize(

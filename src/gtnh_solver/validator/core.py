@@ -101,6 +101,7 @@ from gtnh_solver.ir import (
     Machine,
     Net,
     PipeFamily,
+    PlacedHatch,
     Placement,
     Port,
     Route,
@@ -117,6 +118,7 @@ from ._geometry import (
     in_region,
     is_connected,
     is_unit_step,
+    placed_slots,
     usable_faces,
 )
 from .report import ValidationReport, Violation, ViolationCode
@@ -141,6 +143,7 @@ def validate(problem: InputIR, layout: LayoutResult) -> ValidationReport:
     _check_hatches(problem, layout, out)
     _check_port_hatches(problem, layout, out)
     _check_upkeep_hatches(problem, layout, out)
+    _check_output_layers(problem, layout, out)
     _check_route_capacity(problem, layout, out)
     _check_route_materials(problem, layout, out)
     _check_item_pipe_throughput(problem, layout, out)
@@ -889,8 +892,9 @@ def _check_terminal_hatch_cells(
 
     - **the cell must accept that kind of hatch.** Re-derived from the machine's recorded slots
       with the validator's own rotation (``_geometry.hatch_cells``), never the router's. A
-      Distillation Tower's upper cells take an output hatch and nothing else, so an input bus
-      docked there describes a structure that will not form;
+      Distillation Tower's upper cells take an output, energy or maintenance hatch but never an
+      input, so an input bus docked there describes a structure that will not form. Whether an
+      output hatch is on its own layer is :func:`_check_output_layers`'s question;
     - **two connections cannot want the same block.** One casing cell is one block, and a claim on
       the *dock* cell would miss the collision entirely, since one casing cell has up to five free
       faces. This is where an energy hatch quietly sharing a block with an input bus is caught.
@@ -1474,6 +1478,76 @@ def _check_upkeep_hatches(problem: InputIR, layout: LayoutResult, out: list[Viol
                         machine_id=placement.machine_id,
                     )
                 )
+
+
+def _check_output_layers(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
+    """A tower's fluid outputs stand on the layers GT fills them from, and no layer is empty (#299).
+
+    GT fills a Distillation Tower by layer, not first fit: ``addFluidOutputs`` hands recipe fluid
+    output ``i`` to the hatches on output layer ``i`` and to no others, and ``checkMachine``
+    refuses to form the tower while any layer has no output hatch ("layer without output hatch",
+    GT's own comment), a layer no product uses included. So on any machine whose slots record
+    output layers (``HatchSlot.output_layer``, from the dump):
+
+    - the hatch of a port that names layer ``L`` must stand on a slot of layer ``L``
+      (``OUTPUT_HATCH_WRONG_LAYER``); anywhere else it receives another product, or nothing;
+    - every recorded layer holds an output hatch (``OUTPUT_LAYER_EMPTY``), whether a port's or a
+      spare that serves no net.
+
+    Independent of the router (docs/ARCHITECTURE.md #4): the cell-to-slot map is the validator's
+    own rotation (``_geometry.placed_slots``), the layers come from the machine's recorded slots,
+    and the layer a port needs from the problem, never from where the router docked it. The second
+    rule abstains while fluids go over ME, whose output hatches the layout does not draw. Layers
+    are numbered from 1 in the messages, as the layer a recipe's first fluid output goes to.
+    """
+    machines = {m.id: m for m in problem.machines}
+    ports = {(m.id, p.id): p for m in problem.machines for p in m.faces.ports}
+    hatches_by_machine: dict[str, list[PlacedHatch]] = defaultdict(list)
+    for hatch in layout.hatches:
+        hatches_by_machine[hatch.machine_id].append(hatch)
+    over_me = problem.me_toggles.toggled(Commodity.FLUID)
+    for placement in layout.placements:
+        machine = machines.get(placement.machine_id)
+        if machine is None:
+            continue
+        layers = {s.output_layer for s in machine.hatch_slots if s.output_layer is not None}
+        if not layers:
+            continue  # it fills its outputs first fit, or the dump predates layers
+        slots = placed_slots(
+            placement.cell, machine.footprint, placement.orientation, machine.hatch_slots
+        )
+        filled: set[int] = set()
+        for hatch in hatches_by_machine[machine.id]:
+            slot = slots.get(hatch.cell.as_tuple())
+            at = slot.output_layer if slot is not None else None
+            if hatch.kind == "OutputHatch" and at is not None:
+                filled.add(at)
+            port = ports.get((machine.id, hatch.port_id)) if hatch.port_id else None
+            if port is None or port.output_layer is None or at == port.output_layer:
+                continue
+            where = f"output layer {at + 1}" if at is not None else "no output layer"
+            out.append(
+                Violation(
+                    ViolationCode.OUTPUT_HATCH_WRONG_LAYER,
+                    f"the hatch for {port.id!r} on {machine.id!r} ({machine.type}) stands at "
+                    f"{hatch.cell.as_tuple()}, on {where}, but GT fills a tower by layer and sends "
+                    f"that fluid only to output layer {port.output_layer + 1}, so this hatch "
+                    f"receives {'another product' if at is not None else 'nothing'}",
+                    machine_id=machine.id,
+                )
+            )
+        if over_me:
+            continue
+        for layer in sorted(layers - filled):
+            out.append(
+                Violation(
+                    ViolationCode.OUTPUT_LAYER_EMPTY,
+                    f"{machine.id!r} ({machine.type}) has no output hatch on output layer "
+                    f"{layer + 1}: GT's checkMachine refuses to form a tower with a layer without "
+                    f"output hatch, even a layer no product uses",
+                    machine_id=machine.id,
+                )
+            )
 
 
 def _check_terminals(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:

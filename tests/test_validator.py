@@ -13,6 +13,7 @@ import re
 from collections import Counter
 from collections.abc import Callable
 from itertools import pairwise
+from pathlib import Path
 
 import pytest
 from hypothesis import assume, given
@@ -52,7 +53,7 @@ from gtnh_solver.solver import solve
 from gtnh_solver.validator import validate
 from gtnh_solver.validator._geometry import usable_faces
 from gtnh_solver.validator.report import ViolationCode
-from tests._helpers import hatched_dataset
+from tests._helpers import hatched_dataset, layered_tower
 
 Mutator = Callable[[InputIR, LayoutResult], tuple[InputIR, LayoutResult]]
 
@@ -3500,3 +3501,223 @@ def test_a_merged_runs_items_reach_only_their_own_filter_however_near_another_si
     assert set(_refused(problem, layout)) == refused
     plain = ((0, _OUT, 0.1), (0, _IN, 0.1), (2, _OUT, 0.1), (2, _IN, 0.1))
     assert set(_refused(*_pipe_run(PipeSize.NORMAL, *plain))) == set()
+
+
+# ------------------------------------------------------------------ output layers (#299)
+#
+# GT fills a tower by layer: recipe fluid output i goes only to the output hatches on output layer
+# i (MTEDistillationTower.addFluidOutputs), and checkMachine refuses to form a tower with any layer
+# that has no output hatch. The tower below stands at (2, 0, 2) facing north, so a ring cell on its
+# west side is (2, y, 3) and faces west into free air; layer i is the storey y = i + 1.
+
+
+def _tower_line(
+    outputs: tuple[str, ...] = ("a", "b"), *, layers: int = 2, me: bool = False
+) -> tuple[InputIR, LayoutResult]:
+    """One tower and nothing else, with its maintenance hatch and no output hatch yet."""
+    tower = layered_tower(outputs=outputs, layers=layers)
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=layers + 2, sz=8),
+        machines=[tower],
+        nets=[],
+        me_toggles=METoggles(fluids=me),
+    )
+    maintenance = PlacedHatch(
+        machine_id="tower", kind="Maintenance", cell=_coord(2, 0, 3), facing=Facing.WEST
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[Placement(machine_id="tower", cell=_coord(2, 0, 2), orientation=Facing.NORTH)],
+        hatches=[maintenance],
+    )
+    return problem, layout
+
+
+def _with_outputs(layout: LayoutResult, *hatches: tuple[str | None, int]) -> LayoutResult:
+    """``layout`` plus an output hatch per ``(port id or None for a spare, storey y)``, each on the
+    tower's west ring cell of that storey."""
+    added = [
+        PlacedHatch(
+            machine_id="tower",
+            kind="OutputHatch",
+            cell=_coord(2, y, 3),
+            facing=Facing.WEST,
+            port_id=port,
+        )
+        for port, y in hatches
+    ]
+    return layout.model_copy(update={"hatches": [*layout.hatches, *added]})
+
+
+def test_a_tower_with_each_output_on_its_own_layer_is_accepted() -> None:
+    problem, layout = _tower_line()
+    assert validate(problem, _with_outputs(layout, ("output:a", 1), ("output:b", 2))).ok
+
+
+def test_an_output_hatch_on_another_layer_is_refused() -> None:
+    # Swapped: GT would send b into the hatch piped for a, and a into the one piped for b.
+    problem, layout = _tower_line()
+    report = validate(problem, _with_outputs(layout, ("output:a", 2), ("output:b", 1)))
+    wrong = [v for v in report.violations if v.code is ViolationCode.OUTPUT_HATCH_WRONG_LAYER]
+    assert len(wrong) == 2
+    assert set(report.codes()) == {ViolationCode.OUTPUT_HATCH_WRONG_LAYER}
+    assert any(
+        "'output:a'" in v.message
+        and "on output layer 2" in v.message
+        and "only to output layer 1" in v.message
+        for v in wrong
+    )
+    assert all(v.machine_id == "tower" for v in wrong)
+
+
+def test_an_output_hatch_on_the_top_centre_receives_nothing() -> None:
+    # The top centre takes an output hatch, but GT files it with the plain outputs, not a layer.
+    problem, layout = _tower_line(("a",))
+    top = PlacedHatch(
+        machine_id="tower",
+        kind="OutputHatch",
+        cell=_coord(3, 2, 3),
+        facing=Facing.UP,
+        port_id="output:a",
+    )
+    report = validate(problem, layout.model_copy(update={"hatches": [*layout.hatches, top]}))
+    assert ViolationCode.OUTPUT_HATCH_WRONG_LAYER in report.codes()
+    assert "receives nothing" in str(report)
+
+
+def test_a_layer_with_no_output_hatch_is_refused_even_one_no_product_uses() -> None:
+    # The one-product tower is still two layers tall, and GT will not form it without a hatch on
+    # the second: "layer without output hatch".
+    problem, layout = _tower_line(("a",))
+    report = validate(problem, _with_outputs(layout, ("output:a", 1)))
+    assert set(report.codes()) == {ViolationCode.OUTPUT_LAYER_EMPTY}
+    (empty,) = report.violations
+    assert "output layer 2" in empty.message
+    assert empty.machine_id == "tower"
+
+
+def test_a_spare_output_hatch_satisfies_its_layer() -> None:
+    problem, layout = _tower_line(("a",))
+    assert validate(problem, _with_outputs(layout, ("output:a", 1), (None, 2))).ok
+
+
+def test_an_empty_layer_is_not_asked_for_while_fluids_go_over_me() -> None:
+    # The layout draws no ME output hatches, so it cannot say which layers they cover.
+    problem, layout = _tower_line(("a",), me=True)
+    assert ViolationCode.OUTPUT_LAYER_EMPTY not in _codes(problem, layout)
+
+
+def test_a_machine_that_fills_first_fit_is_not_asked_about_layers() -> None:
+    problem, layout = _multiblock_line()
+    assert not _codes(problem, layout) & {
+        ViolationCode.OUTPUT_HATCH_WRONG_LAYER,
+        ViolationCode.OUTPUT_LAYER_EMPTY,
+    }
+
+
+def _tank(mid: str, fluid: str) -> Machine:
+    return Machine(
+        id=mid,
+        type="Super Tank",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[
+                Port(id=f"input:{fluid}", commodity=Commodity.FLUID, direction=IODirection.INPUT)
+            ]
+        ),
+    )
+
+
+def _tower_into_tanks() -> InputIR:
+    """A two-product tower, each product piped to its own tank."""
+    machines = [layered_tower(outputs=("a", "b")), _tank("ta", "a"), _tank("tb", "b")]
+    nets = [
+        Net(
+            id=f"n-{fluid}",
+            commodity=Commodity.FLUID,
+            fluid_or_item=fluid,
+            throughput=1.0,
+            endpoints=[
+                MachineFaceRef(machine_id="tower", port_id=f"output:{fluid}"),
+                MachineFaceRef(machine_id=tank, port_id=f"input:{fluid}"),
+            ],
+        )
+        for fluid, tank in (("a", "ta"), ("b", "tb"))
+    ]
+    return InputIR(bounding_region=CellBox(sx=10, sy=5, sz=10), machines=machines, nets=nets)
+
+
+def test_the_gate_catches_a_router_that_docks_outputs_on_the_wrong_layer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Independent of the router (docs/ARCHITECTURE.md #4): a router reading the layer wrong, here
+    one that offers each port the NEXT layer's cells, solves the line and the gate still refuses
+    it, because the validator never asks ``hatch_slots_for`` where a port belongs."""
+    problem = _tower_into_tanks()
+    original = Machine.hatch_slots_for
+
+    def next_layer(self: Machine, port_id: str) -> tuple[HatchSlot, ...] | None:
+        layer = self._output_layer(port_id)
+        if layer is None:
+            return original(self, port_id)
+        wrong = (layer + 1) % len(self.output_layers)
+        return tuple(s for s in self.hatch_slots if s.output_layer == wrong)
+
+    monkeypatch.setattr(Machine, "hatch_slots_for", next_layer)
+    layout = solve(problem, seed=0)
+    placed = {h.port_id for h in layout.hatches if h.kind == "OutputHatch" and h.port_id}
+    assert placed == {"output:a", "output:b"}, "the configuration: both outputs got a hatch"
+    monkeypatch.undo()
+    report = validate(problem, layout)
+    wrong = [v for v in report.violations if v.code is ViolationCode.OUTPUT_HATCH_WRONG_LAYER]
+    assert len(wrong) == 2
+
+
+def test_the_same_line_routed_right_is_accepted() -> None:
+    problem = _tower_into_tanks()
+    layout = solve(problem, seed=0)
+    assert layout.status is LayoutStatus.VALID, layout.infeasibility
+    assert validate(problem, layout).ok
+
+
+_ROOT = Path(__file__).resolve().parents[1]
+_NITROBENZENE = _ROOT / "examples" / "gtnh-nitrobenzene.json"
+_FIXTURE_DATASET = _ROOT / "data" / "multiblocks"
+
+
+def _layer_blind(problem: InputIR) -> InputIR:
+    """``problem`` as InputIR v5 saw it: no slot or port names a layer, so every output docks on
+    any output cell and no layer asks for a hatch. What main solved before #299."""
+    machines = [
+        m.model_copy(
+            update={
+                "hatch_slots": tuple(
+                    s.model_copy(update={"output_layer": None}) for s in m.hatch_slots
+                ),
+                "faces": FaceSpec(
+                    ports=[p.model_copy(update={"output_layer": None}) for p in m.faces.ports]
+                ),
+            }
+        )
+        for m in problem.machines
+    ]
+    return problem.model_copy(update={"machines": machines})
+
+
+def test_the_299_repro_a_layer_blind_nitrobenzene_layout_is_refused() -> None:
+    """The bug as reported: the nitrobenzene line, solved without layers, validated clean, yet
+    its five-product tower had its hatches on the wrong layers and its one-product tower had no
+    hatch on its second layer, so it would not even form in game. Seed 1, the suite's one short
+    attempt (``conftest._minimal_solves``), which the layer-blind rules certify VALID."""
+    problem = adapt_file(_NITROBENZENE, physical=load_physical_dataset(_FIXTURE_DATASET))
+    blind = _layer_blind(problem)
+    layout = solve(blind, seed=1)
+    assert validate(blind, layout).ok, "the configuration: valid under the layer-blind rules"
+
+    towers = {len(m.output_layers): m.id for m in problem.machines if m.output_layers}
+    assert set(towers) == {2, 5}, "a two-layer tower and a five-layer one"
+    found = {(v.code, v.machine_id) for v in validate(problem, layout).violations}
+    assert (ViolationCode.OUTPUT_HATCH_WRONG_LAYER, towers[5]) in found
+    assert (ViolationCode.OUTPUT_LAYER_EMPTY, towers[2]) in found

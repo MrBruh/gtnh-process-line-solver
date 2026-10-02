@@ -108,6 +108,12 @@ class ViolationCode(str, Enum):
     # GT wants EXACTLY one, so the surplus un-forms the structure as surely as the shortfall; the
     # muffler has no counterpart because several of those are legal (some controllers demand 4)
     MAINTENANCE_DUPLICATE = "maintenance_duplicate"  # more than one on one machine
+    # a tower fills by layer (#299): fluid output i goes only to the hatches on output layer i, and
+    # checkMachine refuses to form a tower with any layer that has no output hatch
+    OUTPUT_HATCH_WRONG_LAYER = (
+        "output_hatch_wrong_layer"  # a fluid output's hatch is not on the layer GT fills it from
+    )
+    OUTPUT_LAYER_EMPTY = "output_layer_empty"  # a tower layer with no output hatch: it won't form
     # where a routed connection may attach: the casing cell behind its terminal must be able to
     # host that connection's hatch, and no two connections may want the same block
     TERMINAL_NOT_ON_HATCH_CELL = (

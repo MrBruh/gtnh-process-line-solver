@@ -153,11 +153,19 @@ Three more structural facts follow from a hatch *being* a casing cell:
 - **One cell is one block.** An input bus and an energy hatch cannot share a cell, not even by
   facing two different ways, so a machine's connections all compete for one pool of casing cells
   (`HATCH_CELLS_EXCEEDED`, and `terminal_hatch_contention` for the per-cell case).
-- **Position can carry meaning.** A Distillation Tower routes output fluid `i` to structure layer
-  `i` and accepts an output hatch there and nowhere else; an Assembly Line feeds its `n`th input
-  bus from the `n`th recipe input. Which cells accept which hatch kinds is dumped per controller
-  (`Machine.hatch_slots`), and those kinds are a **lower bound**: an adder built from a bare method
-  reference exposes no filter, so a cell is recorded without a kind rather than as refusing it.
+- **Position can carry meaning.** A Distillation Tower routes recipe fluid output `i` to the
+  output hatches on its `i`-th layer above the base and to no others
+  (`MTEDistillationTower.addFluidOutputs`), and it **does not form** while any layer has no output
+  hatch, a layer no product uses included (`checkMachine`: "layer without output hatch"). Which
+  layer a cell feeds is GT's own bookkeeping, read from the dump (`HatchSlot.output_layer`, from the
+  machine's own structure check), never assumed from height: a Mega tower's layer is a five-high
+  band, and a tower's top centre takes an output hatch that feeds no layer. So each fluid output
+  docks on its own layer's cells alone (`Port.output_layer`, `OUTPUT_HATCH_WRONG_LAYER`), and a
+  layer no product uses gets a **spare** output hatch that receives nothing (`OUTPUT_LAYER_EMPTY`
+  without one). An Assembly Line feeds its `n`th input bus from the `n`th recipe input. Which cells
+  accept which hatch kinds is dumped per controller (`Machine.hatch_slots`), and those kinds are a
+  **lower bound**: an adder built from a bare method reference exposes no filter, so a cell is
+  recorded without a kind rather than as refusing it.
 
 Two more bind the machine at **runtime**, where a structure that formed perfectly still misbehaves:
 

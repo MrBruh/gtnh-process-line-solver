@@ -5,7 +5,7 @@ up front (minimal, not exhaustive) and grown with explicit version bumps. Implem
 typed schemas in `src/gtnh_solver/ir/` (Pydantic v2).
 
 > Status: **implemented** (Pydantic v2, `src/gtnh_solver/ir/`). The shapes below match the
-> code: `InputIR` is at **v4**, `LayoutResult` at **v3** (the contract changelog lives at the
+> code: `InputIR` is at **v6**, `LayoutResult` at **v4** (the contract changelog lives at the
 > bottom of `ir/__init__.py`). Bump the relevant `*_VERSION` on any breaking change.
 
 ## Input IR - the problem
@@ -93,7 +93,7 @@ Machine
   may dock on any face but the front, a pinned port on exactly its Port.faces turned with the
   machine (ir.geometry.absolute_face).
 
-HatchSlot { offset: CellCoord, kinds: [str] }
+HatchSlot { offset: CellCoord, kinds: [str], output_layer: int | null }
   offset  from the machine's UNROTATED minimum corner (the corner Placement.cell names), so a
           placed slot's world cell is placement.cell + rotated_slot(offset, footprint,
           placement.orientation). Kept unrotated because orientation is a placement decision.
@@ -104,6 +104,11 @@ HatchSlot { offset: CellCoord, kinds: [str] }
           Nor is the enum closed - ~30 further IHatchElement implementations live outside
           gregtech.api.enums.HatchElement (TecTech's EnergyMulti/InputData, gtPlusPlus's set,
           per-controller ones, and HatchElementEither's "A or B"), any of which a dump may name.
+  output_layer  which of the machine's per-layer output lists a hatch here is filed under (dataset
+          schema v3): GT's own index, from 0, which is the recipe fluid output it receives. null
+          for a cell in no list: no output hatch, a machine that fills first fit, or a tower's top
+          centre or base. Machine.output_layers collects them; GT forms a tower only with an
+          output hatch on every one. InputIR v6 (BREAKING, #299)
 
   Which kinds a port needs (ir.input_ir.HATCH_KINDS; the bus/hatch split is lexical in GT and
   means items/fluids):
@@ -118,6 +123,9 @@ HatchSlot { offset: CellCoord, kinds: [str] }
         no slot names the kind        -> ALL of them (the dump is silent, not prohibiting; a
                                          dump taken before #227 records the Chemical Plant with
                                          zero Energy cells, and it must still be powerable)
+  ...except a port with an output_layer, which gets exactly the slots of its kind on that layer
+  and no fallback: GT fills a tower by layer, so a hatch anywhere else takes another product or
+  none, and an empty answer is reported rather than docked on the wrong layer (InputIR v6).
 
 FaceSpec     { ports: [Port] }      # catalog of required I/O; the physical face is a solver choice
 Port
@@ -148,6 +156,15 @@ Port
                                     #  the front (every port before v4). An Item Filter's output
                                     #  is (back,), its input (front, left, right, up, down).
                                     #  Non-empty, no repeats. InputIR v4 (BREAKING, #249)
+  output_layer: int | null          # the output layer GT fills this port's fluid from, on a
+                                    #  tower that fills by layer: the fluid's place among the
+                                    #  recipe's fluid outputs (Distillation Tower output i goes
+                                    #  only to layer i's hatches). Only a fluid output may name
+                                    #  one, it must be a layer the slots record, and on such a
+                                    #  machine every fluid output names one. The adapter refuses
+                                    #  a time-share putting one fluid at two indices
+                                    #  (InfeasiblePlanError, constraint output_layer). InputIR v6
+                                    #  (BREAKING, #299)
 
 Net
   id: str
@@ -276,8 +293,10 @@ RouteMaterial
 Terminal    { machine_id, port_id, face: Facing, cell: CellCoord }  # non-front face; cell just outside
 PlacedHatch { machine_id, kind: str, cell: CellCoord, facing: Facing, port_id: str | null }
               # cell is the BODY cell the hatch replaces, inside the footprint - not the dock
-              # cell outside it. port_id is null for an upkeep hatch (maintenance, muffler),
-              # which belongs to no net and is why the record has to exist at all.
+              # cell outside it. port_id is null for a hatch that serves no port: an upkeep
+              # hatch (maintenance, muffler), which is why the record has to exist at all, or a
+              # SPARE output hatch on a tower layer no product uses, since GT forms a tower only
+              # with an output hatch on every layer (#299; additive, no LayoutResult bump).
 Segment     { start: CellCoord, end: CellCoord, channel: int }   # >= 0 only; the per-edge channel cap is Phase 2, not yet enforced
 AutoConnection { net_id, source_machine_id, source_face: Facing, target_machine_id, target_face: Facing }
 Infeasibility { constraint: str, detail: str, suggested_relaxation: str | null }
@@ -336,7 +355,8 @@ result carries no infeasibility; `infeasible`/`partial_invalid` must carry one.
   and a v2 consumer that builds a route's blocks from its segments builds nothing for that pipe.
   `LayoutResult` v4 is the same kind of bump: a net may now be partly routed and partly
   auto-connected, and a v3 consumer that reads a net as one or the other can drop the half it does
-  not expect.
+  not expect. `InputIR` v6 breaks by omission too: a v5 consumer that ignores `output_layer` docks
+  a tower's outputs on any layer, so each product leaves through a hatch GT fills with another.
 - **An older layout is not upgraded on read.** v2's one new field would be easy to fill in for a
   v1 payload (every v1 pipe was normal), but the rule below is only worth having if it has no
   exceptions, so a v1 layout is refused and regenerated by re-solving its plan. Nor does `size`

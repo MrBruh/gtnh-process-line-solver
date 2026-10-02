@@ -316,6 +316,25 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **Each tower output's hatch stands on the layer GT fills it from, and every layer gets one
+  (#299).** GT fills a Distillation Tower by layer, not first fit: recipe fluid output `i` goes only
+  to the output hatches on its `i`-th layer above the base, and the tower does not form while any
+  layer has no output hatch. The router docked a tower's output hatches on any output cell and the
+  validator certified the result, so `examples/gtnh-nitrobenzene.json` came out VALID with each of
+  its five-product tower's hatches on another product's layer and its one-product tower (3x3x3, two
+  output layers) with no hatch on its second layer, which would not even form in game. Now each
+  fluid output names the layer GT fills it from (`Port.output_layer`, the fluid's place among the
+  recipe's fluid outputs, against the layers dataset schema v3 records), the router docks it on that
+  layer's cells alone, and a layer no product uses gets a **spare** output hatch that receives
+  nothing (`PlacedHatch.port_id = None`). The validator checks both on its own geometry
+  (`output_hatch_wrong_layer`, `output_layer_empty`). A tower time-sharing recipes that put one
+  fluid out at two different indices is refused (`InfeasiblePlanError`, constraint `output_layer`):
+  one hatch stands on one layer, so one of the two would fill a hatch piped for another product.
+  Different fluids at one index are fine, and those hatches are then locked to their products, since
+  a layer fills first fit among its own hatches. A tower's output buses fill first fit and are
+  locked like any other machine's; the hover on a tower's output hatch names its layer, and a spare
+  says it is one. **InputIR v6** (`HatchSlot.output_layer`, `Port.output_layer`): a v5 problem is
+  refused; re-adapt the plan. LayoutResult stays v4.
 - **`--me power` places no power source, and stops blaming a missing amp ceiling (#225).** With
   power left to ME no cable is laid, yet the adapter still synthesized a `Power Source (<tier>)`
   per tier, so the layout placed one connected to nothing and the preview and `.schematic` showed

@@ -650,3 +650,32 @@ def test_a_block_the_dump_gave_no_provenance_is_not_taken_for_a_casing() -> None
     )
     assert not _names_a_casing(manifest, "mod:anon", 0)
     assert not _names_a_casing(manifest, "mod:absent", 0)
+
+
+def test_a_spare_output_hatch_becomes_the_same_block_as_a_ports_output_hatch() -> None:
+    """A tower's spare (#299) stands on a layer no product uses so the tower forms, and serves no
+    port. It is a real Output Hatch all the same, chosen by its kind and the machine's tier like
+    any other, which is what the ``.schematic`` export writes too: it lowers these same cubes."""
+    output = "gregtech.api.metatileentity.implementations.MTEHatchOutput"
+    manifest = TextureManifest(
+        {
+            "schema": 2,
+            "blocks": {
+                "gregtech:gt.blockcasings|0": _casing_entry(_CASING),
+                "gregtech:gt.blockmachines|63": _hatch_entry(
+                    "Output Hatch (HV)", output, front=[_PIPE_IN]
+                ),
+            },
+            "icons": {},
+        }
+    )
+    machine = _scene_machine(
+        [
+            {"cell": [0, 0, 0], "kind": "OutputHatch", "facing": "west", "port": "output:a"},
+            {"cell": [1, 0, 0], "kind": "OutputHatch", "facing": "east", "port": None},
+        ]
+    )
+    cubes = {c.cell: c for c in expand_machine(machine, _casing_doc(), manifest)}
+    assert (cubes[(0, 0, 0)].block, cubes[(0, 0, 0)].meta) == ("gregtech:gt.blockmachines", 63)
+    assert (cubes[(1, 0, 0)].block, cubes[(1, 0, 0)].meta) == ("gregtech:gt.blockmachines", 63)
+    assert cubes[(1, 0, 0)].facing == "EAST"

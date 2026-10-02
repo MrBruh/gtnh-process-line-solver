@@ -122,21 +122,27 @@ def vent_cells(placements: Sequence[Placement], machines: Mapping[str, Machine])
 
 
 def hatch_faces(
-    placement: Placement, machine: Machine, kind: str
+    placement: Placement, machine: Machine, kind: str, layer: int | None = None
 ) -> list[tuple[Cell, Facing, Cell]]:
     """Every ``(casing cell, facing, outward cell)`` a ``kind`` hatch could take, in order.
 
     The cell must record the kind, and the facing must point out of the structure and not through
     the controller's front: a hatch facing into its own structure moves nothing, so an interior
     casing cell offers no face at all. ``FACE_ORDER`` then ascending cell, the same total order
-    docking uses, so whichever option a caller takes first is reproducible.
+    docking uses, so whichever option a caller takes first is reproducible. ``layer`` keeps only
+    the cells of that output layer (``HatchSlot.output_layer``).
 
-    Only the upkeep hatches (maintenance, muffler) come through here, and they belong to no
-    ``Port``, so no pin (``Port.faces``) applies and the front rule stays as it is; a port's hatch
-    docks through :func:`dock_candidates`, which asks ``Machine.allowed_faces``.
+    Only the hatches that serve no port come through here: the upkeep hatches (maintenance,
+    muffler) and a tower's spare output hatches (#299). No pin (``Port.faces``) applies to them,
+    so the front rule stays as it is; a port's hatch docks through :func:`dock_candidates`, which
+    asks ``Machine.allowed_faces``.
     """
     body = set(occupied_cells(placement.cell, machine.footprint, placement.orientation))
-    slots = [s for s in machine.hatch_slots if kind in s.kinds]
+    slots = [
+        s
+        for s in machine.hatch_slots
+        if kind in s.kinds and (layer is None or s.output_layer == layer)
+    ]
     hosts = host_cells(placement, machine, slots)
     faces: list[tuple[Cell, Facing, Cell]] = []
     for face in FACE_ORDER:

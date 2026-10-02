@@ -22,7 +22,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from gtnh_solver.dataset import tier_voltage
-from gtnh_solver.hatch_locks import LOCK_SLOT, fills_by_layer, hatch_locks
+from gtnh_solver.hatch_locks import LOCK_SLOT, hatch_layers, hatch_locks
 from gtnh_solver.ir import (
     CellBox,
     Commodity,
@@ -159,12 +159,12 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
 
     ports = {(m.id, p.id): p for m in problem.machines for p in m.faces.ports}
     locks = hatch_locks(problem, layout)
+    layers = hatch_layers(problem, layout)
     hatches_by_machine: dict[str, list[dict[str, Any]]] = {}
     for hatch in layout.hatches:
         port = ports.get((hatch.machine_id, hatch.port_id)) if hatch.port_id else None
         # The port of a hatch that moves a fluid or item; an energy hatch's carries no resource.
         moved = port if port is not None and port.commodity is not Commodity.POWER else None
-        owner = machines.get(hatch.machine_id)
         lock = locks.get((hatch.machine_id, hatch.cell.as_tuple()))
         hatches_by_machine.setdefault(hatch.machine_id, []).append(
             {
@@ -174,11 +174,12 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
                 "port": hatch.port_id,
                 # What the hover says about it (#120): its name, which way what it moves goes
                 # (the hatch's own direction, unlike a storage's), the product it must be locked
-                # to (None when it needs no lock) and the slot GT sets that in. ``byLayer`` marks
-                # an output of a tower that fills by layer, which a lock would only break
-                # (``hatch_locks``). ``resourceLabel`` and ``lockLabel`` are the two resources as
-                # the hover prints them, the plan's name in front of the id (#296); ``label`` is
-                # the hatch's own name.
+                # to (None when it needs no lock) and the slot GT sets that in. ``layer`` is the
+                # output layer a tower fills this hatch from (GT's index, from 0; None off a
+                # tower's layers), and ``spare`` marks a tower's spare output hatch, which stands
+                # on a layer no product uses so the tower forms (#299). ``resourceLabel`` and
+                # ``lockLabel`` are the two resources as the hover prints them, the plan's name in
+                # front of the id (#296); ``label`` is the hatch's own name.
                 "label": _hatch_label(hatch.kind),
                 "flow": _HATCH_FLOW[moved.direction] if moved is not None else None,
                 "resource": port_resource(moved) if moved is not None else None,
@@ -188,10 +189,8 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
                 "lock": lock,
                 "lockLabel": resource_label(lock, names) if lock is not None else None,
                 "lockSlot": LOCK_SLOT[hatch.kind] if lock is not None else None,
-                "byLayer": moved is not None
-                and moved.direction is IODirection.OUTPUT
-                and owner is not None
-                and fills_by_layer(owner),
+                "layer": layers.get((hatch.machine_id, hatch.cell.as_tuple())),
+                "spare": hatch.kind == "OutputHatch" and hatch.port_id is None,
             }
         )
 

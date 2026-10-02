@@ -71,7 +71,9 @@ class PlacedHatch(StrictModel):
     record has to exist at all: a maintenance hatch and a muffler occupy a casing cell each and
     belong to no net, so before this there was nowhere to put them and a layout silently described
     a machine that would not run. ``port_id`` names the port a routed hatch serves and is ``None``
-    for those upkeep hatches.
+    for a hatch that serves no port: an upkeep hatch, or a **spare output hatch** (#299). GT forms
+    a tower only with an output hatch on every layer, so a layer no product uses gets an
+    ``OutputHatch`` that receives nothing.
 
     ``cell`` is the **body** cell the hatch replaces, inside the machine's footprint - not the cell
     outside it that a route docks at. A routed hatch is therefore described twice, here and by its

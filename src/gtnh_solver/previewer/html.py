@@ -1118,14 +1118,24 @@ function machineHover(id) {
 // A hatch's tag (#120): its machine, which hatch it is, and what it moves, in the storage tag's
 // 'in:'/'out:' words (a hatch's own direction). Where the machine has two or more products of the
 // hatch's kind, GT puts each in whichever hatch takes it first, so the tag says what this one must
-// be locked to and the slot that sets it instead. A tower's outputs fill by layer, which a lock
-// would only break, so those say to leave it unlocked.
+// be locked to and the slot that sets it instead. A tower fills each output layer with its own
+// fluid output (#299), which a lock would only break, so a layer's hatch says which layer it is and
+// to leave it unlocked, unless two time-shared products share the layer and it needs its lock after
+// all. A spare stands on a layer no product uses, because the tower forms only with a hatch on
+// every layer. Layers are numbered from 1, as the fluid output that fills each one.
 function hatchHover(what) {
   const h = what.hatch;
   const lines = [nameById[what.machineId] || what.machineId, h.label];
   if (h.lock) lines.push('locked to: ' + h.lockLabel, '(set its ' + h.lockSlot + ')');
   else if (h.resource) lines.push(h.flow + ': ' + h.resourceLabel);
-  if (h.byLayer) lines.push('filled by layer: leave unlocked');
+  if (h.spare) {
+    lines.push(
+      'spare for output layer ' + (h.layer + 1) + ': the tower needs one on every layer to form',
+      'receives nothing',
+    );
+  } else if (h.layer != null) {
+    lines.push('output layer ' + (h.layer + 1) + (h.lock ? '' : ': filled by layer, leave unlocked'));
+  }
   return { lines: () => lines, anchor: [h.cell[0] + 0.5, h.cell[1] + 1 + 0.15, h.cell[2] + 0.5] };
 }
 // A cover marker's tag: which cover, on which machine's which face, and what it lets out.

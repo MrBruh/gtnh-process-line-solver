@@ -165,10 +165,12 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from gtnh_solver.dataset import VOLTAGE_BY_TIER, MachinePhysical, PhysicalDataset
+from gtnh_solver.dataset.multiblocks import VariantShape
 from gtnh_solver.ir import (
     CellBox,
     Commodity,
     FaceSpec,
+    Infeasibility,
     InputIR,
     IODirection,
     Machine,
@@ -181,7 +183,7 @@ from gtnh_solver.ir import (
 from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 from gtnh_solver.ir.nets import SINGLE_BLOCK_IO_FACES, connection_counts
 
-from ._errors import AdapterError, AdapterWarning
+from ._errors import AdapterError, AdapterWarning, InfeasiblePlanError
 from .plan import (
     Edge,
     MachineHandler,
@@ -484,6 +486,13 @@ def to_input_ir(
             if record is not None
             else None
         )
+        # On a tower that fills its outputs by layer, the layer each fluid output's hatch must stand
+        # on (#299). Empty for every other machine, and for one the dataset did not resolve.
+        layers = (
+            _output_layers(node, record, sections, shape)
+            if record is not None and shape is not None
+            else {}
+        )
         if record is None and identifies_single_blocks:
             _classify_census_miss(recipe, node, single_block_ids)
         if _is_multiblock(recipe, node, record):
@@ -504,7 +513,7 @@ def to_input_ir(
                 hatch_cells=(shape.hatch_cells or None) if shape is not None else None,
                 # Empty when the dump recorded no slots, which reads as "unknown".
                 hatch_slots=shape.slots if shape is not None else (),
-                faces=FaceSpec(ports=_node_ports(sections)),
+                faces=FaceSpec(ports=_node_ports(sections, layers)),
                 voltage_tier=_run_tier(recipe, node),
                 # Every machine keeps all four horizontal facings: occupied_cells rotates a
                 # non-cubic footprint now, so there is nothing left to pin against.
@@ -1332,13 +1341,16 @@ def _check_input_overrides(recipe: Recipe, node: Node) -> None:
         )
 
 
-def _node_ports(sections: Sections) -> list[Port]:
+def _node_ports(sections: Sections, layers: Mapping[str, int] | None = None) -> list[Port]:
     """One input/output port per distinct resource any section moves (deduped by id), each carrying
     the throughput it moves (items/t or mB/t) so boundary rates - notably a dangling output's
     product, which no net records - are reportable downstream.
 
     A machine that time-shares recipes has every port any of them uses, since it is fed for all of
-    them; a port two recipes share (a common product) is one port, at their combined rate."""
+    them; a port two recipes share (a common product) is one port, at their combined rate. On a
+    tower, each fluid output port also names the layer GT fills it from (``layers``, from
+    :func:`_output_layers`)."""
+    layers = layers or {}
     ports: dict[str, Port] = {}
     for recipe, node in sections:
         for direction, pool, outputs in (
@@ -1352,8 +1364,104 @@ def _node_ports(sections: Sections) -> list[Port]:
                     commodity=_commodity(res.kind),
                     direction=direction,
                     rate=_node_rate(sections, res.id, outputs=outputs),
+                    output_layer=layers.get(pid) if outputs else None,
                 )
     return list(ports.values())
+
+
+def _output_layers(
+    node: Node, record: MachinePhysical, sections: Sections, shape: VariantShape
+) -> dict[str, int]:
+    """Each fluid output port's layer, on a tower that fills its outputs by layer (#299).
+
+    GT hands recipe fluid output ``i`` to the hatches on the tower's ``i``-th layer and to no others
+    (``MTEDistillationTower.addFluidOutputs``), so a port's layer is its fluid's place among the
+    recipe's fluid outputs, in the order the export lists them, which is GT's own. Read off the
+    recipes, so it needs no table of recipe maps and no ``rawRecipeId``. Empty for a machine whose
+    reserved form records no layers: it fills its outputs first fit.
+
+    Refused, as an :class:`InfeasiblePlanError` (the #112 pattern), when no layout could honour it:
+
+    - **one fluid at two indices**, across the recipes a machine time-shares or within one recipe.
+      One tower runs every recipe, and a hatch stands on one layer, so one of the two would send the
+      fluid into a hatch piped for another product. Different fluids at one index are fine: the
+      recipes never run at once, and the hatch there is locked to neither;
+    - **an index the reserved form has no layer for**, which only a form the plan pinned can do:
+      a tower sized from the recipes always has a layer per fluid output.
+    """
+    layers = {s.output_layer for s in shape.slots if s.output_layer is not None}
+    if not layers:
+        return {}
+    found: dict[str, tuple[int, Recipe]] = {}
+    for recipe, _ in sections:
+        fluids = [out for out in recipe.outputs if out.kind == "fluid"]
+        for index, out in enumerate(fluids):
+            port_id = _port_id(IODirection.OUTPUT, out.id)
+            seen = found.get(port_id)
+            if seen is not None and seen[0] != index:
+                raise InfeasiblePlanError(_layer_clash(node, record, out, seen, (index, recipe)))
+            if index not in layers:
+                raise InfeasiblePlanError(_layer_missing(node, record, out, index, recipe, layers))
+            found.setdefault(port_id, (index, recipe))
+    return {port_id: index for port_id, (index, _) in found.items()}
+
+
+def _resource_label(resource: Resource) -> str:
+    """A resource as a reader finds it in NEI: its name and its id, or the id alone."""
+    return f"{resource.display_name} ({resource.id})" if resource.display_name else resource.id
+
+
+def _layer_clash(
+    node: Node,
+    record: MachinePhysical,
+    fluid: Resource,
+    first: tuple[int, Recipe],
+    second: tuple[int, Recipe],
+) -> Infeasibility:
+    """One fluid at two fluid-output indices of one tower. Numbered from 1, as NEI shows them."""
+    (one, recipe_one), (two, recipe_two) = first, second
+    where = (
+        f"recipe {recipe_one.id!r} as both fluid output {one + 1} and fluid output {two + 1}"
+        if recipe_one is recipe_two
+        else f"fluid output {one + 1} of recipe {recipe_one.id!r} and fluid output {two + 1} of "
+        f"recipe {recipe_two.id!r}, which the machine time-shares"
+    )
+    return Infeasibility(
+        constraint="output_layer",
+        detail=(
+            f"machine {node.id!r} ({record.key}) puts {_resource_label(fluid)} out as {where}. "
+            f"GT fills a {record.key} by layer, sending fluid output N only to the hatches on its "
+            f"N-th layer, so the fluid would leave through two layers, and a hatch on one layer is "
+            f"piped for another product"
+        ),
+        suggested_relaxation=(
+            "run the recipes on separate towers (split the node), so each tower's layers carry one "
+            "recipe's outputs"
+        ),
+    )
+
+
+def _layer_missing(
+    node: Node,
+    record: MachinePhysical,
+    fluid: Resource,
+    index: int,
+    recipe: Recipe,
+    layers: set[int],
+) -> Infeasibility:
+    """A fluid output whose layer the reserved form does not have."""
+    return Infeasibility(
+        constraint="output_layer",
+        detail=(
+            f"machine {node.id!r} ({record.key}) runs recipe {recipe.id!r}, whose fluid output "
+            f"{index + 1} ({_resource_label(fluid)}) leaves only through output layer {index + 1}, "
+            f"but the form the plan reserves has {len(layers)} output layer(s)"
+        ),
+        suggested_relaxation=(
+            f"build a taller tower, with at least {index + 1} output layers: drop the plan's pinned "
+            f"structure size, or raise it"
+        ),
+    )
 
 
 def _storage_ports(

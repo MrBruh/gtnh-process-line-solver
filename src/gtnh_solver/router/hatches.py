@@ -10,6 +10,8 @@ front of it) and which nets ended up on a free auto-output rather than a pipe.
 
     routes ------> a hatch per terminal, at the casing cell behind it, facing the way it docked
     autos -------> a hatch per side of each free connection, on the two touching casing cells
+    a tower -----> a spare output hatch on each output layer no product uses (GT forms a tower
+                   only with an output hatch on every layer)
     the machine -> one maintenance hatch, and one muffler if its structure accepts one
                        |
                        v
@@ -22,7 +24,8 @@ checks none of them (``IStructureElement.check`` takes no facing and every hatch
 then moves nothing):
 
 - **the cell must accept the kind** (``Machine.hatch_slots_for``, permissive where the dump is
-  silent - see that method for the three levels);
+  silent - see that method for the three levels), and a tower's fluid output must stand on its
+  own output layer, since GT fills a tower by layer (#299);
 - **the facing must point out of the structure.** An interior casing cell therefore hosts nothing
   at all, not even a maintenance hatch: it has no outward face to give;
 - **one casing cell is one block**, so no two hatches share one.
@@ -44,6 +47,8 @@ from dataclasses import dataclass
 
 from gtnh_solver.ir import (
     AutoConnection,
+    Commodity,
+    HatchSlot,
     Infeasibility,
     InputIR,
     Machine,
@@ -68,6 +73,9 @@ UPKEEP_KINDS: tuple[str, ...] = ("Maintenance", "Muffler")
 #: What a hatch is called when the port names no kind at all - an endpoint the IR does not
 #: describe. It cannot arise from a well-formed problem; the validator reports the port, not this.
 _UNKNOWN_KIND = "Unknown"
+
+#: The kind of hatch a tower's output layer needs one of, and so the kind of its spares.
+_OUTPUT_HATCH = "OutputHatch"
 
 
 @dataclass(frozen=True)
@@ -117,7 +125,9 @@ def place_hatches(
     52 missing maintenance hatches and 11 missing mufflers (#228).
 
     Deterministic throughout: routed and auto hatches take the cells routing already chose, and the
-    upkeep hatches take the first free legal cell in ``FACE_ORDER``-then-ascending-cell order.
+    spare and upkeep hatches take the first free legal cell in ``FACE_ORDER``-then-ascending-cell
+    order. Spares go before the upkeep hatches: a tower's layer has only its own ring to offer,
+    while a maintenance hatch can usually stand on several.
     """
     machines = {m.id: m for m in problem.machines}
     by_machine = placement_index(placements)
@@ -138,8 +148,17 @@ def place_hatches(
             shortfalls.append(dropped)
         hatches.extend(auto_hatches)
 
+    placed_ids = sorted({p.machine_id for p in placements})
+    for machine_id in placed_ids:
+        machine, placement = machines.get(machine_id), by_machine.get(machine_id)
+        if machine is None or placement is None or not machine.output_layers:
+            continue
+        spares, short = _layer_hatches(machine, placement, claimed, hatches, problem)
+        hatches.extend(spares)
+        shortfalls.extend(short)
+
     blocked = set(occupied) | {h.cell.as_tuple() for h in hatches}
-    for machine_id in sorted({p.machine_id for p in placements}):
+    for machine_id in placed_ids:
         machine, placement = machines.get(machine_id), by_machine.get(machine_id)
         if machine is None or placement is None or not machine.hatch_slots:
             continue
@@ -290,6 +309,52 @@ def _auto_pair(
     return None
 
 
+def _layer_hatches(
+    machine: Machine,
+    placement: Placement,
+    claimed: dict[str, set[Cell]],
+    hatches: Sequence[PlacedHatch],
+    problem: InputIR,
+) -> tuple[list[PlacedHatch], list[Infeasibility]]:
+    """A spare output hatch on each output layer of a tower that no product uses (#299).
+
+    GT fills a tower by layer, and its ``checkMachine`` refuses to form the tower while any layer
+    has no output hatch ("layer without output hatch"), even a layer the recipe sends nothing to:
+    a one-product Distillation Tower is still two layers tall. A layer a port owns gets that port's
+    hatch, so only the others need a spare, which receives nothing and serves no net, like an
+    upkeep hatch. An owned layer whose hatch is missing is not given one: its port lost its
+    connection, which the validator already reports. Nothing is added while fluids go over ME,
+    whose output hatches the layout does not draw.
+    """
+    if problem.me_toggles.toggled(Commodity.FLUID):
+        return [], []
+    owned = {p.output_layer for p in machine.faces.ports if p.output_layer is not None}
+    slots = _slots_by_cell(placement, machine)
+    covered = {
+        slots[cell].output_layer
+        for hatch in hatches
+        if hatch.machine_id == machine.id
+        and hatch.kind == _OUTPUT_HATCH
+        and (cell := hatch.cell.as_tuple()) in slots
+    }
+    out: list[PlacedHatch] = []
+    shortfalls: list[Infeasibility] = []
+    for layer in sorted(machine.output_layers - owned - covered):
+        taken = claimed.get(machine.id, set())
+        options = [
+            o for o in hatch_faces(placement, machine, _OUTPUT_HATCH, layer) if o[0] not in taken
+        ]
+        if not options:
+            shortfalls.append(_no_layer_room(machine, layer))
+            continue
+        cell, face, _ = options[0]
+        claimed.setdefault(machine.id, set()).add(cell)
+        out.append(
+            PlacedHatch(machine_id=machine.id, kind=_OUTPUT_HATCH, cell=coord(cell), facing=face)
+        )
+    return out, shortfalls
+
+
 def _upkeep_hatches(
     machine: Machine,
     placement: Placement,
@@ -359,21 +424,22 @@ def _kind_at(machine: Machine, placement: Placement, port_id: str, cell: Cell) -
     kinds = machine.hatch_kinds_for(port_id)
     if not kinds:
         return _UNKNOWN_KIND
-    accepted = _kinds_by_cell(placement, machine).get(cell, frozenset())
+    slot = _slots_by_cell(placement, machine).get(cell)
+    accepted = slot.kinds if slot is not None else ()
     return next((kind for kind in kinds if kind in accepted), kinds[0])
 
 
-def _kinds_by_cell(placement: Placement, machine: Machine) -> dict[Cell, frozenset[str]]:
-    """This machine's placed casing cells to the kinds each records. Empty when nothing was dumped.
+def _slots_by_cell(placement: Placement, machine: Machine) -> dict[Cell, HatchSlot]:
+    """This machine's placed casing cells to the slot each is. Empty when nothing was dumped.
 
     ``host_cells`` sorts, so it cannot be zipped back onto the slot list; the offsets are turned
     here directly instead. The turn is injective (property-tested), so no two slots collide.
     """
-    turned: dict[Cell, frozenset[str]] = {}
+    turned: dict[Cell, HatchSlot] = {}
     origin = placement.cell
     for slot in machine.hatch_slots:
         dx, dy, dz = rotated_slot(slot.offset.as_tuple(), machine.footprint, placement.orientation)
-        turned[(origin.x + dx, origin.y + dy, origin.z + dz)] = frozenset(slot.kinds)
+        turned[(origin.x + dx, origin.y + dy, origin.z + dz)] = slot
     return turned
 
 
@@ -401,6 +467,24 @@ def _no_room(machine: Machine, kind: str) -> Infeasibility:
             f"machine {machine.id!r} ({machine.type}) has no casing cell left for its {kind} "
             f"hatch: its {len(machine.hatch_slots)} hatch cell(s) are all spent on its "
             f"{len(machine.faces.ports)} connection(s)"
+        ),
+        suggested_relaxation=(
+            "reduce the machine's connections, or split the recipe over more machines"
+        ),
+    )
+
+
+def _no_layer_room(machine: Machine, layer: int) -> Infeasibility:
+    """Every cell of a tower's unused output layer already hosts another hatch.
+
+    Numbered from 1, as the layer a recipe's first fluid output goes to.
+    """
+    return Infeasibility(
+        constraint="hatch_budget",
+        detail=(
+            f"machine {machine.id!r} ({machine.type}) has no casing cell left for a spare output "
+            f"hatch on output layer {layer + 1}: GT forms a tower only with an output hatch on "
+            f"every layer, and every cell of that layer already hosts another hatch"
         ),
         suggested_relaxation=(
             "reduce the machine's connections, or split the recipe over more machines"

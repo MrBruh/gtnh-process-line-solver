@@ -23,6 +23,7 @@ from gtnh_solver.ir import (
     Commodity,
     FaceSpec,
     Facing,
+    HatchSlot,
     Infeasibility,
     InputIR,
     IODirection,
@@ -47,6 +48,7 @@ from gtnh_solver.ir import (
 from gtnh_solver.ir._base import FrozenModel, StrictModel
 from gtnh_solver.ir.geometry import absolute_face
 from gtnh_solver.ir.nets import connection_counts
+from tests._helpers import layered_tower
 
 # --------------------------------------------------------------------------- helpers
 
@@ -948,3 +950,85 @@ def test_net_round_trips_for_any_nonneg_throughput(throughput: float, n_endpoint
         endpoints=[MachineFaceRef(machine_id=f"m{i}", port_id="p") for i in range(n_endpoints)],
     )
     assert Net.model_validate_json(net.model_dump_json()) == net
+
+
+# ------------------------------------------------------------------- output layers (InputIR v6)
+
+
+def test_only_a_fluid_output_port_names_an_output_layer() -> None:
+    # GT fills a tower's FLUID outputs by layer; its output bus, its inputs and its power fill
+    # nothing by layer, so a layer on any of them is a malformed problem (#299).
+    for commodity, direction in (
+        (Commodity.ITEM, IODirection.OUTPUT),
+        (Commodity.FLUID, IODirection.INPUT),
+        (Commodity.POWER, IODirection.INPUT),
+    ):
+        with pytest.raises(ValidationError, match="only a fluid output port"):
+            Port(id="p", commodity=commodity, direction=direction, output_layer=0)
+    assert (
+        Port(
+            id="p", commodity=Commodity.FLUID, direction=IODirection.OUTPUT, output_layer=0
+        ).output_layer
+        == 0
+    )
+
+
+def test_an_output_layer_is_never_negative() -> None:
+    with pytest.raises(ValidationError):
+        Port(id="p", commodity=Commodity.FLUID, direction=IODirection.OUTPUT, output_layer=-1)
+    with pytest.raises(ValidationError):
+        HatchSlot(offset=CellCoord(x=0, y=0, z=0), kinds=("OutputHatch",), output_layer=-1)
+
+
+def test_a_port_layer_must_be_one_the_slots_record() -> None:
+    with pytest.raises(ValidationError, match="names output layer 5"):
+        layered_tower(outputs=["a"], layers=2, port_layers=[5])
+
+
+def test_a_tower_names_the_layer_of_every_fluid_output() -> None:
+    # An unnamed fluid output on a tower would dock on any layer, which is the bug (#299).
+    with pytest.raises(ValidationError, match="names no output layer"):
+        layered_tower(outputs=["a", "b"], port_layers=[0, None])
+
+
+def test_a_machine_that_fills_first_fit_names_no_layers() -> None:
+    m = Machine(
+        id="m",
+        type="t",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[Port(id="out", commodity=Commodity.FLUID, direction=IODirection.OUTPUT)]
+        ),
+        hatch_slots=(HatchSlot(offset=CellCoord(x=0, y=0, z=0), kinds=("OutputHatch",)),),
+    )
+    assert m.output_layers == frozenset()
+
+
+def test_output_layers_collects_the_layers_the_slots_record() -> None:
+    assert layered_tower(outputs=["a"], layers=3).output_layers == {0, 1, 2}
+
+
+def test_a_layered_port_gets_exactly_its_own_layer_and_kind() -> None:
+    tower = layered_tower(outputs=["a", "b"], layers=2, inputs=["feed"])
+    on_b = tower.hatch_slots_for("output:b")
+    assert on_b is not None
+    assert len(on_b) == 8  # the ring of layer 1, and neither the top centre nor layer 0
+    assert {s.output_layer for s in on_b} == {1}
+    assert {s.offset.y for s in on_b} == {2}
+    # A port with no layer keeps the three-level rule: the input goes on the base, as before.
+    feed = tower.hatch_slots_for("input:feed")
+    assert feed is not None
+    assert {s.offset.y for s in feed} == {0}
+
+
+def test_a_layered_port_whose_layer_has_no_slot_of_its_kind_gets_none_not_all() -> None:
+    # No fallback: an empty answer means no cell can host it, which the router reports, rather
+    # than the permissive "every slot" a silent dump gets. Here layer 1 takes only energy hatches.
+    tower = layered_tower(outputs=["a", "b"], layers=2)
+    energy_only = tuple(
+        s.model_copy(update={"kinds": ("Energy",)}) if s.output_layer == 1 else s
+        for s in tower.hatch_slots
+    )
+    tower = tower.model_copy(update={"hatch_slots": energy_only})
+    assert tower.hatch_slots_for("output:b") == ()
