@@ -50,11 +50,14 @@ schema-v3 dataset:
   sweeps the trigger stack (size 1..N, stopping when the placed block set stops changing).
   Per stack size it runs a **hint pass** (`construct(trigger, hintsOnly=true)` with a
   recording proxy that captures the hologram's hint dots) and a **block pass**
-  (`construct(trigger, hintsOnly=false)` into a wiped region, then scan). GT's hatch element
-  places nothing (`HatchElementBuilder.placeBlock` is a `// TODO` returning false), so the casing
-  shell plus hint positions are what get recorded, and a scan that finds a real hatch fails the
-  controller rather than record it (#177: this used to set `gt_no_hatch`, which GT 2.9 removed; its
-  opt-in successor `gt_hatch` is never probed). The build sits at `8, 128, 8`, halfway up the world,
+  (`construct(trigger, hintsOnly=false)` into a wiped region, then scan). Up to GT 5.09.54.20 GT's
+  hatch element placed nothing (`HatchElementBuilder.placeBlock` was a `// TODO` returning false).
+  From 5.09.54.133 it places a real hatch taken from `GTCreativeHatchSource.instance`, and an
+  exclusive element (every `newAny`) skips the `gt_hatch` gate, so each block pass swaps that field
+  for a copy holding no hatch and puts it back afterwards. Either way the casing shell plus hint
+  positions are what get recorded, and a scan that finds a real hatch fails the controller rather
+  than record it (#177: this used to set `gt_no_hatch`, which GT 2.9 removed; its opt-in successor
+  `gt_hatch` is never probed). The build sits at `8, 128, 8`, halfway up the world,
   and a build that lies on a face of its scan cube is rebuilt on a wider one; a face that cannot
   widen (the world's height, `MAX_SCAN_DIM` = 256) or a hologram cell outside the cube marks the
   form clipped, which fails the controller's first form and ends the sweep after a later one (#175).
@@ -168,6 +171,7 @@ actually touches:
 | `IStructureElement` / `IStructureElementChain` (+ `StructureEvent`) | `com.gtnewhorizon.structurelib[.structure]` | `ElementRecorder` maps cell -> visiting element; `HatchProbe` flattens a chain and asks `getBlocksToPlace` what each leaf accepts, falling back to the leaf's own `check` when its filter names no hatch kind, which is where a slot's hatch kinds come from. |
 | `HatchElement` (+ `mteClasses()`, `count()`) | `gregtech.api.enums` | The GT hatch-kind enum whose names a slot's `kinds` list holds (`InputBus`, `OutputHatch`, ...). One probe per kind (the first registered MTE of the classes the kind declares) is tested against the element's predicate, or placed for its check, so a GT bump that renumbers hatches is picked up automatically; `count()` says whether a placed probe registered as its kind. |
 | `StructureLib.proxy` (reflected) + `CommonProxy` (subclassed) | `com.gtnewhorizon.structurelib` | Temporarily swap in `RecordingProxy` to capture hint particles headlessly (the server's proxy no-ops them). The one reflective touch of a StructureLib internal; a bump that moves it fails loudly and locally. |
+| `GTCreativeHatchSource.instance` (reflected, GT 5.09.54.133 and later) | `gregtech.api.util` | The supply GT's hatch element places real hatches from. Swapped for a copy holding no hatch around every block pass, then restored, so the scan stays a casing shell. Looked up by name, so on an older GT it is absent and nothing is swapped. |
 
 One extra reflective touch, on the Minecraft side: StructureLib's hint walk is client-only
 (`iterate()` opens with `if (!world.isRemote && hintsOnly) return false;`), so the dump briefly

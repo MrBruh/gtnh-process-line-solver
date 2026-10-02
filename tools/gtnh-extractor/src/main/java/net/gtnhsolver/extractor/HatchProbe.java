@@ -52,9 +52,11 @@ import gregtech.api.metatileentity.implementations.MTEMultiBlockBase;
  * <p>
  * Neither of the two obvious routes works. The hint pass only yields a dot index, which is a
  * machine-local integer the structure's author chose (and 13/14/15 are StructureLib's reserved
- * AIR/NOT_AIR/ERROR markers, not hatch data). Re-running the block pass with hatches enabled yields
- * nothing either: GT's hatch elements return an unconditional {@code false} from {@code placeBlock},
- * so {@code construct(...)} never places a hatch in the first place.
+ * AIR/NOT_AIR/ERROR markers, not hatch data). Re-running the block pass with hatches enabled does not
+ * answer it either. Up to GT 5.09.54.20 a hatch element's {@code placeBlock} returned an unconditional
+ * {@code false}, so {@code construct(...)} never placed a hatch at all; from 5.09.54.133 it places the
+ * first hatch in GT's creative hatch source that its filter accepts, which names one kind the cell
+ * takes, not the set of them. (The block pass now empties that source, see {@code StructureDumper}.)
  *
  * <p>
  * So we ask GT itself, in up to three steps:
