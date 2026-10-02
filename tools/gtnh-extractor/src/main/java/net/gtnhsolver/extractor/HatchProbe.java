@@ -140,6 +140,10 @@ final class HatchProbe {
     /** Resolved on the public interface and record, since GT's other error classes are not public. */
     private static final Method ERROR_ID = gtMethod(STRUCTURE_ERROR, "getId");
     private static final Method ERROR_MESSAGE = gtMethod(TRANSLATABLE_ERROR, "message");
+    /** {@code IHatchElement.matchesHatch(mte)}, GT's own test of a hatch against a kind, or null before 5.09.54.133. */
+    private static final Method MATCHES_HATCH = gtMethod(HatchElement.class, "matchesHatch", IMetaTileEntity.class);
+    /** {@code IHatchElement.mteBlacklist()}, the hatch classes a kind turns away though they match it, or null. */
+    private static final Method MTE_BLACKLIST = gtMethod(HatchElement.class, "mteBlacklist");
 
     /** A hatch to probe with: its kind, its item form for the filter, and its MTE for placing one. */
     private static final class Probe {
@@ -219,6 +223,12 @@ final class HatchProbe {
             hull != null ? "machine hull" : "none, so bare adders go unprobed",
             CHECK_WITH_ERRORS != null && ERROR_ID != null ? "checkMachine errors"
                 : "none, GT has no structure errors, so bare adders are not recorded");
+        // Which MTE stands for each kind, so a bump that hands two kinds one hatch shows in the log.
+        List<String> chosen = new ArrayList<>();
+        for (Map.Entry<String, Probe> probe : probes.entrySet()) {
+            chosen.add(probe.getKey() + "=" + probe.getValue().id);
+        }
+        LOG.info("gtnh-extractor: hatch probe MTE per kind: {}", chosen);
     }
 
     /** A GT class by name, or null if this GT does not have it. */
@@ -243,27 +253,63 @@ final class HatchProbe {
     }
 
     /**
-     * A representative hatch for one kind: the first registered MTE assignable to one of the classes the
-     * kind declares. Declaration-driven, so a GT bump that renumbers hatches is picked up automatically
-     * and only a kind GT stopped registering goes missing.
+     * A representative hatch for one kind: the first registered MTE that GT's own hatch filter would take
+     * as that kind, which is what {@code HatchElementBuilder.anyOf} asks: {@code kind.matchesHatch(mte)},
+     * and a class not in {@code kind.mteBlacklist()}. Declaration-driven, so a GT bump that renumbers
+     * hatches is picked up automatically and only a kind GT stopped registering goes missing.
+     *
+     * <p>
+     * "The first MTE of a class the kind declares" is not the same question from GT 5.09.54.133:
+     * {@code CryotheumHatch} and {@code PyrotheumHatch} both declare {@code MTEHatchCustomFluidBase} and
+     * differ only in {@code matchesHatch} (the fluid the hatch is locked to), so asking by class handed
+     * both the Cryotheum hatch. Both methods are reached reflectively; on a GT without
+     * {@code matchesHatch} the declared classes are asked instead, which is what its default does.
      */
     private static Probe findProbe(HatchElement kind, List<? extends Class<? extends IMetaTileEntity>> classes) {
+        List<?> blacklist = blacklistOf(kind);
         IMetaTileEntity[] all = GregTechAPI.METATILEENTITIES;
         for (int id = 0; id < all.length; id++) {
             IMetaTileEntity mte = all[id];
-            if (mte == null) {
+            if (mte == null || blacklist.contains(mte.getClass()) || !matches(kind, classes, mte)) {
                 continue;
             }
-            for (Class<? extends IMetaTileEntity> cls : classes) {
-                if (cls != null && cls.isInstance(mte)) {
-                    ItemStack form = mte.getStackForm(1);
-                    if (form != null) {
-                        return new Probe(kind, form, mte, id);
-                    }
-                }
+            ItemStack form = mte.getStackForm(1);
+            if (form != null) {
+                return new Probe(kind, form, mte, id);
             }
         }
         return null;
+    }
+
+    /** Whether GT takes {@code mte} as {@code kind}: its {@code matchesHatch}, else a declared class. */
+    private static boolean matches(HatchElement kind, List<? extends Class<? extends IMetaTileEntity>> classes,
+        IMetaTileEntity mte) {
+        if (kind != null && MATCHES_HATCH != null) {
+            try {
+                return Boolean.TRUE.equals(MATCHES_HATCH.invoke(kind, mte));
+            } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+                return false; // a kind that cannot be asked about this hatch does not take it
+            }
+        }
+        for (Class<? extends IMetaTileEntity> cls : classes) {
+            if (cls != null && cls.isInstance(mte)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The classes {@code kind} turns away (GT compares exact classes), or empty for none or no such API. */
+    private static List<?> blacklistOf(HatchElement kind) {
+        if (kind == null || MTE_BLACKLIST == null) {
+            return Collections.emptyList();
+        }
+        try {
+            Object blacklist = MTE_BLACKLIST.invoke(kind);
+            return blacklist instanceof List ? (List<?>) blacklist : Collections.emptyList();
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            return Collections.emptyList();
+        }
     }
 
     /** Drop what the element checks answered: a new controller's elements are asked afresh. */
