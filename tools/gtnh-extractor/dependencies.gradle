@@ -58,6 +58,16 @@ dependencies {
     implementation("com.github.GTNewHorizons:CropsNH:2.0.114:dev") {
         exclude group: "com.github.GTNewHorizons", module: "ThaumicTinkerer"
     }
+    // Better Builder's Wands - on the run classpath only, for CropsNH 2.0.114's postInit. Its
+    // BetterBuildersWandsCompatHandler.postInit is gated on the mod being loaded, but the JVM verifies
+    // the whole method before running it, and verifying setMapping(new ...CropStickCustomMapping())
+    // loads portablejim.bbw.core.conversion.ICustomMapping: without the jar the server dies in
+    // postInit with a NoClassDefFoundError before anything is dumped. CropsNH's own build carries it
+    // the same way (devOnlyNonPublishable, transitive = false). Pinned from DreamAssemblerXXL
+    // manifest 2.9.0-beta-3.
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:BetterBuildersWands:0.13.12-GTNH:dev") {
+        transitive = false
+    }
 
     // JUnit 4, for the ASM icon-name matcher only (#98). Deliberately a SEPARATE suite from the
     // project's pytest gate: run it with `./gradlew test` from this directory. It is not wired
