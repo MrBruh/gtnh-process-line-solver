@@ -2342,11 +2342,26 @@ final class TextureDumper {
         }
 
         // gt.blocktintedglass - no String field and no callable getIcon, so the table is the only
-        // route left. Its four metas are plain BlockIcons constants, verified by verifyCasingTable.
+        // route left. Its metas are plain BlockIcons constants, verified by verifyCasingTable. GT
+        // 5.09.54.133 grew it from 4 metas to 16, one per dye, in BlockTintedIndustrialGlass.getIcon's
+        // order; on 5.09.54.20 and older the twelve added constants do not exist, and verifyCasingTable
+        // names them there.
         flat("gregtech:gt.blocktintedglass", 0, "GLASS_TINTED_INDUSTRIAL_WHITE");
         flat("gregtech:gt.blocktintedglass", 1, "GLASS_TINTED_INDUSTRIAL_LIGHT_GRAY");
         flat("gregtech:gt.blocktintedglass", 2, "GLASS_TINTED_INDUSTRIAL_GRAY");
         flat("gregtech:gt.blocktintedglass", 3, "GLASS_TINTED_INDUSTRIAL_BLACK");
+        flat("gregtech:gt.blocktintedglass", 4, "GLASS_TINTED_INDUSTRIAL_BROWN");
+        flat("gregtech:gt.blocktintedglass", 5, "GLASS_TINTED_INDUSTRIAL_RED");
+        flat("gregtech:gt.blocktintedglass", 6, "GLASS_TINTED_INDUSTRIAL_ORANGE");
+        flat("gregtech:gt.blocktintedglass", 7, "GLASS_TINTED_INDUSTRIAL_YELLOW");
+        flat("gregtech:gt.blocktintedglass", 8, "GLASS_TINTED_INDUSTRIAL_LIME");
+        flat("gregtech:gt.blocktintedglass", 9, "GLASS_TINTED_INDUSTRIAL_GREEN");
+        flat("gregtech:gt.blocktintedglass", 10, "GLASS_TINTED_INDUSTRIAL_CYAN");
+        flat("gregtech:gt.blocktintedglass", 11, "GLASS_TINTED_INDUSTRIAL_LIGHT_BLUE");
+        flat("gregtech:gt.blocktintedglass", 12, "GLASS_TINTED_INDUSTRIAL_BLUE");
+        flat("gregtech:gt.blocktintedglass", 13, "GLASS_TINTED_INDUSTRIAL_PURPLE");
+        flat("gregtech:gt.blocktintedglass", 14, "GLASS_TINTED_INDUSTRIAL_MAGENTA");
+        flat("gregtech:gt.blocktintedglass", 15, "GLASS_TINTED_INDUSTRIAL_PINK");
 
         // gt.blockglass1 - meta 5's constant says FRAME though the item is "Nanite Shielding Glass".
         flat("gregtech:gt.blockglass1", 0, "GLASS_PH_RESISTANT");
