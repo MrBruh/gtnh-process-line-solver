@@ -876,6 +876,33 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **The pinned pack is now GTNH 2.9.0-beta-3.** `gtnh.lock.json` and the extractor pin
+  GT5-Unofficial 5.09.54.133 and CropsNH 2.0.114 (StructureLib stays 1.4.42), the pack the
+  maintainer plays. GT 5.09.54.133 changed enough under the extractor that a dump taken with the
+  old code would have been quietly wrong, so the bump carries its fixes, each also building against
+  the older pins:
+  - GT's hatch elements now place real hatches while a structure is built, so the block pass empties
+    GT's hatch supply first and still gets the casing shell, and cell visits from the structure check
+    GT now runs inside a build are ignored rather than recorded as the build's own.
+  - Removing a controller with no owner now throws, which left half of each build standing in the
+    scratch region for the next build to inherit: in a trial beta-3 dump 24 controllers came out
+    wrong, two of them (the Large Chemical Reactor and the Mega Alloy Blast Smelter) refused
+    outright. The scratch controller gets an owner, and the wipe carries on past a cell that throws.
+  - Each hatch kind is probed the way GT matches hatches (the Cryotheum and Pyrotheum hatches share a
+    class), TecTech's two-argument `BlockIcons.custom` overlays resolve again, CropsNH's renamed
+    icon fields are read, and all 16 tinted industrial glass metas are tabled.
+  - The dev server needs Better Builder's Wands on its run classpath for CropsNH 2.0.114, and
+    GTNHExtLib 1.0.4, which some antivirus tools flag as a false positive (GTNHExtLib #5, #6).
+  The beta-3 structure dump lists 297 controllers (beta-2: 296, plus the new Industrial Farm), fails
+  only the two beta-2 failed, and matches beta-2 byte for byte for every controller the shipped
+  examples use but the Large Fluid Extractor, whose glass options changed. Its texture manifest has
+  the same icon coverage as beta-2's (its 96 new gaps are GT's invisible renderer blocks), and an
+  ev-nitrobenzene preview drawn from it textures exactly what the beta-2 one does. The solver
+  follows: the Ice Cream Machine, GT's one new basic machine, exports with its two facings, and the
+  Sparge Tower stays layered under its renamed `gt.recipe.lftr.sparging` map. The beta-2 dumps
+  stay beside the beta-3 ones for the two example plans balanced on beta-2, and the examples are
+  unchanged. A successful Gradle run is no longer taken as proof of a dump: the extractor README
+  now says to check its output.
 - **Dataset schema v3: each tower output cell names the layer GT fills it from (#299). Re-run the
   extractor.** GT fills a Distillation Tower by layer: recipe fluid output `i` goes only to the
   output hatches on the tower's `i`-th layer above its base, and the tower does not form while any
