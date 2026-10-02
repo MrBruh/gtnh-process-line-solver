@@ -2,6 +2,7 @@ package net.gtnhsolver.extractor;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import org.objectweb.asm.ClassReader;
@@ -55,11 +56,21 @@ import org.objectweb.asm.Opcodes;
  *    PUTSTATIC ScreenOFF : IIconContainer
  * </pre>
  *
+ * <pre>
+ * B'': the same factory with its domain passed apart, as GT 5.09.54.133 spells it
+ *    GETSTATIC Mods.GregTech : Mods        (or: LDC "gregtech")
+ *    GETFIELD  Mods.resourceDomain : String
+ *    LDC "iconsets/EM_CONTROLLER"
+ *    INVOKESTATIC Textures$BlockIcons.custom (String, String)IIconContainer
+ *    PUTSTATIC ScreenOFF : IIconContainer
+ * </pre>
+ *
  * Shape A is {@code BlockGTCasingsTT.registerBlockIcons} and friends; shape B is
  * {@code TTMultiblockBase.registerIcons}, whose two statics are the overlay half of every tectech
  * controller hull; shape C is {@code BlockCasingSpaceElevator}, which writes 4 of its 5 icons that
  * way. All three were read out of real bytes before being written here, not guessed - C was found
- * by disassembling, after the first two had been implemented from source.
+ * by disassembling, after the first two had been implemented from source. B' and B'' are shape B's
+ * {@code TTMultiblockBase.registerIcons} again, at GT 5.09.54.20 and 5.09.54.133.
  *
  * <p>
  * <b>Shape C is not the array case the notes warn against.</b> Non-negotiable 3 in
@@ -84,6 +95,16 @@ import org.objectweb.asm.Opcodes;
  * cost this project 46 unfetchable asset paths. The raw literal is returned exactly as written and
  * the caller decides, which for shape B means handing it to {@code CustomIcon}, whose own
  * constructor applies {@code GregTech.getResourcePath} to a bare name.
+ *
+ * <p>
+ * Shape B'' is the one case with two strings, and it is folded into the spelling the one-argument
+ * factory reads, so the caller still has a single name to hand on: the path literal as written when
+ * the domain is GregTech's own (a bare name already means {@code gregtech} to both factories), else
+ * {@code domain:path}. The domain is only ever taken as written: an LDC, or {@code Mods.GregTech}'s
+ * {@code resourceDomain}, which is {@code "gregtech"}. Any other {@code Mods} constant's domain is its
+ * mod id lower-cased, which bytes alone cannot say, so it yields nothing rather than a guess. Every
+ * {@code custom(domain, path)} call in the allowlisted classes at 5.09.54.133 passes
+ * {@code Mods.GregTech.resourceDomain}.
  */
 final class IconNameMatcher {
 
@@ -130,6 +151,26 @@ final class IconNameMatcher {
 
     /** The factory's return type, pinned so an unrelated {@code custom(String)} cannot match. */
     private static final String ICON_CONTAINER_DESC = "(Ljava/lang/String;)Lgregtech/api/interfaces/IIconContainer;";
+
+    /**
+     * Shape B'': the two-argument {@code custom(domain, path)} GT 5.09.54.133 moved its callers to, with the
+     * same pinned return type. Its one-argument sibling survives as a deprecated stub, so the caller can
+     * still inject through it.
+     */
+    private static final String DOMAIN_ICON_CONTAINER_DESC = "(Ljava/lang/String;Ljava/lang/String;)"
+        + "Lgregtech/api/interfaces/IIconContainer;";
+
+    /** GT's mod enum, whose constants carry a {@code resourceDomain} shape B'' passes as its domain. */
+    private static final String MODS_OWNER = "gregtech/api/enums/Mods";
+
+    /** The one {@code Mods} constant whose domain is known without running it: {@code ID.toLowerCase()}. */
+    private static final String GREGTECH_MOD = "GregTech";
+
+    /** That constant's {@code resourceDomain}, and the domain a bare icon name already means. */
+    private static final String GREGTECH_DOMAIN = "gregtech";
+
+    /** Stands for a {@code Mods} domain this class cannot name, so the call it feeds yields nothing. */
+    private static final String UNKNOWN_DOMAIN = "";
 
     /**
      * The methods worth walking; everything else in the class is skipped outright.
@@ -215,6 +256,13 @@ final class IconNameMatcher {
         /** Shape C only: the array field being filled, and the constant index into it. */
         private String pendingArrayField;
         private int pendingIndex = -1;
+        /**
+         * Shape B'' only: the domain argument read ahead of the path literal ({@link #UNKNOWN_DOMAIN} for a
+         * {@code Mods} constant this class cannot name), and the {@code Mods} constant loaded while its
+         * {@code resourceDomain} read is still to come.
+         */
+        private String pendingDomain;
+        private String pendingModConstant;
 
         IconMethodVisitor(Map<String, String> found) {
             super(Opcodes.ASM5);
@@ -226,13 +274,33 @@ final class IconNameMatcher {
             consumedByAcceptedCall = false;
             pendingArrayField = null;
             pendingIndex = -1;
+            pendingDomain = null;
+            pendingModConstant = null;
         }
 
         @Override
         public void visitLdcInsn(Object value) {
-            // A second literal before the field write means we are not in a shape we understand.
-            pendingLiteral = value instanceof String && !consumedByAcceptedCall ? (String) value : null;
+            boolean usable = value instanceof String && !consumedByAcceptedCall && pendingModConstant == null;
             consumedByAcceptedCall = false;
+            pendingModConstant = null; // a Mods constant goes straight to its resourceDomain, or not at all
+            if (!usable) {
+                pendingLiteral = null;
+                pendingDomain = null;
+                return;
+            }
+            if (pendingLiteral == null) {
+                pendingLiteral = (String) value;
+                return;
+            }
+            if (pendingDomain == null && pendingArrayField == null) {
+                // Shape B'': a literal straight after another is the path, and the one before its domain.
+                pendingDomain = pendingLiteral;
+                pendingLiteral = (String) value;
+                return;
+            }
+            // A third literal before the field write means we are not in a shape we understand.
+            pendingLiteral = null;
+            pendingDomain = null;
         }
 
         @Override
@@ -241,14 +309,28 @@ final class IconNameMatcher {
                 reset();
                 return;
             }
-            boolean shapeA = opcode == Opcodes.INVOKEINTERFACE && isRegisterIcon(name)
+            // Every one-string shape refuses a pending domain: that literal went somewhere we do not model.
+            boolean bare = pendingDomain == null;
+            boolean shapeA = bare && opcode == Opcodes.INVOKEINTERFACE && isRegisterIcon(name)
                 && REGISTER_ICON_DESC.equals(desc);
-            boolean shapeB = opcode == Opcodes.INVOKESPECIAL && "<init>".equals(name)
+            boolean shapeB = bare && opcode == Opcodes.INVOKESPECIAL && "<init>".equals(name)
                 && "(Ljava/lang/String;)V".equals(desc) && owner.endsWith(CUSTOM_ICON_SUFFIX);
             // B' is the same fact as B, spelled the way 2.9 spells it. See CUSTOM_FACTORY.
-            boolean shapeBPrime = opcode == Opcodes.INVOKESTATIC && CUSTOM_FACTORY.equals(name)
+            boolean shapeBPrime = bare && opcode == Opcodes.INVOKESTATIC && CUSTOM_FACTORY.equals(name)
                 && ICON_CONTAINER_DESC.equals(desc);
-            if (shapeA || shapeB || shapeBPrime) {
+            // B'' is B' with its domain passed apart. See DOMAIN_ICON_CONTAINER_DESC.
+            boolean shapeBDoublePrime = !bare && opcode == Opcodes.INVOKESTATIC && CUSTOM_FACTORY.equals(name)
+                && DOMAIN_ICON_CONTAINER_DESC.equals(desc);
+            if (shapeBDoublePrime) {
+                String joined = withDomain(pendingDomain, pendingLiteral);
+                if (joined == null) {
+                    reset(); // a domain we cannot name is not one we guess at
+                    return;
+                }
+                pendingLiteral = joined;
+                pendingDomain = null;
+                consumedByAcceptedCall = true;
+            } else if (shapeA || shapeB || shapeBPrime) {
                 consumedByAcceptedCall = true;
             } else {
                 reset(); // the literal went somewhere we do not model; forget it
@@ -267,6 +349,17 @@ final class IconNameMatcher {
             if (opcode == Opcodes.GETSTATIC && desc.startsWith("[")) {
                 reset(); // shape C opens here, so any earlier half-sequence is abandoned
                 pendingArrayField = name;
+                return;
+            }
+            if (opcode == Opcodes.GETSTATIC && MODS_OWNER.equals(owner) && ("L" + MODS_OWNER + ";").equals(desc)) {
+                reset(); // shape B'' opens here, with the domain's mod
+                pendingModConstant = name;
+                return;
+            }
+            if (opcode == Opcodes.GETFIELD && pendingModConstant != null && MODS_OWNER.equals(owner)
+                && "resourceDomain".equals(name) && "Ljava/lang/String;".equals(desc)) {
+                pendingDomain = GREGTECH_MOD.equals(pendingModConstant) ? GREGTECH_DOMAIN : UNKNOWN_DOMAIN;
+                pendingModConstant = null;
                 return;
             }
             reset();
@@ -290,7 +383,8 @@ final class IconNameMatcher {
                 reset();
                 return;
             }
-            if (opcode != Opcodes.DUP) { // DUP sits between NEW and the literal in shape B
+            // DUP sits between NEW and the literal in shape B, but never inside shape B''.
+            if (opcode != Opcodes.DUP || pendingModConstant != null) {
                 reset();
             }
         }
@@ -299,8 +393,9 @@ final class IconNameMatcher {
         public void visitVarInsn(int opcode, int var) {
             // ALOAD of the registry sits between the literal and the call in shape A, so a load
             // alone is not disqualifying; anything storing into a local IS, since the literal then
-            // reaches the field by a path this does not model.
-            if (opcode >= Opcodes.ISTORE) {
+            // reaches the field by a path this does not model. Nothing sits between a Mods constant
+            // and its resourceDomain read, so there even a load is.
+            if (opcode >= Opcodes.ISTORE || pendingModConstant != null) {
                 reset();
             }
         }
@@ -323,9 +418,22 @@ final class IconNameMatcher {
         @Override
         public void visitTypeInsn(int opcode, String type) {
             // NEW of the holder precedes the literal in shape B; it must not clear a pending one.
-            if (opcode != Opcodes.NEW && opcode != Opcodes.CHECKCAST) {
+            if ((opcode != Opcodes.NEW && opcode != Opcodes.CHECKCAST) || pendingModConstant != null) {
                 reset();
             }
         }
+    }
+
+    /**
+     * The {@code (domain, path)} of shape B'' as the one name the one-argument factory reads, or null when
+     * the domain cannot be named or the path already carries one of its own (the two-argument factory takes
+     * a colon-free path, so a colon there is a shape we do not model).
+     */
+    private static String withDomain(String domain, String path) {
+        if (domain == null || domain.isEmpty() || path.indexOf(':') >= 0) {
+            return null;
+        }
+        // ResourceLocation lower-cases a domain, so "GregTech" is GregTech's domain too.
+        return GREGTECH_DOMAIN.equals(domain.toLowerCase(Locale.ROOT)) ? path : domain + ":" + path;
     }
 }

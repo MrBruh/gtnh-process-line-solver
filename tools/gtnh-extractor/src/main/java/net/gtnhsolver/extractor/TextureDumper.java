@@ -14,9 +14,12 @@ import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
@@ -1973,6 +1976,17 @@ final class TextureDumper {
         "kekztech.common.blocks.BlockTFFTStorageField", };
 
     /**
+     * Allowlisted classes that register nothing themselves on a newer GT, so yielding no names there is
+     * expected rather than the "a shape moved" alarm. bartworks' Windmill registered its top sprite in
+     * its own {@code registerIcons} up to GT 5.09.54.20; from 5.09.54.133 that method is gone and
+     * {@code getTexture} draws a brick block plus the {@code OVERLAY_TOP_STEAM_MACERATOR} constant, which
+     * the ordinary routes name, so there is nothing left in its bytes to match. It stays allowlisted for
+     * the packs that still need it.
+     */
+    private static final Set<String> ASM_ICON_CLASSES_MAY_YIELD_NOTHING = new HashSet<>(
+        Arrays.asList("bartworks.common.tileentities.multis.MTEWindmill"));
+
+    /**
      * Fill the icon holders whose names exist only in bytes, so every existing route can resolve
      * them (GitHub #98).
      *
@@ -2017,8 +2031,13 @@ final class TextureDumper {
             }
             if (names.isEmpty()) {
                 // Also loud: every class in the allowlist earned its place by yielding names, so
-                // yielding none means a shape moved under us - the failure mode a pack bump has.
-                LOG.warn("gtnh-extractor: {} is allowlisted but yielded no icon names", className);
+                // yielding none means a shape moved under us - the failure mode a pack bump has. The
+                // exception is a class known to have stopped registering icons itself.
+                if (ASM_ICON_CLASSES_MAY_YIELD_NOTHING.contains(className)) {
+                    LOG.debug("gtnh-extractor: {} registers no icons itself on this GT; nothing to match", className);
+                } else {
+                    LOG.warn("gtnh-extractor: {} is allowlisted but yielded no icon names", className);
+                }
                 continue;
             }
             Class<?> owner;
