@@ -62,7 +62,7 @@ What is checked now (needs only the IR):
   re-derived from its own geometry by GT's nearest-first rule, each charged to the blocks GT's
   transfer loop charges, on the validator's OWN arithmetic (it shares only the rule DATA in
   ``dataset/pipe_capacity.py``, never the router's run-wide sizing, which would refuse a build
-  proven to work in game).
+  proven to work in game, nor the router's own per-block reading in ``router/item_pipes.py``).
 
 What is deferred to the dataset lane (rule data not available yet) - TODO:
   fluid pipe throughput (no fluid capacity data yet, and GT moves fluid by a different mechanism),
@@ -265,12 +265,15 @@ def _check_item_pipe_throughput(
             large tin makes 2: accepted (the size the working build used)
 
     **Not the router's rule, by design** (docs/ARCHITECTURE.md decision 4). The router sizes a whole
-    run for the point where all of its streams could meet (``router/core.py``, ``_pipe_size``). That
-    is safe for laying pipe and wrong as a refusal threshold: it asks for huge on the cobblestone
-    run, where the maintainer's working build has large. This shares only the rule DATA with it
-    (``ITEM_PIPE_CAPACITY``, ``STREAM_SERVICE_TICKS``, ``ITEMS_PER_INSERTION`` and the rounding
-    slack) and never calls ``endpoint_insertions``, ``item_pipe_insertions`` or
-    ``item_pipe_size_for``, so a bug in those is caught here rather than agreed with.
+    run for the point where all of its streams could meet (``router/core.py``, ``_pipe_size``), and
+    never below its own reading of this per-block charge (``router/item_pipes.py``, #200). The
+    run-wide figure is safe for laying pipe and wrong as a refusal threshold: it asks for huge on
+    the cobblestone run, where the maintainer's working build has large. This shares neither
+    reading's code, only the rule DATA (``ITEM_PIPE_CAPACITY``, ``STREAM_SERVICE_TICKS``,
+    ``ITEMS_PER_INSERTION`` and the rounding slack), and never calls ``endpoint_insertions``,
+    ``item_pipe_insertions`` or ``item_pipe_size_for``, so a bug in those, or in the router's
+    matching of streams, is caught here rather than agreed with. Change the matching, the tie
+    order, the split flow or the merged-run rule here, and change ``router/item_pipes.py`` with it.
 
     What it deliberately does not judge:
 

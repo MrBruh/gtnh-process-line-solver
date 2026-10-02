@@ -348,7 +348,9 @@ def test_the_gate_does_not_demand_the_size_the_router_would_lay(
     """The trap #190 had to avoid. The router sizes a whole run for the point where all its streams
     could meet, so on this placement it lays huge on the cobblestone run. Used as the refusal
     threshold, that rule would reject the working build's large there. The solver may over-size;
-    the gate must not reject what works."""
+    the gate must not reject what works. The router's per-block floor (#200) asks for only one
+    insertion a block on cobblestone, a normal pipe; the run-wide bound, kept as the router's
+    margin, is what lays it huge."""
     problem, layout = working_build
     items_only = problem.model_copy(update={"me_toggles": METoggles(power=True)})
     routed = route(items_only, layout.placements)

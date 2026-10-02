@@ -279,6 +279,22 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **An item pipe is never laid thinner than its busiest block needs (#200).** The router sized a
+  whole item run from its endpoints alone: the larger side's sum of insertions, on the premise that
+  every stream meets at one point, so the figure could only oversize. It could undersize. When a
+  producer splits its output between consumers, GT's nearest-first delivery makes more streams than
+  either side has endpoints, and the blocks near that producer pay for all of them. Producers at
+  0.15 and 0.05 items/t into two consumers at 0.1 each make three streams through the two middle
+  blocks where the run-wide figure counts two, so the router laid large, the validator refused it
+  (`item_pipe_size_insufficient`), and the solve lost a VALID layout to `partial_invalid`. The
+  router now also reads what GT charges each block of the pipe it laid (`router/item_pipes.py`)
+  and lays the larger of the two. That raises only a run the validator would refuse at the run-wide
+  size, so every run it accepted keeps its size: the parallel sand line's four runs stay huge. The
+  router's reading is the validator's rule written separately, sharing none of its code, so a
+  mistake in either still shows up as a refused size rather than a pipe both agree on. Measured
+  at full effort on parallel-sand (16 seeds), iron (8), nitrobenzene and ev-nitrobenzene (2 each)
+  and sand: all 29 layouts are the same as before, every one VALID, and all 127 item routes keep
+  their size.
 - **Optimizing is never worse than `--fast` (#132).** The optimizer anneals away from the
   constructive placement `--fast` lays, and its floor term can prefer stacking machines so one is
   left with only its front free, which no cable docks on. When every attempt came out partial it
