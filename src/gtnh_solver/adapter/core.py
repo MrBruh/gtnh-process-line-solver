@@ -411,8 +411,11 @@ def to_input_ir(
     ``me_toggles`` names the commodities the line moves over ME (AE2) rather than over pipes and
     cables. It is not something a plan states, so it comes from the caller (the CLI's ``--me``) and
     is stamped on the ``InputIR`` unchanged; ``None`` keeps the default, every commodity routed
-    physically. The mapping itself ignores it: the nets, storages and power synthesis are the same
-    either way, and each downstream stage skips a toggled commodity itself (docs/DOMAIN.md).
+    physically. Most of the mapping ignores it, since each downstream stage skips a toggled
+    commodity itself (docs/DOMAIN.md). It reaches the mapping in two places: the item merges, which
+    count only the connections a toggle leaves physical, and power, whose synthesized sources and
+    nets a power toggle drops (#225), since a source would stand in the build connected to nothing.
+    The powered machines keep their energy ports either way.
 
     Raises :class:`~gtnh_solver.adapter.AdapterError` for a plan that does not map (a dangling
     reference, an unsupported kind), and :class:`~gtnh_solver.adapter.InfeasiblePlanError` for one
@@ -561,6 +564,9 @@ def to_input_ir(
     )
     _check_resolved_power(plan, nets)
     toggles = me_toggles if me_toggles is not None else METoggles()
+    if toggles.toggled(Commodity.POWER):
+        # After the cross-check above, which reads the synthesized nets' draw.
+        machines, nets = _without_power_sources(machines, nets)
     # After the power synthesis, so a machine's power connection counts toward its faces, and before
     # the region is sized, so the filters it places are inside it.
     machines, nets = _merge_item_outputs(
@@ -1048,6 +1054,24 @@ def _check_resolved_power(plan: Plan, nets: list[Net]) -> None:
             AdapterWarning,
             stacklevel=2,
         )
+
+
+def _without_power_sources(
+    machines: list[Machine], nets: list[Net]
+) -> tuple[list[Machine], list[Net]]:
+    """``machines`` and ``nets`` without the synthesized power sources and their nets (#225).
+
+    Under ``--me power`` the line's power arrives some other way, so no cable is laid, and a source
+    would be placed, previewed and exported (as the Debug Power Generator stand-in) connected to
+    nothing. Every power net is the synthesis's own (``_without_generated_power`` takes the plan's
+    EU flows out first), so all of them go. Each powered machine keeps the energy ports the
+    synthesis gave it: they still state what every connection draws, which the preview's power
+    panel reports for the builder to supply.
+    """
+    return (
+        [m for m in machines if not m.is_power_source],
+        [n for n in nets if n.commodity is not Commodity.POWER],
+    )
 
 
 def _without_generated_power(plan: Plan) -> Plan:

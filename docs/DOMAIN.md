@@ -524,6 +524,11 @@ no terminal, no placement/cost term). Placing the appropriate ME endpoint (inter
 on a machine face in its stead is **planned** (Phase 2); v1 does not model ME channel limits.
 Default is to route all three physically.
 
+Power left to ME also has **no power source**: the adapter drops the per-tier sources and their
+nets, since a source no cable reaches would be placed and exported connected to nothing (#225).
+Each powered machine keeps its energy ports, so the preview still states the draw per tier for
+whatever delivers it.
+
 ## Multiblocks
 
 Represented as a **bounding box + controller-face and hatch/bus-face metadata** (multiblocks
