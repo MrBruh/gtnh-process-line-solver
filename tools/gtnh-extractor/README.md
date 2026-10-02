@@ -387,8 +387,14 @@ with GT5U + StructureLib + their hard dependencies loaded, `DumperMod` fires on
 `FMLServerStartedEvent`, runs the requested pass(es), and calls `exitJava(0)`, yielding
 `BUILD SUCCESSFUL`. On a fresh machine the wall-clock is dominated by the one-time Minecraft
 decompile and the multi-GB dependency/toolchain download; once cached, a boot is about a
-minute. Nothing in CI runs it: both passes are local-only, so `BUILD SUCCESSFUL` (the real
-exit status, not a piped `tail`'s) is the gate.
+minute. Nothing in CI runs it: both passes are local-only.
+
+**`BUILD SUCCESSFUL` does not prove a dump ran.** A server that crashes before `DumperMod`
+fires (a mod dying in `preInit` or `postInit`) still ends the Gradle run with `BUILD SUCCESSFUL`
+and exit 0: on 2.9.0-beta-3 that happened twice, once for a missing GTNHExtLib and once for
+CropsNH's Better Builder's Wands hook. The gate is the output: `_meta.json` in the
+`-PdatasetOut` folder (or `manifest.json` in `-PtextureOut`) with this run's `generated_at`, and
+the log's own completion line. Look in `run/server/crash-reports/` when it is missing.
 
 ### Running the texture pass on a client (`runClient`)
 
