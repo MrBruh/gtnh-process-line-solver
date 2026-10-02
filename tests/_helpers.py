@@ -23,8 +23,14 @@ Reconciled drift (chose the form that keeps every caller green):
 
 from __future__ import annotations
 
+import json
 import os
+import struct
+import zipfile
+import zlib
 from collections.abc import Sequence
+from pathlib import Path
+from typing import Any
 
 from gtnh_solver.dataset import DatasetMeta, MachinePhysical, PhysicalDataset
 from gtnh_solver.dataset.schema import SCHEMA_VERSION
@@ -313,3 +319,44 @@ def property_examples(full: int) -> int:
         if 0.0 < parsed <= 1.0:
             fraction = parsed
     return max(_PROPERTY_FLOOR, round(full * fraction))
+
+
+def solid_png(rgb: tuple[int, int, int], size: int = 4) -> bytes:
+    """A ``size`` x ``size`` PNG of one colour, written by hand so no test needs Pillow."""
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+
+    rows = b"".join(b"\x00" + bytes(rgb) * size for _ in range(size))
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(rows))
+        + chunk(b"IEND", b"")
+    )
+
+
+def write_icon_index(
+    folder: Path,
+    *,
+    items: dict[str, Any] | None = None,
+    fluids: dict[str, Any] | None = None,
+    images: dict[str, bytes] | None = None,
+) -> Path:
+    """An icon index (``dataset.icons``) under ``folder``: ``index.json`` with these entries and
+    ``images.zip`` holding ``images``, member path -> bytes. Returns the index's path."""
+    folder.mkdir(parents=True, exist_ok=True)
+    index = folder / "index.json"
+    doc = {
+        "generated_at": "2026-10-02T00:00:00Z",
+        "schema": 1,
+        "source": {"exporter": "test", "pack_version": "test", "icon_px": 4},
+        "items": items or {},
+        "fluids": fluids or {},
+    }
+    index.write_text(json.dumps(doc), encoding="utf-8")
+    with zipfile.ZipFile(folder / "images.zip", "w") as archive:
+        for name, data in (images or {}).items():
+            archive.writestr(name, data)
+    return index

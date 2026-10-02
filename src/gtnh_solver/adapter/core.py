@@ -591,6 +591,7 @@ def to_input_ir(
         nets=nets,
         me_toggles=toggles,
         resource_names=_resource_names(plan, machines, nets),
+        resource_colors=_resource_colors(plan, machines, nets),
         pack_version=plan_pack_version(plan),
     )
 
@@ -1232,19 +1233,60 @@ def _resource_names(plan: Plan, machines: list[Machine], nets: list[Net]) -> dic
     ``label`` comes first, since an edge is what becomes a net, then a recipe's ``display_name`` on
     an input, output, listed alternative or node override, for the ids no edge names. The two can
     disagree: one MrBruh-fork plan labels ``minecraft:log@32767`` "Oak Log" on its edge and "Oak
-    Wood" on the recipe input. Restricted to the resources the problem carries (a net's, a non-power
-    port's, an Item Filter's), so an ore-dictionary alternative nobody picked is not listed.
+    Wood" on the recipe input. Restricted to the resources the problem carries (:func:`_carried`),
+    so an ore-dictionary alternative nobody picked is not listed.
     """
     named: dict[str, str] = {}
     for edge in plan.edges:
         if edge.label:
             named.setdefault(edge.resource_id, edge.label)
+    for res in _listed(plan):
+        if res.display_name:
+            named.setdefault(res.id, res.display_name)
+    return {resource: named[resource] for resource in _carried(machines, nets) if resource in named}
+
+
+#: A colour as factory-flow writes ``dominantColor``: ``#`` and six hex digits, either case.
+_PLAN_COLOR = re.compile(r"#[0-9a-fA-F]{6}")
+
+
+def _resource_colors(plan: Plan, machines: list[Machine], nets: list[Net]) -> dict[str, str]:
+    """``InputIR.resource_colors``: the export's ``dominantColor`` for each resource the problem
+    moves, lowercased, which the previewer draws where it has no icon (#297).
+
+    Read from a recipe's inputs, outputs and listed alternatives and a node's overrides first, then
+    from the storages, for the plans that colour a resource nowhere else (the MrBruh-fork
+    nitrobenzene plan colours none of its recipe I/O). The first colour found for an id wins: two
+    can differ, as ev-nitrobenzene's spruce log is ``#3b2c18`` on the crop recipe's output and
+    ``#55442a`` on the node override and storage that feed it. A value that is not ``#rrggbb`` is
+    dropped rather than refused, since a colour is decoration and the plan is somebody else's file.
+    Like the names, only the resources the problem carries (:func:`_carried`).
+    """
+    colored: dict[str, str] = {}
+    sources = [(res.id, res.dominant_color) for res in _listed(plan)]
+    sources += [(storage.resource_id, storage.dominant_color) for storage in plan.storages]
+    for resource, color in sources:
+        if resource and _PLAN_COLOR.fullmatch(color):
+            colored.setdefault(resource, color.lower())
+    return {
+        resource: colored[resource] for resource in _carried(machines, nets) if resource in colored
+    }
+
+
+def _listed(plan: Plan) -> list[Resource]:
+    """Every resource the plan's recipes and nodes describe, in the order a display field is
+    looked up: each recipe's inputs then outputs, then each node's overrides, and each followed
+    by the alternatives it lists. A plan describes a resource many times over; the caller keeps
+    the first."""
     listed = [res for recipe in plan.recipes for res in (*recipe.inputs, *recipe.outputs)]
     listed += [res for node in plan.nodes for res in node.recipe_input_overrides.values()]
-    for res in listed:
-        for each in (res, *res.alternatives):
-            if each.display_name:
-                named.setdefault(each.id, each.display_name)
+    return [each for res in listed for each in (res, *res.alternatives)]
+
+
+def _carried(machines: list[Machine], nets: list[Net]) -> list[str]:
+    """Every fluid and item the problem moves, sorted: on a net, through a non-power port, or
+    let through by an Item Filter. What the display maps (names, colours) are restricted to, so an
+    ore-dictionary alternative nobody picked is not listed."""
     carried = {resource for net in nets for resource in net.resources}
     for machine in machines:
         carried.update(machine.filter_items)
@@ -1253,7 +1295,7 @@ def _resource_names(plan: Plan, machines: list[Machine], nets: list[Net]) -> dic
             for port in machine.faces.ports
             if port.commodity is not Commodity.POWER
         )
-    return {resource: named[resource] for resource in sorted(carried) if resource in named}
+    return sorted(carried)
 
 
 #: Forge's ``OreDictionary.WILDCARD_VALUE``. A recipe input spelled ``<registry>@32767`` accepts any

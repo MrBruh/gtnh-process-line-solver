@@ -24,6 +24,7 @@ diverge, the doc records the intent, so reconcile one to the other and say which
 | [requirements.md](dataset-extraction/requirements.md) | What the extraction pipeline must achieve: its outputs, constraints, and acceptance criteria (the *what*). |
 | [implementation.md](dataset-extraction/implementation.md) | How the code achieves it: the Java extractor and the Python consumer, mechanism by mechanism (the *how*). |
 | [texture-resolution.md](dataset-extraction/texture-resolution.md) | Deep dive on the texture pass: the routes `TextureDumper` tries to turn a `(block, meta)` into a sprite name, why a headless dedicated server needs more than one, and what is still unreachable. |
+| [icons.md](dataset-extraction/icons.md) | The item and fluid icons the previewer shows beside each resource: the per-pack icon index it reads, its format, and what a preview draws without one (#297). |
 
 ### spikes/
 

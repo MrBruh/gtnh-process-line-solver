@@ -116,10 +116,12 @@ def test_falls_back_without_a_sourcing_net_and_on_unprefixed_ids() -> None:
     io = system_io(problem, layout)
     # storage output with no net -> resource from the ``output:`` prefix, rate omitted
     assert io.inputs == [
-        BoundaryFlow("chest", "Super Chest", (0, 0, 0), "thing", Commodity.ITEM, None)
+        BoundaryFlow("chest", "Super Chest", (0, 0, 0), "thing", ("thing",), Commodity.ITEM, None)
     ]
     # dangling output on a plain (non-``{dir}:``-prefixed) port id -> id used verbatim
-    assert io.outputs == [BoundaryFlow("maker", "Maker", (2, 0, 0), "out", Commodity.ITEM, None)]
+    assert io.outputs == [
+        BoundaryFlow("maker", "Maker", (2, 0, 0), "out", ("out",), Commodity.ITEM, None)
+    ]
     assert io.power_total == pytest.approx(8.0)
     assert io.power_amps_by_tier == {"LV": 1}  # ceil(8 / 32) = 1 A (no power route -> distance 0)
 
@@ -402,6 +404,88 @@ def test_a_net_is_labelled_by_what_it_carries_a_merged_run_by_all_of_it() -> Non
     assert net_resource(merged) == "a, b, c"
     assert net_resource(single) == "a"
     assert net_resource(power) is None
+
+
+def _storage(mid: str, port_id: str, commodity: Commodity, direction: IODirection) -> Machine:
+    return Machine(
+        id=mid,
+        type="Super Tank" if commodity is Commodity.FLUID else "Super Chest",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(ports=[Port(id=port_id, commodity=commodity, direction=direction)]),
+    )
+
+
+def test_a_boundary_flow_lists_each_resource_it_carries_one_by_one() -> None:
+    """``resources`` is what a consumer that looks each resource up reads (#297): a merged run's
+    several items one by one, and a fluid whose id holds a comma as the one id it is, where the
+    joined ``resource`` label would split it in two."""
+    feed = _storage("feed", "output:items", Commodity.ITEM, IODirection.OUTPUT)
+    tank = _storage("tank", "output:1,3dimethylbenzene", Commodity.FLUID, IODirection.OUTPUT)
+    bin_ = _storage("bin", "input:items", Commodity.ITEM, IODirection.INPUT)
+    mixer = Machine(
+        id="mixer",
+        type="Mixer",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[
+                Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT),
+                Port(id="fluid", commodity=Commodity.FLUID, direction=IODirection.INPUT),
+                Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT),
+            ]
+        ),
+    )
+    nets = [
+        Net(
+            id="run",
+            commodity=Commodity.ITEM,
+            items=("a", "b"),
+            throughput=0.2,
+            endpoints=[
+                MachineFaceRef(machine_id="feed", port_id="output:items"),
+                MachineFaceRef(machine_id="mixer", port_id="in"),
+            ],
+        ),
+        Net(
+            id="xylene",
+            commodity=Commodity.FLUID,
+            fluid_or_item="1,3dimethylbenzene",
+            throughput=5.0,
+            endpoints=[
+                MachineFaceRef(machine_id="tank", port_id="output:1,3dimethylbenzene"),
+                MachineFaceRef(machine_id="mixer", port_id="fluid"),
+            ],
+        ),
+        Net(
+            id="product",
+            commodity=Commodity.ITEM,
+            items=("c", "d"),
+            throughput=0.1,
+            endpoints=[
+                MachineFaceRef(machine_id="mixer", port_id="out"),
+                MachineFaceRef(machine_id="bin", port_id="input:items"),
+            ],
+        ),
+    ]
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=2, sz=8), machines=[feed, tank, bin_, mixer], nets=nets
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id=m.id, cell=CellCoord(x=2 * i, y=0, z=0), orientation=Facing.NORTH)
+            for i, m in enumerate(problem.machines)
+        ],
+    )
+    io = system_io(problem, layout)
+    carried = {f.machine_id: (f.resource, f.resources) for f in [*io.inputs, *io.outputs]}
+    assert carried == {
+        "feed": ("a, b", ("a", "b")),
+        "tank": ("1,3dimethylbenzene", ("1,3dimethylbenzene",)),
+        "bin": ("c, d", ("c", "d")),
+    }
 
 
 def test_a_resource_is_labelled_by_its_plan_name_with_its_id_beside_it() -> None:

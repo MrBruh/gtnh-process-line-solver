@@ -37,12 +37,17 @@ RATE_STEM = {Commodity.ITEM: "items", Commodity.FLUID: "mB", Commodity.POWER: "E
 class BoundaryFlow:
     """One resource crossing the line's edge at a specific machine (an input to load or a product
     to collect). ``rate`` is the sourcing net's typed throughput, or ``None`` when no net gives one
-    (a dangling output, or an unwired boundary storage)."""
+    (a dangling output, or an unwired boundary storage).
+
+    ``resource`` is what it carries as one label (:func:`net_resource`: a merged run's several,
+    comma separated) and ``resources`` the same ids one by one, which is what a consumer that looks
+    each one up must read: a fluid id can contain a comma itself (``1,3dimethylbenzene``)."""
 
     machine_id: str
     machine_type: str
     cell: tuple[int, int, int]
     resource: str
+    resources: tuple[str, ...]
     commodity: Commodity
     rate: float | None
 
@@ -145,10 +150,18 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
         if (is_boundary_storage(machine.type) or machine.outside_front) and only_sources:
             for port in out_ports:
                 src = net_by_source.get((machine.id, port.id))
-                resource = (net_resource(src) if src else None) or port_resource(port)
+                carried = _carried(src, port)
                 rate = src.throughput if src else None
                 inputs.append(
-                    BoundaryFlow(machine.id, machine.type, cell_t, resource, port.commodity, rate)
+                    BoundaryFlow(
+                        machine.id,
+                        machine.type,
+                        cell_t,
+                        ", ".join(carried),
+                        carried,
+                        port.commodity,
+                        rate,
+                    )
                 )
             continue
 
@@ -160,10 +173,18 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
                 if port.commodity is Commodity.POWER:
                     continue
                 sink = net_by_sink.get((machine.id, port.id))
-                resource = (net_resource(sink) if sink else None) or port_resource(port)
+                carried = _carried(sink, port)
                 rate = sink.throughput if sink else port.rate
                 outputs.append(
-                    BoundaryFlow(machine.id, machine.type, cell_t, resource, port.commodity, rate)
+                    BoundaryFlow(
+                        machine.id,
+                        machine.type,
+                        cell_t,
+                        ", ".join(carried),
+                        carried,
+                        port.commodity,
+                        rate,
+                    )
                 )
             continue
 
@@ -172,9 +193,16 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
                 continue  # a power output is a source, not a product to collect
             if (machine.id, port.id) in net_by_source:
                 continue  # consumed by a net or auto-output (e.g. wired to a collection buffer)
+            resource = port_resource(port)
             outputs.append(
                 BoundaryFlow(
-                    machine.id, machine.type, cell_t, port_resource(port), port.commodity, port.rate
+                    machine.id,
+                    machine.type,
+                    cell_t,
+                    resource,
+                    (resource,),
+                    port.commodity,
+                    port.rate,
                 )
             )
 
@@ -220,6 +248,12 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
         power_amps_by_tier=power_amps_by_tier,
         power_amps_by_source=power_amps_by_source,
     )
+
+
+def _carried(net: Net | None, port: Port) -> tuple[str, ...]:
+    """What a boundary storage's ``port`` moves: everything its ``net`` carries, else the one
+    resource the port names (an unwired storage, or a net that names nothing)."""
+    return (net.resources if net is not None else ()) or (port_resource(port),)
 
 
 def _power_source_of(

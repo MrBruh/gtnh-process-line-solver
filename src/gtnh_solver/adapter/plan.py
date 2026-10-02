@@ -56,6 +56,10 @@ class Resource(BaseModel):
     #: by the exporter. Display only: it names the resource for a person reading the preview and
     #: never keys anything (``core._resource_names``). Empty when the export has none.
     display_name: str = ""
+    #: The exporter's colour for it, ``"#rrggbb"`` (the average of its in-game icon). Display only:
+    #: the previewer's swatch where it has no icon (``core._resource_colors``, #297). Empty when the
+    #: export has none; a value that is not a colour is dropped there, not here.
+    dominant_color: str = ""
     #: Every resource a recipe INPUT accepts in this one's place, as the arodoid exporter lists it
     #: from the ore dictionary ("Salt": GT's dust and HarvestCraft's salt), the input's own id
     #: included. What a node's override may pick (``core._refines``). Empty on an output and on
@@ -281,13 +285,17 @@ class Node(BaseModel):
 
 class Storage(BaseModel):
     """A boundary source/sink (feed or drain). The resource it carries is taken from the edges
-    touching it (``adapter.core._storage_ports``), so the export's per-storage ``resourceId`` is
-    redundant here and not modelled - the edge is the single source of truth for what flows."""
+    touching it (``adapter.core._storage_ports``), never from ``resource_id``: the edge is the
+    single source of truth for what flows. ``resource_id`` and ``dominant_color`` are read for
+    display only, because a storage is where some plans keep the only colour a resource has (the
+    MrBruh-fork nitrobenzene plan colours its recipe I/O nowhere, #297)."""
 
     model_config = _CFG
 
     id: str
     kind: str
+    resource_id: str = ""
+    dominant_color: str = ""
 
 
 class Edge(BaseModel):

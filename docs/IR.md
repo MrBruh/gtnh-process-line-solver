@@ -30,6 +30,10 @@ InputIR
                                     #  for the resources this problem moves. Display only: nothing
                                     #  joins on a name, and an id with no entry is shown as the id.
                                     #  InputIR v5 (additive, #296).
+  resource_colors: { str: str }     # raw resource id -> "#rrggbb", the plan's dominantColor for
+                                    #  the resources this problem moves, lowercased; anything
+                                    #  else is refused. Display only: the previewer's swatch
+                                    #  where it has no icon. InputIR v6 (additive, #297).
   pack_version: str | null          # the GTNH pack the plan was balanced against
                                     #  ("2.9.0-beta-2"), null when it states none or two. GT's
                                     #  defaults differ between packs in ways a build must know
