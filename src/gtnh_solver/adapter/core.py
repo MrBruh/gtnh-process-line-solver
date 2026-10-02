@@ -576,7 +576,13 @@ def to_input_ir(
     # what is still short of faces.
     machines, nets = _merge_item_inputs(machines, nets, frozenset(proven_single_ids), toggles)
     region = _bounding_region([m.footprint for m in machines])
-    return InputIR(bounding_region=region, machines=machines, nets=nets, me_toggles=toggles)
+    return InputIR(
+        bounding_region=region,
+        machines=machines,
+        nets=nets,
+        me_toggles=toggles,
+        resource_names=_resource_names(plan, machines, nets),
+    )
 
 
 def _synthesized_eut(recipe: Recipe, node: Node) -> float:
@@ -1207,6 +1213,37 @@ def _port_resource(port_id: str) -> str:
     of :func:`_port_id`, kept beside it so the encode/decode stay in sync. The resource keeps its
     own colons (``output:minecraft:sand`` -> ``minecraft:sand``)."""
     return port_id.split(":", 1)[1]
+
+
+def _resource_names(plan: Plan, machines: list[Machine], nets: list[Net]) -> dict[str, str]:
+    """``InputIR.resource_names``: the export's display name for each resource the problem moves.
+
+    The names are the exporter's, read from the game, never authored here (#296). An edge's
+    ``label`` comes first, since an edge is what becomes a net, then a recipe's ``display_name`` on
+    an input, output, listed alternative or node override, for the ids no edge names. The two can
+    disagree: one MrBruh-fork plan labels ``minecraft:log@32767`` "Oak Log" on its edge and "Oak
+    Wood" on the recipe input. Restricted to the resources the problem carries (a net's, a non-power
+    port's, an Item Filter's), so an ore-dictionary alternative nobody picked is not listed.
+    """
+    named: dict[str, str] = {}
+    for edge in plan.edges:
+        if edge.label:
+            named.setdefault(edge.resource_id, edge.label)
+    listed = [res for recipe in plan.recipes for res in (*recipe.inputs, *recipe.outputs)]
+    listed += [res for node in plan.nodes for res in node.recipe_input_overrides.values()]
+    for res in listed:
+        for each in (res, *res.alternatives):
+            if each.display_name:
+                named.setdefault(each.id, each.display_name)
+    carried = {resource for net in nets for resource in net.resources}
+    for machine in machines:
+        carried.update(machine.filter_items)
+        carried.update(
+            _port_resource(port.id)
+            for port in machine.faces.ports
+            if port.commodity is not Commodity.POWER
+        )
+    return {resource: named[resource] for resource in sorted(carried) if resource in named}
 
 
 #: Forge's ``OreDictionary.WILDCARD_VALUE``. A recipe input spelled ``<registry>@32767`` accepts any

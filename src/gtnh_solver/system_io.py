@@ -21,6 +21,7 @@ formats it.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from gtnh_solver.dataset import UnknownTierError, UnpowerableError, amp_load, whole_amps
@@ -92,6 +93,23 @@ def net_resource(net: Net) -> str | None:
     Every other net names its one resource exactly as before, verbatim as the plan spells it.
     """
     return ", ".join(net.resources) or None
+
+
+def resource_label(resource: str, names: Mapping[str, str]) -> str:
+    """How a person reads ``resource``: its display name with the raw id beside it,
+    ``"Toluene (liquid_toluene)"``, or the id alone when the plan names it nothing (#296).
+
+    The name is ``InputIR.resource_names``, the exporter's, never one authored here. The id stays in
+    the label because it is what a builder searches NEI for, and a name alone can be ambiguous.
+    """
+    name = names.get(resource, "")
+    return f"{name} ({resource})" if name and name != resource else resource
+
+
+def net_label(net: Net, names: Mapping[str, str]) -> str | None:
+    """:func:`net_resource` with each resource labelled by :func:`resource_label`, or ``None`` for
+    power. A merged item run's several read in the net's own order, comma separated."""
+    return ", ".join(resource_label(resource, names) for resource in net.resources) or None
 
 
 def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:

@@ -332,6 +332,12 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   Breaking by the same rule: a v4 consumer that ignores the flag places a Crop Manager anywhere,
 #   its field face buried among the line's machines. A v4 payload is refused on parse.
 #
+# InputIR v5 (additive, no version bump) - added `InputIR.resource_names: dict[str, str]`, the
+#   display name of each fluid and item the problem moves (raw id -> "Toluene"), as the plan's
+#   exporter read it from the game (#296). Display only: every other field still keys a resource by
+#   its raw id, and nothing joins on a name. Not breaking by omission either: a consumer that
+#   ignores it shows bare ids, which is what every consumer did before, and builds nothing wrong.
+#
 # LayoutResult v3 (additive, no version bump) - added `LayoutMetrics.rounds: int | None`, how many
 #   rounds of the multi-start a solve ran. Set only when the solve was given a time budget or a
 #   round count (`gtnh-solve --time-budget` / `--rounds`), and left out of the dump while None, so a

@@ -7,6 +7,18 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **The previewer names each fluid and item, next to its id (#296).** Both gtnh-factory-flow forks
+  export a display name for every resource (an edge's `label`, a recipe input or output's
+  `displayName`), and the adapter used to drop them, so every hover and panel read
+  `liquid_toluene` or `gregtech:gt.metaitem.01@2032`. The adapter now keeps them in a new
+  `InputIR.resource_names` table (raw id to name, only for resources the problem moves), and the
+  previewer prints `Toluene (liquid_toluene)` in a route's hover tag, a storage's contents, an Item
+  Filter's "lets through", a cover's tag, a hatch's hover (what it moves and the product it must be
+  locked to, #120), the nets panel and the system i/o panel. The id stays in
+  the label, because it is what a builder searches NEI for. Where an edge and a recipe disagree
+  (one plan calls `minecraft:log@32767` "Oak Log" on its edge and "Oak Wood" on the recipe), the
+  edge wins, since an edge is what becomes a net. A plan with no names shows bare ids, as before.
+  Additive to the InputIR contract, so no version bump; layouts are unchanged.
 - **Hovering a hatch in the preview says what it must be locked to (#120).** GT fills a
   multiblock's output hatches first fit, so on a machine with two products of a kind the pipe from
   one hatch carries whichever product reached it first, not the one it was routed for. A builder
