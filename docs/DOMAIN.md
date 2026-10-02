@@ -174,9 +174,14 @@ Two more bind the machine at **runtime**, where a structure that formed perfectl
   turbines), so there is no duplicate-muffler error to report.
 - **Which hatch a product lands in is the machine's choice, not ours.** `addOutput` takes the first
   hatch that can store the stack, so with two output hatches nothing guarantees the pipe we routed
-  from one carries the product we routed it for. Pinning it is a player action (fluid-lock or
-  item-lock the hatch), so a deterministic build eventually has to emit that lock configuration.
-  It does not today.
+  from one carries the product we routed it for. Pinning it is a player action: lock **every**
+  output hatch of a kind to its own product, since a locked hatch that fills spills into an
+  unlocked one. A fluid hatch is locked through its `Locked Fluid` slot (in 2.9 an empty locked
+  hatch receives nothing, so the slot must be set), a bus through its output filter, which both
+  packs have. `hatch_locks` derives which hatches need it: those of a kind carrying two or more
+  distinct products, on any machine but a tower that fills by layer (the distillation tower and
+  sparging recipe maps), where a lock decides nothing and one that disagrees voids the product. The
+  preview shows the lock on the hatch's hover (#120).
 
 **One port is one hatch, so it is one net** (#213). A plan draws an edge per consumer, so an output
 feeding two machines arrives as two edges out of one port. In game that port is one hatch with one
