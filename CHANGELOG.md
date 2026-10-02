@@ -7,6 +7,18 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Hovering a hatch in the preview says what it must be locked to (#120).** GT fills a
+  multiblock's output hatches first fit, so on a machine with two products of a kind the pipe from
+  one hatch carries whichever product reached it first, not the one it was routed for. A builder
+  has to lock every such hatch to its own product, and nothing said so. Each hatch and bus block of
+  a multiblock now has a hover of its own: its name, what it moves in or out, and where the machine
+  has two or more products of the hatch's kind, the product it must be locked to and the slot GT
+  sets it in (the fluid hatch's `Locked Fluid` slot, a bus's output filter). A Distillation Tower,
+  a Mega or Advanced (Dangote) tower in tower mode, and a Sparge Tower fill by layer instead, so
+  their outputs say to leave them unlocked: a lock there decides nothing, and one that disagrees
+  voids the product. On the shipped lines that is nitrobenzene's Large Chemical Reactor (nitric
+  acid and water) and ev-nitrobenzene's two Multiblock Centrifuges (8 hatches in all). The rule
+  lives in `hatch_locks.py`; a multiblock drawn as one box lists its locks on its own hover.
 - **A producer standing against the consumer of a net it shares with others auto-outputs into it
   (#270).** Auto-output used to cover only a net with one producer and one consumer, so three
   Forge Hammers feeding one Super Chest were always piped, even with a hammer touching the chest.

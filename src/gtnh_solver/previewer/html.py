@@ -8,8 +8,11 @@ six faces name their tiles in ``blocks[].texture``; a face with no resolved icon
 missing-texture checkerboard, while a machine with no doc at all keeps a flat type-coloured box), with
 the machine name on the front face and, since a textured cube shows no name, a hover name tag that
 floats above whatever the pointer picks out (raycast): a machine's name, a Super Chest/Tank's name
-AND what it holds, or - hovering a pipe or cable - the resource that route carries, its commodity
-and its rate, which is the only way to tell one noodle of a crossing bundle from the next (#155).
+AND what it holds, a multiblock's hatch or bus by name with what it moves and, where the machine
+has two or more products of one kind, the product it must be locked to and the slot that sets it
+(``scene.machines[].hatches``, ``hatch_locks``, #120), or - hovering a pipe or cable - the
+resource that route carries, its commodity and its rate, which is the only way to tell one noodle
+of a crossing bundle from the next (#155).
 Resource ids are shown verbatim as the plan carries them, never a display name invented here; a
 state control swaps every machine between
 its idle and running
@@ -591,6 +594,7 @@ const hoverables = [];
 const nameById = Object.fromEntries(SCENE.machines.map((m) => [m.id, m.type]));
 const contentsById = Object.fromEntries(SCENE.machines.map((m) => [m.id, m.contents || []]));
 const filterItemsById = Object.fromEntries(SCENE.machines.map((m) => [m.id, m.filter_items || []]));
+const hatchesById = Object.fromEntries(SCENE.machines.map((m) => [m.id, m.hatches || []]));
 for (const m of SCENE.machines) {
   const [sx, sy, sz] = m.size;
   const pos = new THREE.Vector3(m.cell[0] + sx / 2, m.cell[1] + sy / 2, m.cell[2] + sz / 2);
@@ -637,17 +641,25 @@ const FACE_COVERED = 1, FACE_CAP = 2;   // previewer.scene's FACE_* values
 const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
 const blockLayers = new Map();   // y -> { main: Batch, caps: Batch }
 const machineOwner = {};         // machine id -> the hover owner every one of its faces shares
+// A hatch's block gets an owner of its own, so hovering it names the hatch, not just its machine
+// (#120): which hatch, what it moves, and the product it must be locked to. Keyed by machine AND
+// cell, since a hatch replaces one casing cell of one machine.
+const hatchOwner = {};
+for (const m of SCENE.machines) {
+  for (const h of m.hatches || []) hatchOwner[m.id + '@' + h.cell.join(',')] = { machineId: m.id, hatch: h };
+}
 for (const b of (ATLAS ? SCENE.blocks || [] : [])) {
   const y = b.cell[1];
   let lb = blockLayers.get(y);
   if (!lb) { lb = { main: new Batch(), caps: new Batch() }; blockLayers.set(y, lb); }
   if (!(b.machine in machineOwner)) machineOwner[b.machine] = { machineId: b.machine };
+  const owner = hatchOwner[b.machine + '@' + b.cell.join(',')] || machineOwner[b.machine];
   const at = [b.cell[0] + 0.5, b.cell[1] + 0.5, b.cell[2] + 0.5];
   for (let f = 0; f < 6; f++) {
     const cover = b.cover ? b.cover[f] : 0;
     if (cover === FACE_COVERED) continue;
     (cover === FACE_CAP ? lb.caps : lb.main)
-      .face(UNIT_BOX, f, at, atlasMaterial, machineOwner[b.machine], tileUV(b.texture[f]));
+      .face(UNIT_BOX, f, at, atlasMaterial, owner, tileUV(b.texture[f]));
   }
 }
 for (const [y, lb] of blockLayers) {
@@ -1067,15 +1079,32 @@ function machineHover(id) {
   // A boundary storage's contents under its type, in the system-i/o panel's own words: 'in:' is a
   // buffer the builder keeps stocked, 'out:' one a product collects in. An Item Filter lists what
   // its slots must let through (#249). A machine that holds nothing adds no line at all, so its tag
-  // is the single name it has always been.
+  // is the single name it has always been. A multiblock drawn as one box rather than as blocks has
+  // no hatch to hover, so its own tag carries the locks its hatches need (#120).
+  const drawnAsBlocks = id in machineOwner;
   return {
     lines: () => [
       nameById[id],
       ...contentsById[id].map((c) => c.flow + ': ' + c.resource + viaMe(c)),
       ...filterItemsById[id].map((item) => 'lets through: ' + item),
+      ...(drawnAsBlocks ? [] : hatchesById[id].filter((h) => h.lock).map(
+        (h) => h.label + ' at ' + h.cell.join(', ') + ' locked to: ' + h.lock)),
     ],
     anchor: [c.x, c.y + s[1] / 2 + 0.15, c.z],
   };
+}
+// A hatch's tag (#120): its machine, which hatch it is, and what it moves, in the storage tag's
+// 'in:'/'out:' words (a hatch's own direction). Where the machine has two or more products of the
+// hatch's kind, GT puts each in whichever hatch takes it first, so the tag says what this one must
+// be locked to and the slot that sets it instead. A tower's outputs fill by layer, which a lock
+// would only break, so those say to leave it unlocked.
+function hatchHover(what) {
+  const h = what.hatch;
+  const lines = [nameById[what.machineId] || what.machineId, h.label];
+  if (h.lock) lines.push('locked to: ' + h.lock, '(set its ' + h.lockSlot + ')');
+  else if (h.resource) lines.push(h.flow + ': ' + h.resource);
+  if (h.byLayer) lines.push('filled by layer: leave unlocked');
+  return { lines: () => lines, anchor: [h.cell[0] + 0.5, h.cell[1] + 1 + 0.15, h.cell[2] + 0.5] };
 }
 // A cover marker's tag: which cover, on which machine's which face, and what it lets out.
 const resourceByNet = Object.fromEntries(SCENE.routes.map((r) => [r.netId, r.resource]));
@@ -1120,6 +1149,7 @@ function pickAt(ev) {
   const what = owners ? owners[hit.faceIndex] : hit.object.userData;
   if (!what) return null;
   if (what.cover) return coverHover(what, hit.object.position);
+  if (what.hatch) return hatchHover(what);
   return what.route ? routeHover(what.route, what.cell) : machineHover(what.machineId);
 }
 // Mouse only: a touch 'pointermove' is a finger dragging the camera, and picking along it would
