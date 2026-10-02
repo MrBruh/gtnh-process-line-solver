@@ -3,8 +3,8 @@ plugins {
     id("com.gtnewhorizons.gtnhconvention")
 }
 
-// Forward the dataset-run properties the CI (and the boot-verify command) pass on the Gradle
-// command line into the forked run JVM as system properties, where DumperMod reads them.
+// Forward the dataset-run properties a dump command passes on the Gradle command line into the
+// forked run JVM as system properties, where DumperMod reads them.
 //   -PdatasetOut=<dir>     where to emit <dir>/multiblocks/ (resolved against this project dir)
 //   -PtextureOut=<dir>     where to emit <dir>/manifest.json (lane 6, texture pass; texture-only
 //                          when -PdatasetOut is absent, so the run skips the structure dump)

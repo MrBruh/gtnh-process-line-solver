@@ -87,9 +87,9 @@ public class DumperMod {
      * Runs the dump, then exits the JVM.
      *
      * <p>
-     * Exit code contract: 0 when the dump succeeds so CI goes green; nonzero when any
-     * {@link Throwable} escapes the dump so CI fails loudly rather than committing an
-     * empty or partial dataset. {@code hardExit = false} lets FML shut the server down
+     * Exit code contract: 0 when the dump succeeds; nonzero when any {@link Throwable}
+     * escapes the dump, so the Gradle run fails loudly rather than leaving an empty or
+     * partial dataset to be trusted. {@code hardExit = false} lets FML shut the server down
      * gracefully before the process exits.
      */
     @Mod.EventHandler
@@ -116,9 +116,9 @@ public class DumperMod {
      * The graceful path is still the one taken: {@code exitJava(code, false)} runs
      * {@code System.exit}, which lets FML and Forge shut the world down. But this is called from the
      * server thread, and a client JVM's shutdown hooks join that same thread - a shape that can sit
-     * there forever instead of exiting. A hung shutdown would cost a whole run, and a client run
-     * costs a human clicking through to a world, so a daemon watchdog halts the JVM if the graceful
-     * path has not finished in time.
+     * there forever instead of exiting. A hung shutdown would cost a whole run and leave an
+     * unattended one waiting for nobody, so a daemon watchdog halts the JVM if the graceful path has
+     * not finished in time.
      *
      * <p>
      * Halting is safe by construction here and nowhere else: every output file is written, flushed
@@ -148,8 +148,8 @@ public class DumperMod {
      * Run the requested passes. Resolve the output directories and run metadata from system
      * properties (a local {@code ./gradlew runServer|runClient -PdatasetOut=... -PtextureOut=...}
      * passes them;
-     * the structure dump is local-only with no CI, so the texture manifest is the only pass a
-     * workflow drives). The structure pass builds every constructable controller with
+     * both passes are local-only, and no CI job runs either). The structure pass builds every
+     * constructable controller with
      * {@link StructureDumper} and writes the schema-v2 dataset to {@code <datasetOut>/multiblocks/};
      * the texture pass writes the schema-2 manifest. Throws if a requested pass produced nothing, so
      * an extractor that silently emits an empty dataset fails loudly rather than being trusted.
@@ -163,7 +163,7 @@ public class DumperMod {
         // -PtextureOut. It reflects each MetaTileEntity's ITexture layer stack (which needs a booted
         // server + a scratch world to place hulls/hatches into) plus the plain casing block icons, so
         // when only -PtextureOut is set the correctness-critical structure dump is still skipped and
-        // the texture workflow stays decoupled from it.
+        // a texture-only run stays decoupled from it.
         File textureOut = resolveOut("gtnhextractor.textureOut");
         if (textureOut != null) {
             LOG.info("gtnh-extractor: dumping layered texture manifest to {}", textureOut.getAbsolutePath());
@@ -231,7 +231,7 @@ public class DumperMod {
 
     /**
      * The versions of the two manifest-tracked mods this dump was built from, for {@code _meta.json}.
-     * Prefers the pinned versions passed by the workflow via {@code -PmodVersions} (read from the
+     * Prefers the pinned versions passed via {@code -PmodVersions} (copied by hand from the
      * repo-root {@code gtnh.lock.json}); the runtime Forge container is only the dev fallback,
      * because GT5-Unofficial's container self-reports the uninformative "MC1710" rather than its
      * artifact version.
