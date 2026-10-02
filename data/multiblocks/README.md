@@ -1,4 +1,4 @@
-# `data/multiblocks/` - extracted multiblock dataset (schema v2)
+# `data/multiblocks/` - extracted multiblock dataset (schema v3)
 
 Committed JSON describing GregTech multiblock controllers: one `<registry_name>.json` file per
 controller plus a `_meta.json` run summary. The solver reads only this data; it never runs the
@@ -16,11 +16,12 @@ instead.
 **Two hand-authored fixtures**, `gregtech_machine_1000.json` (Electric Blast Furnace) and
 `gregtech_machine_1001.json` (Vacuum Freezer), so the Python adapter
 (`gtnh_solver.dataset.multiblocks`) and its golden tests have something real-shaped to run against.
-They are **hand-authored to conform to schema v2** and encode true GTNH ground truth where the
-golden tests assert it (the Electric Blast Furnace is a 3x3x4 shell with two coil layers; the
-Vacuum Freezer is 3x3x3), but the exact block metas, hint colours, `hatch_slots` kinds, and
-`_meta.json` provenance are placeholders. In particular their controller `meta` ids are
-illustrative and do NOT match any one GT5U build - a real local dump is the authority on those.
+They are **hand-authored to conform to schema v3** (written for v2 and re-stamped, since neither
+carries a layer) and encode true GTNH ground truth where the golden tests assert it (the Electric
+Blast Furnace is a 3x3x4 shell with two coil layers; the Vacuum Freezer is 3x3x3), but the exact
+block metas, hint colours, `hatch_slots` kinds, and `_meta.json` provenance are placeholders. In
+particular their controller `meta` ids are illustrative and do NOT match any one GT5U build - a real
+local dump is the authority on those.
 
 **The controllers the shipped example lines resolve to**, one `gregtech_gt_blockmachines_<meta>.json`
 each, so the nitrobenzene lines place real multiblocks and solve on a fresh clone and in CI instead
@@ -48,7 +49,8 @@ never drift from what the loader accepts. The fields, restated here for a reader
 - top-level `schema` (version int), `controller`, `variants`, `substitutions`, `failures`;
 - `controller`: `registry_name`, `meta`, `display_name`, `source_class`, `facing_convention`;
 - each variant: `trigger_stack_size`, `channels`, `blocks[{d:[x,y,z], block, meta}]`,
-  `hints[{d, hint}]`, `hatch_slots[{d, kinds}]`, `bbox`;
+  `hints[{d, hint}]`, `hatch_slots[{d, kinds, output_layer?}]`, `bbox` (`output_layer`, schema v3,
+  is the per-layer output list GT files a hatch in that cell under, on a tower only);
 - `substitutions`: identity-only channel swaps (e.g. tiered `coil` blocks);
 - `_meta.json`: `schema`, `pack_version`, `mod_versions`, `generated_at`, `extractor_sha`,
   `controller_count`, `failures`.

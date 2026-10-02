@@ -16,7 +16,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 
 /**
- * Serialises the dumped facts to schema-v2 JSON with Gson (already on the 1.7.10 classpath). One
+ * Serialises the dumped facts to schema-v3 JSON with Gson (already on the 1.7.10 classpath). One
  * file per controller plus a {@code _meta.json} run summary, both under {@code <out>/multiblocks/}.
  *
  * <p>
@@ -40,9 +40,10 @@ final class JsonWriter {
      * <p>
      * v2 added {@code variants[].hatch_slots}. The Python models are {@code extra="forbid"}, so an
      * old loader rejects a new file outright rather than quietly ignoring the field - which is why
-     * this is a bump rather than an additive no-op.
+     * this is a bump rather than an additive no-op. v3 added {@code hatch_slots[].output_layer}, the
+     * layer GT fills each tower output hatch from (#299), for the same reason.
      */
-    static final int SCHEMA_VERSION = 2;
+    static final int SCHEMA_VERSION = 3;
 
     private static final Comparator<DumpModel.PlacedBlock> BLOCK_ORDER = Comparator
         .comparingInt((DumpModel.PlacedBlock b) -> b.dy)
@@ -195,6 +196,9 @@ final class JsonWriter {
                 JsonArray kinds = new JsonArray();
                 s.kinds.forEach(k -> kinds.add(new JsonPrimitive(k)));
                 sj.add("kinds", kinds);
+                if (s.outputLayer != null) {
+                    sj.addProperty("output_layer", s.outputLayer);
+                }
                 hatchSlots.add(sj);
             });
         o.add("hatch_slots", hatchSlots);

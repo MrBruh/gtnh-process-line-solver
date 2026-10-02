@@ -39,6 +39,7 @@ from gtnh_solver.dataset import (
     PhysicalDataset,
     load_physical_dataset,
 )
+from gtnh_solver.dataset.schema import SCHEMA_VERSION
 from gtnh_solver.ir import CellBox, Facing, Machine
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
@@ -75,7 +76,7 @@ def _dump(
     return PhysicalDataset(
         meta=DatasetMeta.model_validate(
             {
-                "schema": 2,
+                "schema": SCHEMA_VERSION,
                 "pack_version": pack_version,
                 "generated_at": "2026-01-01T00:00:00Z",
                 "extractor_sha": "0" * 40,

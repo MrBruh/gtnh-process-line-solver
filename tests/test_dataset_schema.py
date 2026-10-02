@@ -1,4 +1,4 @@
-"""Schema-v2 validation tests for the committed ``data/multiblocks/`` dataset.
+"""Schema validation tests for the committed ``data/multiblocks/`` dataset.
 
 Proves the extractor contract holds for every committed file (schema.py) and that the loader
 fails loud on a malformed one - the "entries load + validate; bad footprint raises clearly" gate
@@ -108,6 +108,36 @@ def test_a_file_without_hatch_slots_still_parses() -> None:
         variant.pop("hatch_slots", None)
     doc = MultiblockDoc.model_validate(payload)
     assert doc.variants[0].hatch_slots == []
+
+
+# ------------------------------------------------------------ output layers (schema v3, #299)
+
+
+def test_an_output_layer_parses_and_defaults_to_none() -> None:
+    payload = json.loads((_DATA_DIR / "gregtech_machine_1000.json").read_text(encoding="utf-8"))
+    payload["variants"][0]["hatch_slots"] = [
+        {"d": [0, 1, 1], "kinds": ["OutputHatch"], "output_layer": 2},
+        {"d": [0, 2, 1], "kinds": ["OutputHatch"]},
+    ]
+    slots = MultiblockDoc.model_validate(payload).variants[0].hatch_slots
+    assert [s.output_layer for s in slots] == [2, None]
+
+
+def test_a_negative_output_layer_fails_loud() -> None:
+    # GT's per-layer lists are indexed from 0, so a negative layer can only be a malformed dump.
+    payload = json.loads((_DATA_DIR / "gregtech_machine_1000.json").read_text(encoding="utf-8"))
+    payload["variants"][0]["hatch_slots"] = [
+        {"d": [0, 1, 1], "kinds": ["OutputHatch"], "output_layer": -1}
+    ]
+    with pytest.raises(ValidationError):
+        MultiblockDoc.model_validate(payload)
+
+
+def test_a_v2_dump_is_refused_because_it_has_no_layers(tmp_path: Path) -> None:
+    """A v2 file carries no ``output_layer`` key, so it would read as a tower that fills its
+    outputs first fit: every output hatch could dock on any layer. The gate names that."""
+    with pytest.raises(DatasetSchemaError, match="output_layer"):
+        load_multiblock_doc(_doc_file(tmp_path, 2))
 
 
 def test_schema_field_loads_by_alias_and_by_name() -> None:

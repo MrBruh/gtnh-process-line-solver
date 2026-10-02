@@ -44,6 +44,7 @@ from gtnh_solver.dataset import (
     load_physical_dataset,
     to_physical,
 )
+from gtnh_solver.dataset.schema import SCHEMA_VERSION
 from gtnh_solver.ir import CellBox, Facing, LayoutStatus, Machine
 from gtnh_solver.solver import solve
 from gtnh_solver.validator import validate
@@ -140,7 +141,7 @@ def test_a_dump_with_no_census_field_is_taken_as_a_census(dataset: PhysicalDatas
     # registered controller, so any real dump IS a census and defaults to one.
     meta = DatasetMeta.model_validate(
         {
-            "schema": 2,
+            "schema": SCHEMA_VERSION,
             "pack_version": "test",
             "generated_at": "2026-01-01T00:00:00Z",
             "extractor_sha": "0" * 40,
@@ -247,7 +248,7 @@ def _tower_doc(
         )
     return MultiblockDoc.model_validate(
         {
-            "schema": 2,
+            "schema": SCHEMA_VERSION,
             "controller": {
                 "registry_name": "r",
                 "meta": 0,
@@ -288,7 +289,7 @@ def test_a_banded_tower_declines_selection_and_takes_the_largest() -> None:
 def test_a_fixed_shape_machine_ignores_the_recipe() -> None:
     doc = MultiblockDoc.model_validate(
         {
-            "schema": 2,
+            "schema": SCHEMA_VERSION,
             "controller": {
                 "registry_name": "r",
                 "meta": 0,
@@ -491,7 +492,7 @@ def _sliced_oven_doc(slices: int = 4) -> MultiblockDoc:
         )
     return MultiblockDoc.model_validate(
         {
-            "schema": 2,
+            "schema": SCHEMA_VERSION,
             "controller": {
                 "registry_name": "r",
                 "meta": 0,
@@ -628,7 +629,7 @@ def test_hint_positions_map_to_all_six_faces() -> None:
     # A hint centred on each face of a 3x3x3 box should mark every one of the six faces I/O-capable.
     doc = MultiblockDoc.model_validate(
         {
-            "schema": 2,
+            "schema": SCHEMA_VERSION,
             "controller": {
                 "registry_name": "r",
                 "meta": 0,
@@ -661,7 +662,7 @@ def test_primary_variant_is_the_largest_built_form() -> None:
     # A small variant plus a bigger one; the footprint must come from the bigger (fully-built) one.
     doc = MultiblockDoc.model_validate(
         {
-            "schema": 2,
+            "schema": SCHEMA_VERSION,
             "controller": {
                 "registry_name": "r",
                 "meta": 0,
@@ -690,7 +691,7 @@ def test_primary_variant_is_the_largest_built_form() -> None:
 def test_bbox_mismatch_raises_dataset_error() -> None:
     doc = MultiblockDoc.model_validate(
         {
-            "schema": 2,
+            "schema": SCHEMA_VERSION,
             "controller": {
                 "registry_name": "r",
                 "meta": 0,
@@ -707,7 +708,7 @@ def test_bbox_mismatch_raises_dataset_error() -> None:
 
 def _dump_meta(count: int = 2) -> dict[str, object]:
     return {
-        "schema": 2,
+        "schema": SCHEMA_VERSION,
         "pack_version": "test",
         "generated_at": "now",
         "extractor_sha": "0",
@@ -719,7 +720,7 @@ def _doc(
     meta_id: int, display_name: str, registry: str = "r", source_class: str | None = None
 ) -> dict[str, object]:
     return {
-        "schema": 2,
+        "schema": SCHEMA_VERSION,
         "controller": {
             "registry_name": registry,
             "meta": meta_id,

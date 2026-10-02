@@ -150,7 +150,7 @@ public class DumperMod {
      * passes them;
      * both passes are local-only, and no CI job runs either). The structure pass builds every
      * constructable controller with
-     * {@link StructureDumper} and writes the schema-v2 dataset to {@code <datasetOut>/multiblocks/};
+     * {@link StructureDumper} and writes the schema-v3 dataset to {@code <datasetOut>/multiblocks/};
      * the texture pass writes the schema-2 manifest. Throws if a requested pass produced nothing, so
      * an extractor that silently emits an empty dataset fails loudly rather than being trusted.
      */

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from gtnh_solver.dataset.schema import SCHEMA_VERSION
 from gtnh_solver.previewer.textures import (
     BlockCube,
     TextureManifest,
@@ -275,7 +276,7 @@ def _casing_doc(meta: int = 0, *, slots: bool = False) -> Any:
 
     return MultiblockDoc.model_validate(
         {
-            "schema": 2,
+            "schema": SCHEMA_VERSION,
             "controller": {
                 "registry_name": "gregtech:gt.blockmachines",
                 "meta": 1000,
@@ -463,7 +464,7 @@ def _coil_chain_doc() -> Any:
 
     return MultiblockDoc.model_validate(
         {
-            "schema": 2,
+            "schema": SCHEMA_VERSION,
             "controller": {
                 "registry_name": "gregtech:gt.blockmachines",
                 "meta": 1169,
@@ -535,7 +536,7 @@ def _two_block_doc(first: tuple[str, int], second: tuple[str, int]) -> Any:
     cells = [first, first, second, second]
     return MultiblockDoc.model_validate(
         {
-            "schema": 2,
+            "schema": SCHEMA_VERSION,
             "controller": {
                 "registry_name": "gregtech:gt.blockmachines",
                 "meta": 1000,
@@ -588,7 +589,7 @@ def _glass_ring_doc() -> Any:
 
     return MultiblockDoc.model_validate(
         {
-            "schema": 2,
+            "schema": SCHEMA_VERSION,
             "controller": {
                 "registry_name": "gregtech:gt.blockmachines",
                 "meta": 1000,

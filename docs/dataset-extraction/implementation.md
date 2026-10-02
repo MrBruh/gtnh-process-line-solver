@@ -10,7 +10,7 @@ contracts, and policy are in requirements.md and are not restated here. The livi
 tools/gtnh-extractor/   Forge 1.7.10 dedicated-server mod (JDK 25 daemon + JDK 8 toolchain)
    runServer, gated by -PdatasetOut and/or -PtextureOut (write into data/<version>/)
         |
-        |-- structure dump  --> data/<version>/multiblocks/<controller>.json + _meta.json  (v2)
+        |-- structure dump  --> data/<version>/multiblocks/<controller>.json + _meta.json  (v3)
         '-- texture manifest --> data/<version>/textures/manifest.json                      (v2)
                                           |  (local, gitignored; committed fixtures live at data/)
                                           v
@@ -77,7 +77,20 @@ into a scratch region halfway up the world (origin `8, 128, 8`, controller facin
   `IStructureElement` that visited it; `HatchProbe` then tests one probe stack per `HatchElement`
   kind against that element's `getBlocksToPlace` predicate, and records the kinds it accepts. An
   element that exposes no item filter reports no kinds rather than a guess.
-- **Robustness.** `preloadRegion()` force-loads the scratch chunks up front to dodge a re-entrant
+- **Output layers per slot (schema v3, #299).** Which layer an output cell feeds is the machine's
+  own bookkeeping, so `HatchProbe`'s LAYER step asks it, once per built form: an output hatch stands
+  in every cell that takes one, the machine's `checkMachine` runs on a throwaway copy of the
+  controller (the overload that lists errors on 2.9, the plain one on 2.8.4), and the per-layer list
+  each hatch lands in is read back. The list is found by its type, `List<List<MTEHatchOutput>>`,
+  walking up the class hierarchy, since its name differs between machines; a machine without one
+  records no layers. Every cell is restored afterwards. An answer that cannot be whole is dropped
+  with a note in the doc's `failures`: a list holding no probe hatch (an incomplete fill) or a
+  check that throws leaves the form without layers, and a cell filed under two lists gets none.
+- **Robustness.** GT's machine-block updates are off for the dump thread
+  (`RunnableMachineUpdate.setCurrentThreadEnabled(false)`): GT answers every GT block placed or
+  broken with one, and on 2.8.4 it runs on a thread pool that reads the cells the dump is building
+  in, which cost the layer probe random forms of two towers in a 2.8.4 census (#299).
+  `preloadRegion()` force-loads the scratch chunks up front to dodge a re-entrant
   `"Already decorating!!"` decorator cascade; hard caps bound the stack sweep (16), variant count
   (also 16, pinned to the sweep so it is non-binding: at 6 it rejected 16 of 191 legitimately
   parametric controllers), hinted cells (20000), scan dimension (80), and substitution entries (128)
@@ -130,7 +143,7 @@ which `@SideOnly` failure mode each route answers, the traps that cost the most 
 the casing table safely, and what is currently unreachable.
 
 ### JsonWriter and ErrorCollector
-`JsonWriter` serialises schema v2 with Gson, every list sorted and every key order fixed (blocks,
+`JsonWriter` serialises schema v3 with Gson, every list sorted and every key order fixed (blocks,
 hatch slots and hints by `(dy, dz, dx)` then identity), so a regenerated dump is a minimal,
 reviewable diff; field order mirrors `schema.py` exactly so it loads without a translation step.
 `ErrorCollector` gathers per-controller failures into `_meta.json.failures`.

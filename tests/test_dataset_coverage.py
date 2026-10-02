@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from gtnh_solver.dataset.coverage import format_report, measure
+from gtnh_solver.dataset.schema import SCHEMA_VERSION
 from gtnh_solver.previewer.jar import cached_jar
 
 
@@ -24,7 +25,7 @@ def _doc(
     substitutions: dict[str, list[tuple[str, int]]] | None = None,
 ) -> dict[str, Any]:
     return {
-        "schema": 2,
+        "schema": SCHEMA_VERSION,
         "controller": {
             "registry_name": "gregtech:gt.blockmachines",
             "meta": abs(hash(name)) % 1000,
@@ -54,7 +55,7 @@ def _dataset(tmp_path: Path, docs: dict[str, dict[str, Any]], *, meta: bool = Tr
         (directory / "_meta.json").write_text(
             json.dumps(
                 {
-                    "schema": 2,
+                    "schema": SCHEMA_VERSION,
                     "pack_version": "2.8.4",
                     "generated_at": "2026-01-01T00:00:00Z",
                     "extractor_sha": "abc",
