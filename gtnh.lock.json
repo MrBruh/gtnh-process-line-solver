@@ -5,5 +5,14 @@
     "StructureLib": "1.4.42"
   },
   "pack_version": "2.9.0-beta-3",
-  "schema": 1
+  "schema": 1,
+  "tools": {
+    "nesql-exporter": {
+      "commit": "9b650ed2c1fd9c020c1b418fa8a1a6ee10e16287",
+      "license": "LGPL-3.0",
+      "repo": "https://github.com/MrBruh/nesql-exporter",
+      "upstream": "https://github.com/ShadowTheAge/nesql-exporter",
+      "upstream_commit": "b5b896ebd9bcf4cfe1f4fad19ccdc7de8414ee57"
+    }
+  }
 }

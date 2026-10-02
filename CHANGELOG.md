@@ -7,6 +7,18 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **An icon index can now be made from a NESQL export (#297).** `tools/derive_icons.py` turns what
+  NESQL Exporter writes in a full 2.9 pack instance (`nesql-db.script` and `image.zip`) into the
+  `data/<version>/icons/` the previewer reads, and `docs/dataset-extraction/icons.md` now has the
+  whole run: building the exporter (pinned in `gtnh.lock.json` under a new `tools` key, at
+  `MrBruh/nesql-exporter`, ShadowTheAge's fork plus a build-file fix for GTNH's pruned maven),
+  exporting in game, and deriving. The new `gtnh_solver.dataset.nesql` reads the HSQLDB script
+  itself, refusing what it does not understand rather than guessing, keys items and fluids the way
+  a plan spells them, prefers each item's NBT-free row, and cleans names of formatting codes and
+  GT:NH's private-use font glyphs (ShadowTheAge's table, MIT, credited in `NOTICE`). The tool
+  refuses an export with an empty NEI list and a pack other than the lock's, since the export
+  records no pack of its own. `tests/test_acceptance_icons.py` checks a local index against every
+  resource the shipped lines move, and skips without one.
 - **The previewer shows a picture beside each fluid and item (#297).** Every surface that names a
   resource since #296 (a route's, a cover's and a hatch's hover, a storage's contents, an Item
   Filter's slots, the nets panel and the system i/o panel) now puts its icon in front of the name,
@@ -18,8 +30,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   clone shows dots everywhere. Only the icons the line uses are embedded, and an index from another
   pack stands in when the plan's pack has none, since a picture is display only. Where the plan
   names a resource nothing, the index's name is shown. The io panel also labels each item of a
-  merged run by its own name now, where it used to look up the joined string and find none. Making
-  an index from a NESQL export is the second half of #297; until then previews show the dots.
+  merged run by its own name now, where it used to look up the joined string and find none. Without
+  an index (made from a NESQL export, above) previews show the dots.
 - **The preview and the export say which machines must refuse input through their output face
   (#278).** When several machines' outputs share one pipe (the machines of a parallel node on one
   trunk, or several producers on one feed run), each machine's output face sits on a pipe that

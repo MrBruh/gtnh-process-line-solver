@@ -24,6 +24,13 @@ Third-party components:
   repository, extracts the referenced iconset PNGs, and embeds them (as data: URIs) only
   in the generated preview HTML. No PNG is ever committed to this repository.
 
+- NESQL Exporter (https://github.com/ShadowTheAge/nesql-exporter, a fork of
+  https://github.com/D-Cysteine/nesql-exporter), LGPL-3.0. tools/derive_icons.py reads the
+  database script and image archive the exporter writes when run in a GT:NH instance. The
+  exporter is built and run separately, from the build-file-only fork pinned in
+  gtnh.lock.json (https://github.com/MrBruh/nesql-exporter); none of its source is vendored
+  here, and the icons it renders are local data, never committed to this repository.
+
 - GTNH Calculator (https://github.com/ShadowTheAge/gtnh), MIT License, Copyright (c) 2025
   ShadowTheAge. src/gtnh_solver/dataset/nesql.py carries, as Python, the table from its
   export/FontCharactersFixer.cs that maps GT:NH's private-use font glyphs to the Unicode
