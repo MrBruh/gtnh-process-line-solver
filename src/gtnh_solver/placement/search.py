@@ -32,8 +32,8 @@ machines (a net-connected neighbourhood, the ones that want to sit together) and
 re-insert each at the position + orientation that minimises the cost, biased toward cells next to
 its already-placed net-neighbours. One LNS step reshapes a whole cluster at once, escaping the
 local optima single-cell moves plateau in. The re-insertion prices compactness too (how much a
-spot grows the build), which is what lets it fold the long strip the first-fit start lays a big
-multiblock line out in (#254). Metropolis acceptance with geometric cooling keeps the best valid
+spot grows the build), which is what folded the long strip a multiblock line used to start as
+(#254), though never a strip as long as log-bug's (below). Metropolis acceptance with geometric cooling keeps the best valid
 layout seen.
 
 **Best means the cheapest layout the crowding gate passes**, not the cheapest one seen. The
@@ -48,7 +48,7 @@ itself: the anneal takes exactly the path it always did, and only the state it r
 When no state passes, it returns the cheapest one, and the solver's own gate and fallback decide
 as before.
 
-    initial = constructive.place(lattice=True)   # a valid seed; single blocks on a spaced lattice
+    initial = constructive.place(lattice=True)   # a valid seed, spaced, busy blocks lifted
     repeat for a seeded budget:
         cand = with prob p_lns:  ruin (remove a related cluster) + recreate (greedy re-insert,
                                  priced on nets, auto-output and how much it grows the build)
@@ -66,6 +66,27 @@ at full effort iron solved VALID on 15 either way, at a median of 346 floor plus
 against 366, and 37 of its 128 attempts routed VALID against 29. The floor term hardly moves a
 lattice (each edge is a whole row of blocks), so it was left alone: priced as a smooth
 ((x + z) / 2) ** 2, or with a one-cell routing margin on each side, iron solved no better.
+
+**A line with a multiblock starts on shelves**, the same spacing for boxes of any size
+(``constructive`` has the picture). Started from first-fit's row, log-bug's 104 machines lay 168
+cells long and one deep, and the anneal never folded it: the full search ended in a 150x6x6 strip
+with machines boxed in by their neighbours (``crowded_machines``), which is where the line's
+unconnected nets came from. The shelves start it 33 by 39 with 4 machines crowded instead of 22,
+and platline with 14 instead of 23. At full effort platline then ends with 9.5 unconnected nets
+instead of 15.5 and log-bug about 30 by 35, and of the lines that solve, ev-nitrobenzene's median
+floor plus route cells fall from 849 to 709 and untitled-design's from 486.5 to 422.5, with
+gtnh-nitrobenzene and hydrogen-line about even.
+
+**A busy single block starts off the floor.** On the floor it has four faces for connections (no
+down, and no I/O on its front), so one with four or more has none to spare; ``constructive``
+lifts it one cell and holds the cell below it empty. That takes bio-diesel's seed from 8 crowded
+machines to none and platline's from 14 to 1. At full effort titanium and salty-root then solve
+VALID on 16 of 16 seeds instead of 4 and 2, iron's median floor plus route cells fall from 191.5
+to 166.5, and log-bug ends with 2 unconnected nets instead of about 10. Lifting only blocks with
+five connections was worse on every one of those lines: it made the spread start pass the
+crowding gate where the compact states the walk reached did not, so many anneals handed the start
+back and titanium's layouts came out twice the size. Nothing here keeps a lifted block up: a move
+may set it back on the floor, where the face-shortfall term charges for it.
 
 **The nudge** shifts one machine by one cell. Relocate draws a cell anywhere in the region, which
 almost never lands anywhere useful (under 2% of relocates are accepted), so without a nudge the
