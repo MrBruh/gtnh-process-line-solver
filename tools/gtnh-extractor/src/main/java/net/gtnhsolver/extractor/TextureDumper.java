@@ -300,7 +300,7 @@ final class TextureDumper {
 
     /**
      * Build the layered manifest and write {@code <textureOut>/manifest.json}. Returns the number of
-     * resolved (block, side, state) layer stacks, so a run that resolves nothing fails CI loudly.
+     * resolved (block, side, state) layer stacks, so a run that resolves nothing fails loudly.
      */
     int run(File textureOut, String packVersion, Map<String, String> modVersions, String extractorSha)
         throws IOException {

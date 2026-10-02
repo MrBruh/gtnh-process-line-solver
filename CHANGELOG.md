@@ -1328,8 +1328,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   from 261 unresolved pairs and 208 of 296 gapped multiblocks to 12 and 13 of 296; 2.8.4 from 45 and
   56 of 208 to 1 and 1 of 208.** Nothing resolves worse: 4642 drawable keys gained and 0 lost at
   2.8.4, 7134 and 0 at 2.9, and `gregtech` icons naming a PNG the jar does not carry fall from 147
-  to 2. A server dump is unchanged, verified at both packs. It needs a GL window and a human to load
-  a world, so it does not replace the server path yet; `docs/dataset-extraction/client-dump-spike.md`
+  to 2. A server dump is unchanged, verified at both packs. A client run still needs a GL window, so
+  it does not replace the server path yet; `docs/dataset-extraction/client-dump-spike.md`
   has the numbers and the recommendation that follows from them. (#169)
 - **The icon-name matcher works on GT 2.9 as well as 2.8.4 (`dataset/`, extractor).** 2.9 refactored
   `Textures.BlockIcons` from an enum into a class, and the icon holder went with it:
