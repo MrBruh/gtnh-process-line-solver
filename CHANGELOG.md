@@ -7,6 +7,19 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **The preview and the export say which machines must refuse input through their output face
+  (#278).** When several machines' outputs share one pipe (the machines of a parallel node on one
+  trunk, or several producers on one feed run), each machine's output face sits on a pipe that
+  carries the others' outputs. On 2.9 a new GT basic machine takes items and fluids in through its
+  output face, so one that runs dry takes a sibling's output into its input and jams. The fix is the
+  machine's own setting, "Input from Output Side forbidden", and nothing said so. Now each such
+  machine's auto-output arrow is red, its hover says to screwdriver the output face (not sneaking)
+  until chat says "Input from Output Side forbidden", the legend counts them, and `--schematic`
+  warns with the list. It names the state to reach rather than a click, since a 2.8.4 machine starts
+  forbidden and the same click would allow it, and a 2.8.4 plan is not marked at all. On the shipped
+  lines that is parallel-sand's nine Forge Hammers (seeds 0 and 1 at minimal effort) and nothing
+  else. The plan's pack reaches the IR as
+  `InputIR.pack_version` (additive, no version bump).
 - **The previewer names each fluid and item, next to its id (#296).** Both gtnh-factory-flow forks
   export a display name for every resource (an edge's `label`, a recipe input or output's
   `displayName`), and the adapter used to drop them, so every hover and panel read

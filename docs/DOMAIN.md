@@ -72,7 +72,10 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
   the filters sorting all of them. On 2.8.4 a sibling's output face refuses the others' items. On
   2.9 it takes any item into an empty input slot (above), so a stocked machine never does, but one
   that runs dry can take a stray output and jam; a screwdriver right-click on each sibling's output
-  face ("Input from Output Side forbidden") rules it out. The filter's faces are pinned in the IR (`Port.faces`: input on front, left,
+  face ("Input from Output Side forbidden") rules it out. The same holds for fluids
+  (`isLiquidInput`) and for any pipe several machines' outputs share, a feed run (#270) as much as
+  a trunk. The preview draws each such machine's auto-output arrow red, with the step on its hover,
+  and the `.schematic` export lists them, for a plan balanced against 2.9 (`output_faces`, #278). The filter's faces are pinned in the IR (`Port.faces`: input on front, left,
   right, up, down; output on back), and the validator checks that every trunk item has exactly one
   filter, that each filter's output carries only its items, and that nothing but its own output
   sits behind it (`FILTER_ITEM_UNSORTED`, `FILTER_BACK_NOT_ITS_OUTPUT`). The routers hold that

@@ -582,6 +582,7 @@ def to_input_ir(
         nets=nets,
         me_toggles=toggles,
         resource_names=_resource_names(plan, machines, nets),
+        pack_version=plan_pack_version(plan),
     )
 
 

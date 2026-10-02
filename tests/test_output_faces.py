@@ -8,6 +8,8 @@ from here, which is what these pin.
 
 from __future__ import annotations
 
+import pytest
+
 from gtnh_solver.ir import (
     AutoConnection,
     CellBox,
@@ -28,7 +30,13 @@ from gtnh_solver.ir import (
     Route,
     Terminal,
 )
-from gtnh_solver.output_faces import _FACE_ORDER, BlockOutputs, CoverFace, output_faces
+from gtnh_solver.output_faces import (
+    _FACE_ORDER,
+    BlockOutputs,
+    CoverFace,
+    output_faces,
+    output_side_takes_input,
+)
 from gtnh_solver.router._grid import FACE_ORDER
 
 _SOUTH_OF_ORIGIN = (0, 0, 1)
@@ -106,8 +114,15 @@ def _solve(
     placements: list[Placement],
     routes: list[Route] = (),  # type: ignore[assignment]
     autos: list[AutoConnection] = (),  # type: ignore[assignment]
+    *,
+    pack_version: str | None = None,
 ) -> dict[str, BlockOutputs]:
-    problem = InputIR(bounding_region=CellBox(sx=8, sy=4, sz=8), machines=machines, nets=nets)
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=machines,
+        nets=nets,
+        pack_version=pack_version,
+    )
     layout = LayoutResult(
         status=LayoutStatus.VALID,
         seed=0,
@@ -352,3 +367,122 @@ def test_the_sand_line_auto_outputs_every_hammer_and_covers_its_chest(
     chests = [b for mid, b in got.items() if types[mid] == "Super Chest"]
     assert chests
     assert all(b.auto_face is None and b.covers for b in chests)
+
+
+# ------------------------------------------------- input through the output face (#278)
+
+
+@pytest.mark.parametrize(
+    ("pack", "takes"),
+    [
+        ("2.9.0-beta-2", True),
+        ("2.9.0", True),
+        ("2.10.1", True),
+        ("3.0.0", True),
+        ("2.8.4", False),
+        (None, True),  # unknown: say the state to reach rather than nothing
+        ("nightly", True),
+    ],
+)
+def test_a_new_basic_machine_takes_input_through_its_output_face_from_29(
+    pack: str | None, takes: bool
+) -> None:
+    assert output_side_takes_input(pack) is takes
+
+
+_SHARED = CellCoord(x=1, y=0, z=0)
+
+
+def _sharing(
+    a_type: str = "Macerator",
+    *,
+    a_filters: tuple[str, ...] = (),
+    a_on_pipe: bool = True,
+    autos: list[AutoConnection] = (),  # type: ignore[assignment]
+    pack_version: str | None = "2.9.0-beta-2",
+) -> dict[str, BlockOutputs]:
+    """``a`` and ``b`` both feed ``x`` into one Super Chest ``c``, by one pipe at (1, 0, 0) that
+    docks ``a``'s east face (unless ``a_on_pipe`` is off) and ``b``'s west face."""
+    machines = [
+        _block("a", [_out("output:x")], type_=a_type, filter_items=a_filters),
+        _block("b", [_out("output:x")]),
+        _block("c", [_in("input:x")], type_="Super Chest"),
+    ]
+    net = Net(
+        id="n",
+        commodity=Commodity.ITEM,
+        fluid_or_item="x",
+        throughput=1.0,
+        endpoints=[
+            MachineFaceRef(machine_id="a", port_id="output:x"),
+            MachineFaceRef(machine_id="b", port_id="output:x"),
+            MachineFaceRef(machine_id="c", port_id="input:x"),
+        ],
+    )
+    terminals = [
+        Terminal(machine_id="b", port_id="output:x", face=Facing.WEST, cell=_SHARED),
+        Terminal(machine_id="c", port_id="input:x", face=Facing.NORTH, cell=_SHARED),
+    ]
+    if a_on_pipe:
+        terminals.insert(
+            0, Terminal(machine_id="a", port_id="output:x", face=Facing.EAST, cell=_SHARED)
+        )
+    pipe = Route(net_id="n", commodity=Commodity.ITEM, terminals=terminals, segments=[])
+    placements = [_place("a", 0, 0, 0), _place("b", 2, 0, 0), _place("c", 1, 0, 1)]
+    return _solve(machines, [net], placements, [pipe], autos, pack_version=pack_version)
+
+
+def test_machines_whose_outputs_share_a_pipe_must_refuse_input_through_it_on_29() -> None:
+    """Each one's output face is on a pipe that carries the other's output, and a GT pipe delivers
+    to any inventory that takes the stack: on 2.9 a new basic machine takes it through its output
+    face, so one run dry jams on a sibling's product (#278)."""
+    got = _sharing()
+    assert got["a"].forbid_input_from_output
+    assert got["b"].forbid_input_from_output
+
+
+def test_a_28_plan_marks_nothing() -> None:
+    # 2.8.4's basic machines refuse input through the output face by default; the same screwdriver
+    # click would ALLOW it, so a 2.8.4 build must not be told to make it.
+    got = _sharing(pack_version="2.8.4")
+    assert not got["a"].forbid_input_from_output
+    assert not got["b"].forbid_input_from_output
+
+
+def test_a_machine_alone_on_its_output_pipe_is_not_marked() -> None:
+    machines = [_block("m", [_out("output:x")]), _block("c", [_in("input:x")])]
+    net = _net("x", ("m", "output:x"), ("c", "input:x"), Commodity.ITEM)
+    pipe = _pipe(
+        net,
+        Commodity.ITEM,
+        ("m", "output:x", Facing.EAST),
+        ("c", "input:x", Facing.WEST),
+        (1, 0, 0),
+    )
+    placements = [_place("m", 0, 0, 0), _place("c", 2, 0, 0)]
+    got = _solve(machines, [net], placements, [pipe], pack_version="2.9.0-beta-2")
+    assert not got["m"].forbid_input_from_output
+
+
+def test_only_a_basic_machine_is_marked() -> None:
+    # An Item Filter refuses items at its back with no setting to change, so it is never told to set
+    # one; the machine beside it still is, since the filter's output passes its output face.
+    got = _sharing("Ultra Low Voltage Item Filter", a_filters=("x",))
+    assert not got["a"].forbid_input_from_output
+    assert got["b"].forbid_input_from_output
+
+
+def test_a_machine_ejecting_straight_into_its_consumer_is_not_on_the_pipe() -> None:
+    # #270: ``a`` stands against the chest and auto-outputs into it, so its output face touches the
+    # chest, not the pipe, and ``b`` is the only machine feeding that pipe. Neither is marked.
+    auto = AutoConnection(
+        net_id="n",
+        source_machine_id="a",
+        source_face=Facing.SOUTH,
+        target_machine_id="c",
+        target_face=Facing.NORTH,
+    )
+    got = _sharing(a_on_pipe=False, autos=[auto])
+    assert got["a"].auto_face is Facing.SOUTH
+    assert not got["a"].forbid_input_from_output
+    assert not got["b"].forbid_input_from_output

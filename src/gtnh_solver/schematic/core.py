@@ -433,6 +433,7 @@ def lower(
     outputs = output_faces(problem, layout)
     covers: list[tuple[str, tuple[int, int, int], CoverFace]] = []
     filters: list[tuple[str, tuple[int, int, int], list[str]]] = []
+    forbids: list[tuple[str, tuple[int, int, int], Facing]] = []
     for machine in scene["machines"]:
         cubes = machine_cubes(machine, docs, manifest, auto_out)
         if not cubes:
@@ -450,6 +451,8 @@ def lower(
                 name = manifest.display_name(cube.block, cube.meta) or str(machine["type"])
                 if machine_outputs is not None:
                     covers.extend((name, key, c) for c in machine_outputs.covers)  # type: ignore[misc]
+                    if machine_outputs.forbid_input_from_output and machine_outputs.auto_face:
+                        forbids.append((name, key, machine_outputs.auto_face))  # type: ignore[arg-type]
                 if machine.get("filter_items"):
                     filters.append((name, key, list(machine["filter_items"])))  # type: ignore[arg-type]
             grid[key] = cell  # type: ignore[index]
@@ -463,6 +466,7 @@ def lower(
     _warn_about_frames(grid, manifest)
     _warn_about_covers(covers)
     _warn_about_filters(filters)
+    _warn_about_output_side(forbids)
     return size, grid  # type: ignore[return-value]
 
 
@@ -529,6 +533,33 @@ def _warn_about_filters(filters: list[tuple[str, tuple[int, int, int], list[str]
     warnings.warn(
         f"{len(filters)} Item Filter(s): a .schematic carries no inventory, so set each filter's "
         f"slots to the item it lets through. {listed}",
+        SchematicWarning,
+        stacklevel=3,
+    )
+
+
+def _warn_about_output_side(forbids: list[tuple[str, tuple[int, int, int], Facing]]) -> None:
+    """Name every machine that must refuse input through its output face, and how (#278).
+
+    Its output face shares a pipe with another machine's outputs (``output_faces``), and on 2.9 a
+    basic machine takes items and fluids in through that face by default, so one run dry takes a
+    sibling's output and jams. The file writes each one's ``mAllowInputFromOutputSide`` off
+    (:func:`_single_block_tile`), but a machine placed by hand from the ghost is new and starts
+    allowed. The step names the state to reach, not a click count: a 2.8.4 machine starts
+    forbidden, and the same click would allow it.
+    """
+    if not forbids:
+        return
+    listed = "; ".join(
+        f"{name} at ({x}, {y}, {z}), {face.value} face"
+        for name, (x, y, z), face in sorted(forbids, key=lambda f: f[1])
+    )
+    warnings.warn(
+        f"{len(forbids)} machine(s) share an output pipe with another machine's outputs. On 2.9 a "
+        "new basic machine takes input through its output face, so one run dry would take a "
+        "sibling's output and jam. This file records each as refusing it, but a machine placed by "
+        "hand from the ghost does not get that: screwdriver its output face, not sneaking, until "
+        f'chat says "Input from Output Side forbidden". {listed}',
         SchematicWarning,
         stacklevel=3,
     )

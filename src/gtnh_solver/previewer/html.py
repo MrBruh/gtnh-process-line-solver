@@ -27,7 +27,8 @@ size and their two baked looks all resolved in Python and read straight off ``sc
 so no two surfaces can disagree about what a layout is made of (#4); every single block's one
 auto-output face is a small cyan arrow on each of its faces perpendicular to the ejecting direction
 (so one stays visible however the machines are packed), whether it ejects into a neighbour or into a
-pipe, and every other output face, which takes a cover, an amber cover marker
+pipe, red where that pipe also carries another machine's outputs and the builder must set the machine
+to refuse input there (#278), and every other output face, which takes a cover, an amber cover marker
 (``scene.machines[].outputs``, #249); drawn for **single blocks only** - a multiblock ejects from a
 hatch's own face, not from its bounding box, so there is no box face to mark (#153). A side panel lists the
 machine/route legend (materials footnoted as stand-ins where they are), an inventory of the
@@ -747,6 +748,19 @@ for (const [netId, byLayer] of routeBatches) {
 const arrows = [];   // the arrow and cover-marker decals, shown/hidden by #arrowToggle
 let arrowsOn = true;
 let coverCount = 0;
+// A basic machine whose output face shares a pipe with another machine's outputs (#278): on 2.9 a
+// new one takes input through that face, so one run dry takes a sibling's output and jams. Its arrow
+// is red instead of cyan and hovers as the machine, whose tag names the setting that rules it out.
+// The hint names the state to reach rather than "click once": a 2.8.4 machine already starts
+// forbidden, and the same click would allow it.
+const FORBID_COLOR = '#ff5252';
+const FORBID_LINES = [
+  'output face: set Input from Output Side forbidden',
+  '(screwdriver it, not sneaking, until chat says so)',
+];
+const forbidById = Object.fromEntries(
+  SCENE.machines.map((m) => [m.id, !!(m.outputs && m.outputs.forbidInput)]));
+let forbidCount = 0;
 function edgeDecals(id, face, make, userData) {
   const src = centerById[id], n = FACE_NORMAL[face];
   if (!src || !n) return;
@@ -770,7 +784,7 @@ function edgeDecals(id, face, make, userData) {
       .addScaledVector(nv, surf * alongN - 0.10);   // slide toward the marked edge so the tip reaches it
     deco.quaternion.setFromRotationMatrix(
       new THREE.Matrix4().makeBasis(nv, new THREE.Vector3().crossVectors(dv, nv), dv));
-    if (userData) { deco.userData = userData; hoverables.push(deco); }   // hover -> which cover
+    if (userData) { deco.userData = userData; hoverables.push(deco); }   // hover -> cover or machine
     track(deco, cellY, cellY + size[1] - 1);
     arrows.push(deco);
   }
@@ -778,7 +792,10 @@ function edgeDecals(id, face, make, userData) {
 for (const m of SCENE.machines) {
   const out = m.outputs;
   if (!out) continue;
-  if (out.autoFace) edgeDecals(m.id, out.autoFace, () => faceArrow('#00e5ff'), null);
+  if (out.autoFace && out.forbidInput) {
+    forbidCount++;
+    edgeDecals(m.id, out.autoFace, () => faceArrow(FORBID_COLOR), { machineId: m.id });
+  } else if (out.autoFace) edgeDecals(m.id, out.autoFace, () => faceArrow('#00e5ff'), null);
   for (const c of out.covers) {
     coverCount++;
     edgeDecals(m.id, c.face, () => coverMark(c.cover), { machineId: m.id, cover: c });
@@ -981,6 +998,7 @@ function renderLegend() {
   const routes = section(panel, 'routes');
   for (const k of ['item', 'fluid', 'power']) row(routes, swatch(COMMODITY[k]), k);
   row(routes, swatch('#00e5ff'), 'auto-output');
+  if (forbidCount) row(routes, swatch(FORBID_COLOR), 'auto-output: set Input from Output Side forbidden');
   if (coverCount) row(routes, swatch(COVER_COLOR), 'cover (conveyor / pump)');
   // The net inventory, which the page did not have at all: what nets exist, what each carries and
   // at what rate, and a click to see one of them by itself.
@@ -1081,7 +1099,9 @@ function machineHover(id) {
   // buffer the builder keeps stocked, 'out:' one a product collects in. An Item Filter lists what
   // its slots must let through (#249). A machine that holds nothing adds no line at all, so its tag
   // is the single name it has always been. A multiblock drawn as one box rather than as blocks has
-  // no hatch to hover, so its own tag carries the locks its hatches need (#120).
+  // no hatch to hover, so its own tag carries the locks its hatches need (#120). A basic machine
+  // whose output face shares a pipe with another machine's outputs says how to make that face
+  // refuse input (#278); its red arrow hovers as this same tag.
   const drawnAsBlocks = id in machineOwner;
   return {
     lines: () => [
@@ -1090,6 +1110,7 @@ function machineHover(id) {
       ...filterLabelsById[id].map((item) => 'lets through: ' + item),
       ...(drawnAsBlocks ? [] : hatchesById[id].filter((h) => h.lock).map(
         (h) => h.label + ' at ' + h.cell.join(', ') + ' locked to: ' + h.lockLabel)),
+      ...(forbidById[id] ? FORBID_LINES : []),
     ],
     anchor: [c.x, c.y + s[1] / 2 + 0.15, c.z],
   };
