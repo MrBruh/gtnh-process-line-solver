@@ -41,7 +41,7 @@ with a populated `coil` table (14 tiers), so the adapter counts its 2 coil layer
 **Lane 2 (issue #45): the core dump loop.** On top of the lane 1 scaffold
 (the `ExampleMod1.7.10` buildscript wiring, `dependencies.gradle` pins, and the
 `DumperMod` boot/exit plumbing), the tool builds every multiblock and emits the
-schema-v2 dataset:
+schema-v3 dataset:
 
 - `DumperMod` hooks `FMLServerStartedEvent`, resolves the run config, runs the dump, and
   exits the JVM (0 on success, nonzero on failure) so a `runServer` boot is a pass/fail gate.
@@ -69,7 +69,12 @@ schema-v2 dataset:
   A kind found that way is kept only if the machine's own `checkMachine`, run over the whole shell
   with the hatch in place, counts the hatch as that kind and reports no kind of error the bare shell
   did not already have: a muffler on a Dangote Distillus ring passes the element's check but ends
-  the tower at that layer, and the machine check is what says so; `JsonWriter` serialises the raw facts to schema-v2 JSON (Gson,
+  the tower at that layer, and the machine check is what says so. Once per built form, the LAYER
+  step stands an output hatch in every output cell at once, runs the same `checkMachine`, and reads
+  back which of the machine's per-layer output lists each hatch landed in: on a tower, recipe fluid
+  output `i` goes only to list `i`, so that index is the slot's `output_layer` (schema v3, #299). A
+  probe that cannot give a whole answer records no layer and says why in the doc's `failures`;
+  `JsonWriter` serialises the raw facts to schema-v3 JSON (Gson,
   stable key + variant ordering); `ErrorCollector` sends any exception,
   non-terminating/explosive sweep, or empty scan to `_meta.json.failures` so one broken
   multiblock never kills the run.
@@ -150,7 +155,8 @@ actually touches:
 | `IMetaTileEntity` | `gregtech.api.interfaces.metatileentity` | Element type of that array; `getStackForm`, `newMetaEntity`, `setBaseMetaTileEntity`, `getLocalName`/`getLocalNameKey`/`getMetaName` filter, place, and name the controller. |
 | `BaseMetaTileEntity` | `gregtech.api.metatileentity` | The tile entity the controller (and each probe hatch) is placed into: `setMetaTileID`, `setMetaTileEntity`, `setFrontFacing`. |
 | `MTEHatch`, `MTEBasicHull` | `gregtech.api.metatileentity.implementations` | `MTEHatch` marks a real hatch found in the block pass (a failure, see #177); a hull is `HatchProbe`'s control, since an element whose check takes a hull takes any GT tile rather than a hatch. |
-| `MTEMultiBlockBase` (`newMetaEntity`, `clearHatches`, `checkMachine(base, stack, errors)`) + `StructureError` / `TranslatableStructureError` | `gregtech.api.metatileentity.implementations`, `gregtech.api.structure.error` | `HatchProbe` asks a throwaway copy of the controller, and confirms a bare adder's kind with the machine's own whole-structure check, comparing the kinds of error it reports (#227). |
+| `MTEMultiBlockBase` (`newMetaEntity`, `clearHatches`, `checkMachine(base, stack, errors)`, and `checkMachine(base, stack)` where GT has no errors) + `StructureError` / `TranslatableStructureError` | `gregtech.api.metatileentity.implementations`, `gregtech.api.structure.error` | `HatchProbe` asks a throwaway copy of the controller, and confirms a bare adder's kind with the machine's own whole-structure check, comparing the kinds of error it reports (#227). Its LAYER step runs the same check with an output hatch in every output cell, to read which layer each feeds (#299). |
+| `MTEHatchOutput` | `gregtech.api.metatileentity.implementations` | The LAYER step finds a machine's per-layer output lists by their type, `List<List<? extends MTEHatchOutput>>`, rather than by a field name, which differs between machines (`mOutputHatchesByLayer`, `outputHatchesPerLayer`). |
 | `GTLanguageManager.sEnglishFile` | `gregtech.api.util` | GT's `GregTech.lang`, read (never written) for the English name of a controller whose translation does not resolve on the server (#231). |
 | `IConstructable` | `com.gtnewhorizon.structurelib.alignment.constructable` | Filter + the build call `construct(ItemStack trigger, boolean hintsOnly)` (hint pass and block pass). |
 | `ChannelDataAccessor` | `com.gtnewhorizon.structurelib.alignment.constructable` | `setChannelData(trigger, channel, value)` to probe each tier channel (lane 3). |
@@ -332,7 +338,8 @@ properties, which `DumperMod` reads):
   the manifest records GT5U's self-reported `"MC1710"`, `previewer/jar.py` then tries to download a
   jar version that does not exist, and the previewer silently falls back to placeholder boxes for
   *everything*. It looks like a catastrophic regression and is a one-flag mistake.
-- `-PdebugMeta=<id>` diagnostics: log what the hint pass captured for one controller meta id.
+- `-PdebugMeta=<id>` diagnostics: log what the hint pass captured for one controller meta id, and,
+  per built form, which output layer the LAYER step filed each output cell under (by `dy`).
 
 Headless notes:
 

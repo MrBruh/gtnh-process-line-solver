@@ -33,6 +33,7 @@ from gtnh_solver.dataset import (
     to_physical,
     whole_amps,
 )
+from gtnh_solver.dataset.schema import SCHEMA_VERSION
 from gtnh_solver.ir import CellBox
 
 
@@ -306,7 +307,7 @@ def _hatch_doc(slots: list[dict[str, object]]) -> MultiblockDoc:
     ]
     return MultiblockDoc.model_validate(
         {
-            "schema": 2,
+            "schema": SCHEMA_VERSION,
             "controller": {
                 "registry_name": "r",
                 "meta": 0,

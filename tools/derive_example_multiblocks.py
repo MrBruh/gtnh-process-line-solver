@@ -52,7 +52,7 @@ from gtnh_solver.ir import Machine
 
 REPO = Path.cwd()
 COMMITTED = REPO / "data" / "multiblocks"
-#: The illustrative fixtures written by hand to schema v2 (their README): not derived, never rewritten.
+#: The illustrative fixtures written by hand (their README): not derived, never rewritten.
 _HAND_AUTHORED = frozenset({"gregtech_machine_1000.json", "gregtech_machine_1001.json"})
 #: A bracketed run of numbers or of plain strings, which ``json.dumps(indent=2)`` spreads one element
 #: per line.

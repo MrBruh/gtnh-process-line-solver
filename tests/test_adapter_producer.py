@@ -44,6 +44,7 @@ from gtnh_solver.adapter.core import (
 )
 from gtnh_solver.cli import _dataset_version_for, main
 from gtnh_solver.dataset import DatasetMeta, PhysicalDataset, load_physical_dataset
+from gtnh_solver.dataset.schema import SCHEMA_VERSION
 from gtnh_solver.ir import InputIR, LayoutResult, METoggles
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
@@ -88,7 +89,7 @@ def _dataset(pack_version: str, *, census: bool = True) -> PhysicalDataset:
     """An empty dataset that only claims a pack version, which is all the version check reads."""
     return PhysicalDataset(
         meta=DatasetMeta(
-            schema=2,
+            schema=SCHEMA_VERSION,
             pack_version=pack_version,
             generated_at="2026-09-18T00:00:00Z",
             extractor_sha="0" * 40,

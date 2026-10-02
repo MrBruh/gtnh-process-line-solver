@@ -844,6 +844,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **Dataset schema v3: each tower output cell names the layer GT fills it from (#299). Re-run the
+  extractor.** GT fills a Distillation Tower by layer: recipe fluid output `i` goes only to the
+  output hatches on the tower's `i`-th layer above its base, and the tower does not form while any
+  layer has none. The dump recorded which cells take an output hatch but not which layer each one
+  feeds, so nothing could put a product's hatch on its own layer. The extractor's hatch probe now
+  asks the machine: it stands an output hatch in every output cell at once, runs the machine's own
+  structure check on a throwaway controller, and reads back which of the machine's per-layer output
+  lists each hatch landed in (`hatch_slots[].output_layer`, GT's own index from 0). The lists are
+  found by their type, so GT's Distillation Tower, the Dangote Distillus, the Sparge Tower and the
+  Mega towers are all read the same way, and a machine that fills its outputs first fit records no
+  layer. A tower's top centre and its base feed no layer. A probe that cannot give a whole answer
+  records no layer for the form and says why in the doc's `failures`. The committed tower fixtures
+  carry their layers, and the loader refuses a v2 dump, since one would read as a tower with no
+  layers: re-run the extractor for each local `data/<version>/` (`tools/gtnh-extractor/README.md`).
+  Nothing in the solver reads the field yet.
 - **Every proven single block with two or more item outputs sends them out of one face to Item
   Filters, not only one with no face to spare (`adapter/core.py`).** A GT basic machine ejects
   every item slot through its one output face, so a machine left a face per output was a real

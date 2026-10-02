@@ -67,8 +67,8 @@ import gregtech.common.misc.GTStructureChannels;
  *        |       cannot widen (world height, MAX_SCAN_DIM), or a hologram cell outside the cube,
  *        |       means the form is clipped: fatal for the first form, the end of the sweep later
  *        v
- *   hatch slots: ask each visited element which hatch kinds it takes (HatchProbe)
- *        |
+ *   hatch slots: ask each visited element which hatch kinds it takes, then which output layer each
+ *        |       output slot feeds on a machine that fills its outputs by layer (HatchProbe)
  *        v
  *   sweep trigger stack 1..N, stop when the occupied cell set stops changing -> one Variant per
  *   shape (identity-only tier swaps collapse; genuine size variants stay distinct)
@@ -412,6 +412,9 @@ final class StructureDumper {
             }
             if (!distinct.containsKey(signature)) {
                 distinct.put(signature, variant);
+                for (String note : variant.notes) {
+                    doc.failures.add("the form at trigger stack " + n + ": " + note);
+                }
                 if (distinct.size() > MAX_VARIANTS) {
                     throw new DumpException("variant sweep exceeded the cap of " + MAX_VARIANTS + " forms");
                 }
@@ -494,7 +497,7 @@ final class StructureDumper {
             }
             checkClipped(cube, variant, particles);
             collectHints(particles, variant);
-            collectHatchSlots(recorder, controller, trigger, cube, variant);
+            collectHatchSlots(recorder, controller, trigger, cube, variant, id == debugMeta);
             computeBbox(variant);
             return variant;
         } finally {
@@ -617,10 +620,11 @@ final class StructureDumper {
      * <p>
      * Only cells inside the scanned cube are considered, so a stray visit outside the region cannot
      * enter the dump. A cell whose element accepts no hatch is omitted entirely, which keeps the
-     * common case (a solid casing shell) free of noise.
+     * common case (a solid casing shell) free of noise. Once every cell's kinds are known, the slots
+     * that take an output hatch are asked, together, which output layer each feeds.
      */
     private void collectHatchSlots(ElementRecorder recorder, IConstructable controller, ItemStack blockTrigger,
-        int[] cube, DumpModel.Variant variant) {
+        int[] cube, DumpModel.Variant variant, boolean debug) {
         if (recorder.size() == 0) {
             return;
         }
@@ -644,6 +648,43 @@ final class StructureDumper {
                     }
                 }
             }
+        }
+        collectOutputLayers(probe, controller, variant, debug);
+    }
+
+    /** Set each output slot's layer from the probe's LAYER step, and keep what it could not answer. */
+    private void collectOutputLayers(HatchProbe probe, IConstructable controller, DumpModel.Variant variant,
+        boolean debug) {
+        List<DumpModel.HatchSlot> outputs = new ArrayList<>();
+        List<int[]> cells = new ArrayList<>();
+        for (DumpModel.HatchSlot slot : variant.hatchSlots) {
+            if (slot.kinds.contains(HatchProbe.OUTPUT_HATCH)) {
+                outputs.add(slot);
+                cells.add(new int[] { OX + slot.dx, OY + slot.dy, OZ + slot.dz });
+            }
+        }
+        if (outputs.isEmpty()) {
+            return;
+        }
+        HatchProbe.OutputLayers layers = probe.outputLayers(controller, world, cells);
+        // Per layer (-1 for none), how many of its cells sit at each dy: the debug log's summary.
+        Map<Integer, Map<Integer, Integer>> dysByLayer = new java.util.TreeMap<>();
+        for (int i = 0; i < outputs.size(); i++) {
+            DumpModel.HatchSlot slot = outputs.get(i);
+            slot.outputLayer = layers.layers[i];
+            int layer = slot.outputLayer == null ? -1 : slot.outputLayer;
+            dysByLayer.computeIfAbsent(layer, k -> new java.util.TreeMap<>())
+                .merge(slot.dy, 1, Integer::sum);
+        }
+        variant.notes.addAll(layers.notes);
+        if (debug) {
+            LOG.info(
+                "gtnh-extractor DEBUG n={}: output layers via {}: {} lists, cells by layer {}, notes {}",
+                variant.triggerStackSize,
+                layers.field,
+                layers.count,
+                dysByLayer,
+                layers.notes);
         }
     }
 

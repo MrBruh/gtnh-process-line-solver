@@ -2,6 +2,8 @@ package net.gtnhsolver.extractor;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -31,6 +33,7 @@ import gregtech.api.interfaces.metatileentity.IMetaTileEntity;
 import gregtech.api.interfaces.tileentity.IGregTechTileEntity;
 import gregtech.api.metatileentity.BaseMetaTileEntity;
 import gregtech.api.metatileentity.implementations.MTEBasicHull;
+import gregtech.api.metatileentity.implementations.MTEHatchOutput;
 import gregtech.api.metatileentity.implementations.MTEMultiBlockBase;
 
 /**
@@ -42,6 +45,9 @@ import gregtech.api.metatileentity.implementations.MTEMultiBlockBase;
  * recipe's fluid output {@code i} to structure layer {@code i} and NOWHERE else, so the number of
  * layers that accept an output hatch is what decides how tall a tower a given recipe needs. Too
  * short a tower is still a legal multiblock; it just silently voids the fluids it has no layer for.
+ * Which layer a cell belongs to is the LAYER step's answer (below): a tower whose hatches sit on the
+ * wrong layers sends each fluid to the wrong place, and one with a layer that has no output hatch
+ * does not form at all.
  *
  * <p>
  * Neither of the two obvious routes works. The hint pass only yields a dot index, which is a
@@ -71,6 +77,13 @@ import gregtech.api.metatileentity.implementations.MTEMultiBlockBase;
  *   CONFIRM : the machine's own checkMachine over the whole built shell, with the probe hatch in the
  *             cell. Recorded only if the hatch counts as the kind AND the check reports no kind of
  *             error the bare shell did not already have.
+ *
+ *   then once per built form, over every cell those steps found takes an output hatch:
+ *
+ *   LAYER   : stand an output hatch in every such cell at once and run the machine's own checkMachine.
+ *             A layered machine files each hatch in a per-layer list, read back by its type
+ *             (List&lt;List&lt;MTEHatchOutput&gt;&gt;); the list a cell's hatch lands in is the
+ *             output layer it feeds. A machine with no such list records no layers.
  * </pre>
  *
  * <p>
@@ -84,9 +97,10 @@ import gregtech.api.metatileentity.implementations.MTEMultiBlockBase;
  * <p>
  * The confirm step is what keeps a bare adder from over-reporting. An element's check accepts a hatch
  * that the machine as a whole then reads as a change of shape: a muffler on a Dangote Distillus ring
- * ends the tower at that layer, and an output hatch in a Distillation Tower's top centre tells it the
- * tower goes on (both via {@code checkMachine}). Neither is a slot of the form being dumped, and the
- * whole-machine check says so where the element's cannot.
+ * ends the tower at that layer (via {@code checkMachine}). That is not a slot of the form being dumped,
+ * and the whole-machine check says so where the element's cannot. An output hatch in a Distillation
+ * Tower's top centre is not such a change: it ends the tower just as the casing there does
+ * ({@code onTopLayerFound}), so it is a slot of the form, though one that feeds no layer.
  *
  * <p>
  * Both probing steps ask a throwaway copy of the controller, never the built one: a check that passes
@@ -95,8 +109,10 @@ import gregtech.api.metatileentity.implementations.MTEMultiBlockBase;
  * controller would blind every filter probe after it. The element check runs once per element per
  * controller ({@link #forgetCheckedElements}), since what an adder accepts does not depend on the cell;
  * the whole-machine check runs per cell, against the shell's own verdict taken once per built form
- * ({@link #beginVariant}). Every probe restores the cell's block, and every probe is wrapped: a
- * throwing element, predicate or check degrades to "no kinds", never to a failed dump.
+ * ({@link #beginVariant}). The layer step asks a throwaway copy too, once per built form
+ * ({@link #outputLayers}). Every probe restores the cell's block, and every probe is wrapped: a
+ * throwing element, predicate or check degrades to "no kinds" (or "no layers", with a note saying
+ * why), never to a failed dump.
  */
 final class HatchProbe {
 
@@ -104,6 +120,9 @@ final class HatchProbe {
 
     /** How deep a chain's branches are walked: StructureLib chains nest, but only a few levels. */
     private static final int MAX_CHAIN_DEPTH = 8;
+
+    /** The kind whose cells the layer step fills, as a slot's {@code kinds} names it. */
+    static final String OUTPUT_HATCH = HatchElement.OutputHatch.name();
 
     /** GT's structure errors, or null on a GT without them (2.8.4); see the class comment. */
     private static final Class<?> STRUCTURE_ERROR = gtClass("gregtech.api.structure.error.StructureError");
@@ -146,6 +165,26 @@ final class HatchProbe {
         Verdict(Set<String> errors, Map<HatchElement, Long> counts) {
             this.errors = errors;
             this.counts = counts;
+        }
+    }
+
+    /**
+     * What the layer step found for one built form: the index of the per-layer list each probed cell's
+     * hatch landed in, and why the answer cannot be trusted where it cannot.
+     */
+    static final class OutputLayers {
+
+        /** Per probed cell, in the order they were given: its list index, or null for a cell in no list. */
+        final Integer[] layers;
+        /** The field the machine keeps its per-layer lists in, or null for a machine that keeps none. */
+        String field;
+        /** How many per-layer lists the machine's check filled. */
+        int count;
+        /** Why cells got no layer that should have one; empty when the answer stands as given. */
+        final List<String> notes = new ArrayList<>();
+
+        OutputLayers(int cells) {
+            this.layers = new Integer[cells];
         }
     }
 
@@ -398,6 +437,183 @@ final class HatchProbe {
             return true;
         });
         return verdict[0];
+    }
+
+    /**
+     * The LAYER step: which of the machine's per-layer output lists each of {@code cells} feeds.
+     *
+     * <p>
+     * A layered machine fills its output hatches by layer, not first fit: a Distillation Tower hands the
+     * recipe's fluid output {@code i} to the hatches in {@code mOutputHatchesByLayer.get(i)} and no
+     * others, and does not form at all while any layer has none. Which list a hatch goes in is the
+     * machine's own bookkeeping (the height its check had climbed to when it met the cell, or a Mega
+     * tower's five-high band), so the machine is asked: an output hatch stands in every cell at once, as
+     * in a built tower with a hatch on each layer, and its own {@code checkMachine} runs on a throwaway
+     * copy of the controller. The lists are then read back from the copy by their type, since their name
+     * differs between machines ({@code outputHatchesPerLayer} on GT's Mega tower).
+     *
+     * <p>
+     * Every cell is filled, not one at a time, because the check climbs layer by layer and stops at the
+     * first layer it cannot pass, so a lone hatch would only ever be filed if it sat on the first layer.
+     * The top centre is filled too: a hatch there ends the tower just as the casing does. Every cell's
+     * block is put back afterwards. The answer is dropped, with a note, if it cannot be whole: a list
+     * left with no probe hatch means the fill was incomplete (no layers for the form), a cell filed
+     * under two lists gets no layer, and a check that throws gives no layers.
+     */
+    OutputLayers outputLayers(Object controller, World world, List<int[]> cells) {
+        OutputLayers result = new OutputLayers(cells.size());
+        Field field = layerListField(controller.getClass());
+        Probe probe = probes.get(OUTPUT_HATCH);
+        if (field == null || probe == null || cells.isEmpty()) {
+            return result; // not a layered machine (or nothing to file): there are no layers to record
+        }
+        result.field = field.getName();
+        Block[] originals = new Block[cells.size()];
+        int[] originalMetas = new int[cells.size()];
+        Map<Long, Integer> cellAt = new HashMap<>();
+        try {
+            for (int i = 0; i < cells.size(); i++) {
+                int[] c = cells.get(i);
+                Block original = world.getBlock(c[0], c[1], c[2]);
+                int originalMeta = world.getBlockMetadata(c[0], c[1], c[2]);
+                if (original == null || original.hasTileEntity(originalMeta)) {
+                    continue; // never disturb a tile entity; an incomplete fill is reported below
+                }
+                originals[i] = original;
+                originalMetas[i] = originalMeta;
+                if (place(world, c[0], c[1], c[2], probe)) {
+                    cellAt.put(cellKey(c[0], c[1], c[2]), i);
+                }
+            }
+            List<List<?>> lists = new ArrayList<>();
+            String[] thrown = new String[1];
+            boolean asked = withScratch(controller, scratch -> {
+                try {
+                    scratch.clearHatches();
+                    if (CHECK_WITH_ERRORS != null) {
+                        CHECK_WITH_ERRORS.invoke(scratch, scratch.getBaseMetaTileEntity(), null, new ArrayList<>());
+                    } else {
+                        scratch.checkMachine(scratch.getBaseMetaTileEntity(), null);
+                    }
+                    for (Object list : (List<?>) field.get(scratch)) {
+                        lists.add((List<?>) list);
+                    }
+                    return true;
+                } catch (Exception | LinkageError e) {
+                    Throwable cause = e instanceof java.lang.reflect.InvocationTargetException ? e.getCause() : e;
+                    thrown[0] = String.valueOf(cause);
+                    return false;
+                }
+            });
+            if (!asked) {
+                result.notes.add(
+                    "output layers not recorded: the structure check could not be run on a copy of the controller"
+                        + (thrown[0] != null ? " (" + thrown[0] + ")" : ""));
+                return result;
+            }
+            fileLayers(lists, cellAt, result);
+        } finally {
+            for (int i = 0; i < cells.size(); i++) {
+                if (originals[i] != null) {
+                    int[] c = cells.get(i);
+                    world.setBlock(c[0], c[1], c[2], originals[i], originalMetas[i], 2);
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * File each probe hatch the check put in {@code lists} under its list's index, applying the layer
+     * step's rules: a cell in two lists gets none, and a list holding no probe hatch voids them all.
+     */
+    private static void fileLayers(List<List<?>> lists, Map<Long, Integer> cellAt, OutputLayers result) {
+        result.count = lists.size();
+        if (lists.isEmpty()) {
+            result.notes.add("output layers not recorded: the structure check filed no hatch under any layer");
+            return;
+        }
+        Set<Integer> twice = new TreeSet<>();
+        List<Integer> empty = new ArrayList<>();
+        for (int layer = 0; layer < lists.size(); layer++) {
+            boolean filed = false;
+            for (Object hatch : lists.get(layer)) {
+                Integer cell = hatch instanceof IMetaTileEntity ? cellOf((IMetaTileEntity) hatch, cellAt) : null;
+                if (cell == null) {
+                    continue;
+                }
+                filed = true;
+                Integer before = result.layers[cell];
+                if (before != null && before != layer) {
+                    twice.add(cell);
+                }
+                result.layers[cell] = layer;
+            }
+            if (!filed) {
+                empty.add(layer);
+            }
+        }
+        if (!empty.isEmpty()) {
+            java.util.Arrays.fill(result.layers, null);
+            result.notes.add(
+                "output layers not recorded: the structure check filed no probe hatch under layer(s) " + empty
+                    + " of " + lists.size() + ", so the fill was incomplete");
+            return;
+        }
+        for (int cell : twice) {
+            result.layers[cell] = null;
+        }
+        if (!twice.isEmpty()) {
+            result.notes.add(
+                "output layer not recorded for " + twice.size()
+                    + " cell(s) the structure check filed under two layers");
+        }
+    }
+
+    /** Which probed cell {@code hatch} stands in, or null for a hatch the probe did not place. */
+    private static Integer cellOf(IMetaTileEntity hatch, Map<Long, Integer> cellAt) {
+        IGregTechTileEntity base = hatch.getBaseMetaTileEntity();
+        return base == null ? null : cellAt.get(cellKey(base.getXCoord(), base.getYCoord(), base.getZCoord()));
+    }
+
+    private static long cellKey(int x, int y, int z) {
+        return ((long) (x & 0x1FFFFF) << 42) | ((long) (y & 0x1FFFFF) << 21) | (z & 0x1FFFFF);
+    }
+
+    /**
+     * The field a layered machine keeps its output hatches by layer in, found by its type,
+     * {@code List<List<T extends MTEHatchOutput>>}, walking up from the controller's own class. Null for
+     * a machine that keeps none.
+     */
+    private static Field layerListField(Class<?> type) {
+        for (Class<?> c = type; c != null && c != Object.class; c = c.getSuperclass()) {
+            for (Field field : c.getDeclaredFields()) {
+                Type element = listElement(field.getGenericType());
+                Type hatch = element == null ? null : listElement(element);
+                if (hatch instanceof Class && MTEHatchOutput.class.isAssignableFrom((Class<?>) hatch)) {
+                    try {
+                        field.setAccessible(true);
+                        return field;
+                    } catch (SecurityException e) {
+                        return null;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /** The element type of a parameterized {@code List} type, or null if {@code type} is not one. */
+    private static Type listElement(Type type) {
+        if (!(type instanceof ParameterizedType)) {
+            return null;
+        }
+        ParameterizedType parameterized = (ParameterizedType) type;
+        Type raw = parameterized.getRawType();
+        Type[] arguments = parameterized.getActualTypeArguments();
+        return raw instanceof Class && List.class.isAssignableFrom((Class<?>) raw) && arguments.length == 1
+            ? arguments[0]
+            : null;
     }
 
     /**

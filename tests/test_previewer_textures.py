@@ -20,7 +20,7 @@ import pytest
 from gtnh_solver.adapter import MachineHandler, Node, Plan, Recipe, Resource, to_input_ir
 from gtnh_solver.dataset import load_physical_dataset
 from gtnh_solver.dataset import roots as dataset_roots
-from gtnh_solver.dataset.schema import MultiblockDoc
+from gtnh_solver.dataset.schema import SCHEMA_VERSION, MultiblockDoc
 from gtnh_solver.ir import InputIR, LayoutResult, LayoutStatus
 from gtnh_solver.previewer.bake import bake_layers
 from gtnh_solver.previewer.scene import FACE_CAP, FACE_COVERED, block_face_cover, build_scene
@@ -380,7 +380,7 @@ def _ebf_doc() -> dict[str, Any]:
         {"d": [0, 1, 0], "block": "gregtech:gt.blockcasings5", "meta": 0},  # the coil layer
     ]
     return {
-        "schema": 2,
+        "schema": SCHEMA_VERSION,
         "controller": {
             "registry_name": "gregtech:gt.blockmachines",
             "meta": 1000,
@@ -412,7 +412,7 @@ def _glass_ring_doc() -> dict[str, Any]:
     Fusion Computers - and every one is unanimous, which is why a modal-share bar cannot catch them.
     """
     return {
-        "schema": 2,
+        "schema": SCHEMA_VERSION,
         "controller": {
             "registry_name": "gregtech:gt.blockmachines",
             "meta": 1001,
@@ -808,7 +808,7 @@ def test_expand_machine_yaw_rotates_positions_for_east_facing() -> None:
 def _bar_doc(length: int = 3) -> dict[str, Any]:
     """A non-cubic ``length``x1x1 bar of casings, so a yaw would spill it past a reserved footprint."""
     return {
-        "schema": 2,
+        "schema": SCHEMA_VERSION,
         "controller": {
             "registry_name": "gregtech:gt.blockmachines",
             "meta": 1,
@@ -1140,7 +1140,7 @@ def _tower_doc() -> MultiblockDoc:
         )
     return MultiblockDoc.model_validate(
         {
-            "schema": 2,
+            "schema": SCHEMA_VERSION,
             "controller": {
                 "registry_name": "gregtech:gt.blockmachines",
                 "meta": 1126,
@@ -1205,7 +1205,7 @@ def _sliced_oven_doc() -> MultiblockDoc:
         )
     return MultiblockDoc.model_validate(
         {
-            "schema": 2,
+            "schema": SCHEMA_VERSION,
             "controller": {
                 "registry_name": "gregtech:gt.blockmachines",
                 "meta": 15543,
@@ -1325,7 +1325,7 @@ def _controller_doc(meta: int, name: str, source_class: str, height: int) -> dic
         if (x, y, z) != (0, 0, 0)
     ]
     return {
-        "schema": 2,
+        "schema": SCHEMA_VERSION,
         "controller": {
             "registry_name": "gregtech:gt.blockmachines",
             "meta": meta,
@@ -1381,7 +1381,7 @@ def test_a_name_resolved_machine_draws_the_controller_its_footprint_came_from(
     mb = tmp_path / "multiblocks"
     mb.mkdir()
     meta = {
-        "schema": 2,
+        "schema": SCHEMA_VERSION,
         "pack_version": "test",
         "generated_at": "now",
         "extractor_sha": "0",

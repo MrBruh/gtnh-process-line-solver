@@ -26,6 +26,7 @@ from __future__ import annotations
 import os
 
 from gtnh_solver.dataset import DatasetMeta, MachinePhysical, PhysicalDataset
+from gtnh_solver.dataset.schema import SCHEMA_VERSION
 from gtnh_solver.ir import (
     CellBox,
     CellCoord,
@@ -200,7 +201,7 @@ def hatched_dataset(
     return PhysicalDataset(
         meta=DatasetMeta.model_validate(
             {
-                "schema": 2,
+                "schema": SCHEMA_VERSION,
                 "pack_version": "test",
                 "generated_at": "2026-01-01T00:00:00Z",
                 "extractor_sha": "0" * 40,

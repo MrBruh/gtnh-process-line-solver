@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Plain data holders mirroring the schema-v2 dataset contract (one file per controller plus a
+ * Plain data holders mirroring the schema-v3 dataset contract (one file per controller plus a
  * run summary). These carry <em>raw facts only</em> - block registry names, metas, relative
  * offsets, hint positions - exactly as scanned from the world. All interpretation (footprint
  * math, I/O faces, tier semantics) lives in the Python adapter, per constraint 3 of
@@ -91,6 +91,13 @@ final class DumpModel {
         final int dy;
         final int dz;
         final List<String> kinds;
+        /**
+         * Which of the machine's per-layer output lists an output hatch here is filed under (GT's own
+         * index, from 0, which is the recipe fluid output it receives), or null for a cell in no list:
+         * not an output slot, a machine that fills its outputs first fit, or a tower's top centre or base.
+         * Set by {@link HatchProbe#outputLayers}.
+         */
+        Integer outputLayer;
 
         HatchSlot(int dx, int dy, int dz, List<String> kinds) {
             this.dx = dx;
@@ -109,6 +116,11 @@ final class DumpModel {
         final List<HintDot> hints = new ArrayList<>();
         final List<HatchSlot> hatchSlots = new ArrayList<>();
         int[] bbox = new int[] { 0, 0, 0 };
+        /**
+         * What the hatch probe could not answer for this form, for the doc's {@code failures} once the
+         * form is kept. Not serialised with the variant: the schema keeps caveats per controller.
+         */
+        final List<String> notes = new ArrayList<>();
 
         Variant(int triggerStackSize) {
             this.triggerStackSize = triggerStackSize;

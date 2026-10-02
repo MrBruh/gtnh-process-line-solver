@@ -52,6 +52,7 @@ from gtnh_solver.dataset import (
     load_physical_dataset,
 )
 from gtnh_solver.dataset import roots as dataset_roots
+from gtnh_solver.dataset.schema import SCHEMA_VERSION
 from gtnh_solver.ir import (
     LAYOUT_RESULT_VERSION,
     Commodity,
@@ -1109,7 +1110,7 @@ def test_package_exposes_a_nonempty_version_string() -> None:
 def _empty_dataset() -> PhysicalDataset:
     meta = DatasetMeta.model_validate(
         {
-            "schema": 2,
+            "schema": SCHEMA_VERSION,
             "pack_version": "test",
             "generated_at": "now",
             "extractor_sha": "0",

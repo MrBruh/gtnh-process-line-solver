@@ -21,6 +21,7 @@ from gtnh_solver.dataset.roots import (
     list_versions,
     resolve_dataset_path,
 )
+from gtnh_solver.dataset.schema import SCHEMA_VERSION
 
 
 def _mkdir(p: Path, *, mtime: float) -> Path:
@@ -48,7 +49,9 @@ def _manifest(p: Path, *, stamp: str | None, mtime: float = 1000) -> Path:
 def _multiblocks(p: Path, *, stamp: str | None, mtime: float = 1000) -> Path:
     """A multiblock dump directory at ``p``, stamped in its ``_meta.json`` sidecar."""
     p.mkdir(parents=True, exist_ok=True)
-    meta: dict[str, object] = {"schema": 2} if stamp is None else {"generated_at": stamp}
+    meta: dict[str, object] = (
+        {"schema": SCHEMA_VERSION} if stamp is None else {"generated_at": stamp}
+    )
     (p / "_meta.json").write_text(json.dumps(meta), encoding="utf-8")
     os.utime(p.parent, (mtime, mtime))
     return p
