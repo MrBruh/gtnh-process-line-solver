@@ -43,7 +43,9 @@ the maintainer's build.
       v
     [5] emit              item and fluid trees become routes; each item pipe takes the smallest
                           gauge whose GT insertion rate reaches every endpoint on its crowded side
-                          (``_pipe_size``, #165). Power trees are dropped: router.power lays cable.
+                          (``_pipe_size``, #165) and never below what GT charges its busiest block
+                          (``router.item_pipes``, #200). Power trees are dropped: router.power
+                          lays cable.
 
 Two nets never share a cell, the crude single-channel cap the validator enforces as
 ``ROUTE_CELL_COLLISION``. Several terminals of ONE net may share a dock cell when they belong to
@@ -94,6 +96,7 @@ from gtnh_solver.ir.nets import placement_index
 
 from ._grid import claim_key, coord, dock_candidates, filter_backs, obstacle_cells
 from .auto import assign_auto_outputs
+from .item_pipes import block_insertions
 from .steiner import Endpoint, Grid, Key, Tree, route_tree
 
 #: Backstop on negotiation rounds. Most placements converge in 4 to 13 rounds, and the tightest
@@ -186,7 +189,8 @@ def route(
     )
     machines = {m.id: m for m in problem.machines}
     routes = tuple(
-        _as_route(net, trees[net.id], machines)
+        # A net auto-output covers in part pipes only its own producers' items (#270).
+        _as_route(net, trees[net.id], machines, split=net.id in assignment.fed)
         for net in nets
         if net.id in trees and net.commodity is not Commodity.POWER
     )
@@ -212,7 +216,7 @@ class _Laid:
     legs: tuple[tuple[Cell, ...], ...]
 
 
-def _as_route(net: Net, laid: _Laid, machines: Mapping[str, Machine]) -> Route:
+def _as_route(net: Net, laid: _Laid, machines: Mapping[str, Machine], *, split: bool) -> Route:
     return Route(
         net_id=net.id,
         commodity=net.commodity,
@@ -224,29 +228,35 @@ def _as_route(net: Net, laid: _Laid, machines: Mapping[str, Machine]) -> Route:
         ],
         # One representative material per family (docs/DOMAIN.md), at the size the run needs: a
         # pipe carries no tier, but it does carry a gauge, and too thin a one starves (#165).
-        material=route_material(net.commodity, size=_pipe_size(net, machines)),
+        material=route_material(net.commodity, size=_pipe_size(net, laid, machines, split=split)),
     )
 
 
-def _pipe_size(net: Net, machines: Mapping[str, Machine]) -> PipeSize:
-    """The size ``net``'s pipe is laid at, chosen from what the run has to carry (#165).
+def _pipe_size(net: Net, laid: _Laid, machines: Mapping[str, Machine], *, split: bool) -> PipeSize:
+    """The size ``net``'s pipe is laid at, chosen from what the run has to carry (#165, #200).
 
     GT counts an item pipe's capacity in *insertions*, each landing one stack in one inventory, and
     tries the nearest inventory first (``dataset/pipe_capacity.py``). So a run must reach every
     endpoint on its crowded side within each service interval, and the nearest one always has room
     for a few more: a pipe that cannot make that many insertions feeds the near machines and starves
-    the far ones, which is exactly the one-hammer-in-three the maintainer saw in game. Both sides
-    count. Its sinks each need topping up; its sources each fill a pipe block that GT refuses to
-    refill until it is empty (``MTEItemPipe.allowPutStack``), so each needs an insertion to drain it.
-    The demand is the larger side's sum of :func:`~gtnh_solver.dataset.endpoint_insertions`, which
-    is where the rate enters: an endpoint moving more than a stack per interval needs a second, and
-    one moving under an item per interval needs only that fraction of one.
+    the far ones, which is exactly the one-hammer-in-three the maintainer saw in game.
 
-    Sized per net rather than per segment, unlike a cable. A cable's load sums along a known tree;
-    where GT's nearest-first routing sends items depends on buffers the layout does not model, so
-    the whole run takes the size of its busiest possible point, which is where every stream on the
-    crowded side meets. That can over-size a run whose endpoints pair off along it, which is the
-    safe direction: a bigger pipe never starves anything.
+    The size is the smallest that makes the larger of two lower bounds:
+
+    - **the run-wide one** (:func:`_crowded_side`): every endpoint on the run's crowded side, as if
+      all of its streams met at one point. Sized per net rather than per block, it over-sizes a run
+      whose endpoints pair off along it, which is the safe direction: a bigger pipe never starves
+      anything. It is kept on purpose as a margin, since the per-block reading below rests on one
+      in-game calibration, and the working parallel sand build ran large pipes where that reading
+      allows normal ones.
+    - **the busiest block's charge** (:func:`~gtnh_solver.router.item_pipes.block_insertions`):
+      where the run-wide figure undercounts. A producer that splits its output between consumers
+      makes more streams than either side has endpoints, and the block beside it pays for all of
+      them (#200). Laid at the run-wide size, that run came back ``partial_invalid``.
+
+    The second only ever raises a size, and only on a run the validator would refuse at the first,
+    so every run the validator accepted keeps its size. ``split`` is a net some of whose producers
+    auto-output into its consumer (#270), whose pipe carries only what its own producers send.
 
     Fluid routes are not sized yet and keep the normal size (``dataset/pipes.py``). A demand beyond
     the largest size of the stand-in material is laid at that largest size: nothing thicker exists,
@@ -255,6 +265,23 @@ def _pipe_size(net: Net, machines: Mapping[str, Machine]) -> PipeSize:
     """
     if net.commodity is not Commodity.ITEM:
         return DEFAULT_PIPE_SIZE
+    charged = block_insertions(net, laid.terminals, laid.legs, machines, split=split)
+    busiest = max(charged.values(), default=0.0)
+    # Never below one insertion: normal is the smallest size a routed item net is laid at.
+    size = item_pipe_size_for(max(_crowded_side(net, machines), busiest, 1.0))
+    return size if size is not None else ROUTED_PIPE_SIZES[Commodity.ITEM][-1]
+
+
+def _crowded_side(net: Net, machines: Mapping[str, Machine]) -> float:
+    """Insertions per service interval for every endpoint on ``net``'s crowded side (#165).
+
+    Both sides count. Its sinks each need topping up; its sources each fill a pipe block that GT
+    refuses to refill until it is empty (``MTEItemPipe.allowPutStack``), so each needs an insertion
+    to drain it. The demand is the larger side's sum of
+    :func:`~gtnh_solver.dataset.endpoint_insertions`, which is where the rate enters: an endpoint
+    moving more than a stack per interval needs a second, and one moving under an item per interval
+    needs only that fraction of one.
+    """
     sides: dict[IODirection, list[float | None]] = {IODirection.OUTPUT: [], IODirection.INPUT: []}
     for endpoint in net.endpoints:
         machine = machines.get(endpoint.machine_id)
@@ -271,9 +298,7 @@ def _pipe_size(net: Net, machines: Mapping[str, Machine]) -> PipeSize:
         # the adapter would have written for a node of identical machines.
         share = net.throughput / max(len(rates), 1)
         demand = max(demand, sum(endpoint_insertions(share if r is None else r) for r in rates))
-    # Never below one insertion: normal is the smallest size a routed item net is laid at.
-    size = item_pipe_size_for(max(demand, 1.0))
-    return size if size is not None else ROUTED_PIPE_SIZES[Commodity.ITEM][-1]
+    return demand
 
 
 def _negotiate(

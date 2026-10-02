@@ -105,7 +105,8 @@ doc as intent and reconcile.
   one-dock-cell-per-energy-port hold, made blind, took a middle hammer's last dock cells on the
   maintainer's proven parallel-sand build. Each item pipe it lays is **sized** from what the run carries, in GT's
   own unit: insertions per window, one per endpoint on the run's crowded side
-  (`dataset/pipe_capacity.py`, docs/DOMAIN.md; #165). *(Phase 2, lane D: the
+  (`dataset/pipe_capacity.py`, docs/DOMAIN.md; #165), and never below its busiest block's charge
+  (`router/item_pipes.py`, #200). *(Phase 2, lane D: the
   margin→channels-per-edge cap + cell→block realizability, and power optimization beyond
   size-or-reject.)*
 - **solver/** - orchestrates a multi-start of independent place↔route attempts (built: a

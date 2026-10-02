@@ -239,8 +239,8 @@ an item per 40 ticks, so the cap changes none of them; that a slower stream is s
 rate is read from GT's source, not yet measured in game. A net with no throughput recorded states
 no rate, and each of its endpoints keeps the whole insertion. A run's demand is the larger of its two sides, summed over their endpoints: all the
 sinks it tops up, or all the source blocks it drains. The router lays the smallest size that meets
-it, for the run as a whole (`router/core.py`, `_pipe_size`; the figures are
-`dataset/pipe_capacity.py`).
+it, for the run as a whole, and never below its busiest block's charge (`router/core.py`,
+`_pipe_size`, and `router/item_pipes.py`, #200; the figures are `dataset/pipe_capacity.py`).
 
 Consequences worth knowing:
 
@@ -249,6 +249,12 @@ Consequences worth knowing:
   stream on its crowded side can meet. A run whose producers and consumers pair off along it (the
   maintainer's hand build, one producer and one consumer per pipe block) needs less, and may be
   over-sized by one step. Over-sizing never starves anything.
+- **But never below its busiest block's charge** (#200). The per-run point counts endpoints, and a
+  producer that splits its output between consumers makes more streams than either side has: two
+  producers at 0.15 and 0.05 items/t into two consumers at 0.1 make three, and the blocks between
+  them pay for all three, where the per-run bound asks for two. So the router also reads each
+  block's charge the way the validator does (below), and lays the larger of the two. That only
+  raises a run the validator would refuse at the per-run size, so every other run keeps its size.
 - **Past huge tin there is nothing bigger in the stand-in material.** A run needing more is laid
   huge; the answer is a faster material (brass, electrum, platinum make 2x, 4x, 8x tin's
   insertions), which the stand-in policy does not choose yet. Whether a laid size is enough is the
@@ -264,7 +270,9 @@ Consequences worth knowing:
 The router's per-run bound is safe for laying pipe and wrong as a refusal threshold: it would refuse
 the maintainer's working build, which has large pipes where that bound asks for huge. So the
 validator reads what each pipe block is actually charged for, from the same transfer loop
-(`MTEItemPipe.onPostTick`, lines 210-224 at the pinned tag) and on its own arithmetic:
+(`MTEItemPipe.onPostTick`, lines 210-224 at the pinned tag) and on its own arithmetic. The router
+reads the same charges to set its floor (`router/item_pipes.py`, #200), but the two share no code,
+so a mistake in either shows up as a size the validator refuses:
 
 - **A delivery charges every block its sender's scan reached no later than the target.** The sender
   is the block the producer pushed into. It scans the run nearest first, adds each block it passes

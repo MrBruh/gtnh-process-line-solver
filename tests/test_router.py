@@ -30,10 +30,11 @@ from gtnh_solver.ir import (
     Placement,
     Port,
     Route,
+    Terminal,
 )
 from gtnh_solver.placement import place
 from gtnh_solver.router import route, route_power
-from gtnh_solver.router.core import _pipe_size
+from gtnh_solver.router.core import _Laid, _pipe_size
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
 from tests._helpers import at, machine, net
@@ -828,6 +829,19 @@ def _fan(
     return fan, machines
 
 
+def _hub(fan: Net) -> _Laid:
+    """``fan`` laid as one pipe block every endpoint docks on: the run-wide rule's own premise,
+    every stream meeting at one point, so the per-block charge (#200) never exceeds it here."""
+    cell = CellCoord(x=0, y=0, z=0)
+    return _Laid(
+        terminals=tuple(
+            Terminal(machine_id=e.machine_id, port_id=e.port_id, face=Facing.UP, cell=cell)
+            for e in fan.endpoints
+        ),
+        legs=(),
+    )
+
+
 @pytest.mark.parametrize(
     ("sources", "sinks", "size"),
     [
@@ -845,40 +859,40 @@ def test_an_item_pipe_is_sized_by_its_crowded_side(
     insertion per inventory reached and a normal tin pipe makes one per 40 ticks, which in game fed
     one hammer of three; so every endpoint on the crowded side costs an insertion per interval."""
     fan, machines = _fan(sources, sinks, source_rate=0.3 / sources, sink_rate=0.3 / sinks)
-    assert _pipe_size(fan, machines) is size
+    assert _pipe_size(fan, _hub(fan), machines, split=False) is size
 
 
 def test_an_endpoint_moving_more_than_a_stack_per_interval_needs_a_second_insertion() -> None:
     """One insertion carries one stack at most, so a fast 1-to-1 run outgrows the plain pipe."""
     fan, machines = _fan(1, 1, source_rate=2.0, sink_rate=2.0, throughput=2.0)
-    assert _pipe_size(fan, machines) is PipeSize.LARGE
+    assert _pipe_size(fan, _hub(fan), machines, split=False) is PipeSize.LARGE
 
 
 def test_an_unrated_port_takes_an_even_share_of_the_net() -> None:
     fan, machines = _fan(1, 2, source_rate=None, sink_rate=None, throughput=4.0)
     # Each sink's 2 items/t is past a stack per interval: 2 insertions apiece, 4 in all.
-    assert _pipe_size(fan, machines) is PipeSize.HUGE
+    assert _pipe_size(fan, _hub(fan), machines, split=False) is PipeSize.HUGE
 
 
 def test_a_demand_past_the_largest_pipe_is_laid_at_the_largest() -> None:
     """Nothing thicker exists in the stand-in material. The validator, not the router, is the gate
     that refuses a run too thin for its net (#190)."""
     fan, machines = _fan(1, 6, source_rate=0.6, sink_rate=0.1, throughput=0.6)
-    assert _pipe_size(fan, machines) is PipeSize.HUGE
+    assert _pipe_size(fan, _hub(fan), machines, split=False) is PipeSize.HUGE
 
 
 def test_an_endpoint_the_router_cannot_resolve_is_not_counted() -> None:
     fan, machines = _fan(1, 3, source_rate=0.3, sink_rate=0.1)
     del machines["dst2"]  # its machine is gone
     machines["dst1"] = machine("dst1", [])  # and this one no longer has the port
-    assert _pipe_size(fan, machines) is PipeSize.NORMAL
+    assert _pipe_size(fan, _hub(fan), machines, split=False) is PipeSize.NORMAL
 
 
 def test_a_fluid_pipe_is_not_sized_yet() -> None:
     fan, machines = _fan(
         1, 3, source_rate=300.0, sink_rate=100.0, commodity=Commodity.FLUID, throughput=300.0
     )
-    assert _pipe_size(fan, machines) is PipeSize.NORMAL
+    assert _pipe_size(fan, _hub(fan), machines, split=False) is PipeSize.NORMAL
 
 
 def test_a_routed_item_pipe_publishes_its_size() -> None:
