@@ -117,8 +117,9 @@ _FRAME_MATERIAL_MASK: Final = 0xFFF
 #: found in LoaderMetaTileEntities for frames"), and the covered frame in both frame goldens.
 FRAME_MID_BASE: Final = 4096
 
-#: Every ``MTEBasicMachine`` subclass in GT5-Unofficial at both pinned tags (5.09.51.482 for 2.8.4,
-#: 5.09.54.20 for 2.9, which adds ``MTEDrawerFramer``), by the fully qualified name the texture
+#: Every ``MTEBasicMachine`` subclass in GT5-Unofficial at the pinned tags (5.09.51.482 for 2.8.4,
+#: 5.09.54.20 for 2.9.0-beta-2, which adds ``MTEDrawerFramer``, and 5.09.54.133 for 2.9.0-beta-3,
+#: which adds ``MTEIceCreamMachine``), by the fully qualified name the texture
 #: manifest records as ``source_class``. The manifest names only a block's LEAF class, so a basic
 #: machine is known by being one of these, read off the class hierarchy in the source (every class
 #: that extends ``MTEBasicMachine``, transitively; the monorepo's addon packages included). A class
@@ -135,6 +136,7 @@ BASIC_MACHINE_CLASSES: Final = frozenset(
         "gregtech.common.tileentities.machines.basic.MTEBetterJukebox",
         "gregtech.common.tileentities.machines.basic.MTEBoxinator",
         "gregtech.common.tileentities.machines.basic.MTEDrawerFramer",
+        "gregtech.common.tileentities.machines.basic.MTEIceCreamMachine",
         "gregtech.common.tileentities.machines.basic.MTEIndustrialApiary",
         "gregtech.common.tileentities.machines.basic.MTEMassfabricator",
         "gregtech.common.tileentities.machines.basic.MTEMiner",

@@ -1,9 +1,9 @@
 {
   "mods": {
-    "CropsNH": "2.0.91",
-    "GT5-Unofficial": "5.09.54.20",
+    "CropsNH": "2.0.114",
+    "GT5-Unofficial": "5.09.54.133",
     "StructureLib": "1.4.42"
   },
-  "pack_version": "2.9.0-beta-2",
+  "pack_version": "2.9.0-beta-3",
   "schema": 1
 }

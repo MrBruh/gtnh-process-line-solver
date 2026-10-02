@@ -251,6 +251,25 @@ def test_a_basic_machine_with_nothing_leaving_it_outputs_away_from_its_front() -
     assert (out.tile["mItemTransfer"], out.tile["mFluidTransfer"]) == (0, 0)
 
 
+def test_the_basic_machine_2_9_0_beta_3_added_is_written_with_two_facings() -> None:
+    # GT5-Unofficial 5.09.54.133 adds one MTEBasicMachine subclass, the Ice Cream Machine (mID
+    # 20000). Left out of BASIC_MACHINE_CLASSES it would export facing its front with no output face
+    # of its own, like any block of no known class.
+    cell = schematic_core.Cell(
+        "gregtech:gt.blockmachines",
+        1,
+        nbt.Compound({"mID": nbt.Int(20000), "mFacing": nbt.Short(2)}),
+    )
+    out = schematic_core._single_block_tile(
+        cell, "gregtech.common.tileentities.machines.basic.MTEIceCreamMachine", Facing.WEST, None
+    )
+    assert out.tile is not None
+    assert (out.tile["mMainFacing"], out.tile["mFacing"]) == (
+        _FORGE[Facing.WEST],
+        _FORGE[Facing.EAST],
+    )
+
+
 def test_a_block_of_no_known_class_keeps_the_facing_it_had() -> None:
     cell = schematic_core.Cell(
         "gregtech:gt.blockmachines", 3, nbt.Compound({"mFacing": nbt.Short(2)})

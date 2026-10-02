@@ -62,7 +62,9 @@ public class IconNameMatcherTest {
         Map<String, String> names = IconNameMatcher.iconNames(bytes);
 
         // Shape B, from an @SideOnly method: the annotation deletes the method at runtime but
-        // never touches the bytes, which is the entire premise of this matcher.
+        // never touches the bytes, which is the entire premise of this matcher. GT 5.09.54.20 spells
+        // it B' (custom(name)) and 5.09.54.133 B'' (custom(Mods.GregTech.resourceDomain, name)); both
+        // come back as the bare path, which the one-argument factory reads as GregTech's domain.
         assertEquals("iconsets/EM_CONTROLLER", names.get("ScreenOFF"));
         assertEquals("iconsets/EM_CONTROLLER_ACTIVE", names.get("ScreenON"));
     }
@@ -127,6 +129,85 @@ public class IconNameMatcherTest {
 
         assertEquals("iconsets/EM_CONTROLLER_ACTIVE", names.get("ScreenON"));
         assertEquals(1, names.size());
+    }
+
+    @Test
+    public void shape_b_double_prime_with_gregtechs_own_domain_yields_the_bare_path() {
+        Map<String, String> names = IconNameMatcher.iconNames(custom("registerIcons", new Emit() {
+
+            @Override
+            public void emit(MethodVisitor mv) {
+                mv.visitFieldInsn(Opcodes.GETSTATIC, "gregtech/api/enums/Mods", "GregTech",
+                    "Lgregtech/api/enums/Mods;");
+                mv.visitFieldInsn(Opcodes.GETFIELD, "gregtech/api/enums/Mods", "resourceDomain", "Ljava/lang/String;");
+                mv.visitLdcInsn("iconsets/EM_CONTROLLER");
+                mv.visitMethodInsn(Opcodes.INVOKESTATIC, "gregtech/api/enums/Textures$BlockIcons", "custom",
+                    TWO_ARG_CUSTOM, false);
+                mv.visitFieldInsn(Opcodes.PUTSTATIC, "Synth", "ScreenOFF", "Lgregtech/api/interfaces/IIconContainer;");
+            }
+        }));
+
+        assertEquals("iconsets/EM_CONTROLLER", names.get("ScreenOFF"));
+        assertEquals(1, names.size());
+    }
+
+    @Test
+    public void shape_b_double_prime_with_another_literal_domain_qualifies_the_path() {
+        Map<String, String> names = IconNameMatcher.iconNames(custom("registerIcons", new Emit() {
+
+            @Override
+            public void emit(MethodVisitor mv) {
+                mv.visitLdcInsn("tectech");
+                mv.visitLdcInsn("iconsets/EM_CONTROLLER");
+                mv.visitMethodInsn(Opcodes.INVOKESTATIC, "gregtech/api/enums/Textures$BlockIcons", "custom",
+                    TWO_ARG_CUSTOM, false);
+                mv.visitFieldInsn(Opcodes.PUTSTATIC, "Synth", "f", "Lgregtech/api/interfaces/IIconContainer;");
+            }
+        }));
+
+        // The domain was passed apart, so joining it is not re-prefixing: it is the only way the pair
+        // survives as the one name the one-argument factory reads.
+        assertEquals("tectech:iconsets/EM_CONTROLLER", names.get("f"));
+    }
+
+    @Test
+    public void a_mods_domain_the_bytes_cannot_name_yields_nothing() {
+        // Mods.X.resourceDomain is X's mod id lower-cased, which is not in these bytes. Only
+        // GregTech's is known; any other constant must leave the gap rather than guess.
+        Map<String, String> names = IconNameMatcher.iconNames(custom("registerIcons", new Emit() {
+
+            @Override
+            public void emit(MethodVisitor mv) {
+                mv.visitFieldInsn(Opcodes.GETSTATIC, "gregtech/api/enums/Mods", "TecTech",
+                    "Lgregtech/api/enums/Mods;");
+                mv.visitFieldInsn(Opcodes.GETFIELD, "gregtech/api/enums/Mods", "resourceDomain", "Ljava/lang/String;");
+                mv.visitLdcInsn("iconsets/EM_CONTROLLER");
+                mv.visitMethodInsn(Opcodes.INVOKESTATIC, "gregtech/api/enums/Textures$BlockIcons", "custom",
+                    TWO_ARG_CUSTOM, false);
+                mv.visitFieldInsn(Opcodes.PUTSTATIC, "Synth", "f", "Lgregtech/api/interfaces/IIconContainer;");
+            }
+        }));
+
+        assertTrue("an unnamed domain must not be guessed at: " + names, names.isEmpty());
+    }
+
+    @Test
+    public void a_spare_literal_does_not_feed_a_one_argument_call() {
+        // Two literals and the one-argument factory: the first went somewhere this does not model,
+        // so the pairing is ambiguous and neither literal is taken.
+        Map<String, String> names = IconNameMatcher.iconNames(custom("registerIcons", new Emit() {
+
+            @Override
+            public void emit(MethodVisitor mv) {
+                mv.visitLdcInsn("gregtech");
+                mv.visitLdcInsn("iconsets/EM_CONTROLLER");
+                mv.visitMethodInsn(Opcodes.INVOKESTATIC, "gregtech/api/enums/Textures$BlockIcons", "custom",
+                    "(Ljava/lang/String;)Lgregtech/api/interfaces/IIconContainer;", false);
+                mv.visitFieldInsn(Opcodes.PUTSTATIC, "Synth", "f", "Lgregtech/api/interfaces/IIconContainer;");
+            }
+        }));
+
+        assertTrue("a literal with no call to take it must not pair: " + names, names.isEmpty());
     }
 
     @Test
@@ -224,6 +305,10 @@ public class IconNameMatcherTest {
     }
 
     // ------------------------------------------------------------------------------------ helpers
+
+    /** The two-argument {@code Textures.BlockIcons.custom(domain, path)} GT 5.09.54.133 calls. */
+    private static final String TWO_ARG_CUSTOM = "(Ljava/lang/String;Ljava/lang/String;)"
+        + "Lgregtech/api/interfaces/IIconContainer;";
 
     private interface Emit {
 

@@ -50,11 +50,14 @@ schema-v3 dataset:
   sweeps the trigger stack (size 1..N, stopping when the placed block set stops changing).
   Per stack size it runs a **hint pass** (`construct(trigger, hintsOnly=true)` with a
   recording proxy that captures the hologram's hint dots) and a **block pass**
-  (`construct(trigger, hintsOnly=false)` into a wiped region, then scan). GT's hatch element
-  places nothing (`HatchElementBuilder.placeBlock` is a `// TODO` returning false), so the casing
-  shell plus hint positions are what get recorded, and a scan that finds a real hatch fails the
-  controller rather than record it (#177: this used to set `gt_no_hatch`, which GT 2.9 removed; its
-  opt-in successor `gt_hatch` is never probed). The build sits at `8, 128, 8`, halfway up the world,
+  (`construct(trigger, hintsOnly=false)` into a wiped region, then scan). Up to GT 5.09.54.20 GT's
+  hatch element placed nothing (`HatchElementBuilder.placeBlock` was a `// TODO` returning false).
+  From 5.09.54.133 it places a real hatch taken from `GTCreativeHatchSource.instance`, and an
+  exclusive element (every `newAny`) skips the `gt_hatch` gate, so each block pass swaps that field
+  for a copy holding no hatch and puts it back afterwards. Either way the casing shell plus hint
+  positions are what get recorded, and a scan that finds a real hatch fails the controller rather
+  than record it (#177: this used to set `gt_no_hatch`, which GT 2.9 removed; its opt-in successor
+  `gt_hatch` is never probed). The build sits at `8, 128, 8`, halfway up the world,
   and a build that lies on a face of its scan cube is rebuilt on a wider one; a face that cannot
   widen (the world's height, `MAX_SCAN_DIM` = 256) or a hologram cell outside the cube marks the
   form clipped, which fails the controller's first form and ends the sweep after a later one (#175).
@@ -63,9 +66,13 @@ schema-v3 dataset:
 - `RecordingProxy` captures hint particles headlessly (the server's normal proxy no-ops
   them); `ElementRecorder` + `HatchProbe` ask each visited `IStructureElement` which hatch
   kinds it accepts, so a slot carries its `HatchElement` names (this is what schema v2 added:
-  `variants[].hatch_slots`). An element whose item filter names no kind, such as a hatch adder
-  built from a bare method reference, is asked through its own structure check instead, with a
-  real hatch of each kind standing in the cell (#227: the Distillation Tower ring's energy hatches).
+  `variants[].hatch_slots`). Only the build's own walk names a cell's element: from GT 5.09.54.133
+  each hatch element runs the controller's whole structure check from inside the build, and a visit
+  made under that `checkStructure` is ignored, since it can reach cells the build has not (or never)
+  placed and name them with another piece's element. An element whose item filter names no kind,
+  such as a hatch adder built from a bare method reference, is asked through its own structure
+  check instead, with a real hatch of each kind standing in the cell (#227: the Distillation Tower
+  ring's energy hatches).
   A kind found that way is kept only if the machine's own `checkMachine`, run over the whole shell
   with the hatch in place, counts the hatch as that kind and reports no kind of error the bare shell
   did not already have: a muffler on a Dangote Distillus ring passes the element's check but ends
@@ -90,15 +97,24 @@ the Python adapter's.
 
 Versions come from the DreamAssemblerXXL manifest for the current **stable** pack release
 (not dailies/experimental) and are mirrored in `gtnh.lock.json` at the repo root. GitHub
-tags on the two mod repos match these versions.
+tags on the three mod repos match these versions.
 
-| Pack (manifest) | GT5-Unofficial | StructureLib | Pin                              |
-| --------------- | -------------- | ------------ | -------------------------------- |
-| 2.8.4           | 5.09.51.482    | 1.4.23       | previous                         |
-| 2.9.0-beta-2    | 5.09.54.20     | 1.4.42       | **current** (`gtnh.lock.json`)   |
+| Pack (manifest) | GT5-Unofficial | StructureLib | CropsNH | Pin                              |
+| --------------- | -------------- | ------------ | ------- | -------------------------------- |
+| 2.8.4           | 5.09.51.482    | 1.4.23       | (none)  | older                            |
+| 2.9.0-beta-2    | 5.09.54.20     | 1.4.42       | 2.0.91  | previous                         |
+| 2.9.0-beta-3    | 5.09.54.133    | 1.4.42       | 2.0.114 | **current** (`gtnh.lock.json`)   |
 
-2.9.0-beta-2 is a **beta**, against the "stable release" rule above, and is pinned anyway because the
-adapter now reads plans from a fork that is 2.9-only. Its dump is 296 controllers against 2.8.4's 208.
+2.9.0-beta-3 is a **beta** too, against the "stable release" rule above, pinned for the reason
+beta-2 was: the adapter reads plans from a fork that is 2.9-only, and beta-3 supersedes beta-2 as
+the newer 2.9 build. Its GT moved three things the extractor leans on, each handled so the tool
+still builds and runs against beta-2's GT: a hatch element now places a real hatch in
+`construct(trigger, false)` (see the Status notes), the tectech overlays are registered through the
+two-argument `Textures.BlockIcons.custom(domain, path)` (shape B'' in `IconNameMatcher`), and
+CropsNH renamed its `CustomIcon` fields.
+
+2.9.0-beta-2, the previous pin, was the first 2.9 one, a beta pinned for that same reason. Its dump
+is 296 controllers against 2.8.4's 208.
 Two known rough edges are GT's, not ours: `meta.14003` and `meta.15755` fail extraction on
 client-only classes (`TileEntitySpaceElevatorCable`, `GTSoundLoop`), and six controllers (both
 Large Sifters, both Industrial Arc Furnaces, the Industrial Bending Machine and the TFFT) report an
@@ -108,7 +124,7 @@ correctly). The dump names those from GT's own `GregTech.lang` and lists them in
 `_meta.json.untranslated_names` (#231); a dump taken before that records the key, which the Python
 loader refuses to index as a name.
 
-Only these two mods are pinned by hand. Every other hard dependency (IndustrialCraft2,
+Only these three mods are pinned by hand. Every other hard dependency (IndustrialCraft2,
 NotEnoughItems, NotEnoughIds, GTNHLib, ModularUI, waila, AE2, ...) is a runtime dependency
 of GT5-Unofficial and resolves transitively from its Nexus POM (each entry is published
 with `classifier=dev` and `compile` scope), so pulling GT5U populates the whole dev server
@@ -122,7 +138,7 @@ therefore fails at `:compileJava`. Thaumcraft integration is not needed to enume
 build multiblocks, so `dependencies.gradle` drops that one optional subtree; every other
 GT5U hard dependency still resolves and loads on the dev server.
 
-To bump: rewrite the two coordinates in `dependencies.gradle` and the entry in
+To bump: rewrite the three coordinates in `dependencies.gradle` and the entry in
 `gtnh.lock.json` from a newer manifest. The pin is hand-maintained: the structure-dump CI was
 dropped, because the dump is local-only (see the commit and delivery policy in
 `docs/dataset-extraction/requirements.md`).
@@ -153,7 +169,7 @@ actually touches:
 | ------ | ------- | -------- |
 | `GregTechAPI.METATILEENTITIES` | `gregtech.api` | The array of registered meta tile entities to iterate (index = meta id). |
 | `IMetaTileEntity` | `gregtech.api.interfaces.metatileentity` | Element type of that array; `getStackForm`, `newMetaEntity`, `setBaseMetaTileEntity`, `getLocalName`/`getLocalNameKey`/`getMetaName` filter, place, and name the controller. |
-| `BaseMetaTileEntity` | `gregtech.api.metatileentity` | The tile entity the controller (and each probe hatch) is placed into: `setMetaTileID`, `setMetaTileEntity`, `setFrontFacing`. |
+| `BaseMetaTileEntity` | `gregtech.api.metatileentity` | The tile entity the controller (and each probe hatch) is placed into: `setMetaTileID`, `setMetaTileEntity`, `setFrontFacing`, and `setOwnerName` / `setOwnerUuid` for the controller, whose removal throws without an owner from GT 5.09.54.133 (its powerfail tracker looks the owner's team up). |
 | `MTEHatch`, `MTEBasicHull` | `gregtech.api.metatileentity.implementations` | `MTEHatch` marks a real hatch found in the block pass (a failure, see #177); a hull is `HatchProbe`'s control, since an element whose check takes a hull takes any GT tile rather than a hatch. |
 | `MTEMultiBlockBase` (`newMetaEntity`, `clearHatches`, `checkMachine(base, stack, errors)`, and `checkMachine(base, stack)` where GT has no errors) + `StructureError` / `TranslatableStructureError` | `gregtech.api.metatileentity.implementations`, `gregtech.api.structure.error` | `HatchProbe` asks a throwaway copy of the controller, and confirms a bare adder's kind with the machine's own whole-structure check, comparing the kinds of error it reports (#227). Its LAYER step runs the same check with an output hatch in every output cell, to read which layer each feeds (#299). |
 | `MTEHatchOutput` | `gregtech.api.metatileentity.implementations` | The LAYER step finds a machine's per-layer output lists by their type, `List<List<? extends MTEHatchOutput>>`, rather than by a field name, which differs between machines (`mOutputHatchesByLayer`, `outputHatchesPerLayer`). |
@@ -168,6 +184,7 @@ actually touches:
 | `IStructureElement` / `IStructureElementChain` (+ `StructureEvent`) | `com.gtnewhorizon.structurelib[.structure]` | `ElementRecorder` maps cell -> visiting element; `HatchProbe` flattens a chain and asks `getBlocksToPlace` what each leaf accepts, falling back to the leaf's own `check` when its filter names no hatch kind, which is where a slot's hatch kinds come from. |
 | `HatchElement` (+ `mteClasses()`, `count()`) | `gregtech.api.enums` | The GT hatch-kind enum whose names a slot's `kinds` list holds (`InputBus`, `OutputHatch`, ...). One probe per kind (the first registered MTE of the classes the kind declares) is tested against the element's predicate, or placed for its check, so a GT bump that renumbers hatches is picked up automatically; `count()` says whether a placed probe registered as its kind. |
 | `StructureLib.proxy` (reflected) + `CommonProxy` (subclassed) | `com.gtnewhorizon.structurelib` | Temporarily swap in `RecordingProxy` to capture hint particles headlessly (the server's proxy no-ops them). The one reflective touch of a StructureLib internal; a bump that moves it fails loudly and locally. |
+| `GTCreativeHatchSource.instance` (reflected, GT 5.09.54.133 and later) | `gregtech.api.util` | The supply GT's hatch element places real hatches from. Swapped for a copy holding no hatch around every block pass, then restored, so the scan stays a casing shell. Looked up by name, so on an older GT it is absent and nothing is swapped. |
 
 One extra reflective touch, on the Minecraft side: StructureLib's hint walk is client-only
 (`iterate()` opens with `if (!world.isRemote && hintsOnly) return false;`), so the dump briefly
@@ -219,7 +236,8 @@ the pass never registers icons and never stubs the register. (Feeding the blocks
 class cannot implement an interface that does not exist on this side. It was measured and removed;
 texture-resolution.md records it as a dead end so it is not retried.) Icon *names* are taken instead
 from the `Textures.BlockIcons` enum constants' `name()` (or a custom container's `mIconName` plus
-`mModID`), which map 1:1 to the PNGs under `assets/<modid>/textures/blocks/`. Up front,
+`mModID`, which CropsNH spells `iconName` and `modID` from 2.0.114), which map 1:1 to the PNGs
+under `assets/<modid>/textures/blocks/`. Up front,
 `populateIconNames()` injects a name-carrying `NamedIcon` into every `BlockIcons.mIcon` field **and**
 into every custom icon container queued in `GregTechAPI.sGTBlockIconload` (the queue GT drains
 client-side and never runs on a server, which is why those blocks answer `getIcon` with null), so any
@@ -320,8 +338,8 @@ Commands (run from `tools/gtnh-extractor/`):
 # see below.
 printf 'n\ny\n' | ./gradlew runServer \
   -PtextureOut=../../out/textures-run \
-  -PpackVersion=2.9.0-beta-2 \
-  "-PmodVersions=GT5-Unofficial=5.09.54.20,StructureLib=1.4.42,CropsNH=2.0.91"
+  -PpackVersion=2.9.0-beta-3 \
+  "-PmodVersions=GT5-Unofficial=5.09.54.133,StructureLib=1.4.42,CropsNH=2.0.114"
 ```
 
 Run properties (`build.gradle.kts` forwards them into the server JVM as `gtnhextractor.*` system
@@ -369,8 +387,14 @@ with GT5U + StructureLib + their hard dependencies loaded, `DumperMod` fires on
 `FMLServerStartedEvent`, runs the requested pass(es), and calls `exitJava(0)`, yielding
 `BUILD SUCCESSFUL`. On a fresh machine the wall-clock is dominated by the one-time Minecraft
 decompile and the multi-GB dependency/toolchain download; once cached, a boot is about a
-minute. Nothing in CI runs it: both passes are local-only, so `BUILD SUCCESSFUL` (the real
-exit status, not a piped `tail`'s) is the gate.
+minute. Nothing in CI runs it: both passes are local-only.
+
+**`BUILD SUCCESSFUL` does not prove a dump ran.** A server that crashes before `DumperMod`
+fires (a mod dying in `preInit` or `postInit`) still ends the Gradle run with `BUILD SUCCESSFUL`
+and exit 0: on 2.9.0-beta-3 that happened twice, once for a missing GTNHExtLib and once for
+CropsNH's Better Builder's Wands hook. The gate is the output: `_meta.json` in the
+`-PdatasetOut` folder (or `manifest.json` in `-PtextureOut`) with this run's `generated_at`, and
+the log's own completion line. Look in `run/server/crash-reports/` when it is missing.
 
 ### Running the texture pass on a client (`runClient`)
 
@@ -390,8 +414,8 @@ resolving worse. See [`docs/dataset-extraction/client-dump-spike.md`](../../docs
 export JAVA_HOME="/c/Users/<you>/AppData/Local/Programs/Eclipse Adoptium/jdk-25.0.3+9"
 ./gradlew runClient \
   -PtextureOut=../../out/textures-client \
-  -PpackVersion=2.9.0-beta-2 \
-  "-PmodVersions=GT5-Unofficial=5.09.54.20,StructureLib=1.4.42,CropsNH=2.0.91"
+  -PpackVersion=2.9.0-beta-3 \
+  "-PmodVersions=GT5-Unofficial=5.09.54.133,StructureLib=1.4.42,CropsNH=2.0.114"
 ```
 
 Then click **Singleplayer -> Create New World -> Create New World**. The dump fires the moment the
@@ -401,7 +425,7 @@ JVM.
 **Or skip the clicking entirely** with `-PautoWorld=true`, which makes the run unattended:
 
 ```sh
-./gradlew runClient -PautoWorld=true   -PtextureOut=../../out/textures-client   -PpackVersion=2.9.0-beta-2   "-PmodVersions=GT5-Unofficial=5.09.54.20,StructureLib=1.4.42,CropsNH=2.0.91"
+./gradlew runClient -PautoWorld=true   -PtextureOut=../../out/textures-client   -PpackVersion=2.9.0-beta-3   "-PmodVersions=GT5-Unofficial=5.09.54.133,StructureLib=1.4.42,CropsNH=2.0.114"
 ```
 
 `ClientProxy` waits for the main menu, then makes the same `Minecraft.launchIntegratedServer` call

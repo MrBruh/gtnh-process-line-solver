@@ -1,8 +1,11 @@
 package net.gtnhsolver.extractor;
 
 import java.io.File;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -10,6 +13,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 import net.minecraft.block.Block;
 import net.minecraft.init.Blocks;
@@ -61,7 +65,7 @@ import gregtech.common.misc.GTStructureChannels;
  *        |
  *        v
  *   BLOCK pass : construct(trigger, hintsOnly=false) -> real casing shell into the world
- *        |       (hatch slots fall back to their chained casing: GT's hatch element places nothing)
+ *        |       (hatch slots fall back to their chained casing: GT's hatch supply is emptied first)
  *        v
  *   scan the affected cube -> {d:[dx,dy,dz], block, meta} relative to the controller, plus bbox
  *        |       build lies on a cube face? widen that face, wipe, rebuild, rescan. A face that
@@ -132,14 +136,30 @@ final class StructureDumper {
 
     /**
      * GT's opt-in hatch placement channel ({@code GTStructureChannels.HATCH} since 2.9, which replaced the
-     * opt-out {@code gt_no_hatch} this dump used to set). Never probed: GT's hatch element does not place a
-     * hatch yet ({@code HatchElementBuilder.placeBlock} is a {@code // TODO} returning false), so sweeping it
-     * finds nothing today, and on a GT that implements that TODO it would record real hatches as a
-     * plausible, wrong substitution table. Named by string, not by the enum constant, so the tool still
-     * compiles against a pack that predates it. The guard in {@link #scanBlocks} is what notices a GT that
-     * starts placing hatches in the block pass itself.
+     * opt-out {@code gt_no_hatch} this dump used to set). Never probed: from GT 5.09.54.133 a hatch element
+     * does place a hatch ({@code HatchElementBuilder.placeBlock}, a {@code // TODO} returning false up to
+     * 5.09.54.20), so sweeping it would record real hatches as a plausible, wrong substitution table. Named
+     * by string, not by the enum constant, so the tool still compiles against a pack that predates it. The
+     * block pass keeps hatches out by emptying their supply ({@link #CREATIVE_HATCH_SOURCE}), and the guard
+     * in {@link #scanBlocks} is what notices one that gets through anyway.
      */
     private static final String HATCH_CHANNEL = "gt_hatch";
+
+    /**
+     * {@code GTCreativeHatchSource.instance}, the hatch supply GT's hatch element places from, or null on a
+     * GT without it (5.09.54.20 and older, whose {@code placeBlock} is a stub).
+     *
+     * <p>
+     * From GT 5.09.54.133 {@code HatchElementBuilder.placeBlock} survival-places a real hatch taken from this
+     * source, which offers one of every registered MTE. Only a non-exclusive element still waits for the
+     * {@code gt_hatch} channel; an exclusive one ({@code .exclusive()}, which every {@code IHatchElement.newAny}
+     * is) skips that gate, so the Electric Blast Furnace, the turbines and dozens more would build with real
+     * hatches in their slots and fail the {@link #scanBlocks} guard. So every block-pass {@code construct}
+     * runs with this field pointing at a copy that holds no hatch ({@link #withoutHatchSupply}): the element
+     * finds nothing to take, rejects the cell, and its chain falls through to the casing, which is the shell
+     * GT 5.09.54.20 built. Looked up by name, so a GT without the class compiles and the swap is a no-op.
+     */
+    private static final Field CREATIVE_HATCH_SOURCE = creativeHatchSourceField();
 
     /** The GT heating-coil channel name; coils are swept by stack size, so it is skipped in the loop. */
     private static final String COIL_CHANNEL = GTStructureChannels.HEATING_COIL.get();
@@ -153,6 +173,11 @@ final class StructureDumper {
     private static final int OX = 8;
     private static final int OY = 128;
     private static final int OZ = 8;
+
+    /** Who the scratch controller belongs to; see {@link #placeController}. */
+    private static final String SCRATCH_OWNER_NAME = "gtnh-extractor";
+    private static final UUID SCRATCH_OWNER_UUID = UUID
+        .nameUUIDFromBytes(SCRATCH_OWNER_NAME.getBytes(StandardCharsets.UTF_8));
 
     // Hard caps (plan risk 9.2): bound the trigger-stack sweep and the per-controller variant count
     // so a dynamic/explosive structure lands on the failure list rather than running away.
@@ -193,6 +218,12 @@ final class StructureDumper {
     private HatchProbe hatchProbe;
     /** Set once the probe fails to build, so we do not retry it per controller. */
     private boolean hatchProbeFailed;
+    /** The hatch supply with nothing in it, built on first use; see {@link #CREATIVE_HATCH_SOURCE}. */
+    private Object emptyHatchSource;
+    /** Set once the empty supply cannot be built, so we do not retry it per construct. */
+    private boolean emptyHatchSourceFailed;
+    /** New-cell visits by GT's own structure checks inside block passes, ignored (see ElementRecorder). */
+    private long nestedVisitsIgnored;
 
     // Set -PdebugMeta=<id> to dump what the hint pass captured for one controller (diagnostics only).
     private final int debugMeta = parseIntProp("gtnhextractor.debugMeta", -1);
@@ -331,6 +362,9 @@ final class StructureDumper {
         if (hatchProbe != null) {
             LOG.info("gtnh-extractor: hatch probe: {}", hatchProbe.summary());
         }
+        LOG.info(
+            "gtnh-extractor: {} new-cell visit(s) by GT's own structure checks inside a build ignored",
+            nestedVisitsIgnored);
         return written;
     }
 
@@ -474,9 +508,10 @@ final class StructureDumper {
         throws DumpException {
         // Both passes use the plain trigger, and no channel is set. The block pass used to set
         // gt_no_hatch "to keep hatches out", but GT 2.9 removed that channel (GitHub #177), and it
-        // never did anything here anyway: GT's hatch element returns an unconditional false from
-        // placeBlock (HatchElementBuilder, a // TODO), so construct(...) places no hatch and the casing
-        // shell is what we scan. scanBlocks fails the controller if a GT ever starts placing one.
+        // never did anything here anyway: up to GT 5.09.54.20 the hatch element's placeBlock was a
+        // // TODO returning false. From 5.09.54.133 it places a real hatch, so the block pass empties
+        // the supply it takes them from (withoutHatchSupply) and the casing shell is still what we
+        // scan. scanBlocks fails the controller if a hatch gets through anyway.
         ItemStack trigger = imte.getStackForm(n);
         if (trigger == null) {
             trigger = imte.getStackForm(1);
@@ -614,8 +649,9 @@ final class StructureDumper {
             LOG.warn("gtnh-extractor: element instrumentation unavailable ({}); hatch slots skipped", e.toString());
         }
         try {
-            controller.construct(blockTrigger, false);
+            withoutHatchSupply(() -> controller.construct(blockTrigger, false));
         } finally {
+            nestedVisitsIgnored += recorder.nestedIgnored();
             if (instrumented) {
                 try {
                     MinecraftForge.EVENT_BUS.unregister(recorder);
@@ -631,6 +667,103 @@ final class StructureDumper {
             }
         }
         return recorder;
+    }
+
+    /**
+     * Run a block-pass {@code build} with GT's hatch supply ({@link #CREATIVE_HATCH_SOURCE}) emptied, and
+     * put the real supply back afterwards, however the build ends. A no-op wrapper on a GT without the
+     * supply, and if the empty copy cannot be made the build runs as it is, so a hatch that lands is
+     * reported by the {@link #scanBlocks} guard rather than slipped into the shell.
+     */
+    private void withoutHatchSupply(Runnable build) {
+        Object empty = CREATIVE_HATCH_SOURCE == null ? null : emptyHatchSource();
+        if (empty == null) {
+            build.run();
+            return;
+        }
+        Object supply;
+        try {
+            supply = CREATIVE_HATCH_SOURCE.get(null);
+            CREATIVE_HATCH_SOURCE.set(null, empty);
+        } catch (IllegalAccessException | RuntimeException e) {
+            LOG.warn(
+                "gtnh-extractor: cannot swap GT's creative hatch source ({}); hatches may be placed",
+                e.toString());
+            build.run();
+            return;
+        }
+        try {
+            build.run();
+        } finally {
+            try {
+                CREATIVE_HATCH_SOURCE.set(null, supply);
+            } catch (IllegalAccessException | RuntimeException e) {
+                LOG.warn("gtnh-extractor: cannot restore GT's creative hatch source ({})", e.toString());
+            }
+        }
+    }
+
+    /**
+     * A {@code GTCreativeHatchSource} that holds no hatch, built once. The field is typed as that class, so
+     * the stand-in has to be one: a fresh instance whose hatch list is emptied, after which its
+     * {@code take} matches nothing and the hatch element's {@code takeOne} comes back empty. The list is
+     * private, so it is found by its type (every instance {@code List} field) rather than by name. Null if
+     * that cannot be done, which is logged once.
+     */
+    private Object emptyHatchSource() {
+        if (emptyHatchSource != null || emptyHatchSourceFailed) {
+            return emptyHatchSource;
+        }
+        try {
+            Class<?> type = CREATIVE_HATCH_SOURCE.getType();
+            Constructor<?> ctor = type.getDeclaredConstructor();
+            ctor.setAccessible(true);
+            Object source = ctor.newInstance();
+            int emptied = 0;
+            for (Field field : type.getDeclaredFields()) {
+                if (Modifier.isStatic(field.getModifiers()) || !List.class.isAssignableFrom(field.getType())) {
+                    continue;
+                }
+                field.setAccessible(true);
+                Object hatches = field.get(source);
+                if (hatches instanceof List) {
+                    ((List<?>) hatches).clear();
+                    emptied++;
+                }
+            }
+            if (emptied == 0) {
+                throw new IllegalStateException(type.getName() + " has no hatch list to empty");
+            }
+            emptyHatchSource = source;
+            LOG.info("gtnh-extractor: block passes run with GT's creative hatch source emptied, so none is placed");
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            emptyHatchSourceFailed = true;
+            LOG.warn(
+                "gtnh-extractor: cannot empty GT's creative hatch source ({}); a placed hatch fails its controller",
+                e.toString());
+        }
+        return emptyHatchSource;
+    }
+
+    /**
+     * {@code GTCreativeHatchSource.instance}, accessible, or null on a GT without it. The class is not
+     * initialised here: its instance is built from GT's MTE registry, so it is left to the first read,
+     * during the dump, when that registry is complete.
+     */
+    private static Field creativeHatchSourceField() {
+        try {
+            Class<?> type = Class
+                .forName("gregtech.api.util.GTCreativeHatchSource", false, StructureDumper.class.getClassLoader());
+            Field field = type.getField("instance");
+            if (!Modifier.isStatic(field.getModifiers()) || Modifier.isFinal(field.getModifiers())
+                || !type.isAssignableFrom(field.getType())) {
+                return null;
+            }
+            field.setAccessible(true);
+            return field;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            return null;
+        }
     }
 
     /**
@@ -947,7 +1080,7 @@ final class StructureDumper {
     private Map<Long, Cell> buildBlockMap(IMetaTileEntity imte, int id, ItemStack trigger, int[] cube) {
         try {
             IConstructable controller = placeController(imte, id);
-            controller.construct(trigger, false);
+            withoutHatchSupply(() -> controller.construct(trigger, false));
             Map<Long, Cell> map = new HashMap<>();
             for (int x = cube[0]; x <= cube[3]; x++) {
                 for (int y = cube[1]; y <= cube[4]; y++) {
@@ -1021,6 +1154,12 @@ final class StructureDumper {
         }
         BaseMetaTileEntity base = (BaseMetaTileEntity) te;
         base.setMetaTileID((short) id);
+        // Owned, as a machine a player places always is (ItemMachines.placeBlockAt sets both). From GT
+        // 5.09.54.133 a multiblock's onRemoval looks its owner's team up (GTPowerfailTracker, through
+        // GTNHLib's TeamManager), and a null owner UUID throws there, so an unowned controller could not
+        // be wiped cleanly. The UUID is fixed so every controller shares the one team GTNHLib makes.
+        base.setOwnerName(SCRATCH_OWNER_NAME);
+        base.setOwnerUuid(SCRATCH_OWNER_UUID);
         IMetaTileEntity controller = imte.newMetaEntity(base);
         if (controller == null) {
             throw new DumpException("newMetaEntity returned null");
@@ -1191,10 +1330,12 @@ final class StructureDumper {
      * Read every non-air block in the cube into the variant, controller-relative; force the origin.
      *
      * <p>
-     * Fails the controller if the build holds a real hatch. GT's hatch element places none today
-     * ({@code HatchElementBuilder.placeBlock} is a {@code // TODO} returning false), which is the whole
-     * premise of "casing shell plus hatch slots". A GT that implements it would put hatches in the scan
-     * as ordinary blocks, and the dump would read on as if nothing had changed (GitHub #177).
+     * Fails the controller if the build holds a real hatch, since "casing shell plus hatch slots" is the
+     * whole premise of the dump. Up to GT 5.09.54.20 the hatch element placed none
+     * ({@code HatchElementBuilder.placeBlock} was a {@code // TODO} returning false); from 5.09.54.133 it
+     * places one from GT's creative hatch source, which {@link #withoutHatchSupply} empties first. A hatch
+     * that lands anyway, from a supply this tool does not know about, would sit in the scan as an ordinary
+     * block, and the dump would read on as if nothing had changed (GitHub #177).
      */
     private void scanBlocks(int[] cube, Block machineBlock, int machineMeta, DumpModel.Variant variant)
         throws DumpException {
@@ -1298,20 +1439,45 @@ final class StructureDumper {
         variant.bbox = new int[] { maxX - minX + 1, maxY - minY + 1, maxZ - minZ + 1 };
     }
 
-    /** Set every non-air block in the cube back to air, clearing the controller and its structure. */
+    /**
+     * Set every non-air block in the cube back to air, clearing the controller and its structure.
+     *
+     * <p>
+     * A cell whose removal throws does not stop the wipe. Minecraft writes the air before it runs the old
+     * block's {@code breakBlock} ({@code Chunk.func_150807_a}), so a removal hook that throws has still
+     * cleared its cell, and going on leaves nothing behind. Stopping at it, as this used to, left every
+     * cell after it standing, and the next build read the previous one back as part of itself: on GT
+     * 5.09.54.133 a controller with no owner threw from every removal (see {@link #placeController}),
+     * which left half of each build behind for the next and failed the Large Chemical Reactor's channel
+     * probe on a table of coils and casings that changed places every build.
+     */
     private void safeWipe(int[] cube) {
-        try {
-            for (int x = cube[0]; x <= cube[3]; x++) {
-                for (int y = Math.max(cube[1], 0); y <= Math.min(cube[4], 255); y++) {
-                    for (int z = cube[2]; z <= cube[5]; z++) {
+        int failed = 0;
+        int standing = 0;
+        Throwable first = null;
+        for (int x = cube[0]; x <= cube[3]; x++) {
+            for (int y = Math.max(cube[1], 0); y <= Math.min(cube[4], 255); y++) {
+                for (int z = cube[2]; z <= cube[5]; z++) {
+                    try {
                         if (world.getBlock(x, y, z) != Blocks.air) {
                             world.setBlock(x, y, z, Blocks.air, 0, 2);
+                        }
+                    } catch (Throwable t) {
+                        failed++;
+                        first = first == null ? t : first;
+                        if (world.getBlock(x, y, z) != Blocks.air) {
+                            standing++;
                         }
                     }
                 }
             }
-        } catch (Throwable t) {
-            LOG.warn("gtnh-extractor: wipe failed around the scratch origin", t);
+        }
+        if (failed > 0) {
+            LOG.warn(
+                "gtnh-extractor: {} cell(s) threw while being wiped around the scratch origin, {} left standing",
+                failed,
+                standing,
+                first);
         }
     }
 

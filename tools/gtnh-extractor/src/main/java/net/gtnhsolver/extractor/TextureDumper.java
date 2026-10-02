@@ -14,9 +14,12 @@ import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
@@ -981,7 +984,7 @@ final class TextureDumper {
         // in a client JVM it names itself. Server-side this reads back our own injected NamedIcon -
         // the same answer the routes below produce - or nothing at all, so those routes remain the
         // server's real answer and nothing about a server run changes.
-        NamedIcon sprite = spriteIcon(readField(container, "mIcon"));
+        NamedIcon sprite = spriteIcon(readField(container, CONTAINER_ICON));
         if (sprite != null) {
             int colon = sprite.iconName.indexOf(':');
             return new String[] { sprite.iconName.substring(0, colon), sprite.iconName.substring(colon + 1) };
@@ -994,14 +997,22 @@ final class TextureDumper {
         if (fieldName != null) {
             return new String[] { ICON_DOMAIN, "iconsets/" + fieldName };
         }
-        Object mIconName = readField(container, "mIconName");
+        Object mIconName = readField(container, CONTAINER_ICON_NAME);
         if (!(mIconName instanceof String) || ((String) mIconName).isEmpty()) {
             return null;
         }
-        Object modId = readField(container, "mModID");
+        Object modId = readField(container, CONTAINER_MOD_ID);
         String fallback = modId instanceof String && !((String) modId).isEmpty() ? (String) modId : ICON_DOMAIN;
         return splitIconName((String) mIconName, fallback);
     }
+
+    // A custom icon container's three fields, under each spelling a holder uses. GT's own and GT++'s
+    // keep the m-prefixed names; CropsNH's CustomIcon had them up to 2.0.91 and renamed them to icon,
+    // iconName and modID at 2.0.114, so reading only the old names would leave every CropsNH machine
+    // overlay unnamed. The first spelling a holder declares is the one read or written.
+    private static final String[] CONTAINER_ICON = { "mIcon", "icon" };
+    private static final String[] CONTAINER_ICON_NAME = { "mIconName", "iconName" };
+    private static final String[] CONTAINER_MOD_ID = { "mModID", "modID" };
 
     /**
      * Split a raw icon name into {@code {domain, relative-path}}, falling back to
@@ -1906,7 +1917,7 @@ final class TextureDumper {
                 skipped++;
                 continue;
             }
-            if (writeField(r, "mIcon", new NamedIcon(ref[0] + ":" + ref[1], assetPath(ref[0], ref[1])))) {
+            if (writeField(r, CONTAINER_ICON, new NamedIcon(ref[0] + ":" + ref[1], assetPath(ref[0], ref[1])))) {
                 ok++;
             } else {
                 skipped++;
@@ -1973,6 +1984,17 @@ final class TextureDumper {
         "kekztech.common.blocks.BlockTFFTStorageField", };
 
     /**
+     * Allowlisted classes that register nothing themselves on a newer GT, so yielding no names there is
+     * expected rather than the "a shape moved" alarm. bartworks' Windmill registered its top sprite in
+     * its own {@code registerIcons} up to GT 5.09.54.20; from 5.09.54.133 that method is gone and
+     * {@code getTexture} draws a brick block plus the {@code OVERLAY_TOP_STEAM_MACERATOR} constant, which
+     * the ordinary routes name, so there is nothing left in its bytes to match. It stays allowlisted for
+     * the packs that still need it.
+     */
+    private static final Set<String> ASM_ICON_CLASSES_MAY_YIELD_NOTHING = new HashSet<>(
+        Arrays.asList("bartworks.common.tileentities.multis.MTEWindmill"));
+
+    /**
      * Fill the icon holders whose names exist only in bytes, so every existing route can resolve
      * them (GitHub #98).
      *
@@ -2017,8 +2039,13 @@ final class TextureDumper {
             }
             if (names.isEmpty()) {
                 // Also loud: every class in the allowlist earned its place by yielding names, so
-                // yielding none means a shape moved under us - the failure mode a pack bump has.
-                LOG.warn("gtnh-extractor: {} is allowlisted but yielded no icon names", className);
+                // yielding none means a shape moved under us - the failure mode a pack bump has. The
+                // exception is a class known to have stopped registering icons itself.
+                if (ASM_ICON_CLASSES_MAY_YIELD_NOTHING.contains(className)) {
+                    LOG.debug("gtnh-extractor: {} registers no icons itself on this GT; nothing to match", className);
+                } else {
+                    LOG.warn("gtnh-extractor: {} is allowlisted but yielded no icon names", className);
+                }
                 continue;
             }
             Class<?> owner;
@@ -2315,11 +2342,26 @@ final class TextureDumper {
         }
 
         // gt.blocktintedglass - no String field and no callable getIcon, so the table is the only
-        // route left. Its four metas are plain BlockIcons constants, verified by verifyCasingTable.
+        // route left. Its metas are plain BlockIcons constants, verified by verifyCasingTable. GT
+        // 5.09.54.133 grew it from 4 metas to 16, one per dye, in BlockTintedIndustrialGlass.getIcon's
+        // order; on 5.09.54.20 and older the twelve added constants do not exist, and verifyCasingTable
+        // names them there.
         flat("gregtech:gt.blocktintedglass", 0, "GLASS_TINTED_INDUSTRIAL_WHITE");
         flat("gregtech:gt.blocktintedglass", 1, "GLASS_TINTED_INDUSTRIAL_LIGHT_GRAY");
         flat("gregtech:gt.blocktintedglass", 2, "GLASS_TINTED_INDUSTRIAL_GRAY");
         flat("gregtech:gt.blocktintedglass", 3, "GLASS_TINTED_INDUSTRIAL_BLACK");
+        flat("gregtech:gt.blocktintedglass", 4, "GLASS_TINTED_INDUSTRIAL_BROWN");
+        flat("gregtech:gt.blocktintedglass", 5, "GLASS_TINTED_INDUSTRIAL_RED");
+        flat("gregtech:gt.blocktintedglass", 6, "GLASS_TINTED_INDUSTRIAL_ORANGE");
+        flat("gregtech:gt.blocktintedglass", 7, "GLASS_TINTED_INDUSTRIAL_YELLOW");
+        flat("gregtech:gt.blocktintedglass", 8, "GLASS_TINTED_INDUSTRIAL_LIME");
+        flat("gregtech:gt.blocktintedglass", 9, "GLASS_TINTED_INDUSTRIAL_GREEN");
+        flat("gregtech:gt.blocktintedglass", 10, "GLASS_TINTED_INDUSTRIAL_CYAN");
+        flat("gregtech:gt.blocktintedglass", 11, "GLASS_TINTED_INDUSTRIAL_LIGHT_BLUE");
+        flat("gregtech:gt.blocktintedglass", 12, "GLASS_TINTED_INDUSTRIAL_BLUE");
+        flat("gregtech:gt.blocktintedglass", 13, "GLASS_TINTED_INDUSTRIAL_PURPLE");
+        flat("gregtech:gt.blocktintedglass", 14, "GLASS_TINTED_INDUSTRIAL_MAGENTA");
+        flat("gregtech:gt.blocktintedglass", 15, "GLASS_TINTED_INDUSTRIAL_PINK");
 
         // gt.blockglass1 - meta 5's constant says FRAME though the item is "Nanite Shielding Glass".
         flat("gregtech:gt.blockglass1", 0, "GLASS_PH_RESISTANT");
@@ -2679,6 +2721,52 @@ final class TextureDumper {
             }
         }
         return false;
+    }
+
+    /** {@link #readField} on the first of {@code names} the owner declares, or null if it declares none. */
+    private static Object readField(Object owner, String[] names) {
+        Field f = firstDeclaredField(owner, names);
+        try {
+            return f == null ? null : f.get(owner);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** {@link #writeField} on the first of {@code names} the owner declares; whether the write landed. */
+    private static boolean writeField(Object owner, String[] names, Object value) {
+        Field f = firstDeclaredField(owner, names);
+        if (f == null) {
+            return false;
+        }
+        try {
+            f.set(owner, value);
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * The first of {@code names}, in order, that the owner's class or a superclass declares, made
+     * accessible; null if none is. Declared, not merely non-null: a holder's own field is the one meant
+     * even while it still holds null.
+     */
+    private static Field firstDeclaredField(Object owner, String[] names) {
+        for (String name : names) {
+            for (Class<?> c = owner.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
+                try {
+                    Field f = c.getDeclaredField(name);
+                    f.setAccessible(true);
+                    return f;
+                } catch (NoSuchFieldException e) {
+                    // keep walking up
+                } catch (Throwable t) {
+                    return null;
+                }
+            }
+        }
+        return null;
     }
 
     private static boolean boolField(Object owner, String name) {
