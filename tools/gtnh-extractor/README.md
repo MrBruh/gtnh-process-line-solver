@@ -97,15 +97,24 @@ the Python adapter's.
 
 Versions come from the DreamAssemblerXXL manifest for the current **stable** pack release
 (not dailies/experimental) and are mirrored in `gtnh.lock.json` at the repo root. GitHub
-tags on the two mod repos match these versions.
+tags on the three mod repos match these versions.
 
-| Pack (manifest) | GT5-Unofficial | StructureLib | Pin                              |
-| --------------- | -------------- | ------------ | -------------------------------- |
-| 2.8.4           | 5.09.51.482    | 1.4.23       | previous                         |
-| 2.9.0-beta-2    | 5.09.54.20     | 1.4.42       | **current** (`gtnh.lock.json`)   |
+| Pack (manifest) | GT5-Unofficial | StructureLib | CropsNH | Pin                              |
+| --------------- | -------------- | ------------ | ------- | -------------------------------- |
+| 2.8.4           | 5.09.51.482    | 1.4.23       | (none)  | older                            |
+| 2.9.0-beta-2    | 5.09.54.20     | 1.4.42       | 2.0.91  | previous                         |
+| 2.9.0-beta-3    | 5.09.54.133    | 1.4.42       | 2.0.114 | **current** (`gtnh.lock.json`)   |
 
-2.9.0-beta-2 is a **beta**, against the "stable release" rule above, and is pinned anyway because the
-adapter now reads plans from a fork that is 2.9-only. Its dump is 296 controllers against 2.8.4's 208.
+2.9.0-beta-3 is a **beta** too, against the "stable release" rule above, pinned for the reason
+beta-2 was: the adapter reads plans from a fork that is 2.9-only, and beta-3 supersedes beta-2 as
+the newer 2.9 build. Its GT moved three things the extractor leans on, each handled so the tool
+still builds and runs against beta-2's GT: a hatch element now places a real hatch in
+`construct(trigger, false)` (see the Status notes), the tectech overlays are registered through the
+two-argument `Textures.BlockIcons.custom(domain, path)` (shape B'' in `IconNameMatcher`), and
+CropsNH renamed its `CustomIcon` fields.
+
+2.9.0-beta-2, the previous pin, was the first 2.9 one, a beta pinned for that same reason. Its dump
+is 296 controllers against 2.8.4's 208.
 Two known rough edges are GT's, not ours: `meta.14003` and `meta.15755` fail extraction on
 client-only classes (`TileEntitySpaceElevatorCable`, `GTSoundLoop`), and six controllers (both
 Large Sifters, both Industrial Arc Furnaces, the Industrial Bending Machine and the TFFT) report an
@@ -115,7 +124,7 @@ correctly). The dump names those from GT's own `GregTech.lang` and lists them in
 `_meta.json.untranslated_names` (#231); a dump taken before that records the key, which the Python
 loader refuses to index as a name.
 
-Only these two mods are pinned by hand. Every other hard dependency (IndustrialCraft2,
+Only these three mods are pinned by hand. Every other hard dependency (IndustrialCraft2,
 NotEnoughItems, NotEnoughIds, GTNHLib, ModularUI, waila, AE2, ...) is a runtime dependency
 of GT5-Unofficial and resolves transitively from its Nexus POM (each entry is published
 with `classifier=dev` and `compile` scope), so pulling GT5U populates the whole dev server
@@ -129,7 +138,7 @@ therefore fails at `:compileJava`. Thaumcraft integration is not needed to enume
 build multiblocks, so `dependencies.gradle` drops that one optional subtree; every other
 GT5U hard dependency still resolves and loads on the dev server.
 
-To bump: rewrite the two coordinates in `dependencies.gradle` and the entry in
+To bump: rewrite the three coordinates in `dependencies.gradle` and the entry in
 `gtnh.lock.json` from a newer manifest. The pin is hand-maintained: the structure-dump CI was
 dropped, because the dump is local-only (see the commit and delivery policy in
 `docs/dataset-extraction/requirements.md`).
@@ -329,8 +338,8 @@ Commands (run from `tools/gtnh-extractor/`):
 # see below.
 printf 'n\ny\n' | ./gradlew runServer \
   -PtextureOut=../../out/textures-run \
-  -PpackVersion=2.9.0-beta-2 \
-  "-PmodVersions=GT5-Unofficial=5.09.54.20,StructureLib=1.4.42,CropsNH=2.0.91"
+  -PpackVersion=2.9.0-beta-3 \
+  "-PmodVersions=GT5-Unofficial=5.09.54.133,StructureLib=1.4.42,CropsNH=2.0.114"
 ```
 
 Run properties (`build.gradle.kts` forwards them into the server JVM as `gtnhextractor.*` system
@@ -399,8 +408,8 @@ resolving worse. See [`docs/dataset-extraction/client-dump-spike.md`](../../docs
 export JAVA_HOME="/c/Users/<you>/AppData/Local/Programs/Eclipse Adoptium/jdk-25.0.3+9"
 ./gradlew runClient \
   -PtextureOut=../../out/textures-client \
-  -PpackVersion=2.9.0-beta-2 \
-  "-PmodVersions=GT5-Unofficial=5.09.54.20,StructureLib=1.4.42,CropsNH=2.0.91"
+  -PpackVersion=2.9.0-beta-3 \
+  "-PmodVersions=GT5-Unofficial=5.09.54.133,StructureLib=1.4.42,CropsNH=2.0.114"
 ```
 
 Then click **Singleplayer -> Create New World -> Create New World**. The dump fires the moment the
@@ -410,7 +419,7 @@ JVM.
 **Or skip the clicking entirely** with `-PautoWorld=true`, which makes the run unattended:
 
 ```sh
-./gradlew runClient -PautoWorld=true   -PtextureOut=../../out/textures-client   -PpackVersion=2.9.0-beta-2   "-PmodVersions=GT5-Unofficial=5.09.54.20,StructureLib=1.4.42,CropsNH=2.0.91"
+./gradlew runClient -PautoWorld=true   -PtextureOut=../../out/textures-client   -PpackVersion=2.9.0-beta-3   "-PmodVersions=GT5-Unofficial=5.09.54.133,StructureLib=1.4.42,CropsNH=2.0.114"
 ```
 
 `ClientProxy` waits for the main menu, then makes the same `Minecraft.launchIntegratedServer` call
