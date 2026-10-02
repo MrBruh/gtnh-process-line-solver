@@ -5,6 +5,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -12,6 +13,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 import net.minecraft.block.Block;
 import net.minecraft.init.Blocks;
@@ -171,6 +173,11 @@ final class StructureDumper {
     private static final int OX = 8;
     private static final int OY = 128;
     private static final int OZ = 8;
+
+    /** Who the scratch controller belongs to; see {@link #placeController}. */
+    private static final String SCRATCH_OWNER_NAME = "gtnh-extractor";
+    private static final UUID SCRATCH_OWNER_UUID = UUID
+        .nameUUIDFromBytes(SCRATCH_OWNER_NAME.getBytes(StandardCharsets.UTF_8));
 
     // Hard caps (plan risk 9.2): bound the trigger-stack sweep and the per-controller variant count
     // so a dynamic/explosive structure lands on the failure list rather than running away.
@@ -1147,6 +1154,12 @@ final class StructureDumper {
         }
         BaseMetaTileEntity base = (BaseMetaTileEntity) te;
         base.setMetaTileID((short) id);
+        // Owned, as a machine a player places always is (ItemMachines.placeBlockAt sets both). From GT
+        // 5.09.54.133 a multiblock's onRemoval looks its owner's team up (GTPowerfailTracker, through
+        // GTNHLib's TeamManager), and a null owner UUID throws there, so an unowned controller could not
+        // be wiped cleanly. The UUID is fixed so every controller shares the one team GTNHLib makes.
+        base.setOwnerName(SCRATCH_OWNER_NAME);
+        base.setOwnerUuid(SCRATCH_OWNER_UUID);
         IMetaTileEntity controller = imte.newMetaEntity(base);
         if (controller == null) {
             throw new DumpException("newMetaEntity returned null");
@@ -1426,20 +1439,45 @@ final class StructureDumper {
         variant.bbox = new int[] { maxX - minX + 1, maxY - minY + 1, maxZ - minZ + 1 };
     }
 
-    /** Set every non-air block in the cube back to air, clearing the controller and its structure. */
+    /**
+     * Set every non-air block in the cube back to air, clearing the controller and its structure.
+     *
+     * <p>
+     * A cell whose removal throws does not stop the wipe. Minecraft writes the air before it runs the old
+     * block's {@code breakBlock} ({@code Chunk.func_150807_a}), so a removal hook that throws has still
+     * cleared its cell, and going on leaves nothing behind. Stopping at it, as this used to, left every
+     * cell after it standing, and the next build read the previous one back as part of itself: on GT
+     * 5.09.54.133 a controller with no owner threw from every removal (see {@link #placeController}),
+     * which left half of each build behind for the next and failed the Large Chemical Reactor's channel
+     * probe on a table of coils and casings that changed places every build.
+     */
     private void safeWipe(int[] cube) {
-        try {
-            for (int x = cube[0]; x <= cube[3]; x++) {
-                for (int y = Math.max(cube[1], 0); y <= Math.min(cube[4], 255); y++) {
-                    for (int z = cube[2]; z <= cube[5]; z++) {
+        int failed = 0;
+        int standing = 0;
+        Throwable first = null;
+        for (int x = cube[0]; x <= cube[3]; x++) {
+            for (int y = Math.max(cube[1], 0); y <= Math.min(cube[4], 255); y++) {
+                for (int z = cube[2]; z <= cube[5]; z++) {
+                    try {
                         if (world.getBlock(x, y, z) != Blocks.air) {
                             world.setBlock(x, y, z, Blocks.air, 0, 2);
+                        }
+                    } catch (Throwable t) {
+                        failed++;
+                        first = first == null ? t : first;
+                        if (world.getBlock(x, y, z) != Blocks.air) {
+                            standing++;
                         }
                     }
                 }
             }
-        } catch (Throwable t) {
-            LOG.warn("gtnh-extractor: wipe failed around the scratch origin", t);
+        }
+        if (failed > 0) {
+            LOG.warn(
+                "gtnh-extractor: {} cell(s) threw while being wiped around the scratch origin, {} left standing",
+                failed,
+                standing,
+                first);
         }
     }
 
