@@ -10,7 +10,10 @@ are built from - each cell with the sides that connect, its gauge and GT's real 
 segments and terminals behind them, auto-output links, how each single block's outputs leave it
 (``output_faces``: the one face it auto-outputs through and the faces that need a cover), the
 region, a legend, and the ``io`` boundary summary - inputs to load, outputs to collect, summed
-power, each flagged ``me`` when its commodity rides ME, since nothing is drawn for it). This
+power, each flagged ``me`` when its commodity rides ME, since nothing is drawn for it). Every
+surface that names resources also lists them one by one as ``resources``, so the viewer can put a
+picture beside each: ``icons`` (filled by ``write_preview`` from a local icon index, #297) and the
+plan's own ``resourceColors`` where there is none. This
 is a *previewer-internal* format - NOT the versioned contract - so the un-testable
 WebGL last mile stays a thin static template while the mapping here is pure and fully tested.
 """
@@ -150,10 +153,17 @@ def _hatch_label(kind: str) -> str:
     return words if words.endswith(("Hatch", "Bus")) else f"{words} Hatch"
 
 
-def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
-    """Flatten ``problem`` + ``layout`` into the self-contained scene dict the viewer renders."""
+def build_scene(
+    problem: InputIR, layout: LayoutResult, *, extra_names: Mapping[str, str] | None = None
+) -> dict[str, Any]:
+    """Flatten ``problem`` + ``layout`` into the self-contained scene dict the viewer renders.
+
+    ``extra_names`` names resources the plan does not (an icon index's, ``previewer.icons``): the
+    plan's own name wins, then one of these, then the bare id. ``icons`` is left empty for
+    ``write_preview`` to fill, which keeps this a pure function of its arguments.
+    """
     machines = {m.id: m for m in problem.machines}
-    names = problem.resource_names
+    names = {**(extra_names or {}), **problem.resource_names}
     types = sorted({m.type for m in problem.machines})
     color_for_type = {t: _MACHINE_PALETTE[i % len(_MACHINE_PALETTE)] for i, t in enumerate(types)}
 
@@ -286,6 +296,8 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
                 # can search NEI for beats a guessed name, which is why the id stays in the label.
                 "resource": net_resource(net) if net is not None else None,
                 "label": net_label(net, names) if net is not None else None,
+                # The same, one entry per resource, for the picture beside each (#297).
+                "resources": _resource_entries(net.resources if net is not None else (), names),
                 "rate": net.throughput if net is not None else None,
                 "unit": RATE_STEM[route.commodity],
                 "color": _COMMODITY_COLOR[route.commodity],
@@ -358,7 +370,8 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
         "inputs": [
             {
                 "resource": f.resource,
-                "label": resource_label(f.resource, names),
+                "label": ", ".join(resource_label(r, names) for r in f.resources),
+                "resources": _resource_entries(f.resources, names),
                 "rate": f.rate,
                 "unit": RATE_STEM[f.commodity],
                 "me": me.toggled(f.commodity),
@@ -368,7 +381,8 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
         "outputs": [
             {
                 "resource": f.resource,
-                "label": resource_label(f.resource, names),
+                "label": ", ".join(resource_label(r, names) for r in f.resources),
+                "resources": _resource_entries(f.resources, names),
                 "rate": f.rate,
                 "unit": RATE_STEM[f.commodity],
                 "me": me.toggled(f.commodity),
@@ -401,6 +415,10 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
             {"commodity": commodity.value, "color": color}
             for commodity, color in _COMMODITY_COLOR.items()
         ],
+        # A picture per resource (#297): the icon ``write_preview`` embeds from a local icon index,
+        # else a dot in the plan's own colour. Both keyed by the raw id, like ``resources`` above.
+        "icons": {},
+        "resourceColors": dict(problem.resource_colors),
         "metrics": {
             "footprint": metrics.footprint,
             "layers": metrics.layers,
@@ -408,6 +426,13 @@ def build_scene(problem: InputIR, layout: LayoutResult) -> dict[str, Any]:
             "buildability": metrics.buildability,
         },
     }
+
+
+def _resource_entries(resources: Iterable[str], names: Mapping[str, str]) -> list[dict[str, str]]:
+    """Each of ``resources`` as ``{"id", "label"}``, in order: what a surface names one by one, so
+    the viewer can draw each one's picture and label without splitting a joined string (a fluid id
+    can hold a comma itself, ``1,3dimethylbenzene``)."""
+    return [{"id": r, "label": resource_label(r, names)} for r in resources]
 
 
 def _scene_material(route: Route) -> dict[str, Any] | None:

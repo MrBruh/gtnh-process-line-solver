@@ -14,7 +14,9 @@ has two or more products of one kind, the product it must be locked to and the s
 resource that route carries, its commodity and its rate, which is the only way to tell one noodle
 of a crossing bundle from the next (#155).
 Resource ids are shown verbatim as the plan carries them, behind the plan's own display name
-where it has one (#296), never a name invented here; a state control swaps every machine between
+where it has one (#296), never a name invented here, and each with its picture where the page has
+one (#297): the item or fluid's own icon from a local icon index (``scene.icons``), else a dot in the
+plan's colour for it (``scene.resourceColors``); a state control swaps every machine between
 its idle and running
 skin where the two differ (the running tiles ride ``scene.atlas.active``, default idle); routes
 (cables and
@@ -174,6 +176,14 @@ _STYLE = """
   #moreToggle { display: none; }
   .sw { display: inline-block; width: 11px; height: 11px; margin-right: 6px; border-radius: 2px;
         vertical-align: middle; }
+  /* A resource's picture before its name (#297): its 64px icon drawn at 16px with Minecraft's own
+     nearest-neighbour look, or, where no icon was exported, a dot in the plan's colour for it.
+     Round, so it never reads as the square commodity swatch a net row starts with, and ringed,
+     because plenty of resources are near-black (benzene is #151515) on a near-black panel. */
+  .ico { width: 16px; height: 16px; margin-right: 4px; vertical-align: middle;
+         image-rendering: pixelated; }
+  .sw.dot { width: 9px; height: 9px; margin-right: 4px; border-radius: 50%;
+            box-shadow: 0 0 0 1px #6b7482; }
   b { color: #aab2bd; font-weight: 600; }
   button { font: inherit; color: #e8eaed; background: #2a2f37; border: 1px solid #3a4150;
            border-radius: 4px; padding: 3px 8px; cursor: pointer; }
@@ -594,7 +604,8 @@ const centerById = {}, sizeById = {}, expandedById = {};
 const hoverables = [];
 const nameById = Object.fromEntries(SCENE.machines.map((m) => [m.id, m.type]));
 const contentsById = Object.fromEntries(SCENE.machines.map((m) => [m.id, m.contents || []]));
-const filterLabelsById = Object.fromEntries(SCENE.machines.map((m) => [m.id, m.filter_labels || []]));
+const filterById = Object.fromEntries(SCENE.machines.map((m) => [m.id,
+  (m.filter_items || []).map((id, i) => ({ id, label: (m.filter_labels || [])[i] || id }))]));
 const hatchesById = Object.fromEntries(SCENE.machines.map((m) => [m.id, m.hatches || []]));
 for (const m of SCENE.machines) {
   const [sx, sy, sz] = m.size;
@@ -938,6 +949,44 @@ function swatch(color) {
 function row(parent, ...parts) {
   parent.append(...parts, el('br'));   // strings here become text nodes, never markup
 }
+// A resource's picture (#297): its icon where write_preview embedded one (SCENE.icons, a data: URI
+// it built from a local icon index), else a dot in the plan's colour for it (SCENE.resourceColors,
+// '#rrggbb' by the IR's own check), else nothing. Maps, not objects: an id is plan text, and an
+// object answers 'constructor' or 'toString' with something that is not a picture.
+const ICONS = new Map(Object.entries(SCENE.icons || {}));
+const COLORS = new Map(Object.entries(SCENE.resourceColors || {}));
+function mark(id) {
+  const icon = ICONS.get(id);
+  if (icon) {
+    const img = el('img');
+    img.className = 'ico';
+    img.alt = '';   // decorative: the label beside it says what it is
+    img.src = icon;
+    return img;
+  }
+  const color = COLORS.get(id);
+  if (!color) return null;
+  const dot = swatch(color);
+  dot.classList.add('dot');
+  return dot;
+}
+// A line that names resources is a list of PARTS: a string, or {icon: id} for that resource's
+// picture. resourceParts turns a scene `resources` list ({id, label} each) into one, comma
+// separated like the joined label it stands in for; partNodes turns parts into what append()
+// takes, text still as text nodes.
+function resourceParts(resources) {
+  const parts = [];
+  (resources || []).forEach((r, i) => parts.push(...(i ? [', '] : []), { icon: r.id }, r.label));
+  return parts;
+}
+function partNodes(parts) {
+  const nodes = [];
+  for (const part of parts) {
+    if (typeof part === 'string') nodes.push(part);
+    else { const m = mark(part.icon); if (m) nodes.push(m); }
+  }
+  return nodes;
+}
 // The suffix for a flow whose commodity rides ME (scene.io, a storage's contents): see #menote.
 function viaMe(flow) {
   return flow.me ? ' via ME' : '';
@@ -963,7 +1012,9 @@ function netRow(r) {
   button.className = 'net';
   if (r.netId === solo) button.classList.add('on');
   button.setAttribute('aria-pressed', String(r.netId === solo));
-  button.append(swatch(r.color), r.label || r.commodity);
+  const named = r.resources && r.resources.length;
+  button.append(swatch(r.color),
+    ...(named ? partNodes(resourceParts(r.resources)) : [r.label || r.commodity]));
   if (r.rate != null) button.append('   ' + rateText(r.rate) + ' ' + r.unit + sfx);
   button.addEventListener('click', () => {
     solo = r.netId === solo ? null : r.netId;   // pressing the soloed net again clears it
@@ -1038,10 +1089,10 @@ function renderLegend() {
   if (SCENE.io) {
     const io = SCENE.io, sfx = perSecond ? '/s' : '/t';
     const sys = section(panel, 'system i/o');
-    for (const i of io.inputs)
-      row(sys, 'in: ' + i.label + (i.rate != null ? ' (' + rateText(i.rate) + ' ' + i.unit + sfx + ')' : '') + viaMe(i));
-    for (const o of io.outputs)
-      row(sys, 'out: ' + o.label + (o.rate != null ? ' (' + rateText(o.rate) + ' ' + o.unit + sfx + ')' : '') + viaMe(o));
+    const flowRow = (word, f) => row(sys, ...partNodes([word + ': ', ...resourceParts(f.resources),
+      (f.rate != null ? ' (' + rateText(f.rate) + ' ' + f.unit + sfx + ')' : '') + viaMe(f)]));
+    for (const i of io.inputs) flowRow('in', i);
+    for (const o of io.outputs) flowRow('out', o);
     // Power: total EU/t supplied plus the per-tier feed spec, the full tier voltage x amps to
     // supply (how a GT source is fed). The total is that feed (tier voltage x amps), so it matches
     // the breakdown, e.g. 'power: 96 EU/t (LV 32V x 3A)' where 96 = 32 x 3.
@@ -1090,7 +1141,9 @@ window.addEventListener('resize', () => {
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const nametag = document.getElementById('nametag');
-let hover = null;   // { lines: () => string[], anchor: [x, y, z] }
+// A line is a string, or a list of parts (resourceParts) where it names resources and so
+// carries their pictures.
+let hover = null;   // { lines: () => (string | Part[])[], anchor: [x, y, z] }
 function machineHover(id) {
   const c = centerById[id];
   if (!c || !nameById[id]) return null;
@@ -1106,10 +1159,10 @@ function machineHover(id) {
   return {
     lines: () => [
       nameById[id],
-      ...contentsById[id].map((c) => c.flow + ': ' + c.label + viaMe(c)),
-      ...filterLabelsById[id].map((item) => 'lets through: ' + item),
-      ...(drawnAsBlocks ? [] : hatchesById[id].filter((h) => h.lock).map(
-        (h) => h.label + ' at ' + h.cell.join(', ') + ' locked to: ' + h.lockLabel)),
+      ...contentsById[id].map((c) => [c.flow + ': ', { icon: c.resource }, c.label + viaMe(c)]),
+      ...filterById[id].map((item) => ['lets through: ', { icon: item.id }, item.label]),
+      ...(drawnAsBlocks ? [] : hatchesById[id].filter((h) => h.lock).map((h) =>
+        [h.label + ' at ' + h.cell.join(', ') + ' locked to: ', { icon: h.lock }, h.lockLabel])),
       ...(forbidById[id] ? FORBID_LINES : []),
     ],
     anchor: [c.x, c.y + s[1] / 2 + 0.15, c.z],
@@ -1126,8 +1179,8 @@ function machineHover(id) {
 function hatchHover(what) {
   const h = what.hatch;
   const lines = [nameById[what.machineId] || what.machineId, h.label];
-  if (h.lock) lines.push('locked to: ' + h.lockLabel, '(set its ' + h.lockSlot + ')');
-  else if (h.resource) lines.push(h.flow + ': ' + h.resourceLabel);
+  if (h.lock) lines.push(['locked to: ', { icon: h.lock }, h.lockLabel], '(set its ' + h.lockSlot + ')');
+  else if (h.resource) lines.push([h.flow + ': ', { icon: h.resource }, h.resourceLabel]);
   if (h.spare) {
     lines.push(
       'spare for output layer ' + (h.layer + 1) + ': the tower needs one on every layer to form',
@@ -1139,10 +1192,11 @@ function hatchHover(what) {
   return { lines: () => lines, anchor: [h.cell[0] + 0.5, h.cell[1] + 1 + 0.15, h.cell[2] + 0.5] };
 }
 // A cover marker's tag: which cover, on which machine's which face, and what it lets out.
-const resourceByNet = Object.fromEntries(SCENE.routes.map((r) => [r.netId, r.label]));
+const resourceByNet = new Map(SCENE.routes.map((r) => [r.netId, r.resources || []]));
 function coverHover(what, at) {
   const c = what.cover;
-  const carried = c.nets.map((n) => resourceByNet[n]).filter((r) => r);
+  const carried = c.nets.map((n) => resourceByNet.get(n) || []).filter((rs) => rs.length)
+    .map(resourceParts);
   return {
     lines: () => [
       c.cover + ' cover',
@@ -1165,7 +1219,9 @@ function routeLines(r) {
   const sfx = perSecond ? '/s' : '/t';
   const rate = r.rate != null ? rateText(r.rate) + ' ' + r.unit + sfx : '';
   const detail = ((r.resource ? r.commodity + '   ' : '') + rate).trim();
-  return detail ? [r.label || r.commodity, detail] : [r.label || r.commodity];
+  const named = r.resources && r.resources.length;
+  const headline = named ? resourceParts(r.resources) : r.label || r.commodity;
+  return detail ? [headline, detail] : [headline];
 }
 function pickAt(ev) {
   const rect = renderer.domElement.getBoundingClientRect();
@@ -1230,14 +1286,19 @@ function updateNametag() {
   const a = hover.anchor;
   _tagPos.set(a[0], a[1], a[2]).project(camera);
   if (_tagPos.z >= 1) { nametag.style.display = 'none'; return; }   // behind the camera
-  // One DOM text node per line, never innerHTML: every line here is a machine name or a resource
-  // id out of the plan, which is somebody else's file (#111). Rebuilt only when the text actually
-  // changes, so an open tag is not re-created 60 times a second - and its size is measured in the
-  // same branch, because reading offsetWidth every frame forces a synchronous layout every frame.
-  const text = lines.join('\\n');
+  // A <div> of DOM text nodes (and resource pictures) per line, never innerHTML: every line here
+  // is a machine name or a resource id out of the plan, which is somebody else's file (#111).
+  // Rebuilt only when the lines actually change, so an open tag is not re-created 60 times a
+  // second - and its size is measured in the same branch, because reading offsetWidth every frame
+  // forces a synchronous layout every frame.
+  const text = JSON.stringify(lines);
   if (text !== _tagText) {
     _tagText = text;
-    nametag.replaceChildren(...lines.map((t) => el('div', t)));
+    nametag.replaceChildren(...lines.map((line) => {
+      const div = el('div');
+      div.append(...partNodes(typeof line === 'string' ? [line] : line));
+      return div;
+    }));
     nametag.style.display = 'block';
     _tagW = nametag.offsetWidth;
     _tagH = nametag.offsetHeight;

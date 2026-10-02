@@ -8,6 +8,8 @@ template (validated by eye). ``write_preview`` composes both to a file (what the
 a texture pass in between that skins each machine box with its real GT casing texture where the
 committed dataset + manifest resolve one (``textures.py``), degrading to the flat colour box
 otherwise, and packs every baked face into the one image the viewer draws from (``atlas.py``).
+Beside it an icon pass embeds a picture of each fluid and item the line moves, from a local icon
+index where one exists (``icons.py``, #297); without one the page draws the plan's own colours.
 
 Stated v1 scope is "build-assist": boxes coloured + labelled by type, region wireframe, pipes
 coloured by commodity, power cables sized by thickness, source markers, a legend. The congestion
@@ -20,11 +22,13 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from gtnh_solver.dataset.icons import IconPack, resolve_icon_index
 from gtnh_solver.dataset.roots import resolve_dataset_path
 from gtnh_solver.ir import InputIR, LayoutResult
 
 from .atlas import pack_atlas
 from .html import render_html
+from .icons import resource_art
 from .jar import JAR_VERSION, gt5u_version_from_manifest, jar_png_provider
 from .scene import SCENE_VERSION, build_scene
 from .textures import TextureSummary, texturize_scene
@@ -64,8 +68,14 @@ def write_preview(
     :func:`~gtnh_solver.schematic.write_schematic` already did. The write is the last step, after
     the scene and every texture are built, so a missing ``out/`` used to throw that work away
     with a raw ``FileNotFoundError`` (#150).
+
+    The icon pass is local only and as best-effort as the texture pass: it draws from the icon index
+    of ``version`` (else of the plan's own pack, else of the newest pack that has one, since icons
+    are display only), and a missing or unusable index leaves the page with the plan's colours.
     """
-    scene = build_scene(problem, layout)
+    names, icons = _resource_art(problem, version or problem.pack_version)
+    scene = build_scene(problem, layout, extra_names=names)
+    scene["icons"] = icons
     if textures:
         try:
             manifest_path = resolve_dataset_path("textures/manifest.json", version=version)
@@ -81,6 +91,29 @@ def write_preview(
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(render_html(scene), encoding="utf-8")
     return out
+
+
+#: Where a missing icon index sends the reader: how to export one and derive the index from it.
+ICON_RUNBOOK = "docs/dataset-extraction/icons.md"
+
+
+def _resource_art(problem: InputIR, pack: str | None) -> tuple[dict[str, str], dict[str, str]]:
+    """``icons.resource_art`` from ``pack``'s icon index, or nothing, logged, when there is none
+    or it cannot be read: the page is drawn either way."""
+    index = resolve_icon_index(pack)
+    if index is None:
+        _log.info(
+            "no icon index under data/<version>/icons/, so the preview draws each resource in the "
+            "plan's colour; %s says how to make one",
+            ICON_RUNBOOK,
+        )
+        return {}, {}
+    try:
+        with IconPack.load(index) as icon_pack:
+            return resource_art(problem, icon_pack)
+    except Exception as exc:  # never let an icon index block a preview
+        _log.warning("icon pass skipped, drawing the plan's colours: %s", exc)
+        return {}, {}
 
 
 def _untextured(scene: dict[str, Any]) -> None:

@@ -381,6 +381,7 @@ def test_scene_reports_system_io() -> None:
         {
             "resource": "minecraft:sand",
             "label": "Sand (minecraft:sand)",
+            "resources": [{"id": "minecraft:sand", "label": "Sand (minecraft:sand)"}],
             "rate": pytest.approx(0.1),
             "unit": "items",
             "me": False,
@@ -752,14 +753,16 @@ def test_the_viewer_prints_each_resource_by_its_label() -> None:
     assert held == {"Stone (minecraft:stone)", "Sand (minecraft:sand)"}
     page = render_html(scene)
     for reads in (
-        "r.label || r.commodity",  # a route's tag and its nets-panel row
-        "c.flow + ': ' + c.label",  # a storage's contents
+        "resourceParts(r.resources)",  # a route's tag and its nets-panel row...
+        "r.label || r.commodity",  # ...and a power route's, which names no resource
+        "c.flow + ': ', { icon: c.resource }, c.label",  # a storage's contents
         "m.filter_labels",  # an Item Filter's slots
-        "[r.netId, r.label]",  # what a cover lets out
-        "'in: ' + i.label",  # the system i/o panel
-        "'out: ' + o.label",
-        "h.flow + ': ' + h.resourceLabel",  # a hatch's hover
-        "'locked to: ' + h.lockLabel",
+        "[r.netId, r.resources || []]",  # what a cover lets out
+        "resourceParts(f.resources)",  # the system i/o panel
+        "flowRow('in', i)",
+        "flowRow('out', o)",
+        "h.flow + ': ', { icon: h.resource }, h.resourceLabel",  # a hatch's hover
+        "'locked to: ', { icon: h.lock }, h.lockLabel",
     ):
         assert reads in page, reads
 
@@ -1123,6 +1126,11 @@ def _xss_scene() -> dict[str, Any]:
     scene["legend"][0]["label"] = _XSS  # machine type -> the legend rows
     scene["io"]["inputs"][0]["resource"] = _XSS  # resource id -> the system-i/o rows
     scene["io"]["outputs"][0]["resource"] = _XSS
+    # ...and one by one, with the picture maps keyed by it (#297): the row's text, its icon's
+    # lookup and its colour's lookup. The icon URI and the colour are write_preview's and the IR's.
+    scene["io"]["inputs"][0]["resources"] = [{"id": _XSS, "label": _XSS}]
+    scene["icons"] = {_XSS: "data:image/png;base64,iVBORw0KGgo="}
+    scene["resourceColors"] = {_XSS: "#123456"}
     return scene
 
 
@@ -1166,8 +1174,8 @@ def test_render_html_keeps_a_plan_payload_out_of_the_pages_markup() -> None:
     # reads at runtime. Anywhere else it would be markup (or JS) the browser executes.
     html = render_html(_xss_scene())
     payload = _inlined_scene_json(html)
-    assert html.count(_XSS) == 3  # the three strings seeded above...
-    assert payload.count(_XSS) == 3  # ...all of them inside the inlined JSON, none outside it
+    assert html.count(_XSS) == 7  # the seven strings seeded above...
+    assert payload.count(_XSS) == 7  # ...all of them inside the inlined JSON, none outside it
     assert json.loads(payload)["legend"][0]["label"] == _XSS  # and it survives as the data it is
 
 
@@ -1291,3 +1299,137 @@ def test_scene_route_of_a_merged_run_names_every_item_it_carries() -> None:
     (scene_route,) = build_scene(problem, layout)["routes"]
     assert scene_route["resource"] == "gt.crushed.iron, gt.dust.stone"
     assert scene_route["rate"] == pytest.approx(0.2)
+    # One by one as well, for the picture beside each (#297).
+    assert [r["id"] for r in scene_route["resources"]] == ["gt.crushed.iron", "gt.dust.stone"]
+
+
+def _xylene_line(names: dict[str, str] | None = None) -> tuple[InputIR, LayoutResult]:
+    """A Super Tank feeding a fluid whose id holds a comma, ``1,3dimethylbenzene``, to a mixer."""
+    tank = Machine(
+        id="tank",
+        type="Super Tank",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[
+                Port(
+                    id="output:1,3dimethylbenzene",
+                    commodity=Commodity.FLUID,
+                    direction=IODirection.OUTPUT,
+                )
+            ]
+        ),
+    )
+    mixer = Machine(
+        id="mixer",
+        type="Mixer",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[Port(id="in", commodity=Commodity.FLUID, direction=IODirection.INPUT)]
+        ),
+    )
+    xylene = Net(
+        id="xylene",
+        commodity=Commodity.FLUID,
+        fluid_or_item="1,3dimethylbenzene",
+        throughput=5.0,
+        endpoints=[
+            MachineFaceRef(machine_id="tank", port_id="output:1,3dimethylbenzene"),
+            MachineFaceRef(machine_id="mixer", port_id="in"),
+        ],
+    )
+    problem = InputIR(
+        bounding_region=CellBox(sx=6, sy=2, sz=4),
+        machines=[tank, mixer],
+        nets=[xylene],
+        resource_names=names or {},
+        resource_colors={"1,3dimethylbenzene": "#5B773C"},
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[at("tank", 0, 0, 0), at("mixer", 3, 0, 0)],
+        routes=[
+            Route(
+                net_id="xylene",
+                commodity=Commodity.FLUID,
+                segments=[
+                    Segment(start=CellCoord(x=1, y=0, z=0), end=CellCoord(x=2, y=0, z=0), channel=0)
+                ],
+            )
+        ],
+    )
+    return problem, layout
+
+
+def test_a_fluid_id_with_a_comma_stays_one_resource_on_every_surface() -> None:
+    """The scene names resources one by one (#297) because a joined label cannot be split back:
+    ``1,3dimethylbenzene`` is one fluid, not ``1`` and ``3dimethylbenzene``."""
+    scene = build_scene(*_xylene_line({"1,3dimethylbenzene": "1,3-Dimethylbenzene"}))
+    expected = [{"id": "1,3dimethylbenzene", "label": "1,3-Dimethylbenzene (1,3dimethylbenzene)"}]
+    (route,) = scene["routes"]
+    assert route["resources"] == expected
+    (feed,) = scene["io"]["inputs"]
+    assert feed["resources"] == expected
+    assert feed["label"] == expected[0]["label"]
+
+
+def test_an_io_label_is_built_from_each_resources_own_label() -> None:
+    # The io label used to be resource_label() of the joined "a, b" string, which no name table
+    # keys, so a merged run's panel row showed bare ids even where the plan named every item.
+    scene = _sand_scene()
+    for flow in [*scene["io"]["inputs"], *scene["io"]["outputs"]]:
+        assert flow["label"] == ", ".join(r["label"] for r in flow["resources"])
+    assert {r["label"] for f in scene["io"]["inputs"] for r in f["resources"]} == {
+        "Stone (minecraft:stone)"
+    }
+
+
+def test_the_plans_name_beats_an_extra_name_which_beats_the_bare_id() -> None:
+    """``extra_names`` (an icon index's, ``previewer.icons``) fills in only what the plan leaves
+    unnamed: the plan's own name wins, then the export's, then the id."""
+    named = build_scene(
+        *_xylene_line({"1,3dimethylbenzene": "From Plan"}),
+        extra_names={"1,3dimethylbenzene": "From Export"},
+    )
+    assert named["routes"][0]["label"] == "From Plan (1,3dimethylbenzene)"
+    unnamed = build_scene(*_xylene_line(), extra_names={"1,3dimethylbenzene": "From Export"})
+    assert unnamed["routes"][0]["label"] == "From Export (1,3dimethylbenzene)"
+    assert unnamed["io"]["inputs"][0]["label"] == "From Export (1,3dimethylbenzene)"
+    bare = build_scene(*_xylene_line())
+    assert bare["routes"][0]["label"] == "1,3dimethylbenzene"
+
+
+def test_the_scene_carries_the_plans_colours_and_leaves_icons_to_write_preview() -> None:
+    scene = build_scene(*_xylene_line())
+    assert scene["resourceColors"] == {"1,3dimethylbenzene": "#5b773c"}  # lowercased by the IR
+    assert scene["icons"] == {}  # build_scene stays pure; write_preview fills it
+    sand = _sand_scene()
+    assert set(sand["resourceColors"]) == {
+        "minecraft:cobblestone",
+        "minecraft:gravel",
+        "minecraft:sand",
+        "minecraft:stone",
+    }
+
+
+def test_the_viewer_draws_a_picture_beside_each_resource() -> None:
+    """The template half of #297, which no test can run: each resource's icon or colour dot is
+    looked up in a Map (a plain object answers ``constructor``), drawn as an ``<img>`` the CSP's
+    ``img-src data:`` admits, and a hover tag's lines may carry pictures, so its change check
+    compares the lines themselves rather than their joined text."""
+    page = render_html(_sand_scene())
+    for reads in (
+        "new Map(Object.entries(SCENE.icons || {}))",
+        "new Map(Object.entries(SCENE.resourceColors || {}))",
+        "img.className = 'ico'",
+        "img.alt = ''",
+        "dot.classList.add('dot')",
+        "JSON.stringify(lines)",
+        ".ico { width: 16px; height: 16px;",
+        "image-rendering: pixelated",
+        ".sw.dot",
+    ):
+        assert reads in page, reads
+    assert "img-src data:" in _csp_of(page)
