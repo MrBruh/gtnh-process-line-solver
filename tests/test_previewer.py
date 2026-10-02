@@ -33,6 +33,7 @@ from gtnh_solver.ir import (
     MachineFaceRef,
     METoggles,
     Net,
+    PlacedHatch,
     Port,
     Route,
     Segment,
@@ -43,6 +44,7 @@ from gtnh_solver.previewer.scene import (
     FACE_CAP,
     FACE_COVERED,
     FACE_EXPOSED,
+    _hatch_label,
     block_face_cover,
 )
 from gtnh_solver.solver import solve
@@ -427,6 +429,142 @@ def test_scene_says_power_left_to_me_arrives_over_me() -> None:
     assert not any(f["me"] for f in io["inputs"] + io["outputs"])
 
 
+def _hatched(
+    recipe_map: str | None,
+    *hatches: tuple[str, str | None],
+    names: dict[str, str] | None = None,
+    keys: tuple[str, ...] = ("label", "flow", "resource", "lock", "lockSlot", "byLayer"),
+) -> list[dict[str, Any]]:
+    """The scene's hatch entries for one multiblock with ``(kind, port id)`` hatches along x,
+    each cut down to ``keys``.
+
+    Its ports are the ones the hatches name (``{direction}:{resource}``, or ``power:in``), and
+    ``names`` is the problem's ``resource_names`` (none by default)."""
+    ports = [
+        Port(
+            id=port_id,
+            commodity=Commodity.POWER if port_id.startswith("power") else Commodity.FLUID,
+            direction=IODirection.OUTPUT if port_id.startswith("output") else IODirection.INPUT,
+        )
+        for _, port_id in hatches
+        if port_id is not None
+    ]
+    reactor = Machine(
+        id="r",
+        type="Large Chemical Reactor",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        footprint=CellBox(sx=3, sy=3, sz=3),
+        faces=FaceSpec(ports=ports),
+        recipe_map=recipe_map,
+    )
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[reactor],
+        resource_names=names or {},
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[at("r", 0, 0, 0)],
+        hatches=[
+            PlacedHatch(
+                machine_id="r",
+                kind=kind,
+                cell=CellCoord(x=x, y=0, z=0),
+                facing=Facing.NORTH,
+                port_id=port_id,
+            )
+            for x, (kind, port_id) in enumerate(hatches)
+        ],
+    )
+    (scene_machine,) = build_scene(problem, layout)["machines"]
+    return [{k: h[k] for k in keys} for h in scene_machine["hatches"]]
+
+
+def test_scene_hatch_says_what_it_moves_and_what_it_must_be_locked_to() -> None:
+    """Hovering a hatch names it and says what it moves (#120). A reactor making two fluids puts
+    each in whichever output hatch takes it first, so those two also say the product each must be
+    locked to and the slot GT sets it in; an input, an energy hatch and the maintenance hatch need
+    nothing of the kind."""
+    entries = _hatched(
+        "gt.recipe.largechemicalreactor",
+        ("InputHatch", "input:water"),
+        ("OutputHatch", "output:nitricacid"),
+        ("OutputHatch", "output:hydrogen"),
+        ("Energy", "power:in"),
+        ("Maintenance", None),
+    )
+    locked = {"lockSlot": "Locked Fluid slot", "byLayer": False}
+    unlocked = {"lock": None, "lockSlot": None, "byLayer": False}
+    assert entries == [
+        {"label": "Input Hatch", "flow": "in", "resource": "water", **unlocked},
+        {"label": "Output Hatch", "flow": "out", "resource": "nitricacid", "lock": "nitricacid"}
+        | locked,
+        {"label": "Output Hatch", "flow": "out", "resource": "hydrogen", "lock": "hydrogen"}
+        | locked,
+        {"label": "Energy Hatch", "flow": None, "resource": None, **unlocked},
+        {"label": "Maintenance Hatch", "flow": None, "resource": None, **unlocked},
+    ]
+
+
+def test_scene_hatch_labels_what_it_moves_and_its_lock_like_every_other_surface() -> None:
+    """A hatch's hover prints the resource it moves and the product it is locked to the way the
+    rest of the preview does (#296): the plan's name, then the id that goes in the Locked Fluid
+    slot. A resource the plan names nothing reads as its id, and an energy hatch moves none."""
+    entries = _hatched(
+        "gt.recipe.largechemicalreactor",
+        ("OutputHatch", "output:nitricacid"),
+        ("OutputHatch", "output:hydrogen"),
+        ("Energy", "power:in"),
+        names={"nitricacid": "Nitric Acid"},
+        keys=("resourceLabel", "lockLabel"),
+    )
+    assert entries == [
+        {"resourceLabel": "Nitric Acid (nitricacid)", "lockLabel": "Nitric Acid (nitricacid)"},
+        {"resourceLabel": "hydrogen", "lockLabel": "hydrogen"},
+        {"resourceLabel": None, "lockLabel": None},
+    ]
+
+
+def test_scene_tower_outputs_say_they_fill_by_layer_and_take_no_lock() -> None:
+    # A Distillation Tower sends output i to layer i, and a lock that disagrees voids the product.
+    entries = _hatched(
+        "gt.recipe.distillationtower",
+        ("InputHatch", "input:creosote"),
+        ("OutputHatch", "output:benzene"),
+        ("OutputHatch", "output:phenol"),
+    )
+    assert [(e["resource"], e["lock"], e["byLayer"]) for e in entries] == [
+        ("creosote", None, False),
+        ("benzene", None, True),
+        ("phenol", None, True),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("kind", "label"),
+    [
+        ("OutputHatch", "Output Hatch"),
+        ("InputBus", "Input Bus"),
+        ("Energy", "Energy Hatch"),  # GT's kind drops the word the block's name has
+        ("Maintenance", "Maintenance Hatch"),
+        ("MultiAmpEnergy", "Multi Amp Energy Hatch"),
+    ],
+)
+def test_a_hatch_kind_reads_as_the_block_is_called(kind: str, label: str) -> None:
+    assert _hatch_label(kind) == label
+
+
+def test_render_html_gives_every_hatch_block_a_hover_of_its_own() -> None:
+    # The page side of #120: a hatch's cube owns its own hover (keyed by machine and cell, since a
+    # hatch replaces one casing cell), and the tag says what the hatch is locked to.
+    html = render_html(_sand_scene())
+    assert "function hatchHover(what)" in html
+    assert "if (what.hatch) return hatchHover(what);" in html
+    assert "'locked to: '" in html
+
+
 def test_scene_storage_says_what_it_holds_and_which_way_that_flows() -> None:
     """A Super Chest read "Super Chest" and nothing else (GitHub #155). What it buffers is on its
     ports - where ``adapter.core`` encoded it - and which way that flows is what tells two buffers
@@ -512,8 +650,8 @@ def test_scene_names_an_item_filter_and_what_it_lets_through() -> None:
 
 def test_the_viewer_prints_each_resource_by_its_label() -> None:
     """Every surface that names a resource prints the scene's ``label`` (#296), not the bare id: a
-    route's tag and the nets panel, a storage's contents, an Item Filter's slots, a cover's tag and
-    the system i/o panel. The template is the untested last mile, so this pins that it reads the
+    route's tag and the nets panel, a storage's contents, an Item Filter's slots, a cover's tag,
+    a hatch's hover (what it moves and what it is locked to) and the system i/o panel. The template is the untested last mile, so this pins that it reads the
     field the scene tests check rather than the raw ``resource`` beside it."""
     scene = _sand_scene()
     held = {c["label"] for m in scene["machines"] for c in m["contents"]}
@@ -526,6 +664,8 @@ def test_the_viewer_prints_each_resource_by_its_label() -> None:
         "[r.netId, r.label]",  # what a cover lets out
         "'in: ' + i.label",  # the system i/o panel
         "'out: ' + o.label",
+        "h.flow + ': ' + h.resourceLabel",  # a hatch's hover
+        "'locked to: ' + h.lockLabel",
     ):
         assert reads in page, reads
 
