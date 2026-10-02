@@ -28,7 +28,7 @@ read for its member names, and for one PNG header, the size the export rendered 
 
 Usage (from the repo root)::
 
-    python tools/derive_icons.py <game dir>/nesql/gtnh-2.9.0-beta-2 --pack-version 2.9.0-beta-2
+    python tools/derive_icons.py <game dir>/nesql/gtnh-2.9.0-beta-3 --pack-version 2.9.0-beta-3
 """
 
 from __future__ import annotations

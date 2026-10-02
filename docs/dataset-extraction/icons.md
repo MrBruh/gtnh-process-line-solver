@@ -10,8 +10,10 @@ A plan carries no image data. The arodoid fork's `iconPath` is a URL into its ow
 MrBruh fork has none. Our extractor's dev environment cannot render one either, because it loads GT
 and its direct dependencies but not the mods most items on an edge come from (dreamcraft, Forestry,
 HarvestCraft). Only a full pack instance has all of them, and NESQL exporter renders every NEI item
-and every fluid from inside one. ShadowTheAge's fork of it is the one that runs on 2.9 and pins the
-same GT5-Unofficial as `gtnh.lock.json` (5.09.54.20). Its export is reduced to an **icon index**, one
+and every fluid from inside one. ShadowTheAge's fork of it is the one that runs on 2.9. It is built
+against 2.9.0-beta-2's GT5-Unofficial (5.09.54.20) and NEI, and its jars export cleanly from the
+2.9.0-beta-3 pack `gtnh.lock.json` now pins (5.09.54.133): with only the plugins below enabled it
+reads NEI's item list and Forge's fluids, not GT. Its export is reduced to an **icon index**, one
 per pack, local only like every other generated dataset (`data/<version>/` is gitignored).
 
 ## What a preview does with it
@@ -46,7 +48,7 @@ data/<version>/icons/
 {
   "generated_at": "2026-10-02T00:00:00Z",
   "schema": 1,
-  "source": {"exporter": "...", "commit": "...", "export": "...", "pack_version": "2.9.0-beta-2",
+  "source": {"exporter": "...", "commit": "...", "export": "...", "pack_version": "2.9.0-beta-3",
              "icon_px": 64},
   "items":  {"minecraft:gravel": {"name": "Gravel", "png": "item/minecraft/gravel~0.png"}},
   "fluids": {"liquid_toluene": {"name": "Toluene", "png": "fluid/gregtech/toluene.png"}}
@@ -74,7 +76,7 @@ this page and the lock to the same commit.
 ### 1. Build the exporter
 
 NESQL Exporter's upstream (D-Cysteine) targets GT5-Unofficial 5.09.45, pack 2.6, and does not load
-on 2.9. ShadowTheAge's fork pins 5.09.54.20, the same as our lock, but publishes no jar, and its
+on 2.9. ShadowTheAge's fork pins 5.09.54.20 (2.9.0-beta-2), but publishes no jar, and its
 build no longer resolves: GTNH's maven has pruned RetroFuturaGradle 1.3.35 and Galacticraft
 3.2.5-GTNH, both of which it asks for. `MrBruh/nesql-exporter` is that fork plus one build-file
 commit (RFG 1.4.9, and Galacticraft left to the newer one GT5-Unofficial already brings), with no
@@ -103,7 +105,7 @@ both jars and the config below sits in `../gtnh-worktrees/nesql-handover/{mods,c
 
 ### 2. Export from a pack instance
 
-In a GT:NH **2.9.0-beta-2** instance, the pack `gtnh.lock.json` pins (step 3 says why it must be):
+In a GT:NH **2.9.0-beta-3** instance, the pack `gtnh.lock.json` pins (step 3 says why it must be):
 
 1. Copy both jars to `mods/`, and this as `config/NESQL-Exporter.cfg`. It keeps the config file,
    runs only the three plugins an index needs (`base`, `nei` for the item list, `forge` for the
@@ -124,33 +126,35 @@ In a GT:NH **2.9.0-beta-2** instance, the pack `gtnh.lock.json` pins (step 3 say
 2. Set the game's language to English (US). Names are exported as the client draws them.
 3. Check that BugTorch is not in `mods/`: with it, enchanted items render blank.
 4. Start the client. 2.9 runs on Java 17 or newer through lwjgl3ify, and the exporter's Hibernate
-   and ByteBuddy stack has only been run on Java 8. If the log says ByteBuddy does not support
-   `Java N`, add `-Dnet.bytebuddy.experimental=true` to the instance's JVM arguments; if it still
-   fails, export from a copy of the instance on Java 8.
+   and ByteBuddy stack ran there with no extra flag for the 2.9.0-beta-3 export (2026-10-02). If a
+   later pack's log says ByteBuddy does not support `Java N`, add
+   `-Dnet.bytebuddy.experimental=true` to the instance's JVM arguments; if it still fails, export
+   from a copy of the instance on Java 8.
 5. Open a single-player world and open NEI once (the inventory), so its item list loads. Without it
    the export stops at once with "NEI item list is empty! Please load it, and retry."
-6. Run `/nesql gtnh-2.9.0-beta-2` and leave it. Chat reports each stage; the export is done at
+6. Run `/nesql gtnh-2.9.0-beta-3` and leave it (about 8 minutes for 2.9.0-beta-3's 55,387 NEI
+   items). Chat reports each stage; the export is done at
    **"Export complete!"**, which follows "Rendering complete!". A red "Something went wrong during
    export! Please check your logs." means it failed. `/nesql` will not overwrite an earlier export
    of the same name ("Cannot create repository ... it already exists!"); `/nesqlf` does.
 
-It leaves `nesql/gtnh-2.9.0-beta-2/` in the instance's game folder (`.minecraft/` or `minecraft/`),
+It leaves `nesql/gtnh-2.9.0-beta-3/` in the instance's game folder (`.minecraft/` or `minecraft/`),
 holding `nesql-db.script` and `image.zip` (and a `nesql-db.properties` nothing here reads).
 
 ### 3. Derive the index
 
 ```sh
-nice -n 10 .venv/Scripts/python tools/derive_icons.py "<game folder>/nesql/gtnh-2.9.0-beta-2" --pack-version 2.9.0-beta-2
+nice -n 10 .venv/Scripts/python tools/derive_icons.py "<game folder>/nesql/gtnh-2.9.0-beta-3" --pack-version 2.9.0-beta-3
 ```
 
 It reads the script and the archive's member names (no image is unpacked), copies `image.zip` to
-`data/2.9.0-beta-2/icons/images.zip`, writes `index.json` beside it through a temporary file (so an
+`data/2.9.0-beta-3/icons/images.zip`, writes `index.json` beside it through a temporary file (so an
 interrupted run leaves the last index whole), and prints how many rows became how many entries,
 with how many have no image. It refuses, and writes nothing, when:
 
 - `nesql-db.script` or `image.zip` is missing, or the script has no ITEM, FLUID or METADATA table;
-- the export has fewer than 10,000 items. A whole 2.9 instance has about 50,000; fewer means NEI's
-  list was empty when it ran;
+- the export has fewer than 10,000 items. A whole 2.9.0-beta-3 instance exports 69,417; fewer
+  means NEI's list was empty when it ran;
 - `--pack-version` is not `gtnh.lock.json`'s `pack_version`. The export records nothing about the
   pack it ran in (its METADATA table holds the exporter's version and a timestamp), so it cannot be
   checked against the pack. The tool holds it to the lock instead, which pins this exporter for one

@@ -19,6 +19,7 @@ skipped quietly; a listed gap that the index has since filled fails too, so the 
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -30,14 +31,24 @@ from gtnh_solver.ir import Commodity
 from gtnh_solver.previewer.icons import carried_kinds
 
 _ROOT = Path(__file__).resolve().parents[1]
-_PACK = "2.9.0-beta-2"
+#: The pack the lock pins, the only one ``tools/derive_icons.py`` writes an index for.
+_PACK = json.loads((_ROOT / "gtnh.lock.json").read_text(encoding="utf-8"))["pack_version"]
 _INDEX = _ROOT / "data" / _PACK / ICON_INDEX
 _EXAMPLES = sorted((_ROOT / "examples").glob("*.json"))
 
-#: Resource id -> why the real export has no name or picture for it. Starts empty: the first dry
-#: run against a real 2.9 export fills it, each id with the reason the export cannot show it. Not
-#: a place to park an id the index failed to join; that is a bug in the join.
-KNOWN_GAPS: dict[str, str] = {}
+#: Resource id -> why the real export has no name or picture for it, filled from the dry run on a
+#: real 2.9.0-beta-3 export (2026-10-02). Not a place to park an id the index failed to join; that
+#: is a bug in the join.
+_NEI_HIDES_CIRCUIT = (
+    "NEI lists only the Programmed Circuit's configuration 0, so the export rendered no row for "
+    "this configuration (gregtech:gt.integrated_circuit is the one row it has)"
+)
+KNOWN_GAPS: dict[str, str] = {
+    "gregtech:gt.integrated_circuit@1": _NEI_HIDES_CIRCUIT,
+    "gregtech:gt.integrated_circuit@10": _NEI_HIDES_CIRCUIT,
+    "gregtech:gt.integrated_circuit@12": _NEI_HIDES_CIRCUIT,
+    "gregtech:gt.integrated_circuit@24": _NEI_HIDES_CIRCUIT,
+}
 
 pytestmark = pytest.mark.skipif(
     not _INDEX.is_file(),
