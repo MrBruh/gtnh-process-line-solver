@@ -67,7 +67,7 @@ The reader is `src/gtnh_solver/dataset/icons.py`; the previewer side is
 ## Making an index
 
 Three steps, the middle one in a game client: build the exporter once, export from a full pack
-instance (about an hour, unattended once it starts), and derive the index here. The exporter is
+instance (unattended once it starts), and derive the index here. The exporter is
 pinned in `gtnh.lock.json` under `tools.nesql-exporter`, at the commit named below; a test holds
 this page and the lock to the same commit.
 
