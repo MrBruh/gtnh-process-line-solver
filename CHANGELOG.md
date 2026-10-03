@@ -7,6 +7,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **A blast furnace is built with a coil hot enough for its recipes (#318).** GT refuses a recipe
+  whose special value, its heat in kelvin, is above what the furnace reaches: its coil's heat
+  (1801 K for Cupronickel, then 900 K a tier), plus, for the Electric Blast Furnace, the Mega
+  Electric Blast Furnace and the Exothermic Hearth, 100 K per voltage tier the machine is supplied
+  above MV (100 K less per tier below it). The Volcanus, the Dimensionally Transcendent Plasma
+  Forge, the Digester and the Utupu-Tanuri read the coil alone. Since #312 the node's coil is
+  drawn and exported, but nothing checked it against the recipe, so an export could hold a furnace
+  that runs nothing. The adapter now keeps the coil the plan names when it reaches the hottest
+  recipe's heat at the tier the furnace is supplied at (read after the power synthesis, like the
+  plant's machine casing), and otherwise builds the cheapest coil the structure accepts that does,
+  with a warning; a heat above every coil builds the hottest, warning that GT will still refuse the
+  recipe. A coil that sets only speed, parallels or EU/t (the Pyrolyse Oven, the Industrial Coke
+  Oven, the Chemical Plant) is not checked. A converted ShadowTheAge plan states no heat, so it
+  builds as before; its converter warns of a coil too cold itself. No shipped example triggers the
+  check.
 - **A Chemical Plant is built from the casings, pipes and coils its node needs (#312).** GT's
   ExxonMobil Chemical Plant builds four parts from a tier ladder, and each decides whether, or how
   fast, it runs: its solid casing (a recipe runs only if its special value is at or below the

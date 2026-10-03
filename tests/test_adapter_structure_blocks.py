@@ -2,7 +2,8 @@
 
 First the recipe's special value, which exporters state in up to three places. Then the blocks
 each machine is stamped with: the three shipped plans end to end against the committed dataset,
-and each rung of each precedence ladder on a one-plant plan.
+and each rung of each precedence ladder on a one-plant plan. Last, the coil a blast furnace's
+recipes need hot enough (#318), on a one-furnace plan.
 """
 
 from __future__ import annotations
@@ -23,10 +24,11 @@ from gtnh_solver.adapter import (
     load_plan,
     to_input_ir,
 )
-from gtnh_solver.adapter.structure_blocks import PlannedStructure, recipe_special_value
+from gtnh_solver.adapter.structure_blocks import CoilHeat, PlannedStructure, recipe_special_value
 from gtnh_solver.dataset import (
     CHEMICAL_PLANT,
     COIL,
+    HEATING_COILS,
     MACHINE_CASING,
     PIPE,
     SOLID_CASING,
@@ -51,6 +53,10 @@ def _pipe(meta: int) -> StructureBlock:
 
 def _machine_casing(meta: int) -> StructureBlock:
     return StructureBlock(block="gregtech:gt.blockcasings", meta=meta)
+
+
+def _heating_coil(meta: int) -> StructureBlock:
+    return StructureBlock(block="gregtech:gt.blockcasings5", meta=meta)
 
 
 def _recipe(**fields: Any) -> Recipe:
@@ -483,3 +489,162 @@ def test_a_dump_contradicting_the_rule_leaves_the_part_as_dumped() -> None:
     ]
     assert len(refused) == 2  # the titanium solid casing and the bronze pipe
     assert plant.structure_blocks.keys() == {COIL, MACHINE_CASING}
+
+
+# --------------------------------------------------------------------------- the coil's heat
+#
+# An EBF reaches its coil's heat plus 100 K per tier above MV; the plans below supply it at HV
+# (``_plant``'s node), so +100 K: Cupronickel 1901 K, Kanthal 2801 K, Nichrome 3701 K, TPV 4601 K.
+
+_EBF = "Electric Blast Furnace"
+
+
+def _furnace(key: str = _EBF, meta: int = 1000) -> PhysicalDataset:
+    """The committed EBF's structure as controller ``meta``, named ``key``, accepting every coil.
+
+    The committed fixture records only Cupronickel to TPV, which is all most cases need."""
+    ebf = _DATASET.by_block_key["gregtech:gt.blockmachines@1000"]
+    furnace = replace(
+        ebf,
+        key=key,
+        meta=meta,
+        substitutions=((COIL, tuple(rung.block_id for rung in HEATING_COILS)),),
+    )
+    return PhysicalDataset(meta=_DATASET.meta, machines={furnace.key: furnace}, records=(furnace,))
+
+
+def test_a_coil_hot_enough_for_its_recipes_is_kept() -> None:
+    ebf = _quiet(node={"coilTier": "nichrome"}, recipes=[_sv(3701)], machine_type=_EBF)
+    assert ebf.structure_blocks == {COIL: _heating_coil(2)}
+
+
+def test_a_named_coil_too_cold_is_raised_with_a_warning() -> None:
+    with pytest.warns(
+        AdapterWarning,
+        match=r"^node 'n' names kanthal heating coil \(2801 K at HV\), below the 3000 K its "
+        r"recipes need; building it with nichrome$",
+    ):
+        ebf = _plant(recipes=[_sv(3000)], machine_type=_EBF)
+    assert ebf.structure_blocks == {COIL: _heating_coil(2)}
+
+
+def test_no_named_coil_and_the_dumps_too_cold_is_raised_with_a_warning() -> None:
+    with pytest.warns(
+        AdapterWarning,
+        match=r"^node 'n' names no heating coil its machine accepts, so it would be drawn with the "
+        r"dump's cupronickel \(1901 K at HV\), below the 2000 K its recipes need; building it "
+        r"with kanthal$",
+    ):
+        ebf = _plant(node={"coilTier": ""}, recipes=[_sv(2000)], machine_type=_EBF)
+    assert ebf.structure_blocks == {COIL: _heating_coil(1)}
+
+
+def test_no_named_coil_and_the_dumps_hot_enough_is_left_as_dumped() -> None:
+    ebf = _quiet(node={"coilTier": ""}, recipes=[_sv(1901)], machine_type=_EBF)
+    assert ebf.structure_blocks == {}
+
+
+def test_a_furnace_whose_recipes_state_no_heat_keeps_its_named_coil() -> None:
+    """A converted ShadowTheAge plan states no special value; its converter warns of a coil too
+    cold itself, so nothing is checked and nothing warns here."""
+    ebf = _quiet(node={"coilTier": "cupronickel"}, machine_type=_EBF)
+    assert ebf.structure_blocks == {COIL: _heating_coil(0)}
+
+
+@pytest.mark.parametrize(
+    ("physical", "heat", "top", "reach", "meta"),
+    [(_DATASET, 5000, "tpv", 4601, 3), (_furnace(), 20000, "eternal", 13601, 13)],
+    ids=["above-the-committed-fixtures-tpv", "above-eternal"],
+)
+def test_a_heat_above_every_accepted_coil_builds_the_hottest_with_a_warning(
+    physical: PhysicalDataset, heat: int, top: str, reach: int, meta: int
+) -> None:
+    with pytest.warns(
+        AdapterWarning,
+        match=rf"^node 'n' runs a recipe of {heat} K, above the {reach} K of {top} at HV, the "
+        rf"hottest coil its machine's dump records; building it with {top}, on which GT will "
+        r"still refuse that recipe$",
+    ):
+        ebf = _plant(recipes=[_sv(heat)], machine_type=_EBF, physical=physical)
+    assert ebf.structure_blocks == {COIL: _heating_coil(meta)}
+
+
+def test_the_raise_follows_coil_tier_not_meta() -> None:
+    """HSS-G (meta 4, 5501 K at HV) is followed by HSS-S (meta 9, 6401 K), not Naquadah (meta 5)."""
+    with pytest.warns(AdapterWarning, match="building it with hss_s$"):
+        ebf = _plant(
+            node={"coilTier": "hss_g"}, recipes=[_sv(6000)], machine_type=_EBF, physical=_furnace()
+        )
+    assert ebf.structure_blocks == {COIL: _heating_coil(9)}
+
+
+def test_an_lv_hatch_costs_100_k() -> None:
+    with pytest.warns(AdapterWarning, match=r"names cupronickel heating coil \(1701 K at LV\)"):
+        ebf = _plant(
+            node={"overclockTier": "LV", "coilTier": "cupronickel"},
+            recipes=[_sv(1750)],
+            eut=30.0,
+            machine_type=_EBF,
+        )
+    assert ebf.voltage_tier == "LV"
+    assert ebf.structure_blocks == {COIL: _heating_coil(1)}
+
+
+def test_the_coil_is_settled_at_the_tier_the_machine_is_supplied_at() -> None:
+    """Nichrome reaches 3701 K at HV and 3801 K at EV, so a 3750 K recipe raises it at HV only."""
+    planned = PlannedStructure(
+        node_id="n",
+        coil_heat=CoilHeat(
+            required=3750, tier_bonus=True, coils=HEATING_COILS, named=HEATING_COILS[2]
+        ),
+    )
+    with pytest.warns(AdapterWarning, match=r"nichrome heating coil \(3701 K at HV\)"):
+        assert planned.blocks("HV") == {COIL: _heating_coil(3)}
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert planned.blocks("EV") == {COIL: _heating_coil(2)}
+
+
+def test_a_re_tiered_furnace_is_coiled_for_the_tier_it_is_supplied_at() -> None:
+    """The heat is read after the power synthesis, which can raise the tier the plan states."""
+    ebf = _quiet(node={"coilTier": "nichrome"}, recipes=[_sv(3750)], eut=8000.0, machine_type=_EBF)
+    assert ebf.voltage_tier == "EV"
+    assert ebf.structure_blocks == {COIL: _heating_coil(2)}
+
+
+def test_a_volcanus_reads_the_coil_alone() -> None:
+    """The Nichrome an HV EBF keeps for a 3701 K recipe (3601 K + 100 K) is too cold in a Volcanus,
+    which adds no tier bonus."""
+    with pytest.warns(AdapterWarning, match=r"names nichrome heating coil \(3601 K at HV\)"):
+        volcanus = _plant(
+            node={"coilTier": "nichrome"},
+            recipes=[_sv(3701)],
+            machine_type="Volcanus",
+            physical=_furnace("Volcanus", 963),
+        )
+    assert volcanus.structure_blocks == {COIL: _heating_coil(3)}
+
+
+def test_a_coil_that_sets_only_speed_is_never_checked() -> None:
+    oven = _quiet(
+        recipes=[_sv(20000)], machine_type="Pyrolyse Oven", physical=_furnace("Pyrolyse Oven", 1159)
+    )
+    assert oven.structure_blocks == {COIL: _heating_coil(1)}
+
+
+def test_a_time_shared_furnace_is_coiled_for_its_hottest_recipe() -> None:
+    with (
+        pytest.warns(AdapterWarning, match="time-shares"),
+        pytest.warns(AdapterWarning, match="below the 3500 K its recipes need"),
+    ):
+        ebf = _plant(recipes=[_sv(2000), _sv(3500), _sv(1000)], machine_type=_EBF)
+    assert ebf.structure_blocks == {COIL: _heating_coil(2)}
+
+
+def test_a_plants_disagreeing_special_values_warn_once() -> None:
+    """The heat check asks whether a machine is heat-gated before it reads a special value, so a
+    Chemical Plant's recipe is read for its casing alone."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _plant(recipes=[{"specialValue": 2, "nei": {"additionalInfo": ["Special value: 5"]}}])
+    assert sum("states special values" in str(w.message) for w in caught) == 1
