@@ -51,8 +51,11 @@ calls for: a Coke Oven's slice count (``_trigger_stack``), a tower's fluid-outpu
 **A machine's tiered parts are built from what the plan says** (#312, ``structure_blocks``): the
 node's coil on any multiblock whose coil channel has a choice, and on a Chemical Plant the solid
 casing its recipes' special value needs, its pipe casing, and the machine casing of the tier it is
-supplied at, read after the power synthesis. They reach ``Machine.structure_blocks``, which the
-previewer and ``.schematic`` export build those parts from instead of the dump's default.
+supplied at, read after the power synthesis. On a blast furnace the coil is also raised, with a
+warning, until it reaches the heat its recipes' special value states, which for the EBF family
+grows 100 K per tier the machine is supplied above MV, so it is read after the power synthesis too
+(#318). They reach ``Machine.structure_blocks``, which the previewer and ``.schematic`` export
+build those parts from instead of the dump's default.
 
 **A node standing for several machines expands** into one ``Machine`` per physical machine
 (``_instance_ids``), all sharing the node's nets - which needed no IR concept, because
@@ -593,8 +596,9 @@ def to_input_ir(
     )
     _check_resolved_power(plan, nets)
     # The tier a machine is supplied at is final only now (_supply_tier can raise it), and the
-    # hatches the export places follow it, so the machine casing a Chemical Plant needs to form is
-    # read from it here rather than from the plan's tier.
+    # hatches the export places follow it, so the machine casing a Chemical Plant needs to form, and
+    # the heat an EBF's hatches add to its coil's, are read from it here rather than from the plan's
+    # tier.
     machines = [
         m.model_copy(update={"structure_blocks": planned[m.id].blocks(m.voltage_tier)})
         if m.id in planned

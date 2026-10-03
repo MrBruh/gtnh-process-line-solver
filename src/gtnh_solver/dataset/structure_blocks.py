@@ -15,9 +15,18 @@ such parts, and each decides whether, or how fast, the built plant runs::
     machine_casing   gt.blockcasings metas 0-9        fails to form if meta < the highest hatch
                      (meta = tier, ULV..UHV)          tier, unless UHV (checkMachine)
 
+A heating coil also has a **heat** (#318): 1801 K for Cupronickel, then 900 K per coil tier
+(:data:`HEATING_COIL_HEATS`). The Electric Blast Furnace family refuses a recipe whose special
+value, read as kelvin, is above the heat it reaches (:data:`COIL_HEAT_GATES`)::
+
+    machine                                  heat a recipe's special value must not exceed
+    ---------------------------------------  ---------------------------------------------
+    EBF, Mega EBF, Exothermic Hearth         coil heat + 100 K x (supplied tier - MV)
+    Volcanus, DTPF, Digester, Utupu-Tanuri   coil heat
+
 This module holds that **rule data and nothing a plan decides** (the split ``voltage.py`` has with
-``adapter/power.py``): the tables, the voltage-to-machine-casing rule, and :func:`channel_blocks`,
-the one place every consumer asks which blocks a channel accepts.
+``adapter/power.py``): the tables, the voltage-to-machine-casing and voltage-to-heat rules, and
+:func:`channel_blocks`, the one place every consumer asks which blocks a channel accepts.
 
 **The dump under-records two of the plant's channels.** The extractor records a channel's
 alternatives by building the structure from each trigger stack and noting what lands. GT++'s
@@ -122,6 +131,44 @@ HEATING_COILS: tuple[TieredBlock, ...] = tuple(
     )
 )
 
+#: Each heating coil's heat in kelvin, index = coil tier as in :data:`HEATING_COILS`.
+#: ``HeatingCoilLevel.getHeat()`` is ``1 + 900 * ordinal`` (lines 32-34), and the coil tier is the
+#: ordinal less 2 (``getTier()``, lines 39-41): Cupronickel, meta 0, is ``LV``, ordinal 2
+#: (``BlockCasings5.getCoilHeatFromDamage``, lines 225-243), so 1801 K, then 900 K per tier.
+HEATING_COIL_HEATS: tuple[int, ...] = tuple(1801 + 900 * tier for tier in range(len(HEATING_COILS)))
+
+#: The controllers whose ``validateRecipe`` refuses a recipe whose special value is above their
+#: heat, mapped to whether that heat adds the hatch-tier bonus (:func:`heat_bonus_for`) to the
+#: coil's. Lines are GT 5.09.54.133 (pack 2.9.0-beta-3), then 5.09.51.482 (pack 2.8.4) where the
+#: machine exists there; every one compares ``recipe.mSpecialValue <=`` the heat. Left out: the
+#: Godforge modules, whose heat comes from upgrades over a fixed coil, and every machine whose coil
+#: sets only its speed, parallels or EU/t (Multi Smelter, Pyrolyse Oven, Oil Cracker, Industrial
+#: Coke Oven, Large Fluid Extractor, the Chemical Plant, ...).
+COIL_HEAT_GATES: dict[str, bool] = {
+    # Electric Blast Furnace, MTEElectricBlastFurnace: validateRecipe 213-215, heat = coil heat
+    # + 100 * (GTUtility.getTier(getMaxInputVoltage()) - 2) at 237 (2.8.4: 210-212, 229).
+    "gregtech:gt.blockmachines@1000": True,
+    # Mega Electric Blast Furnace, bartworks MTEMegaBlastFurnaceLegacy: validateRecipe 301-304,
+    # heat = coil heat + 100 * (BWUtil.getTier(getMaxInputEu()) - 2) at 370-371 (2.8.4: the class
+    # is MTEMegaBlastFurnace, 304-307 and 370-371).
+    "gregtech:gt.blockmachines@12730": True,
+    # Exothermic Hearth, MTEExothermicHearth: validateRecipe 326-333, heat = coil heat
+    # + 100 * (GTUtility.getTierExtended(getMaxInputEu()) - 2) at 523-524. Not in 2.8.4.
+    "gregtech:gt.blockmachines@15517": True,
+    # Volcanus, gtPlusPlus MTEAdvEBF: validateRecipe 257-259 compares getCoilLevel().getHeat()
+    # (2.8.4: 242-244).
+    "gregtech:gt.blockmachines@963": False,
+    # Dimensionally Transcendent Plasma Forge, MTEPlasmaForge: validateRecipe 735-737, heat = coil
+    # heat at 826, "No free heat from extra EU!" (2.8.4: 788-790, 897).
+    "gregtech:gt.blockmachines@1004": False,
+    # Digester, gtnhlanth MTEDigester: validateRecipe 138-141 compares getCoilLevel().getHeat()
+    # (2.8.4: 113-116).
+    "gregtech:gt.blockmachines@10500": False,
+    # Utupu-Tanuri, gtPlusPlus MTEIndustrialDehydrator: validateRecipe 247-249 compares
+    # getCoilLevel().getHeat() (2.8.4: 231-233).
+    "gregtech:gt.blockmachines@995": False,
+}
+
 #: The machine casing block: meta = voltage tier, ULV 0 through UHV 9 (``MACHINE_<tier>_*``).
 _MACHINE_CASING_BLOCK = f"{_GT}gt.blockcasings"
 _UHV_MACHINE_CASING = 9
@@ -168,6 +215,21 @@ def machine_casing_for(voltage_tier: str) -> BlockId | None:
         _MACHINE_CASING_BLOCK,
         min(_UHV_MACHINE_CASING, list(VOLTAGE_BY_TIER).index(voltage_tier)),
     )
+
+
+def heat_bonus_for(voltage_tier: str) -> int:
+    """The kelvin an EBF-family machine supplied at ``voltage_tier`` adds to its coil's heat.
+
+    GT adds ``100 * (tier - 2)`` (:data:`COIL_HEAT_GATES`): 100 K per tier above MV and, with no
+    floor, 100 K taken off per tier below it, so ULV is -200 and MAX +1200. 0 for a tier off the
+    ladder. GT reads the tier off the SUM of the machine's energy hatches (the EBF their voltage, the
+    Mega EBF and Exothermic Hearth their voltage times amperage), and this counts one hatch of the
+    supplied tier, so it is conservative: GT can read two or more hatches, or a hatch's 2 A, as a
+    tier higher, so any error leaves the coil chosen from it hotter than GT needs, never colder.
+    """
+    if voltage_tier not in VOLTAGE_BY_TIER:
+        return 0
+    return 100 * (list(VOLTAGE_BY_TIER).index(voltage_tier) - 2)
 
 
 def channel_blocks(

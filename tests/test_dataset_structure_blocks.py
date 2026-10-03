@@ -2,9 +2,10 @@
 
 The tables are checked against the two independent sources that state them: gtnh-factory-flow's
 own controls (the resource each ``pipeCasing`` and ``heatingCoil`` tier names, in the arodoid
-example) and the committed Chemical Plant dump (the order its ``casing`` and ``coil`` channels list
-their blocks in). Then the gap rule: the two tiers GT accepts but the dump never records are
-added for the plant only, and a dump that contradicts the rule wins with a warning.
+example, and each coil's heat, in every example that carries one) and the committed Chemical Plant
+dump (the order its ``casing`` and ``coil`` channels list their blocks in). Then the heat an EBF's
+hatches add to its coil's, and the gap rule: the two tiers GT accepts but the dump never records
+are added for the plant only, and a dump that contradicts the rule wins with a warning.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import pytest
 from gtnh_solver.dataset import (
     CHEMICAL_PLANT,
     COIL,
+    HEATING_COIL_HEATS,
     HEATING_COILS,
     MACHINE_CASING,
     PIPE,
@@ -28,6 +30,7 @@ from gtnh_solver.dataset import (
     BlockId,
     DatasetWarning,
     channel_blocks,
+    heat_bonus_for,
     load_physical_dataset,
     machine_casing_for,
     tier_block,
@@ -56,6 +59,16 @@ def _control(control_id: str) -> dict[str, Any]:
                 if control["id"] == control_id:
                     return dict(control)
     raise AssertionError(f"no Chemical Plant control {control_id!r} in ev-nitrobenzene.json")
+
+
+def _controls_in(node: Any, control_id: str) -> list[dict[str, Any]]:
+    """Every control ``control_id`` anywhere in an exported plan: on a recipe, or on a handler."""
+    if isinstance(node, list):
+        return [found for item in node for found in _controls_in(item, control_id)]
+    if not isinstance(node, dict):
+        return []
+    here = [node] if node.get("id") == control_id and "tiers" in node else []
+    return here + [found for value in node.values() for found in _controls_in(value, control_id)]
 
 
 def _resource_block(resource_id: str) -> BlockId:
@@ -93,6 +106,27 @@ def test_the_coil_table_is_the_dumped_coil_channel_in_tier_order() -> None:
     assert [t.block_id for t in HEATING_COILS] == _plant_dump()[COIL]
 
 
+def test_the_coil_heats_are_the_planners_heating_coil_controls() -> None:
+    """Every ``heatingCoil`` control the example plans carry states each tier's heat, keyed by the
+    same keys as :data:`HEATING_COILS`."""
+    ours = {rung.key: heat for rung, heat in zip(HEATING_COILS, HEATING_COIL_HEATS, strict=True)}
+    checked: set[str] = set()
+    for example in sorted((_REPO / "examples").glob("*.json")):
+        plan = json.loads(example.read_text(encoding="utf-8"))
+        for control in _controls_in(plan, "heatingCoil"):
+            stated = {tier["key"]: tier["heat"] for tier in control["tiers"] if "heat" in tier}
+            assert stated == {key: ours[key] for key in stated}, example.name
+            checked.update(stated)
+    assert checked == set(ours), "every coil's heat is stated by some example's control"
+
+
+def test_a_coils_heat_is_gts_1_plus_900_per_level() -> None:
+    """``HeatingCoilLevel.getHeat()`` is ``1 + 900 * ordinal``, and Cupronickel, coil tier 0, is
+    ``LV``, ordinal 2."""
+    assert tuple(1 + 900 * (tier + 2) for tier in range(len(HEATING_COILS))) == HEATING_COIL_HEATS
+    assert (HEATING_COIL_HEATS[0], HEATING_COIL_HEATS[-1]) == (1801, 13501)
+
+
 def test_a_key_resolves_to_its_rung() -> None:
     assert tier_block(SOLID_CASINGS, "titanium") == (SOLID_CASINGS[4], False)
     assert tier_block(HEATING_COILS, "hss_g")[0] == HEATING_COILS[4]
@@ -126,6 +160,37 @@ def test_the_machine_casing_is_the_supplied_tier_capped_at_uhv(tier: str, meta: 
 
 def test_a_tier_off_the_ladder_has_no_machine_casing() -> None:
     assert machine_casing_for("XV") is None
+
+
+# --------------------------------------------------------------------------- heat bonus
+
+
+@pytest.mark.parametrize(
+    ("tier", "bonus"),
+    [
+        ("ULV", -200),
+        ("LV", -100),
+        ("MV", 0),
+        ("HV", 100),
+        ("EV", 200),
+        ("IV", 300),
+        ("LuV", 400),
+        ("ZPM", 500),
+        ("UV", 600),
+        ("UHV", 700),
+        ("UEV", 800),
+        ("UIV", 900),
+        ("UMV", 1000),
+        ("UXV", 1100),
+        ("MAX", 1200),
+    ],
+)
+def test_the_heat_bonus_is_100_k_per_tier_above_mv(tier: str, bonus: int) -> None:
+    assert heat_bonus_for(tier) == bonus
+
+
+def test_a_tier_off_the_ladder_adds_no_heat() -> None:
+    assert heat_bonus_for("XV") == 0
 
 
 # --------------------------------------------------------------------------- the gap rule
