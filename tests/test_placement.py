@@ -26,6 +26,7 @@ from gtnh_solver.ir import (
 )
 from gtnh_solver.ir.geometry import front_on_boundary, in_region
 from gtnh_solver.placement import place
+from gtnh_solver.placement.constructive import _place_plain
 from gtnh_solver.validator import validate
 from tests._helpers import PLACEMENT_CODES, power_source
 
@@ -242,6 +243,130 @@ def test_the_lattice_seed_leaves_a_line_with_a_multiblock_alone() -> None:
         region=CellBox(sx=6, sy=1, sz=6),
     )
     assert place(problem, lattice=True) == place(problem)
+
+
+# --- the annealer's seed with groups of parallel single blocks (placement.groups) ---------------
+
+
+def _cells(placements: Sequence[Placement]) -> dict[str, tuple[int, int, int]]:
+    return {p.machine_id: (p.cell.x, p.cell.y, p.cell.z) for p in placements}
+
+
+def test_the_lattice_seed_lays_a_group_as_one_column_on_a_shelf() -> None:
+    # Units a, w (a column of three) and b: three to a row is the squarest floor (5 by 3), each
+    # unit two cells along x from the last, and the column runs back to front along z, #1 at its
+    # head where its front (north) is free.
+    machines = [_machine("a"), _machine("w#1"), _machine("w#2"), _machine("w#3"), _machine("b")]
+    problem = _problem(machines, region=CellBox(sx=10, sy=2, sz=10))
+    seeded = place(problem, lattice=True)
+    assert seeded.ok
+    assert _cells(seeded.placements) == {
+        "a": (0, 0, 0),
+        "w#1": (2, 0, 0),
+        "w#2": (2, 0, 1),
+        "w#3": (2, 0, 2),
+        "b": (4, 0, 0),
+    }
+    assert {p.orientation for p in seeded.placements} == {Facing.NORTH}
+    assert validate(problem, _as_layout(seeded.placements)).ok
+
+
+def test_the_shelf_starts_a_new_row_past_its_deepest_unit() -> None:
+    # Two columns of four and four single blocks: three units a row is the squarest floor (5 by 7),
+    # and the first row is as deep as its columns, so the second starts past them and the aisle.
+    machines = [
+        *(_machine(f"p#{k}") for k in range(1, 5)),
+        *(_machine(f"q#{k}") for k in range(1, 5)),
+        *(_machine(f"s{k}") for k in range(4)),
+    ]
+    seeded = place(_problem(machines, region=CellBox(sx=12, sy=1, sz=16)), lattice=True)
+    cells = _cells(seeded.placements)
+    assert (cells["p#1"], cells["q#1"], cells["s0"]) == ((0, 0, 0), (2, 0, 0), (4, 0, 0))
+    assert (cells["p#4"], cells["q#4"]) == ((0, 0, 3), (2, 0, 3))
+    assert (cells["s1"], cells["s2"], cells["s3"]) == ((0, 0, 6), (2, 0, 6), (4, 0, 6))
+
+
+def test_a_group_on_a_multiblock_line_takes_the_first_free_column() -> None:
+    # No shelf with a multiblock: each unit takes the first slot of the plain scan its box fits,
+    # so the column lands beside the multiblock where the plain seed put its members side by side.
+    machines = [
+        _machine("big", footprint=CellBox(sx=2, sy=1, sz=2)),
+        _machine("w#1"),
+        _machine("w#2"),
+    ]
+    problem = _problem(machines, region=CellBox(sx=6, sy=1, sz=6))
+    assert _cells(place(problem, lattice=True).placements) == {
+        "big": (0, 0, 0),
+        "w#1": (2, 0, 0),
+        "w#2": (2, 0, 1),
+    }
+    assert _cells(place(problem).placements)["w#2"] == (3, 0, 0)
+
+
+def test_a_column_with_no_room_is_dissolved_into_its_members() -> None:
+    # A north-facing column of three needs a free run of three along z, and the reserved row at
+    # z=1 leaves none: its members are fitted one at a time instead, and the line still seeds.
+    machines = [_machine(f"w#{k}") for k in (1, 2, 3)]
+    reserved = [CellCoord(x=x, y=0, z=1) for x in range(4)]
+    problem = _problem(machines, region=CellBox(sx=4, sy=1, sz=3), reserved=reserved)
+    seeded = place(problem, lattice=True)
+    assert seeded.ok
+    assert sorted(_cells(seeded.placements).values()) == [(0, 0, 0), (1, 0, 0), (2, 0, 0)]
+    assert validate(problem, _as_layout(seeded.placements)).ok
+
+
+def test_a_source_goes_after_the_shelf_with_its_feed_face_out() -> None:
+    machines = [_source(), _machine("w#1"), _machine("w#2"), _machine("a")]
+    problem = _problem(machines, region=CellBox(sx=6, sy=1, sz=6))
+    seeded = place(problem, lattice=True)
+    cells = _cells(seeded.placements)
+    assert (cells["w#1"], cells["w#2"], cells["a"]) == ((0, 0, 0), (0, 0, 1), (2, 0, 0))
+    assert validate(problem, _as_layout(seeded.placements)).ok
+
+
+def test_a_grouped_seed_that_cannot_place_the_line_falls_back_to_the_plain_one() -> None:
+    # A 3x1x1 corridor: the column cannot stand (it needs two cells of z), so its members are
+    # fitted from the west end, and the west-facing source that goes last finds its only feed cell
+    # taken. The plain seed seats the source first and places the line.
+    machines = [_source(orientations=[Facing.WEST]), _machine("w#1"), _machine("w#2")]
+    problem = _problem(machines, region=CellBox(sx=3, sy=1, sz=1))
+    plain = _place_plain(problem, lattice=True)
+    assert plain.ok
+    assert place(problem, lattice=True) == plain
+
+
+def test_only_the_annealers_seed_groups() -> None:
+    # The fast path and the solver's fallback keep the plain row, whose neighbours touch.
+    machines = [_machine(f"w#{k}") for k in (1, 2, 3)]
+    problem = _problem(machines, region=CellBox(sx=6, sy=1, sz=6))
+    assert place(problem) == _place_plain(problem, lattice=False)
+    assert {p.cell.z for p in place(problem).placements} == {0}
+
+
+@given(
+    sx=st.integers(min_value=1, max_value=6),
+    sz=st.integers(min_value=1, max_value=6),
+    singles=st.integers(min_value=0, max_value=6),
+    sizes=st.lists(st.integers(min_value=2, max_value=5), max_size=3),
+    reserved=st.sets(st.tuples(st.integers(0, 5), st.integers(0, 5)), max_size=6),
+)
+def test_grouping_never_changes_whether_the_seed_is_feasible(
+    sx: int, sz: int, singles: int, sizes: list[int], reserved: set[tuple[int, int]]
+) -> None:
+    # The grouped seed falls back to the plain one, so it can never lose a line the plain seed
+    # places; without an outside front, both place the line exactly when it has the cells for it.
+    machines = [_machine(f"s{i}") for i in range(singles)]
+    for g, size in enumerate(sizes):
+        machines += [_machine(f"g{g}#{k}") for k in range(1, size + 1)]
+    blocked = [CellCoord(x=x, y=0, z=z) for x, z in reserved if x < sx and z < sz]
+    problem = _problem(machines, region=CellBox(sx=sx, sy=1, sz=sz), reserved=blocked)
+
+    grouped = place(problem, lattice=True)
+    assert grouped.ok is _place_plain(problem, lattice=True).ok
+    assert grouped.ok is (len(machines) <= sx * sz - len(blocked))
+    if grouped.ok:
+        assert len(grouped.placements) == len(machines)
+        assert PLACEMENT_CODES.isdisjoint(validate(problem, _as_layout(grouped.placements)).codes())
 
 
 @given(

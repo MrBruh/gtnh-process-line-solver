@@ -7,11 +7,17 @@ where first-fit strings the spokes out in a row but the optimizer clusters them 
 
 from __future__ import annotations
 
+import json
 import math
 import random
+from collections.abc import Sequence
+from dataclasses import replace
+from pathlib import Path
+from typing import cast
 
 import pytest
 
+from gtnh_solver.adapter import adapt_file
 from gtnh_solver.ir import (
     CellBox,
     CellCoord,
@@ -32,31 +38,50 @@ from gtnh_solver.ir.geometry import (
     FACE_DELTAS,
     Cell,
     Pose,
+    box_cells,
     box_in_region,
+    box_within,
     front_on_boundary,
     in_region,
     occupied_cells,
     pose_of,
     rotated_footprint,
 )
-from gtnh_solver.placement import optimize_placement, place
+from gtnh_solver.placement import Objective, optimize_placement, place
+from gtnh_solver.placement.groups import column_offsets, parallel_groups
 from gtnh_solver.placement.search import (
     _apply_occupied_delta,
     _AutoPair,
     _body,
     _box_offsets,
+    _center,
     _dockable_cells,
     _Extent,
+    _fit_unit,
+    _manhattan,
     _marginal_insertion_cost,
+    _marginal_unit_cost,
+    _member_poses,
+    _net_adjacency,
     _nudge,
     _occupancy_grid,
     _placed_extent,
     _placed_invariants,
     _placement,
+    _relaid,
     _relocate,
+    _reorient,
+    _ruin_and_recreate,
     _SearchContext,
+    _swap,
     _turn_fits,
+    _Unit,
+    _unit_adjacency,
+    _unit_invariants,
+    _unit_pose,
+    _units,
 )
+from gtnh_solver.router.auto import auto_output_possible
 from gtnh_solver.validator import validate
 from tests._helpers import PLACEMENT_CODES, at, power_source
 
@@ -838,13 +863,14 @@ def test_the_grid_never_drifts_from_occupied_during_a_recreate() -> None:
         grid: bytearray,
         ctx: _SearchContext,
         rng: random.Random,
+        unit: _Unit | None = None,
     ) -> tuple[Cell, Facing] | None:
         nonlocal seen
         seen += 1
         assert grid == _occupancy_grid(ctx.region, occupied, ctx.reserved), (
             f"grid drifted from occupied on call {seen}"
         )
-        return real(p, placed, occupied, grid, ctx, rng)
+        return real(p, placed, occupied, grid, ctx, rng, unit=unit)
 
     search_module._best_insertion = checking_best_insertion
     try:
@@ -1024,3 +1050,435 @@ def test_only_a_line_of_single_blocks_is_nudged(monkeypatch: pytest.MonkeyPatch)
     )
     optimize_placement(with_multiblock, seed=0)
     assert calls == 0
+
+
+# ------------------------------------------------- groups of parallel copies, moved as units
+
+_ROOT = Path(__file__).resolve().parents[1]
+_HORIZONTAL = [Facing.NORTH, Facing.SOUTH, Facing.EAST, Facing.WEST]
+
+
+def _washer(mid: str) -> Machine:
+    """One copy of a parallel stage: an item in, an item out, a power draw, turnable every way."""
+    return Machine(
+        id=mid,
+        type="washer",
+        voltage_tier="LV",
+        eut=32.0,
+        orientation_options=list(_HORIZONTAL),
+        faces=FaceSpec(
+            ports=[
+                Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT),
+                Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT),
+                Port(id="pin", commodity=Commodity.POWER, direction=IODirection.INPUT),
+            ]
+        ),
+    )
+
+
+def _column_line(size: int = 3, *, region: CellBox | None = None) -> InputIR:
+    """A feed into ``size`` parallel washers (``w#1`` ..), on to a drain, with a power source: the
+    shape one plan node with a ``machineCount`` takes."""
+    washers = [_washer(f"w#{k}") for k in range(1, size + 1)]
+
+    def net(nid: str, commodity: Commodity, ends: list[tuple[str, str]]) -> Net:
+        return Net(
+            id=nid,
+            commodity=commodity,
+            fluid_or_item=None if commodity is Commodity.POWER else "ore",
+            throughput=1.0,
+            endpoints=[MachineFaceRef(machine_id=m, port_id=p) for m, p in ends],
+        )
+
+    nets = [
+        net("feed", Commodity.ITEM, [("feed", "out"), *((w.id, "in") for w in washers)]),
+        net("drain", Commodity.ITEM, [*((w.id, "out") for w in washers), ("drain", "in")]),
+        net("power:LV", Commodity.POWER, [("psrc", "po"), *((w.id, "pin") for w in washers)]),
+    ]
+    source = power_source("psrc", orientations=list(_HORIZONTAL), port_id="po")
+    return InputIR(
+        bounding_region=region if region is not None else CellBox(sx=8, sy=2, sz=8),
+        machines=[_hub("feed"), *washers, _spoke("drain"), source],
+        nets=nets,
+    )
+
+
+def _columns_intact(problem: InputIR, poses: Sequence[Pose]) -> bool:
+    """Whether every group of ``problem`` stands in ``poses`` as its column, back to front."""
+    pos = {p.machine_id: p for p in poses}
+    for ids in parallel_groups(problem):
+        members = [pos[mid] for mid in ids]
+        facing = members[0].orientation
+        x0, y0, z0 = (min(p.cell[a] for p in members) for a in range(3))
+        for p, (dx, dy, dz) in zip(members, column_offsets(len(ids), facing), strict=True):
+            if p.orientation is not facing or p.cell != (x0 + dx, y0 + dy, z0 + dz):
+                return False
+    return True
+
+
+def _unit_ctx(problem: InputIR, placed: list[Pose]) -> _SearchContext:
+    """A move-only context (:func:`_fit_ctx`) carrying ``problem``'s units over ``placed``."""
+    bodies = {m.id: _body(m) for m in problem.machines}
+    adjacency = _net_adjacency(problem)
+    units = _units(placed, bodies, parallel_groups(problem), adjacency)
+    return replace(
+        _fit_ctx(problem.bounding_region, list(problem.machines)),
+        adjacency=adjacency,
+        units=units,
+        unit_adjacency=_unit_adjacency(units),
+    )
+
+
+def _seeded(problem: InputIR) -> tuple[list[Pose], set[Cell]]:
+    """The annealer's seed for ``problem`` as poses, and the cells it occupies."""
+    placed = [pose_of(p) for p in place(problem, lattice=True).placements]
+    machines = {m.id: m for m in problem.machines}
+    return placed, {c for p in placed for c in _pose_cells(p, machines[p.machine_id])}
+
+
+_PIN = json.loads((_ROOT / "tests" / "fixtures" / "no-group-anneals.json").read_text())
+
+
+def _pinned_line(name: str) -> tuple[InputIR, dict[str, float] | None]:
+    if name == "star5":
+        return _star(5), None
+    if name == "powered-star3":
+        return _powered_star(3), {"power:LV": 2.0}
+    return adapt_file(_ROOT / "examples" / f"{name}.json"), None
+
+
+@pytest.mark.parametrize("name", ["star5", "powered-star3", "gtnh-sand", "gtnh-nitrobenzene"])
+def test_a_line_with_no_group_anneals_exactly_as_before_units(name: str) -> None:
+    """With every unit a single machine, every draw and every iteration order is main's.
+
+    The fixture is ``optimize_placement``'s output on main before units existed, for every
+    objective and three seeds; a power net's penalty puts the MST pull in the walk too. Any drift
+    here means the unit layer changed the search for lines it should not touch, so the fixture is
+    not something to regenerate: find the draw that moved.
+    """
+    problem, penalties = _pinned_line(name)
+    assert parallel_groups(problem) == ()
+    checked = 0
+    for key, want in _PIN.items():
+        line, objective, seed = key.split("/")
+        if line != name:
+            continue
+        result = optimize_placement(
+            problem, seed=int(seed), objective=cast(Objective, objective), net_penalties=penalties
+        )
+        got = [
+            [p.machine_id, p.cell.x, p.cell.y, p.cell.z, p.orientation.value]
+            for p in result.placements
+        ]
+        assert got == want, key
+        checked += 1
+    assert checked == 9
+
+
+@pytest.mark.parametrize("line", ["column-line", "parallel-sand"])
+@pytest.mark.parametrize("seed", range(3))
+def test_every_accepted_state_keeps_each_group_one_column(
+    line: str, seed: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rigid-unit promise, over every state the walk accepts and not only the one it returns:
+    each group stands as its column, back to front, in every one."""
+    import gtnh_solver.placement.search as search_module
+
+    if line == "column-line":
+        problem = _column_line(4)
+    else:
+        problem = adapt_file(_ROOT / "examples" / "gtnh-parallel-sand.json")
+    states: list[list[Pose]] = []
+    real = search_module._cheapest_uncrowded
+
+    def recording(
+        problem: InputIR, accepted: list[tuple[float, int, list[Pose]]], fallback: list[Pose]
+    ) -> list[Pose]:
+        states.extend(state for *_, state in accepted)
+        return real(problem, accepted, fallback)
+
+    monkeypatch.setattr(search_module, "_cheapest_uncrowded", recording)
+    result = optimize_placement(problem, seed=seed)
+    assert result.ok
+    assert len(states) > 10, "the walk accepted too little to say anything"
+    assert all(_columns_intact(problem, state) for state in states)
+    assert _validates(problem, result.placements)
+
+
+def test_each_small_move_moves_one_unit_whole_and_restores_what_it_borrowed() -> None:
+    problem = _column_line(3)
+    placed, occupied = _seeded(problem)
+    ctx = _unit_ctx(problem, placed)
+    assert ctx.units is not None
+    [column] = [u for u in ctx.units if len(u.members) > 1]
+    unit_of = {mid: u.key for u in ctx.units for mid in u.ids}
+    before = set(occupied)
+    column_moved: set[str] = set()
+    for move in (_relocate, _nudge, _swap, _reorient):
+        for seed in range(80):
+            cand = move(placed, ctx, occupied, random.Random(seed))
+            assert occupied == before, f"{move.__name__} must restore what it borrowed"
+            if cand is None:
+                continue
+            moved = {unit_of[a.machine_id] for a, b in zip(placed, cand, strict=True) if a != b}
+            assert len(moved) == (2 if move is _swap else 1), move.__name__
+            if column.key in moved:
+                column_moved.add(move.__name__)
+                assert all(placed[i] != cand[i] for i in column.members), "a column moves whole"
+            assert _columns_intact(problem, cand)
+            assert _validates(problem, tuple(_placement(p) for p in cand))
+    assert column_moved == {"_relocate", "_nudge", "_swap", "_reorient"}
+
+
+def test_a_columns_quarter_turn_needs_room_along_its_new_axis() -> None:
+    washers = [_washer(f"w#{k}") for k in (1, 2, 3)]
+    placed = [Pose(f"w#{k}", (0, 0, k - 1), Facing.NORTH) for k in (1, 2, 3)]
+    bodies = {m.id: _body(m) for m in washers}
+    [unit] = _units(placed, bodies, (("w#1", "w#2", "w#3"),), {})
+    p = _unit_pose(unit, placed)
+    assert p == Pose("w#1", (0, 0, 0), Facing.NORTH)
+    own = {(0, 0, 0), (0, 0, 1), (0, 0, 2)}
+    narrow = _fit_ctx(CellBox(sx=2, sy=1, sz=3), washers)
+    assert _turn_fits(unit, p, Facing.SOUTH, narrow, own), "a half turn keeps the box"
+    assert not _turn_fits(unit, p, Facing.EAST, narrow, own), "east needs 3 of x; there are 2"
+    room = _fit_ctx(CellBox(sx=3, sy=1, sz=3), washers)
+    assert _turn_fits(unit, p, Facing.EAST, room, own)
+    assert not _turn_fits(unit, p, Facing.EAST, room, own | {(2, 0, 0)})
+    # Turned east it lies back to front along x, its head at the east end so its front is free.
+    turned = _relaid(placed, (unit, p.cell, Facing.EAST))
+    assert [q.cell for q in turned] == [(2, 0, 0), (1, 0, 0), (0, 0, 0)]
+    assert {q.orientation for q in turned} == {Facing.EAST}
+    assert _unit_pose(unit, turned) == Pose("w#1", (0, 0, 0), Facing.EAST)
+
+
+def test_a_group_the_seed_did_not_lay_as_its_column_moves_as_single_machines() -> None:
+    # The seed dissolves a column with no room; the search must not then hold its scattered
+    # members rigid as if they were one, so it dissolves them too.
+    washers = [_washer(f"w#{k}") for k in (1, 2, 3)]
+    bodies = {m.id: _body(m) for m in washers}
+    groups = (("w#1", "w#2", "w#3"),)
+    side_by_side = [Pose(f"w#{k}", (k - 1, 0, 0), Facing.NORTH) for k in (1, 2, 3)]
+    assert [u.ids for u in _units(side_by_side, bodies, groups, {})] == [
+        ("w#1",),
+        ("w#2",),
+        ("w#3",),
+    ]
+    mixed = [Facing.NORTH, Facing.SOUTH, Facing.NORTH]
+    turned = [Pose(f"w#{k}", (0, 0, k - 1), mixed[k - 1]) for k in (1, 2, 3)]
+    assert len(_units(turned, bodies, groups, {})) == 3
+
+
+def test_a_line_that_is_one_group_neither_swaps_nor_ruins() -> None:
+    problem = InputIR(
+        bounding_region=CellBox(sx=6, sy=2, sz=6),
+        machines=[_washer(f"w#{k}") for k in (1, 2, 3)],
+        nets=[],
+    )
+    placed, occupied = _seeded(problem)
+    ctx = _unit_ctx(problem, placed)
+    assert ctx.units is not None
+    assert len(ctx.units) == 1
+    for seed in range(10):
+        assert _swap(placed, ctx, occupied, random.Random(seed)) is None
+        assert _ruin_and_recreate(placed, ctx, random.Random(seed)) is None
+    result = optimize_placement(problem, seed=0)
+    assert result.ok
+    assert _columns_intact(problem, [pose_of(p) for p in result.placements])
+
+
+def test_the_grid_never_drifts_from_occupied_during_a_grouped_recreate() -> None:
+    """:func:`test_the_grid_never_drifts_from_occupied_during_a_recreate` with columns going back
+    whole: a column marks every member's cell in the grid as it lands."""
+    import gtnh_solver.placement.search as search_module
+
+    real = search_module._best_insertion
+    whole = 0
+
+    def checking_best_insertion(
+        p: Pose,
+        placed: list[Pose],
+        occupied: set[Cell],
+        grid: bytearray,
+        ctx: _SearchContext,
+        rng: random.Random,
+        unit: _Unit | None = None,
+    ) -> tuple[Cell, Facing] | None:
+        nonlocal whole
+        whole += unit is not None
+        assert grid == _occupancy_grid(ctx.region, occupied, ctx.reserved)
+        return real(p, placed, occupied, grid, ctx, rng, unit=unit)
+
+    search_module._best_insertion = checking_best_insertion
+    try:
+        result = optimize_placement(_column_line(3), seed=3)
+    finally:
+        search_module._best_insertion = real
+    assert result.ok
+    assert whole > 0, "no column was ever re-inserted; the invariant went unchecked for one"
+
+
+def test_a_column_with_no_candidate_falls_back_to_the_first_slot_it_fits() -> None:
+    washers = [_washer(f"w#{k}") for k in (1, 2, 3)]
+    placed = [Pose(f"w#{k}", (0, 0, k - 1), Facing.NORTH) for k in (1, 2, 3)]
+    [unit] = _units(placed, {m.id: _body(m) for m in washers}, (("w#1", "w#2", "w#3"),), {})
+    ctx = _fit_ctx(CellBox(sx=3, sy=1, sz=3), washers)
+    # The middle row is taken, so no column fits along z; the first one along x is at the origin.
+    middle = {(x, 0, 1) for x in range(3)}
+    assert _fit_unit(unit, ctx, middle) == ((0, 0, 0), Facing.EAST)
+    assert _fit_unit(unit, ctx, middle | {(1, 0, 0), (1, 0, 2)}) is None
+
+
+# ------------------------------------------------------- a column's price (_marginal_unit_cost)
+
+
+def _unit_cost_ctx() -> tuple[_SearchContext, _Unit, dict[str, Pose]]:
+    """Two washers as a column, against a placed hub ``a`` and spoke ``b``, with every term live.
+
+    One net all three share (once, though both members list it), one only ``w#1`` and ``b`` are on,
+    a penalized power net only ``w#2`` is on, and an auto pair either way: ``w#1`` feeding ``b`` and
+    ``a`` feeding ``w#2``.
+    """
+    machines = [_washer("w#1"), _washer("w#2"), _hub("a"), _spoke("b")]
+    shared: tuple[list[str], float] = (["a", "w#1", "w#2"], 1.0)
+    solo: tuple[list[str], float] = (["w#1", "b"], 1.5)
+    power: tuple[list[str], float] = (["a", "w#2"], 2.0)
+    out_b = _AutoPair("w#1", "out", "b", "in")
+    a_in = _AutoPair("a", "out", "w#2", "in")
+    region = CellBox(sx=6, sy=2, sz=6)
+    ctx = _SearchContext(
+        bodies={m.id: _body(m) for m in machines},
+        region=region,
+        bounds=(region.sx, region.sy, region.sz),
+        reserved=set(),
+        adjacency={
+            "w#1": {"a", "w#2", "b"},
+            "w#2": {"a", "w#1"},
+            "a": {"w#1", "w#2"},
+            "b": {"w#1"},
+        },
+        machine_nets={"w#1": [shared, solo], "w#2": [shared], "a": [shared], "b": [solo]},
+        machine_power={"w#1": [], "w#2": [power], "a": [power], "b": []},
+        machine_auto={"w#1": [out_b], "w#2": [a_in], "a": [a_in], "b": [out_b]},
+        weights=(1.0, 0.02),
+    )
+    seed = [Pose("w#1", (0, 0, 0), Facing.NORTH), Pose("w#2", (0, 0, 1), Facing.NORTH)]
+    [unit] = _units(seed, ctx.bodies, (("w#1", "w#2"),), ctx.adjacency)
+    placed_pos = {"a": Pose("a", (4, 0, 0), Facing.NORTH), "b": Pose("b", (0, 0, 4), Facing.NORTH)}
+    return ctx, unit, placed_pos
+
+
+def _candidates(unit: _Unit, ctx: _SearchContext) -> list[tuple[Cell, Facing]]:
+    """Every in-region (origin, facing) for ``unit`` clear of the two placed machines."""
+    taken = {(4, 0, 0), (0, 0, 4)}
+    rx, ry, rz = ctx.bounds
+    return [
+        ((x, y, z), facing)
+        for x in range(rx)
+        for y in range(ry)
+        for z in range(rz)
+        for facing in unit.orientations
+        if box_within((x, y, z), unit.sizes[facing], ctx.bounds)
+        and taken.isdisjoint(box_cells((x, y, z), unit.sizes[facing]))
+    ]
+
+
+def test_a_units_terms_count_each_net_and_pair_once() -> None:
+    ctx, unit, placed_pos = _unit_cost_ctx()
+    terms = _unit_invariants(unit, placed_pos, ctx)
+    assert [net.weight for net in terms.nets] == [1.0, 1.5], "the shared net once, then w#1's own"
+    assert [p.members for p in terms.power] == [(1,)], "only w#2 is on the power net"
+    assert [(pair.source_id, j, src) for pair, j, src in terms.auto] == [
+        ("w#1", 0, True),
+        ("a", 1, False),
+    ]
+
+
+def test_a_units_price_is_its_members_priced_together() -> None:
+    """Against the terms worked out from the member poses directly, for every candidate."""
+    ctx, unit, placed_pos = _unit_cost_ctx()
+    terms = _unit_invariants(unit, placed_pos, ctx)
+    rewarded = 0
+    for origin, facing in _candidates(unit, ctx):
+        poses = {**placed_pos, **{q.machine_id: q for _, q in _member_poses(unit, origin, facing)}}
+        points = {mid: _center(q, ctx.bodies[mid]) for mid, q in poses.items()}
+        wire = 0.0
+        for ids, weight in ((["a", "w#1", "w#2"], 1.0), (["w#1", "b"], 1.5)):
+            pts = [points[mid] for mid in ids]
+            wire += weight * sum(max(c[a] for c in pts) - min(c[a] for c in pts) for a in range(3))
+        cable = 2.0 * _manhattan(points["w#2"], points["a"])
+        auto = sum(
+            auto_output_possible(
+                poses[pair.source_id],
+                ctx.bodies[pair.source_id].machine,
+                pair.source_port,
+                poses[pair.sink_id],
+                ctx.bodies[pair.sink_id].machine,
+                pair.sink_port,
+            )
+            for pair, _, _ in terms.auto
+        )
+        rewarded += auto > 0
+        want = wire + cable - 4.0 * auto
+        assert _marginal_unit_cost(terms, origin, facing, placed_pos, ctx) == pytest.approx(want)
+    assert rewarded > 0, "no candidate made an auto pair, so the reward went unchecked"
+
+
+@pytest.mark.parametrize("extent", _EXTENTS)
+def test_the_unit_pruning_bound_matches_an_unbounded_scan(extent: _Extent | None) -> None:
+    """The column's early-out subtracts the most the reward can take off, so it is admissible: it
+    never reports a wrong finite cost, and a bounded scan picks the unbounded scan's winner."""
+    ctx, unit, placed_pos = _unit_cost_ctx()
+    terms = _unit_invariants(unit, placed_pos, ctx)
+
+    def cost(origin: Cell, facing: Facing, bound: float = math.inf) -> float:
+        return _marginal_unit_cost(
+            terms, origin, facing, placed_pos, ctx, bound=bound, extent=extent
+        )
+
+    for origin, facing in _candidates(unit, ctx):
+        exact = cost(origin, facing)
+        assert math.isfinite(exact)
+        assert cost(origin, facing, exact + 1e-9) == exact
+        assert cost(origin, facing, exact) in (exact, math.inf)
+
+    def scan(use_bound: bool) -> tuple[float, tuple[Cell, Facing] | None]:
+        best_cost, best = math.inf, None
+        for origin, facing in _candidates(unit, ctx):
+            c = cost(origin, facing, best_cost if use_bound else math.inf)
+            if c < best_cost:
+                best_cost, best = c, (origin, facing)
+        return best_cost, best
+
+    assert scan(use_bound=True) == scan(use_bound=False)
+
+
+@pytest.mark.parametrize("extent", _EXTENTS)
+def test_a_unit_of_one_is_priced_as_its_machine(extent: _Extent | None) -> None:
+    """The column cost reduces to the machine's own on a unit of one: the same terms and the same
+    floats, over every origin and facing of the bound tests' region."""
+    machines = [_hub("a"), _hub("b"), _hub("c")]
+    region = CellBox(sx=6, sy=2, sz=6)
+    ctx = _cost_ctx(machines, region)
+    placed_pos = {"b": pose_of(at("b", 4, 0, 0)), "c": pose_of(at("c", 0, 0, 4))}
+    net_boxes, power_attach = _placed_invariants("a", placed_pos, ctx)
+    [unit, *_] = _units([Pose("a", (0, 0, 0), Facing.NORTH)], ctx.bodies, (), ctx.adjacency)
+    terms = _unit_invariants(unit, placed_pos, ctx)
+    body = ctx.bodies["a"]
+    for x in range(region.sx):
+        for z in range(region.sz):
+            for facing in body.orientations:
+                machine = _marginal_insertion_cost(
+                    "a",
+                    (x, 0, z),
+                    facing,
+                    body,
+                    placed_pos,
+                    net_boxes,
+                    power_attach,
+                    ctx,
+                    extent=extent,
+                )
+                unit_cost = _marginal_unit_cost(
+                    terms, (x, 0, z), facing, placed_pos, ctx, extent=extent
+                )
+                assert unit_cost == machine, ((x, 0, z), facing)

@@ -934,6 +934,22 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **The placer moves a node's parallel single blocks as one column, back to front.** A plan node
+  with a `machineCount` becomes `node#1` .. `node#N`, and the annealer used to move each copy on its
+  own, so siblings came out side by side or scattered, every side-by-side contact costing a usable
+  face on each machine. The copies of a node that are all single blocks of one type now move as one
+  rigid unit (`placement.groups`), laid back to front: each member's front, which carries no I/O,
+  against the previous member's back, so a contact costs one face and one straight pipe or cable
+  run along the column can serve every member, the shape the parallel-sand bank build has. Every
+  small move and the LNS ruin-and-recreate pick units, a column turning whole; the annealer's seed
+  lays each group as its column (on a line of single blocks, on a shelf of units that replaces the
+  lattice). Power sources, machines whose front faces outside, and pinned-port machines are never
+  grouped. A line with no group anneals exactly as before, draw for draw
+  (`tests/fixtures/no-group-anneals.json`), and the fast path is unchanged. Over 16 seeds at full
+  effort, iron's floor area plus route cells fell from a median of 191.5 to 150 (15 seeds better,
+  1 worse, VALID on all 16 either way); salty-root and parallel-sand came out level; and three
+  community lines that stay partial either way left fewer nets unconnected on 11 of 12 seeds,
+  solving several times faster.
 - **The pinned pack is now GTNH 2.9.0-beta-3.** `gtnh.lock.json` and the extractor pin
   GT5-Unofficial 5.09.54.133 and CropsNH 2.0.114 (StructureLib stays 1.4.42), the pack the
   maintainer plays. GT 5.09.54.133 changed enough under the extractor that a dump taken with the
