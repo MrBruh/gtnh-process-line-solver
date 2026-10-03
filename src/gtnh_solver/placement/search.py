@@ -48,14 +48,28 @@ itself: the anneal takes exactly the path it always did, and only the state it r
 When no state passes, it returns the cheapest one, and the solver's own gate and fallback decide
 as before.
 
-    initial = constructive.place(lattice=True)   # a valid seed; single blocks on a spaced lattice
+    units = parallel_groups -> one rigid column each, laid back to front; every other machine alone
+    initial = constructive.place(lattice=True)   # a valid seed; each group seeded as its column,
+                                                 # single blocks on a spaced lattice
     repeat for a seeded budget:
-        cand = with prob p_lns:  ruin (remove a related cluster) + recreate (greedy re-insert,
-                                 priced on nets, auto-output and how much it grows the build)
+        cand = with prob p_lns:  ruin (remove a related cluster of UNITS) + recreate (greedy
+                                 re-insert of each unit, priced on nets, auto-output and how much
+                                 it grows the build)
                else:            relocate | nudge (single-block lines only) | swap | reorient
+                                ONE unit, its members rigid
                (only ever a VALID candidate, else skip)
         accept if cheaper, or with prob exp(-d/T)   ; remember it ; cool T
     return the cheapest remembered state the crowding gate passes, else the cheapest
+
+**The search moves units, not machines.** A plan node's parallel single blocks (``node#1`` ..
+``node#N``, ``placement.groups``) move as one rigid column, laid **back to front**: each member's
+front, which carries no I/O, is pressed against the previous member's back. Moved one at a time the
+copies ended up side by side or scattered, and every side-by-side contact costs two usable faces,
+one on each machine; back to front a contact costs one (a back), and one straight pipe or cable run
+along the column can serve every member. It is the shape ``placement.banks`` lays a chain of banks
+in. Nothing downstream needs telling: the only front rule is that it carries no I/O, and the face
+term already sees a covered face. Every other machine is a unit of one, and a line with no group is
+annealed exactly as it was, draw for draw (``tests/fixtures/no-group-anneals.json`` pins it).
 
 **A line of single blocks starts spread out** (``constructive.place(lattice=True)``), on a
 lattice with room to route between the blocks. Started from first-fit's single row it never left
@@ -94,7 +108,7 @@ from dataclasses import dataclass
 from functools import cache
 from itertools import product
 from types import MappingProxyType
-from typing import Literal, NamedTuple
+from typing import Literal, NamedTuple, Protocol
 
 from gtnh_solver.ir import (
     CellBox,
@@ -123,6 +137,7 @@ from gtnh_solver.router.auto import auto_candidates, auto_output_possible
 
 from .constructive import PlacementResult, _fit, place
 from .feasibility import crowded_machines
+from .groups import column_offsets, column_size, parallel_groups
 
 #: The six face-adjacent offsets, for growing LNS insertion candidates around placed neighbours.
 _FACE_DELTAS = FACE_OFFSETS
@@ -339,6 +354,168 @@ def _placement(pose: Pose) -> Placement:
     )
 
 
+class _Boxed(Protocol):
+    """What a fit test reads of the thing it moves: a :class:`_Body` (one machine) or a
+    :class:`_Unit` (a whole column), so one set of fit helpers serves both."""
+
+    @property
+    def sizes(self) -> Mapping[Facing, Size]: ...
+    @property
+    def orientations(self) -> tuple[Facing, ...]: ...
+    @property
+    def fronts_outside(self) -> bool: ...
+
+
+#: A unit of one machine's member offsets: the machine sits at the unit's own origin.
+_AT_ORIGIN: Mapping[Facing, tuple[Cell, ...]] = MappingProxyType(
+    dict.fromkeys(Facing, ((0, 0, 0),))
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _Unit:
+    """What one move picks and moves rigidly: a group's column, or a single machine.
+
+    A unit's pose is its box's minimum corner and the facing every member shares, and each member
+    sits at that corner plus its ``offsets`` for the facing (:func:`_relaid`). For a column those
+    are :func:`~gtnh_solver.placement.groups.column_offsets`, so a turn of the unit relays it back
+    to front along the new axis. A unit of one is its machine: offset ``(0, 0, 0)`` and its body's
+    own sizes, facings and outside-front rule, so a multiblock moves exactly as it always did.
+    """
+
+    #: The first member's machine id: a unit of one is keyed by its machine's id.
+    key: str
+    #: Each member's index into the search's placements list, head first. The list never reorders
+    #: (``_ruin_and_recreate`` hands back the original order), so the indices hold for a solve.
+    members: tuple[int, ...]
+    ids: tuple[str, ...]
+    sizes: Mapping[Facing, Size]
+    offsets: Mapping[Facing, tuple[Cell, ...]]
+    orientations: tuple[Facing, ...]
+    fronts_outside: bool
+    #: The machines outside the unit that share a net with one of its members.
+    neighbors: frozenset[str]
+
+
+def _units(
+    placements: list[Pose],
+    bodies: Mapping[str, _Body],
+    groups: tuple[tuple[str, ...], ...],
+    adjacency: Mapping[str, set[str]],
+) -> tuple[_Unit, ...]:
+    """The search's units over the seed ``placements``, in the order their first member comes.
+
+    Each of ``groups`` the seed laid as its column is one unit, and every other machine is a unit
+    of one. A group the seed did not lay as its column (it had to dissolve it to fit the line,
+    ``constructive._lay_unit``) is dissolved here too, into units of one, so the seed and the search
+    agree without being told.
+    """
+    index = {p.machine_id: i for i, p in enumerate(placements)}
+    columns: dict[int, _Unit] = {}
+    for ids in groups:
+        column = _column_unit(ids, placements, index, bodies, adjacency)
+        if column is not None:
+            columns[min(column.members)] = column
+    in_column = {i for column in columns.values() for i in column.members}
+    units: list[_Unit] = []
+    for i, p in enumerate(placements):
+        if i in columns:
+            units.append(columns[i])
+        elif i not in in_column:
+            units.append(_single_unit(i, bodies[p.machine_id], adjacency))
+    return tuple(units)
+
+
+def _single_unit(index: int, body: _Body, adjacency: Mapping[str, set[str]]) -> _Unit:
+    """The unit of one that is the machine of ``body``, at ``index`` in the placements."""
+    machine_id = body.machine.id
+    return _Unit(
+        key=machine_id,
+        members=(index,),
+        ids=(machine_id,),
+        sizes=body.sizes,
+        offsets=_AT_ORIGIN,
+        orientations=body.orientations,
+        fronts_outside=body.fronts_outside,
+        neighbors=frozenset(adjacency.get(machine_id, ())),
+    )
+
+
+def _column_unit(
+    ids: tuple[str, ...],
+    placements: list[Pose],
+    index: Mapping[str, int],
+    bodies: Mapping[str, _Body],
+    adjacency: Mapping[str, set[str]],
+) -> _Unit | None:
+    """The group ``ids`` as one unit, or None when ``placements`` does not hold it as its column:
+    every member facing one way, each at the box's minimum corner plus its column offset."""
+    members = tuple(index[mid] for mid in ids)
+    poses = [placements[i] for i in members]
+    facing = poses[0].orientation
+    x0 = min(p.cell[0] for p in poses)
+    y0 = min(p.cell[1] for p in poses)
+    z0 = min(p.cell[2] for p in poses)
+    for p, (dx, dy, dz) in zip(poses, column_offsets(len(ids), facing), strict=True):
+        if p.orientation is not facing or p.cell != (x0 + dx, y0 + dy, z0 + dz):
+            return None
+    orientations = bodies[ids[0]].orientations
+    return _Unit(
+        key=ids[0],
+        members=members,
+        ids=ids,
+        sizes=MappingProxyType({f: column_size(len(ids), f) for f in orientations}),
+        offsets=MappingProxyType({f: column_offsets(len(ids), f) for f in orientations}),
+        orientations=orientations,
+        fronts_outside=False,  # parallel_groups never groups a machine whose front faces outside
+        neighbors=frozenset(nb for mid in ids for nb in adjacency.get(mid, ())) - set(ids),
+    )
+
+
+def _unit_adjacency(units: tuple[_Unit, ...]) -> dict[str, set[str]]:
+    """Unit key -> the keys of the units it shares a net with, for the LNS related ruin."""
+    unit_of = {mid: unit.key for unit in units for mid in unit.ids}
+    return {u.key: {unit_of[nb] for nb in u.neighbors if nb in unit_of} for u in units}
+
+
+def _units_of(placements: list[Pose], ctx: _SearchContext) -> tuple[_Unit, ...]:
+    """``ctx``'s units, or every machine of ``placements`` as a unit of one when the context was
+    built without them (a test that calls a move directly)."""
+    if ctx.units is not None:
+        return ctx.units
+    return tuple(
+        _single_unit(i, ctx.bodies[p.machine_id], ctx.adjacency) for i, p in enumerate(placements)
+    )
+
+
+def _unit_pose(unit: _Unit, placements: list[Pose]) -> Pose:
+    """``unit``'s own pose in ``placements``: its key, its box's minimum corner, its facing. A unit
+    of one's pose is its machine's."""
+    head = placements[unit.members[0]]
+    if len(unit.members) == 1:
+        return head
+    dx, dy, dz = unit.offsets[head.orientation][0]
+    x, y, z = head.cell
+    return Pose(unit.key, (x - dx, y - dy, z - dz), head.orientation)
+
+
+def _member_poses(unit: _Unit, origin: Cell, orientation: Facing) -> Iterator[tuple[int, Pose]]:
+    """Each member's index and pose with ``unit`` at ``origin`` facing ``orientation``."""
+    x, y, z = origin
+    for i, mid, (dx, dy, dz) in zip(unit.members, unit.ids, unit.offsets[orientation], strict=True):
+        yield i, Pose(mid, (x + dx, y + dy, z + dz), orientation)
+
+
+def _relaid(placements: list[Pose], *moves: tuple[_Unit, Cell, Facing]) -> list[Pose]:
+    """A copy of ``placements`` with each ``(unit, origin, orientation)`` of ``moves`` laid there,
+    every member at its offset."""
+    new = list(placements)
+    for unit, origin, orientation in moves:
+        for i, pose in _member_poses(unit, origin, orientation):
+            new[i] = pose
+    return new
+
+
 @dataclass(frozen=True)
 class _SearchContext:
     """Immutable per-solve context threaded through the neighbourhood + recreate helpers.
@@ -364,6 +541,12 @@ class _SearchContext:
     #: Whether the small moves include the one-cell nudge: only when every machine is a single
     #: block (module docstring).
     nudges: bool = False
+    #: What the moves pick and move (:class:`_Unit`): every group's column and every other machine
+    #: alone. None makes every machine a unit of one, for a context a test builds by hand.
+    units: tuple[_Unit, ...] | None = None
+    #: :func:`_unit_adjacency` of ``units``, which the LNS ruin grows its cluster along; None reads
+    #: ``adjacency``, which it equals when every unit is one machine.
+    unit_adjacency: dict[str, set[str]] | None = None
 
 
 def optimize_placement(
@@ -428,6 +611,11 @@ def optimize_placement(
     # router's own rule): the cost rewards each pair the current placement+orientation makes
     # face-adjacent, so orientation has a gradient toward enabling the free connection.
     auto_pairs = _auto_candidate_pairs(problem)
+    # The anneal holds plain poses and hands back ``Placement``s only at the end (see Pose).
+    current = [pose_of(p) for p in base.placements]
+    adjacency = _net_adjacency(problem)
+    # What the moves move: each group the seed laid as its column, and every other machine alone.
+    units = _units(current, bodies, parallel_groups(problem), adjacency)
     # The immutable per-solve context every move + recreate helper shares, built once and threaded
     # instead of a dozen loose parameters: adjacency (LNS grows a *related* ruin cluster along the
     # net edges), and the per-machine net/power/auto views recreate ranks insertions with cheaply,
@@ -437,18 +625,17 @@ def optimize_placement(
         region=region,
         bounds=bounds,
         reserved=reserved,
-        adjacency=_net_adjacency(problem),
+        adjacency=adjacency,
         machine_nets=_machine_nets(problem, wire_nets),
         machine_power=_machine_nets(problem, power_nets),
         machine_auto=_machine_auto(problem, auto_pairs),
         weights=_OBJECTIVE_WEIGHTS[objective],
         nudges=all(body.sizes[Facing.NORTH] == (1, 1, 1) for body in bodies.values()),
+        units=units,
+        unit_adjacency=_unit_adjacency(units),
     )
     weights = ctx.weights
     rng = random.Random(seed)
-
-    # The anneal holds plain poses and hands back ``Placement``s only at the end (see Pose).
-    current = [pose_of(p) for p in base.placements]
     # ``current``'s occupied-cell set, maintained incrementally: relocate/swap test a candidate
     # against it (temporarily lifting the moved machine's own cells) instead of rebuilding the whole
     # set per proposal, and each accepted move folds in only its delta (see _apply_occupied_delta).
@@ -524,8 +711,8 @@ def _cheapest_uncrowded(
     return fallback
 
 
-def _cells(pose: Pose, body: _Body) -> Iterator[Cell]:
-    """Every cell ``pose``'s body covers - ``occupied_cells`` for a pose and its body."""
+def _cells(pose: Pose, body: _Boxed) -> Iterator[Cell]:
+    """Every cell ``pose``'s body (or unit) covers - ``occupied_cells`` for a pose and its body."""
     return box_cells(pose.cell, body.sizes[pose.orientation])
 
 
@@ -960,7 +1147,7 @@ def _center(p: Pose, body: _Body) -> tuple[float, float, float]:
     return (x + sx / 2, y + sy / 2, z + sz / 2)
 
 
-def _feed_ok(body: _Body, origin: Cell, orientation: Facing, bounds: Size) -> bool:
+def _feed_ok(body: _Boxed, origin: Cell, orientation: Facing, bounds: Size) -> bool:
     """Whether placing ``body`` here honors the outside-front rule (trivially true for a machine
     without one): a power source's front is its reserved external-feed face, and a Crop Manager's
     faces its field outside the build (#282), so either must lie flush on the region boundary
@@ -970,7 +1157,7 @@ def _feed_ok(body: _Body, origin: Cell, orientation: Facing, bounds: Size) -> bo
     )
 
 
-def _feed_orientation(body: _Body, origin: Cell, current: Facing, bounds: Size) -> Facing | None:
+def _feed_orientation(body: _Boxed, origin: Cell, current: Facing, bounds: Size) -> Facing | None:
     """The orientation ``body`` should take at ``origin``: ``current`` when it is legal there,
     else the first option that puts a source's feed face back on the boundary, else ``None``
     (the move cannot place this machine here)."""
@@ -985,11 +1172,13 @@ def _move(
     occupied: set[Cell],
     rng: random.Random,
 ) -> list[Pose] | None:
-    """Propose one small move; return a VALID candidate layout, or None if it could not be made.
+    """Propose one small move of one unit; return a VALID candidate layout, or None if it could not
+    be made.
 
     ``occupied`` is ``placements``' occupied-cell set (owned by the annealing loop): relocate and
     swap borrow it to test a candidate and restore it before returning, so the caller keeps the
-    single incrementally-maintained copy."""
+    single incrementally-maintained copy. Each move lifts the unit's whole box, tests the box where
+    it would land, and relays every member there (:func:`_relaid`), so a column stays rigid."""
     roll = rng.random()
     if roll < _P_RELOCATE:
         if ctx.nudges and roll >= _P_RELOCATE_WHEN_NUDGING:
@@ -1006,33 +1195,31 @@ def _relocate(
     occupied: set[Cell],
     rng: random.Random,
 ) -> list[Pose] | None:
-    i = rng.randrange(len(placements))
-    p = placements[i]
-    body = ctx.bodies[p.machine_id]
-    # Lift machine i's own cells out of the shared occupied set so a candidate may reuse them; the
-    # remainder is exactly the other machines' cells (what ``others`` was). Restored in the finally.
-    own = set(_cells(p, body))
+    units = _units_of(placements, ctx)
+    unit = units[rng.randrange(len(units))]
+    p = _unit_pose(unit, placements)
+    # Lift the unit's own cells out of the shared occupied set so a candidate may reuse them; the
+    # remainder is exactly the other units' cells (what ``others`` was). Restored in the finally.
+    own = set(_cells(p, unit))
     occupied.difference_update(own)
     try:
         for _ in range(_RELOCATE_TRIES):
-            origin = _rand_origin(body, ctx.bounds, p.orientation, rng)
+            origin = _rand_origin(unit, ctx.bounds, p.orientation, rng)
             if origin is None:
                 return None
             # Orientation first: which cells a turned non-cubic machine covers depends on it, so
             # the fit test cannot run before it is known. _feed_orientation draws no randomness, so
             # hoisting it above the test leaves the RNG trajectory (and every existing layout)
             # exactly as it was.
-            orientation = _feed_orientation(body, origin, p.orientation, ctx.bounds)
+            orientation = _feed_orientation(unit, origin, p.orientation, ctx.bounds)
             if orientation is None:
                 continue  # a source relocated off the boundary: no legal feed face, keep trying
-            size = body.sizes[orientation]
+            size = unit.sizes[orientation]
             if not box_within(origin, size, ctx.bounds):
                 continue  # the body would hang off the region: cheaper to reject than to expand
             cells = list(box_cells(origin, size))
             if ctx.reserved.isdisjoint(cells) and occupied.isdisjoint(cells):
-                new = list(placements)
-                new[i] = Pose(p.machine_id, origin, orientation)
-                return new
+                return _relaid(placements, (unit, origin, orientation))
         return None
     finally:
         occupied.update(own)
@@ -1048,17 +1235,17 @@ def _nudge(
     occupied: set[Cell],
     rng: random.Random,
 ) -> list[Pose] | None:
-    """Shift one machine by one cell, trying the six directions in a random order.
+    """Shift one unit by one cell, trying the six directions in a random order.
 
-    The local move relocate is not (module docstring). The machine keeps its orientation, except
+    The local move relocate is not (module docstring). The unit keeps its orientation, except
     that a power source turns back onto the boundary the way relocate turns it; the first direction
-    that fits wins, and a machine boxed in on every side yields ``None``.
+    that fits wins, and a unit boxed in on every side yields ``None``.
     """
-    i = rng.randrange(len(placements))
-    p = placements[i]
-    body = ctx.bodies[p.machine_id]
-    # As in _relocate: lift the machine's own cells so it may step into one it covers now.
-    own = set(_cells(p, body))
+    units = _units_of(placements, ctx)
+    unit = units[rng.randrange(len(units))]
+    p = _unit_pose(unit, placements)
+    # As in _relocate: lift the unit's own cells so it may step into one it covers now.
+    own = set(_cells(p, unit))
     occupied.difference_update(own)
     try:
         steps = list(_NUDGE_STEPS)
@@ -1066,17 +1253,15 @@ def _nudge(
         x, y, z = p.cell
         for dx, dy, dz in steps:
             origin = (x + dx, y + dy, z + dz)
-            orientation = _feed_orientation(body, origin, p.orientation, ctx.bounds)
+            orientation = _feed_orientation(unit, origin, p.orientation, ctx.bounds)
             if orientation is None:
                 continue  # a source stepped off the boundary with no feed-legal facing there
-            size = body.sizes[orientation]
+            size = unit.sizes[orientation]
             if not box_within(origin, size, ctx.bounds):
                 continue
             cells = list(box_cells(origin, size))
             if ctx.reserved.isdisjoint(cells) and occupied.isdisjoint(cells):
-                new = list(placements)
-                new[i] = Pose(p.machine_id, origin, orientation)
-                return new
+                return _relaid(placements, (unit, origin, orientation))
         return None
     finally:
         occupied.update(own)
@@ -1088,11 +1273,15 @@ def _swap(
     occupied: set[Cell],
     rng: random.Random,
 ) -> list[Pose] | None:
-    i, j = rng.sample(range(len(placements)), 2)
-    pi, pj = placements[i], placements[j]
-    bi, bj = ctx.bodies[pi.machine_id], ctx.bodies[pj.machine_id]
-    # Lift both machines' current cells so the remainder is the other machines' (what ``others``
-    # was); restored in the finally on every exit.
+    """Exchange two units' minimum corners, each keeping its facing where it may."""
+    units = _units_of(placements, ctx)
+    if len(units) < 2:
+        return None  # one unit holds every machine: there is nothing to swap it with
+    i, j = rng.sample(range(len(units)), 2)
+    bi, bj = units[i], units[j]
+    pi, pj = _unit_pose(bi, placements), _unit_pose(bj, placements)
+    # Lift both units' current cells so the remainder is the other units' (what ``others`` was);
+    # restored in the finally on every exit.
     own = set(_cells(pi, bi)) | set(_cells(pj, bj))
     occupied.difference_update(own)
     try:
@@ -1116,22 +1305,21 @@ def _swap(
             or not occupied.isdisjoint(moved)
         ):
             return None
-        new = list(placements)
-        new[i] = Pose(pi.machine_id, pj.cell, oi)
-        new[j] = Pose(pj.machine_id, pi.cell, oj)
-        return new
+        return _relaid(placements, (bi, pj.cell, oi), (bj, pi.cell, oj))
     finally:
         occupied.update(own)
 
 
 def _turn_fits(
-    body: _Body, p: Pose, orientation: Facing, ctx: _SearchContext, occupied: set[Cell]
+    body: _Boxed, p: Pose, orientation: Facing, ctx: _SearchContext, occupied: set[Cell]
 ) -> bool:
-    """Whether ``body`` still fits at its own origin once turned to ``orientation``.
+    """Whether ``body`` (a machine or a unit) still fits at its own origin once turned to
+    ``orientation``.
 
     Short-circuits the common case: a turn that leaves the extents alone cannot change which cells
-    are covered, so every 1x1x1 block and every square-base multiblock skips the test and the hot
-    path is untouched.
+    are covered, so every 1x1x1 block, every square-base multiblock and a column's half turn skip
+    the test and the hot path is untouched. A column's quarter turn swaps 1x1xN for Nx1x1, so it
+    takes the real test and needs room along the new axis.
     """
     size = body.sizes[orientation]
     if size == body.sizes[p.orientation]:
@@ -1149,30 +1337,30 @@ def _reorient(
     occupied: set[Cell],
     rng: random.Random,
 ) -> list[Pose] | None:
+    """Turn one unit about its own minimum corner; a column turns whole, back to front again."""
+    units = _units_of(placements, ctx)
     candidates: list[tuple[int, list[Facing]]] = []
-    for k, p in enumerate(placements):
-        body = ctx.bodies[p.machine_id]
+    for k, unit in enumerate(units):
+        p = _unit_pose(unit, placements)
         # A source only reorients among feed-legal facings (its front must stay on the boundary),
-        # and ANY machine only among facings it still fits at. A quarter turn swaps a non-cubic
-        # machine's horizontal extents, so a turn can push it out of the region, onto a reserved
+        # and ANY unit only among facings it still fits at. A quarter turn swaps a non-cubic
+        # box's horizontal extents, so a turn can push it out of the region, onto a reserved
         # cell or into a neighbour. Nothing checked that while rotation was a no-op, and an
         # accepted state that broke it would violate this loop's overlap-free invariant in silence.
         alts = [
             o
-            for o in body.orientations
+            for o in unit.orientations
             if o != p.orientation
-            and _feed_ok(body, p.cell, o, ctx.bounds)
-            and _turn_fits(body, p, o, ctx, occupied)
+            and _feed_ok(unit, p.cell, o, ctx.bounds)
+            and _turn_fits(unit, p, o, ctx, occupied)
         ]
         if alts:
             candidates.append((k, alts))
     if not candidates:
         return None
     k, alts = candidates[rng.randrange(len(candidates))]
-    p = placements[k]
-    new = list(placements)
-    new[k] = Pose(p.machine_id, p.cell, rng.choice(alts))
-    return new
+    unit = units[k]
+    return _relaid(placements, (unit, _unit_pose(unit, placements).cell, rng.choice(alts)))
 
 
 def _ruin_and_recreate(
@@ -1180,20 +1368,24 @@ def _ruin_and_recreate(
     ctx: _SearchContext,
     rng: random.Random,
 ) -> list[Pose] | None:
-    """Ruin a related cluster of machines and greedily re-insert them (the LNS large move).
+    """Ruin a related cluster of units and greedily re-insert them (the LNS large move).
 
-    Removes a net-connected cluster (2..``_MAX_RUIN`` machines), then re-inserts each at the
+    Removes a net-connected cluster (2..``_MAX_RUIN`` units), then re-inserts each at the
     position + orientation minimising its marginal cost, preferring cells beside its already-placed
-    net-neighbours. Every insertion is validity-checked, so the result is a complete,
-    overlap/bounds/reserved-clean placement in the original machine order - or ``None`` if a
-    machine cannot be re-placed at all (a freed origin can be retaken by an earlier re-insert), in
-    which case the caller just skips the move.
+    net-neighbours; a column goes back whole (:func:`_marginal_unit_cost`). Every insertion is
+    validity-checked, so the result is a complete, overlap/bounds/reserved-clean placement in the
+    original machine order - or ``None`` if a unit cannot be re-placed at all (a freed origin can
+    be retaken by an earlier re-insert), in which case the caller just skips the move.
     """
-    n = len(placements)
+    units = _units_of(placements, ctx)
+    n = len(units)
     if n < 2:
         return None
-    ruined = _related_cluster(placements, ctx.adjacency, rng.randint(2, min(n, _MAX_RUIN)), rng)
-    kept = [p for i, p in enumerate(placements) if i not in ruined]
+    adjacency = ctx.adjacency if ctx.unit_adjacency is None else ctx.unit_adjacency
+    keys = [unit.key for unit in units]
+    ruined = _related_cluster(keys, adjacency, rng.randint(2, min(n, _MAX_RUIN)), rng)
+    lifted = {i for k in ruined for i in units[k].members}
+    kept = [p for i, p in enumerate(placements) if i not in lifted]
 
     occupied = _occupied(kept, ctx.bodies)
     # One grid for the whole recreate, updated in step with `occupied` as each machine lands,
@@ -1202,37 +1394,42 @@ def _ruin_and_recreate(
     row, plane = ctx.bounds[0], ctx.bounds[0] * ctx.bounds[1]
 
     placed = list(kept)
-    placed_ids = {p.machine_id for p in placed}
+    placed_keys = {key for k, key in enumerate(keys) if k not in ruined}
     # Re-insert the most-constrained first (most already-placed net-neighbours) so the strongest
-    # pulls choose their spot before the freer machines fill in around them.
+    # pulls choose their spot before the freer units fill in around them.
     to_insert = sorted(
-        (placements[i] for i in sorted(ruined)),
-        key=lambda p: -_placed_neighbor_count(p.machine_id, ctx.adjacency, placed_ids),
+        (units[k] for k in sorted(ruined)),
+        key=lambda unit: -_placed_neighbor_count(unit.key, adjacency, placed_keys),
     )
-    for p in to_insert:
-        spot = _best_insertion(p, placed, occupied, grid, ctx, rng)
+    for unit in to_insert:
+        p = _unit_pose(unit, placements)
+        if len(unit.members) == 1:
+            spot = _best_insertion(p, placed, occupied, grid, ctx, rng)
+        else:
+            spot = _best_insertion(p, placed, occupied, grid, ctx, rng, unit=unit)
         if spot is None:
-            return None  # could not re-place this machine; abandon the move, the loop skips it
-        landed = Pose(p.machine_id, *spot)
-        placed.append(landed)
-        placed_ids.add(p.machine_id)
-        for cell in _cells(landed, ctx.bodies[p.machine_id]):
-            occupied.add(cell)
-            grid[cell[0] + cell[1] * row + cell[2] * plane] = 1
+            return None  # could not re-place this unit; abandon the move, the loop skips it
+        placed_keys.add(unit.key)
+        for _, landed in _member_poses(unit, *spot):
+            placed.append(landed)
+            for cell in _cells(landed, ctx.bodies[landed.machine_id]):
+                occupied.add(cell)
+                grid[cell[0] + cell[1] * row + cell[2] * plane] = 1
 
     by_id = {p.machine_id: p for p in placed}
     return [by_id[p.machine_id] for p in placements]  # preserve the original ordering
 
 
 def _related_cluster(
-    placements: list[Pose], adjacency: dict[str, set[str]], k: int, rng: random.Random
+    keys: list[str], adjacency: Mapping[str, set[str]], k: int, rng: random.Random
 ) -> set[int]:
-    """Indices of a net-connected cluster of ``k`` machines grown from a random seed; padded with
-    random machines when the seed's net-component is smaller than ``k`` (e.g. isolated machines)."""
-    idx_of = {p.machine_id: i for i, p in enumerate(placements)}
-    seed_i = rng.randrange(len(placements))
+    """Indices of a net-connected cluster of ``k`` units (of ``keys``) grown from a random seed;
+    padded with random units when the seed's net-component is smaller than ``k`` (e.g. isolated
+    machines)."""
+    idx_of = {key: i for i, key in enumerate(keys)}
+    seed_i = rng.randrange(len(keys))
     chosen = {seed_i}
-    frontier = [placements[seed_i].machine_id]
+    frontier = [keys[seed_i]]
     while len(chosen) < k and frontier:
         neighbors = sorted(adjacency.get(frontier.pop(0), set()))
         rng.shuffle(neighbors)
@@ -1243,18 +1440,18 @@ def _related_cluster(
             if j is not None and j not in chosen:
                 chosen.add(j)
                 frontier.append(nb)
-    if len(chosen) < k:  # the seed's component is smaller than k: pad with random other machines
-        rest = [i for i in range(len(placements)) if i not in chosen]
+    if len(chosen) < k:  # the seed's component is smaller than k: pad with random other units
+        rest = [i for i in range(len(keys)) if i not in chosen]
         rng.shuffle(rest)
         chosen.update(rest[: k - len(chosen)])
     return chosen
 
 
 def _placed_neighbor_count(
-    machine_id: str, adjacency: dict[str, set[str]], placed_ids: set[str]
+    key: str, adjacency: Mapping[str, set[str]], placed_keys: set[str]
 ) -> int:
-    """How many of ``machine_id``'s net-neighbours are already placed (its re-insertion priority)."""
-    return sum(1 for nb in adjacency.get(machine_id, set()) if nb in placed_ids)
+    """How many of unit ``key``'s net-neighbours are already placed (its re-insertion priority)."""
+    return sum(1 for nb in adjacency.get(key, set()) if nb in placed_keys)
 
 
 def _placed_invariants(
@@ -1292,6 +1489,110 @@ def _placed_invariants(
         _PowerAttach(weight, placed_centroids(ids)) for ids, weight in ctx.machine_power[machine_id]
     ]
     return net_boxes, power
+
+
+#: The centroids of a unit's members on one net, as offsets from the unit's origin: the least and
+#: greatest along x, then y, then z.
+_Reach = tuple[float, float, float, float, float, float]
+
+
+class _UnitNet(NamedTuple):
+    """One wire net of a unit: :class:`_NetBox` over the members placed OUTSIDE the unit, and the
+    reach of the unit's own members on the net, by facing.
+
+    The box is empty (each bound at its far infinity) when nothing outside is placed yet, so the
+    candidate's own members span it alone. The reach is per net because siblings can sit on
+    different nets (a ``power:MV#k`` split, ``adapter.power``), so only the members actually on a
+    net may widen it.
+    """
+
+    weight: float
+    x0: float
+    x1: float
+    y0: float
+    y1: float
+    z0: float
+    z1: float
+    reach: Mapping[Facing, _Reach]
+
+
+class _UnitPower(NamedTuple):
+    """One penalized power net of a unit: :class:`_PowerAttach` over the members placed outside
+    it, and which of the unit's members (their index in the unit) are on the net."""
+
+    weight: float
+    centroids: list[_Centroid]
+    members: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _UnitTerms:
+    """Everything :func:`_marginal_unit_cost` needs that does not depend on the candidate: what
+    :func:`_placed_invariants` is for one machine, gathered over a unit's members."""
+
+    unit: _Unit
+    nets: list[_UnitNet]
+    power: list[_UnitPower]
+    #: Each auto-output pair a member is on, once across the members: the pair, which member (its
+    #: index in the unit) and whether that member is the pair's source.
+    auto: list[tuple[_AutoPair, int, bool]]
+
+
+def _unit_invariants(
+    unit: _Unit, placed_pos: Mapping[str, Pose], ctx: _SearchContext
+) -> _UnitTerms:
+    """:func:`_placed_invariants` for a whole unit: each net and auto pair any member is on, once.
+
+    A net two siblings share is one net, priced once over every member on it. The nets come off the
+    per-machine views, which list the same net entry for every member, so they are told apart by
+    identity; the auto pairs by value.
+    """
+    inside = set(unit.ids)
+    centroids = {mid: _center(q, ctx.bodies[mid]) for mid, q in placed_pos.items()}
+
+    def outside(ids: list[str]) -> list[_Centroid]:
+        return [centroids[mid] for mid in ids if mid not in inside and mid in placed_pos]
+
+    def on(ids: list[str]) -> tuple[int, ...]:
+        return tuple(j for j, mid in enumerate(unit.ids) if mid in ids)
+
+    nets: list[_UnitNet] = []
+    power: list[_UnitPower] = []
+    seen: set[int] = set()
+    for mid in unit.ids:
+        for entry in ctx.machine_nets[mid]:
+            if id(entry) in seen:
+                continue
+            seen.add(id(entry))
+            ids, weight = entry
+            pts = outside(ids)
+            members = on(ids)
+            reach = {f: _reach(unit.offsets[f], members) for f in unit.orientations}
+            if pts:
+                xs, ys, zs = [c[0] for c in pts], [c[1] for c in pts], [c[2] for c in pts]
+                box = (min(xs), max(xs), min(ys), max(ys), min(zs), max(zs))
+            else:
+                box = (math.inf, -math.inf, math.inf, -math.inf, math.inf, -math.inf)
+            nets.append(_UnitNet(weight, *box, reach=reach))
+        for entry in ctx.machine_power[mid]:
+            if id(entry) not in seen:
+                seen.add(id(entry))
+                ids, weight = entry
+                power.append(_UnitPower(weight, outside(ids), on(ids)))
+    auto: dict[_AutoPair, tuple[int, bool]] = {}
+    for j, mid in enumerate(unit.ids):
+        for pair in ctx.machine_auto[mid]:
+            auto.setdefault(pair, (j, pair.source_id == mid))
+    return _UnitTerms(unit, nets, power, [(pair, j, src) for pair, (j, src) in auto.items()])
+
+
+def _reach(offsets: tuple[Cell, ...], members: tuple[int, ...]) -> _Reach:
+    """The :data:`_Reach` of ``members`` at ``offsets``. Every member is a single block, so its
+    centroid is half a cell past its origin on each axis (as :func:`_center` has it)."""
+    xs = [offsets[j][0] + 0.5 for j in members]
+    ys = [offsets[j][1] + 0.5 for j in members]
+    zs = [offsets[j][2] + 0.5 for j in members]
+    return (min(xs), max(xs), min(ys), max(ys), min(zs), max(zs))
 
 
 def _placed_extent(placed: list[Pose], ctx: _SearchContext) -> _Extent | None:
@@ -1353,6 +1654,7 @@ def _best_insertion(
     grid: bytearray,
     ctx: _SearchContext,
     rng: random.Random,
+    unit: _Unit | None = None,
 ) -> tuple[Cell, Facing] | None:
     """The valid (origin, orientation) for ``p``'s machine that minimises its *marginal* cost, over
     candidate cells beside its placed net-neighbours plus a few random ones; falls back to any
@@ -1361,26 +1663,37 @@ def _best_insertion(
     Ranking uses only the terms that depend on this machine (its nets + auto pairs), so an insertion
     costs O(machine degree), not a full O(all nets) recompute - the loop's ``_cost`` still gates
     acceptance globally.
+
+    ``unit`` is a group's column to insert whole (a unit of one is passed as its machine alone):
+    ``p`` is then the unit's pose, the candidates are for its box, the price is
+    :func:`_marginal_unit_cost`, and the last resort is :func:`_fit_unit`.
     """
     body = ctx.bodies[p.machine_id]
+    box: _Boxed = body if unit is None else unit
     placed_pos = {q.machine_id: q for q in placed}
-    net_boxes, power_attach = _placed_invariants(p.machine_id, placed_pos, ctx)
+    if unit is None:
+        net_boxes, power_attach = _placed_invariants(p.machine_id, placed_pos, ctx)
+        terms = None
+    else:
+        net_boxes, power_attach = [], []
+        terms = _unit_invariants(unit, placed_pos, ctx)
     extent = _placed_extent(placed, ctx)
     bounds = ctx.bounds
     offsets_by_size: dict[Size, tuple[int, ...]] = {}
     row, plane = bounds[0], bounds[0] * bounds[1]
     best: tuple[Cell, Facing] | None = None
     best_cost = math.inf
-    for origin in _candidate_origins(p, body, placed, ctx, rng):
+    neighbor_ids = None if unit is None else unit.neighbors
+    for origin in _candidate_origins(p, box, placed, ctx, rng, neighbor_ids):
         # The fit test moved inside the orientation loop, because which cells the machine covers
         # depends on how it is turned - but it depends ONLY on the rotated box, and four facings
         # yield at most two of those. Memoizing per box keeps this at one test per origin for a
         # square-base machine (every machine in both shipped examples) instead of four.
         fits: dict[Size, bool] = {}
-        for orientation in body.orientations:
-            if not _feed_ok(body, origin, orientation, bounds):
+        for orientation in box.orientations:
+            if not _feed_ok(box, origin, orientation, bounds):
                 continue  # a source's feed face must stay on the boundary
-            size = body.sizes[orientation]
+            size = box.sizes[orientation]
             ok = fits.get(size)
             if ok is None:
                 # In-region off the box first: this is the hottest fit test in the solve (one per
@@ -1400,26 +1713,51 @@ def _best_insertion(
                 fits[size] = ok
             if not ok:
                 continue
-            cost = _marginal_insertion_cost(
-                p.machine_id,
-                origin,
-                orientation,
-                body,
-                placed_pos,
-                net_boxes,
-                power_attach,
-                ctx,
-                bound=best_cost,
-                extent=extent,
-            )
+            if terms is None:
+                cost = _marginal_insertion_cost(
+                    p.machine_id,
+                    origin,
+                    orientation,
+                    body,
+                    placed_pos,
+                    net_boxes,
+                    power_attach,
+                    ctx,
+                    bound=best_cost,
+                    extent=extent,
+                )
+            else:
+                cost = _marginal_unit_cost(
+                    terms, origin, orientation, placed_pos, ctx, bound=best_cost, extent=extent
+                )
             if cost < best_cost:
                 best_cost, best = cost, (origin, orientation)
     if best is not None:
         return best
+    if unit is not None:
+        return _fit_unit(unit, ctx, occupied)
     # Last resort: any free slot in first-fit order (a source additionally requires a slot +
     # orientation with its feed face on the boundary - the same rule the constructive seed used).
     fit = _fit(body.machine, ctx.region, occupied | ctx.reserved)
     return None if fit is None else (fit[0].as_tuple(), fit[1])
+
+
+def _fit_unit(unit: _Unit, ctx: _SearchContext, occupied: set[Cell]) -> tuple[Cell, Facing] | None:
+    """A column's last resort, as :func:`~gtnh_solver.placement.constructive._fit` is a machine's:
+    the first origin in first-fit scan order (the floor first, then rows, then up) where the column
+    fits at one of its facings, tried in order. None when it fits nowhere."""
+    blocked = occupied | ctx.reserved
+    rx, ry, rz = ctx.bounds
+    for y in range(ry):
+        for z in range(rz):
+            for x in range(rx):
+                for orientation in unit.orientations:
+                    size = unit.sizes[orientation]
+                    if box_within((x, y, z), size, ctx.bounds) and blocked.isdisjoint(
+                        box_cells((x, y, z), size)
+                    ):
+                        return (x, y, z), orientation
+    return None
 
 
 def _marginal_insertion_cost(
@@ -1525,17 +1863,90 @@ def _marginal_insertion_cost(
     return _W_WIRE * wire + rest - _W_AUTO * auto
 
 
+def _marginal_unit_cost(
+    terms: _UnitTerms,
+    origin: Cell,
+    orientation: Facing,
+    placed_pos: Mapping[str, Pose],
+    ctx: _SearchContext,
+    bound: float = math.inf,
+    extent: _Extent | None = None,
+) -> float:
+    """:func:`_marginal_insertion_cost` for a whole column at ``origin`` facing ``orientation``.
+
+    The same four terms, over the members: each net's HPWL widened by the centroids of the members
+    on it (only those: siblings can sit on different power nets), the attach distance of the
+    nearest member on each penalized power net, the growth of the build by the column's box, and
+    the auto-output reward of every pair a member is on, each pair once. The early-out subtracts
+    that distinct pair count, the most the reward can still take off, so it stays admissible. A
+    pair whose other end is a member too is never scored (the other end is not placed); it only
+    loosens the bound.
+    """
+    unit = terms.unit
+    x, y, z = origin
+    wire = 0.0
+    for weight, x0, x1, y0, y1, z0, z1, reach in terms.nets:
+        lx, hx, ly, hy, lz, hz = reach[orientation]
+        wire += weight * (
+            max(x + hx, x1)
+            - min(x + lx, x0)
+            + max(y + hy, y1)
+            - min(y + ly, y0)
+            + max(z + hz, z1)
+            - min(z + lz, z0)
+        )
+    offsets = unit.offsets[orientation]
+    cable = 0.0
+    if terms.power:
+        centers = [(x + dx + 0.5, y + dy + 0.5, z + dz + 0.5) for dx, dy, dz in offsets]
+        for weight, centroids, members in terms.power:
+            nearest = (_manhattan(centers[j], c) for j in members for c in centroids)
+            cable += weight * min(nearest, default=0.0)
+    growth = 0.0
+    if extent is not None:
+        # The growth term exactly as _marginal_insertion_cost prices it, on the column's box.
+        sx, sy, sz = unit.sizes[orientation]
+        ex0, ex1, ey0, ey1, ez0, ez1 = extent
+        wx, wy, wz = ex1 - ex0 + 1, ey1 - ey0 + 1, ez1 - ez0 + 1
+        nx = max(x + sx - 1, ex1) - min(x, ex0) + 1
+        ny = max(y + sy - 1, ey1) - min(y, ey0) + 1
+        nz = max(z + sz - 1, ez1) - min(z, ez0) + 1
+        w_footprint, w_volume = ctx.weights
+        growth = w_footprint * (nx * nz - wx * wz) + w_volume * (nx * ny * nz - wx * wy * wz)
+    rest = cable + growth
+    if _W_WIRE * wire + rest - _W_AUTO * len(terms.auto) >= bound:
+        return math.inf  # even every pair scoring cannot beat the incumbent
+    auto = 0
+    for pair, j, is_source in terms.auto:
+        other = pair.sink_id if is_source else pair.source_id
+        op = placed_pos.get(other)
+        if op is None:
+            continue
+        dx, dy, dz = offsets[j]
+        here = Pose(unit.ids[j], (x + dx, y + dy, z + dz), orientation)
+        m, om = ctx.bodies[unit.ids[j]].machine, ctx.bodies[other].machine
+        if is_source:
+            possible = auto_output_possible(here, m, pair.source_port, op, om, pair.sink_port)
+        else:
+            possible = auto_output_possible(op, om, pair.source_port, here, m, pair.sink_port)
+        if possible:
+            auto += 1
+    return _W_WIRE * wire + rest - _W_AUTO * auto
+
+
 def _candidate_origins(
     p: Pose,
-    body: _Body,
+    body: _Boxed,
     placed: list[Pose],
     ctx: _SearchContext,
     rng: random.Random,
+    neighbor_ids: Collection[str] | None = None,
 ) -> list[Cell]:
     """Origins to try inserting ``body`` at: its freed origin, the cells face-adjacent to each
     placed net-neighbour (to cluster / auto-output), and a few random free origins - deduped,
-    in-region."""
-    neighbor_ids = ctx.adjacency.get(p.machine_id, set())
+    in-region. ``neighbor_ids`` are a unit's net-neighbours; None reads ``p``'s machine's."""
+    if neighbor_ids is None:
+        neighbor_ids = ctx.adjacency.get(p.machine_id, set())
     rx, ry, rz = ctx.bounds
     origins: list[Cell] = []
     seen: set[Cell] = set()
@@ -1561,7 +1972,9 @@ def _candidate_origins(
     return origins
 
 
-def _rand_origin(body: _Body, bounds: Size, orientation: Facing, rng: random.Random) -> Cell | None:
+def _rand_origin(
+    body: _Boxed, bounds: Size, orientation: Facing, rng: random.Random
+) -> Cell | None:
     # The rotated extents, not the declared ones: an east-facing 5x1x2 needs 2 of x and 5 of z, so
     # bounding by the declared box would both reject origins that fit and offer origins that do
     # not - and the draws below consume randomness, so a wrong bound shifts every later draw.
