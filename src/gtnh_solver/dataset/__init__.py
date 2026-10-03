@@ -10,8 +10,9 @@ helpers (``voltage`` submodule) that the shared-amperage power feature needs - m
 a *fractional* amp load and only aggregates round up to whole amps; and the **multiblock**
 footprint/face dataset - a schema-v2 loader (``schema``) for the extractor's ``data/multiblocks/``
 JSON plus the adapter (``multiblocks``) that interprets those raw facts into IR-shaped physical
-records (footprints, hint-derived faces, coil tiers); and the **item pipe capacity** per size
-(``pipe_capacity``) a route's gauge is chosen from (#165). Still TODO(dataset): per-material cable
+records (footprints, hint-derived faces, coil tiers); the **tiered structure blocks**
+(``structure_blocks``) a multiblock's casing, pipe, coil and machine-casing channels accept (#312);
+and the **item pipe capacity** per size (``pipe_capacity``) a route's gauge is chosen from (#165). Still TODO(dataset): per-material cable
 loss; fluid pipe throughput; the real extractor (issue #45) replacing the illustrative fixtures;
 spot-check tiers/face-rules/throughputs in-game (docs/ROADMAP.md step 0).
 """
@@ -28,6 +29,7 @@ from .multiblocks import (
     DatasetError,
     MachinePhysical,
     PhysicalDataset,
+    dumped_channels,
     load_physical_dataset,
     to_physical,
 )
@@ -77,6 +79,22 @@ from .schema import (
     load_meta,
     load_multiblock_doc,
     multiblock_json_schema,
+)
+from .structure_blocks import (
+    CHEMICAL_PLANT,
+    COIL,
+    HEATING_COILS,
+    MACHINE_CASING,
+    PIPE,
+    PIPE_CASING_ALIASES,
+    PIPE_CASINGS,
+    SOLID_CASING,
+    SOLID_CASINGS,
+    BlockId,
+    TieredBlock,
+    channel_blocks,
+    machine_casing_for,
+    tier_block,
 )
 from .voltage import (
     CABLE_LOSS_PER_BLOCK,
@@ -153,7 +171,23 @@ __all__ = [  # noqa: RUF022 - grouped by submodule, not alphabetized
     "MachinePhysical",
     "PhysicalDataset",
     "to_physical",
+    "dumped_channels",
     "load_physical_dataset",
+    # tiered structure blocks (GT rule data for a multiblock's channels)
+    "BlockId",
+    "CHEMICAL_PLANT",
+    "COIL",
+    "HEATING_COILS",
+    "MACHINE_CASING",
+    "PIPE",
+    "PIPE_CASINGS",
+    "PIPE_CASING_ALIASES",
+    "SOLID_CASING",
+    "SOLID_CASINGS",
+    "TieredBlock",
+    "channel_blocks",
+    "machine_casing_for",
+    "tier_block",
     # dataset location (version-namespaced local folders + committed fixtures)
     "DEFAULT_DATA",
     "DatasetWarning",

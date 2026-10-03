@@ -11,7 +11,8 @@ it would become a second, untested codebase (that constraint's whole point), so 
 
     data/multiblocks/*.json --load--> MultiblockDoc      (schema.py: raw extractor facts)
                                            |
-                               to_physical | derive footprint + I/O faces + coil tiers
+                               to_physical | derive footprint + I/O faces + coil tiers;
+                                           | keep each tiered channel's alternatives
                                            v
                                     MachinePhysical       (IR-shaped physical rules for one machine)
                                            |
@@ -42,16 +43,13 @@ from .schema import (
     load_meta,
     load_multiblock_doc,
 )
+from .structure_blocks import COIL, BlockId, channel_blocks
 
 #: Default location of the committed dataset, relative to the source tree (this file is
 #: ``src/gtnh_solver/dataset/multiblocks.py``, so the repo root is three parents up). Resolves in
 #: an editable/dev install, which is how the repo is used; ``load_physical_dataset`` takes an
 #: explicit directory for any other layout (and every test passes one).
 DEFAULT_DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "multiblocks"
-
-#: The substitutions channel that carries tiered heating coils (plan section 4.2 example). A coil
-#: layer is a y-level whose blocks include one of this channel's alternatives.
-_COIL_CHANNEL = "coil"
 
 #: GT's own marker for a controller kept registered only so existing worlds keep working, after the
 #: machine it implements was reimplemented elsewhere ("MTEIndustrialCentrifugeLegacy"). It is what
@@ -185,6 +183,17 @@ class MachinePhysical:
     #: How many upkeep hatches (maintenance, muffler) this machine accepts, and so needs one each
     #: of. Cells they occupy cannot carry routed I/O, so the budget subtracts them.
     upkeep_hatch_count: int = 0
+    #: The dump's tiered channels as ``(channel, alternatives)``, sorted by channel: the blocks each
+    #: part GT builds from a tier ladder (coil, solid casing, pipe casing, ...) may be swapped for
+    #: without changing the shape. As recorded, which can miss a tier GT accepts; read
+    #: :attr:`channel_blocks` for what a channel takes. A tuple so the record stays hashable.
+    substitutions: tuple[tuple[str, tuple[BlockId, ...]], ...] = ()
+
+    @property
+    def channel_blocks(self) -> dict[str, tuple[BlockId, ...]]:
+        """Each tiered channel mapped to every block GT accepts there
+        (:func:`~gtnh_solver.dataset.structure_blocks.channel_blocks`)."""
+        return channel_blocks(self.block_key, dict(self.substitutions))
 
     def energy_hatch_budget(
         self, routed_ports: int = 0, fluid_outputs: int = 0, trigger_stack: int | None = None
@@ -464,7 +473,7 @@ def to_physical(doc: MultiblockDoc) -> MachinePhysical:
     Derives the footprint from the blocks the primary variant actually spans (not the extractor's
     reported ``bbox``, which is only cross-checked), the I/O faces from the hint positions, the
     coil-layer count from the coil substitution table, and the hatch-cell capacity from the
-    recorded hatch slots. Raises :class:`DatasetError` if the derived box disagrees with the
+    recorded hatch slots, and keeps every substitution channel's alternatives. Raises :class:`DatasetError` if the derived box disagrees with the
     reported one.
     """
     variant = _primary_variant(doc)
@@ -477,7 +486,8 @@ def to_physical(doc: MultiblockDoc) -> MachinePhysical:
     footprint = CellBox(sx=size[0], sy=size[1], sz=size[2])
     hatch_cells, energy_hatch_cells, upkeep_hatch_count = _hatch_counts(variant)
 
-    coil_blocks = {(s.block, s.meta) for s in doc.substitutions.get(_COIL_CHANNEL, [])}
+    substitutions = dumped_channels(doc)
+    coil_blocks = set(dict(substitutions).get(COIL, ()))
     coil_layers = {
         b.d[1] - min_corner[1] for b in variant.blocks if (b.block, b.meta) in coil_blocks
     }
@@ -497,6 +507,21 @@ def to_physical(doc: MultiblockDoc) -> MachinePhysical:
         hatch_cells=hatch_cells,
         energy_hatch_cells=energy_hatch_cells,
         upkeep_hatch_count=upkeep_hatch_count,
+        substitutions=substitutions,
+    )
+
+
+def dumped_channels(doc: MultiblockDoc) -> tuple[tuple[str, tuple[BlockId, ...]], ...]:
+    """``doc``'s substitution channels as ``(channel, (block, meta)...)`` pairs, sorted by channel.
+
+    The dump's own lists in the dump's order: what the extractor saw built, before
+    :func:`~gtnh_solver.dataset.structure_blocks.channel_blocks` adds a tier GT accepts but never
+    places. Keyed by block identity alone; ``channel_value`` is not a tier (a hand-written fixture
+    numbers its coils from 0).
+    """
+    return tuple(
+        (channel, tuple((sub.block, sub.meta) for sub in subs))
+        for channel, subs in sorted(doc.substitutions.items())
     )
 
 

@@ -9,7 +9,9 @@ Rerun when the examples change.
 **Multiblock casings are kept by the fixture that places them.** A fresh clone draws a multiblock
 from the committed ``data/multiblocks/`` fixture its controller resolves to, block by block, so the
 blocks of every fixture a scoped example resolves to are kept, and so are the two hand-authored
-fixtures'. A fixture only an unscoped example needs stays unskinned (``_NOT_MANIFEST_SCOPED``).
+fixtures'. So is every block those fixtures' tiered channels accept (``dataset.channel_blocks``),
+since a node may build its coil, casing or pipe from any of them. A fixture only an unscoped
+example needs stays unskinned (``_NOT_MANIFEST_SCOPED``).
 
 **Cables and pipes are kept the same way, and for the same reason.** ``cable.tin.02`` contains
 no machine-type name either, so the name rule can never reach one. The stand-in policy in
@@ -52,6 +54,7 @@ from gtnh_solver.dataset import (
     PIPE_MATERIAL,
     ROUTED_PIPE_SIZES,
     cable_display_name,
+    channel_blocks,
     list_versions,
     load_physical_dataset,
     manifest_names,
@@ -245,7 +248,13 @@ _HAND_AUTHORED_FIXTURES = frozenset({"gregtech_machine_1000.json", "gregtech_mac
 
 def _fixture_block_keys(controllers: set[str]) -> set[str]:
     """``"<block>|<meta>"`` keys placed by the hand-authored fixtures and by every committed
-    fixture whose controller is in ``controllers``."""
+    fixture whose controller is in ``controllers``, plus every block their tiered channels accept.
+
+    Asked of ``dataset.channel_blocks``, the function the adapter and the previewer ask, so a
+    tier GT accepts but the dump never places (the Chemical Plant's Bronze pipe casing and ULV
+    machine casing) is kept as well: a plant built from it would otherwise draw unskinned and
+    refuse to export.
+    """
     keys: set[str] = set()
     for path in sorted((REPO / "data" / "multiblocks").glob("*.json")):
         if path.name == "_meta.json":
@@ -257,9 +266,12 @@ def _fixture_block_keys(controllers: set[str]) -> set[str]:
         for variant in doc.get("variants", []):
             for block in variant.get("blocks", []):
                 keys.add(f"{block['block']}|{block['meta']}")
-        for subs in doc.get("substitutions", {}).values():
-            for sub in subs:
-                keys.add(f"{sub['block']}|{sub['meta']}")
+        dumped = {
+            channel: [(sub["block"], sub["meta"]) for sub in subs]
+            for channel, subs in doc.get("substitutions", {}).items()
+        }
+        for blocks in channel_blocks(controller, dumped).values():
+            keys.update(f"{block}|{meta}" for block, meta in blocks)
     return keys
 
 
