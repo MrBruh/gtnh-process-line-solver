@@ -280,3 +280,27 @@ def test_two_plants_on_different_casings_bake_distinct_faces() -> None:
     plain = BlockCube(cell=(0, 0, 0), block=_CONTROLLER[0], meta=_CONTROLLER[1], steps=0)
     keys = {face_key(cube, "NORTH") for cube in (titanium, tungstensteel, plain)}
     assert len(keys) == 3
+
+
+def test_a_choice_the_form_already_holds_swaps_nothing() -> None:
+    assert structure_swaps(_PLANT_DOC, _PLANT_DOC.variants[0], {"coil": _CUPRONICKEL}) == {}
+
+
+def test_a_form_holding_two_blocks_of_one_channel_is_logged_and_left_alone(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """No dump does this today; if one did, which cells form the part would be ambiguous."""
+    doc = _two_form_oven()
+    first = next(v for v in doc.variants if v.trigger_stack_size == 1)
+    mixed = first.model_copy(
+        update={
+            "blocks": [
+                *first.blocks[:-1],
+                first.blocks[-1].model_copy(update={"meta": 1}),
+            ]
+        }
+    )
+    with caplog.at_level(logging.WARNING, logger="gtnh_solver.previewer.textures"):
+        swaps = structure_swaps(doc, mixed, {"coil": ("gregtech:gt.blockcasings5", 3)})
+    assert swaps == {}
+    assert "holds 2 blocks of its 'coil' channel" in caplog.text

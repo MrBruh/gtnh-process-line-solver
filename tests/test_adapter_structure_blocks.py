@@ -23,7 +23,7 @@ from gtnh_solver.adapter import (
     load_plan,
     to_input_ir,
 )
-from gtnh_solver.adapter.structure_blocks import recipe_special_value
+from gtnh_solver.adapter.structure_blocks import PlannedStructure, recipe_special_value
 from gtnh_solver.dataset import (
     CHEMICAL_PLANT,
     COIL,
@@ -443,12 +443,43 @@ def test_a_re_tiered_plant_takes_the_machine_casing_of_the_tier_it_is_supplied_a
     assert plant.structure_blocks[MACHINE_CASING] == _machine_casing(4)
 
 
-def test_a_plant_without_its_machine_casing_channel_plans_none() -> None:
+@pytest.mark.parametrize("missing", [MACHINE_CASING, SOLID_CASING, PIPE])
+def test_a_plant_part_the_dump_does_not_record_is_not_planned(missing: str) -> None:
+    """The dump says which tiered parts a structure has; a channel it does not record is drawn as
+    dumped, silently, whatever the plan says about it."""
     record = _DATASET.by_block_key[CHEMICAL_PLANT]
-    bare = replace(
-        record, substitutions=tuple(c for c in record.substitutions if c[0] != MACHINE_CASING)
-    )
+    bare = replace(record, substitutions=tuple(c for c in record.substitutions if c[0] != missing))
     dataset = PhysicalDataset(meta=_DATASET.meta, machines={bare.key: bare}, records=(bare,))
     plant = _quiet(recipes=[_sv(4)], physical=dataset)
-    assert MACHINE_CASING not in plant.structure_blocks
-    assert plant.structure_blocks.keys() == {COIL, PIPE, SOLID_CASING}
+    assert plant.structure_blocks.keys() == {COIL, MACHINE_CASING, PIPE, SOLID_CASING} - {missing}
+
+
+def test_a_supplied_tier_with_no_accepted_machine_casing_warns_and_draws_the_dumps() -> None:
+    planned = PlannedStructure(node_id="n", machine_casings=(("gregtech:gt.blockcasings", 3),))
+    with pytest.warns(AdapterWarning, match="supplied at 'EV', which has no machine casing"):
+        assert planned.blocks("EV") == {}
+
+
+def test_a_dump_contradicting_the_rule_leaves_the_part_as_dumped() -> None:
+    """When a dump lists a block the cited rule does not accept, the dump's list wins
+    (``dataset.channel_blocks``), and a block the rule then picks on its own may not be in it."""
+    record = _DATASET.by_block_key[CHEMICAL_PLANT]
+    stray = ("gregtech:gt.blockcasings8", 1)
+    contradicting = replace(
+        record,
+        substitutions=tuple(
+            (channel, (blocks[0], stray)) if channel in (PIPE, SOLID_CASING) else (channel, blocks)
+            for channel, blocks in record.substitutions
+        ),
+    )
+    dataset = PhysicalDataset(
+        meta=_DATASET.meta, machines={contradicting.key: contradicting}, records=(contradicting,)
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        plant = _plant(recipes=[_sv(4)], physical=dataset)
+    refused = [
+        str(w.message) for w in caught if "its machine's dump does not accept" in str(w.message)
+    ]
+    assert len(refused) == 2  # the titanium solid casing and the bronze pipe
+    assert plant.structure_blocks.keys() == {COIL, MACHINE_CASING}
