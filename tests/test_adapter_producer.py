@@ -54,6 +54,9 @@ _NITROBENZENE = _EXAMPLES / "gtnh-nitrobenzene.json"
 #: line is a 9-hammer toy; ``ev-nitrobenzene`` is a real 2.9 line (multiblocks, #204).
 _PARALLEL_SAND = _EXAMPLES / "gtnh-parallel-sand.json"
 _EV_NITROBENZENE = _EXAMPLES / "ev-nitrobenzene.json"
+#: A ShadowTheAge calculator plan converted by gtnh-shadow-convert (#293): a ``converter`` block,
+#: and the arodoid fork's ``machineHandlers`` beside it.
+_SHADOW_NITROBENZENE = _EXAMPLES / "shadow-nitrobenzene.json"
 
 
 def _plan(
@@ -126,9 +129,15 @@ def test_committed_arodoid_fixture_detects_despite_schema_version_1(path: Path) 
     assert detect_producer(plan) is PlanProducer.ARODOID_V1
 
 
+def test_committed_shadow_fixture_detects_ahead_of_its_handlers() -> None:
+    plan = load_plan(_SHADOW_NITROBENZENE)
+    assert any(recipe.machine_handlers for recipe in plan.recipes)
+    assert detect_producer(plan) is PlanProducer.SHADOW_V1
+
+
 @pytest.mark.parametrize(
     ("path", "pack"),
-    [(_SAND, "2.8.4"), (_PARALLEL_SAND, "2.9.0-beta-2")],
+    [(_SAND, "2.8.4"), (_PARALLEL_SAND, "2.9.0-beta-2"), (_SHADOW_NITROBENZENE, "2.9.0-beta-2")],
     ids=lambda v: v.name if isinstance(v, Path) else v,
 )
 def test_the_problem_carries_the_pack_its_plan_was_balanced_against(path: Path, pack: str) -> None:
@@ -190,6 +199,7 @@ def test_describe_markers_names_every_signal() -> None:
     assert "resolved=absent" in described
     assert "app=absent" in described
     assert "machineHandlers=present" in described
+    assert "converter=absent" in described
 
 
 # ------------------------------------------------------------------ effective handler

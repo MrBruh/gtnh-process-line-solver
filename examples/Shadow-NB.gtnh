@@ -1,0 +1,82 @@
+{
+  "name": "Shadow-NB",
+  "products": [
+    {
+      "goodsId": "f:miscutils:nitrobenzene",
+      "amount": 5000
+    }
+  ],
+  "rootGroup": {
+    "type": "recipe_group",
+    "links": {
+      "f:minecraft:water": 1
+    },
+    "elements": [
+      {
+        "type": "recipe",
+        "recipeId": "r~lbiMPNCCNS6AdBtSLQ3-gw==",
+        "voltageTier": 2,
+        "choices": {
+          "coilTier": 0,
+          "pipeFluidCasingTier": 0
+        }
+      },
+      {
+        "type": "recipe",
+        "recipeId": "r~wsro2Fn0NA2OT-iCHWZ1rw==",
+        "voltageTier": 1,
+        "choices": {}
+      },
+      {
+        "type": "recipe",
+        "recipeId": "r~QBtOSezKN1arz5H0iYHl2g==",
+        "voltageTier": 2,
+        "choices": {}
+      },
+      {
+        "type": "recipe",
+        "recipeId": "r~Mrjn8DDwM8CNu_1_dui6vw==",
+        "voltageTier": 1,
+        "choices": {
+          "casingType": 0,
+          "slices": 1,
+          "coilTier": 0
+        }
+      },
+      {
+        "type": "recipe_group",
+        "links": {
+          "f:minecraft:water": 1
+        },
+        "elements": [
+          {
+            "type": "recipe",
+            "recipeId": "r~1UkuNk-KO6yy0csZYA0njQ==",
+            "voltageTier": 2,
+            "choices": {}
+          },
+          {
+            "type": "recipe",
+            "recipeId": "r~4ALDcWV7NX-M2dgIWofuyg==",
+            "voltageTier": 0,
+            "choices": {}
+          },
+          {
+            "type": "recipe",
+            "recipeId": "r~kUefzVo0Oj-LJjAia9l9IQ==",
+            "voltageTier": 2,
+            "choices": {}
+          }
+        ],
+        "collapsed": false,
+        "name": "Group"
+      }
+    ],
+    "collapsed": false,
+    "name": "Group"
+  },
+  "settings": {
+    "minVoltage": 0,
+    "timeUnit": "min"
+  }
+}

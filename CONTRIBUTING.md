@@ -60,7 +60,7 @@ as "safe to start on" rather than "unblocked".
 
 | Lane | Phase 2 work | Status |
 |------|--------------|--------|
-| A | adapter hardening: pin the plan-schema + recipe-dataset version | Open - Phase 1 adapter done; pinning not started |
+| A | adapter hardening: pin the plan-schema + recipe-dataset version | Open - Phase 1 adapter done; ShadowTheAge `.gtnh` plans read through the `shadow` extra (#293); pinning not started |
 | B | full physical dataset (footprints / faces / tiers / cell->block) | Largely landed - the schema-v2 `dataset/` loader ships real footprints, hint-derived I/O faces, coil tiers and per-cell hatch slots, all wired into the solve path; the Java extractor (`tools/gtnh-extractor/`) dumps structures and a layered texture manifest on demand, local-only and version-namespaced, with the example lines' multiblocks committed (trimmed) so a fresh clone solves them offline. Ahead: cell->block realizability, and the third-party texture tail |
 | C | placement: SA/LNS + routing-aware cost | Largely landed - SA + LNS + the routing-aware (HPWL / compactness / auto-output) cost are in; the incremental congestion-aware cost is the remaining refinement |
 | D | router: negotiated-congestion, multi-channel cap, shared-amperage power optimization | In progress - negotiated-congestion routing (docks and power negotiated with the pipes, #164), single-channel capacity, and size-or-reject power landed; power trunks keep failed-first rip-up/reroute across tiers. Ahead: the per-edge multi-channel cap and power optimization |

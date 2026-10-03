@@ -34,7 +34,13 @@ Third-party components:
 - GTNH Calculator (https://github.com/ShadowTheAge/gtnh), MIT License, Copyright (c) 2025
   ShadowTheAge. src/gtnh_solver/dataset/nesql.py carries, as Python, the table from its
   export/FontCharactersFixer.cs that maps GT:NH's private-use font glyphs to the Unicode
-  symbols they are drawn as. No other part of it is included. Its license:
+  symbols they are drawn as. No other part of it is included. The optional `shadow` extra
+  installs gtnh-shadow-convert (https://github.com/MrBruh/gtnh-shadow-convert, MIT), a separate
+  package that ports the calculator's data reader, solver and machine rules to read its plans.
+  examples/Shadow-NB.gtnh is a plan the calculator saved (recipe ids, tiers and options only),
+  and examples/shadow-nitrobenzene.json is that plan converted. The calculator's recipe data
+  (data.bin, from https://github.com/ShadowTheAge/gtnh-data) is published without a license and
+  is never included in this repository; a user downloads it separately. Its license:
 
     Permission is hereby granted, free of charge, to any person obtaining a copy of this
     software and associated documentation files (the "Software"), to deal in the Software

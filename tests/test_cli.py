@@ -16,12 +16,14 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 from functools import cache
 from pathlib import Path
 from typing import Any, Final
 
 import pytest
 
+import gtnh_solver.adapter.shadow as shadow_module
 import gtnh_solver.cli as cli_module
 from gtnh_solver import __version__
 from gtnh_solver.adapter import (
@@ -1355,3 +1357,92 @@ def test_an_me_toggled_net_is_not_counted_as_unconnected(sand_layout: LayoutResu
     remaining = _unconnected_nets(toggled, stripped)
     assert remaining, "the power net is still physical"
     assert all(net.commodity is not Commodity.ITEM for net in toggled.nets if net.id in remaining)
+
+
+# ------------------------------------------------------------------ ShadowTheAge .gtnh plans (#293)
+
+_SHADOW_MINIMAL: Final = Path(__file__).parent / "fixtures" / "shadow-minimal.json"
+
+
+def _gtnh(tmp_path: Path, name: str = "plan.gtnh") -> str:
+    plan = tmp_path / name
+    plan.write_text("{}", encoding="utf-8")
+    return str(plan)
+
+
+def test_cli_solves_a_gtnh_plan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    solve_calls: list[dict[str, object]],
+) -> None:
+    # The converter stubbed with a plan in the shape it writes. The suffix is matched in any case,
+    # and the converter block makes the producer known, so no --plan-schema advice is printed.
+    seen: list[tuple[object, object]] = []
+
+    def convert(gtnh: object, data: object) -> dict[str, Any]:
+        seen.append((gtnh, data))
+        loaded: dict[str, Any] = json.loads(_SHADOW_MINIMAL.read_text(encoding="utf-8"))
+        return loaded
+
+    monkeypatch.setattr(shadow_module, "_require_converter", lambda: convert)
+    plan = _gtnh(tmp_path, "plan.GTNH")
+    code = main([plan, "--shadow-data", "data.bin"])
+    captured = capsys.readouterr()
+    assert code == 0
+    assert seen == [(plan, "data.bin")]
+    assert "could not tell which" not in captured.err
+    _published(captured.out)
+    assert len(solve_calls) == 1
+
+
+def test_cli_a_gtnh_plan_needs_its_data(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    assert main([_gtnh(tmp_path)]) == 2
+    err = capsys.readouterr().err
+    assert "could not load" in err
+    assert "--shadow-data" in err
+    assert not solve_calls
+
+
+def test_cli_shadow_data_is_only_for_a_gtnh_plan(
+    capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    assert main([_SAND, "--shadow-data", "data.bin"]) == 2
+    assert "only read with a ShadowTheAge .gtnh plan" in capsys.readouterr().err
+    assert not solve_calls
+
+
+def test_cli_a_gtnh_plan_without_the_shadow_extra(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    solve_calls: list[dict[str, object]],
+) -> None:
+    monkeypatch.setitem(sys.modules, "gtnh_shadow_convert", None)
+    assert main([_gtnh(tmp_path), "--shadow-data", "data.bin"]) == 2
+    assert 'pip install -e ".[shadow]"' in capsys.readouterr().err
+    assert not solve_calls
+
+
+def test_cli_a_plan_the_converter_refuses(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    solve_calls: list[dict[str, object]],
+) -> None:
+    # The converter's errors are ValueErrors: an unloadable plan, exit 2, its reason on stderr.
+    def convert(gtnh: object, data: object) -> dict[str, Any]:
+        raise ValueError("no rule for the machine 'Nano Forge' has been ported")
+
+    monkeypatch.setattr(shadow_module, "_require_converter", lambda: convert)
+    assert main([_gtnh(tmp_path), "--shadow-data", "data.bin"]) == 2
+    assert "Nano Forge" in capsys.readouterr().err
+    assert not solve_calls
+
+
+def test_cli_offers_the_shadow_schema() -> None:
+    action = next(a for a in cli_module.build_parser()._actions if a.dest == "plan_schema")
+    assert action.choices is not None
+    assert "shadow-v1" in action.choices

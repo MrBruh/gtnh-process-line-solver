@@ -1,7 +1,8 @@
 """adapter - gtnh-factory-flow exported plan JSON -> InputIR.
 
 Parses the documented export (typed view in ``plan``) and maps it to the solver's input
-contract (``core``). No upstream code is vendored; the consumed shape is pinned by the
+contract (``core``). A ShadowTheAge calculator plan (``.gtnh``) is first converted into that same
+shape by the optional gtnh-shadow-convert package (``shadow``). No upstream code is vendored; the consumed shape is pinned by the
 committed fixtures in ``examples/`` and ``tests/fixtures/`` (docs/ARCHITECTURE.md decision #3).
 
 Crude for Phase 1 (docs/ROADMAP.md): single-block footprints and default orientations (real
@@ -17,6 +18,7 @@ from ._errors import AdapterError, AdapterWarning, InfeasiblePlanError
 from .core import adapt_file, load_plan, to_input_ir
 from .plan import (
     AppInfo,
+    ConverterInfo,
     Edge,
     MachineBlock,
     MachineConfigControl,
@@ -46,11 +48,14 @@ from .producer import (
     resolve_producer,
     strip_dataset_channel,
 )
+from .shadow import SHADOW_EXTRA_HINT, load_shadow_plan
 
 __all__ = [
+    "SHADOW_EXTRA_HINT",
     "AdapterError",
     "AdapterWarning",
     "AppInfo",
+    "ConverterInfo",
     "Edge",
     "InfeasiblePlanError",
     "MachineBlock",
@@ -77,6 +82,7 @@ __all__ = [
     "describe_markers",
     "detect_producer",
     "load_plan",
+    "load_shadow_plan",
     "plan_pack_version",
     "resolve_producer",
     "strip_dataset_channel",

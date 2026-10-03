@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "name": "Shadow minimal (hand-made)",
+  "converter": {
+    "name": "gtnh-shadow-convert",
+    "version": "0.1.0",
+    "shadowCommit": "af8c79888ec859913b27543c1381c3c11c24658f",
+    "dataVersion": 7,
+    "dataSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "packVersion": "2.9.0-beta-2"
+  },
+  "recipes": [
+    {
+      "id": "shadow:0:r~coke",
+      "name": "Coke Oven: Charcoal",
+      "kind": "gregtech_machine",
+      "machineType": "Industrial Coke Oven",
+      "eut": 96,
+      "durationTicks": 256,
+      "inputs": [
+        {"kind": "item", "id": "gregtech:gt.integrated_circuit@10", "amount": 1, "displayName": "Programmed Circuit", "consumed": false},
+        {"kind": "item", "id": "minecraft:log@32767", "amount": 16, "displayName": "Oak Log"},
+        {"kind": "fluid", "id": "nitrogen", "amount": 1000, "displayName": "Nitrogen"}
+      ],
+      "outputs": [
+        {"kind": "item", "id": "minecraft:coal@1", "amount": 20, "displayName": "Charcoal"},
+        {"kind": "fluid", "id": "woodtar", "amount": 1500, "displayName": "Wood Tar"}
+      ],
+      "source": {
+        "machineBlock": {"id": "gregtech:gt.blockmachines@15543", "displayName": "Industrial Coke Oven"},
+        "datasetVersionId": "shadow-2.9.0-beta-2",
+        "rawRecipeId": "",
+        "shadowRecipeId": "r~coke"
+      },
+      "runtimeCalculation": {
+        "sourceKind": "gtnh-shadow-convert",
+        "variants": [
+          {"id": "shadow", "overclockTier": "MV", "coilTier": "cupronickel", "eut": 97.95918367346938, "durationTicks": 256, "parallel": 1}
+        ]
+      },
+      "machineHandlers": [{"id": "shadow", "kind": "multiblock", "label": "Industrial Coke Oven"}]
+    },
+    {
+      "id": "shadow:1:r~tower",
+      "name": "Distillation Tower: Benzene",
+      "kind": "gregtech_machine",
+      "machineType": "Dangote Distillus",
+      "eut": 240,
+      "durationTicks": 40,
+      "inputs": [
+        {"kind": "item", "id": "gregtech:gt.integrated_circuit@2", "amount": 1, "displayName": "Programmed Circuit", "consumed": false},
+        {"kind": "fluid", "id": "woodtar", "amount": 1000, "displayName": "Wood Tar"}
+      ],
+      "outputs": [
+        {"kind": "fluid", "id": "creosote", "amount": 250, "displayName": "Creosote Oil"},
+        {"kind": "fluid", "id": "benzene", "amount": 400, "displayName": "Benzene"},
+        {"kind": "item", "id": "gregtech:gt.metaitem.01@1815", "amount": 1, "displayName": "Ash", "chance": 0.25}
+      ],
+      "source": {
+        "machineBlock": {"id": "gregtech:gt.blockmachines@31021", "displayName": "Dangote Distillus"},
+        "datasetVersionId": "shadow-2.9.0-beta-2",
+        "rawRecipeId": "",
+        "shadowRecipeId": "r~tower"
+      },
+      "runtimeCalculation": {
+        "sourceKind": "gtnh-shadow-convert",
+        "variants": [
+          {"id": "shadow", "overclockTier": "HV", "coilTier": null, "eut": 240, "durationTicks": 11, "parallel": 1}
+        ]
+      },
+      "machineHandlers": [{"id": "shadow", "kind": "multiblock", "label": "Dangote Distillus"}]
+    },
+    {
+      "id": "shadow:2:r~heat",
+      "name": "Fluid Heater: Steam",
+      "kind": "gregtech_machine",
+      "machineType": "Advanced Fluid Heater",
+      "eut": 30,
+      "durationTicks": 20,
+      "inputs": [
+        {"kind": "fluid", "id": "water", "amount": 100, "displayName": "Water"}
+      ],
+      "outputs": [
+        {"kind": "fluid", "id": "ic2steam", "amount": 100, "displayName": "Steam"}
+      ],
+      "source": {
+        "machineBlock": {"id": "gregtech:gt.blockmachines@622", "displayName": "Advanced Fluid Heater"},
+        "datasetVersionId": "shadow-2.9.0-beta-2",
+        "rawRecipeId": "",
+        "shadowRecipeId": "r~heat"
+      },
+      "runtimeCalculation": {
+        "sourceKind": "gtnh-shadow-convert",
+        "variants": [
+          {"id": "shadow", "overclockTier": "MV", "coilTier": null, "eut": 120, "durationTicks": 10, "parallel": 1}
+        ]
+      },
+      "machineHandlers": [{"id": "shadow", "kind": "single", "label": "Advanced Fluid Heater"}]
+    }
+  ],
+  "nodes": [
+    {"id": "node-0", "recipeId": "shadow:0:r~coke", "machineCount": 2, "parallel": 1, "overclockTier": "MV", "coilTier": "cupronickel", "machineConfigTiers": {"cokeOvenCasing": "heat_resistant", "cokeOvenSlices": "slice-2"}},
+    {"id": "node-1", "recipeId": "shadow:1:r~tower", "machineCount": 1, "parallel": 4, "overclockTier": "HV"},
+    {"id": "node-2", "recipeId": "shadow:2:r~heat", "machineCount": 2, "parallel": 1, "overclockTier": "MV"}
+  ],
+  "storages": [
+    {"id": "feed-1", "kind": "item", "resourceId": "minecraft:log@32767", "displayName": "Oak Log"},
+    {"id": "feed-2", "kind": "fluid", "resourceId": "nitrogen", "displayName": "Nitrogen"},
+    {"id": "feed-3", "kind": "fluid", "resourceId": "water", "displayName": "Water"},
+    {"id": "drain-4", "kind": "fluid", "resourceId": "benzene", "displayName": "Benzene"},
+    {"id": "drain-5", "kind": "fluid", "resourceId": "creosote", "displayName": "Creosote Oil"},
+    {"id": "drain-6", "kind": "item", "resourceId": "minecraft:coal@1", "displayName": "Charcoal"},
+    {"id": "drain-7", "kind": "fluid", "resourceId": "ic2steam", "displayName": "Steam"},
+    {"id": "drain-8", "kind": "item", "resourceId": "gregtech:gt.metaitem.01@1815", "displayName": "Ash"}
+  ],
+  "edges": [
+    {"id": "edge-1", "source": "feed-1", "target": "node-0", "resourceKind": "item", "resourceId": "minecraft:log@32767", "label": "Oak Log"},
+    {"id": "edge-2", "source": "feed-2", "target": "node-0", "resourceKind": "fluid", "resourceId": "nitrogen", "label": "Nitrogen"},
+    {"id": "edge-3", "source": "node-0", "target": "node-1", "resourceKind": "fluid", "resourceId": "woodtar", "label": "Wood Tar"},
+    {"id": "edge-4", "source": "node-1", "target": "drain-4", "resourceKind": "fluid", "resourceId": "benzene", "label": "Benzene"},
+    {"id": "edge-5", "source": "node-1", "target": "drain-5", "resourceKind": "fluid", "resourceId": "creosote", "label": "Creosote Oil"},
+    {"id": "edge-6", "source": "node-0", "target": "drain-6", "resourceKind": "item", "resourceId": "minecraft:coal@1", "label": "Charcoal"},
+    {"id": "edge-7", "source": "feed-3", "target": "node-2", "resourceKind": "fluid", "resourceId": "water", "label": "Water"},
+    {"id": "edge-8", "source": "node-2", "target": "drain-7", "resourceKind": "fluid", "resourceId": "ic2steam", "label": "Steam"},
+    {"id": "edge-9", "source": "node-1", "target": "drain-8", "resourceKind": "item", "resourceId": "gregtech:gt.metaitem.01@1815", "label": "Ash"}
+  ]
+}

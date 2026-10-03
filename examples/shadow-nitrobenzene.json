@@ -1,0 +1,830 @@
+{
+  "schemaVersion": 1,
+  "name": "Shadow-NB",
+  "converter": {
+    "name": "gtnh-shadow-convert",
+    "version": "0.1.0",
+    "shadowCommit": "af8c79888ec859913b27543c1381c3c11c24658f",
+    "dataVersion": 7,
+    "dataSha256": "624c9a20c8476dc630c274145dc04c72d7c582e130a3599dc49ce9aee0a2fe73",
+    "packVersion": "2.9.0-beta-2"
+  },
+  "recipes": [
+    {
+      "id": "shadow:0:r~lbiMPNCCNS6AdBtSLQ3-gw==",
+      "name": "Chemical Plant: Nitrobenzene",
+      "kind": "gregtech_machine",
+      "machineType": "ExxonMobil Chemical Plant",
+      "eut": 480,
+      "durationTicks": 600,
+      "inputs": [
+        {
+          "kind": "item",
+          "id": "gregtech:gt.integrated_circuit@12",
+          "amount": 1,
+          "displayName": "Programmed Circuit",
+          "consumed": false
+        },
+        {
+          "kind": "fluid",
+          "id": "benzene",
+          "amount": 5000,
+          "displayName": "Benzene"
+        },
+        {
+          "kind": "fluid",
+          "id": "sulfuricacid",
+          "amount": 1000,
+          "displayName": "Sulfuric Acid"
+        },
+        {
+          "kind": "fluid",
+          "id": "nitricacid",
+          "amount": 5000,
+          "displayName": "Nitric Acid"
+        },
+        {
+          "kind": "fluid",
+          "id": "ic2distilledwater",
+          "amount": 10000,
+          "displayName": "Distilled Water"
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "fluid",
+          "id": "nitrobenzene",
+          "amount": 5000,
+          "displayName": "Nitrobenzene"
+        }
+      ],
+      "source": {
+        "machineBlock": {
+          "id": "gregtech:gt.blockmachines@998",
+          "displayName": "ExxonMobil Chemical Plant"
+        },
+        "datasetVersionId": "shadow-2.9.0-beta-2",
+        "rawRecipeId": "",
+        "shadowRecipeId": "r~lbiMPNCCNS6AdBtSLQ3-gw=="
+      },
+      "runtimeCalculation": {
+        "sourceKind": "gtnh-shadow-convert",
+        "variants": [
+          {
+            "id": "shadow",
+            "overclockTier": "HV",
+            "coilTier": "cupronickel",
+            "eut": 480,
+            "durationTicks": 1200,
+            "parallel": 1
+          }
+        ]
+      },
+      "machineHandlers": [
+        {
+          "id": "shadow",
+          "kind": "multiblock",
+          "label": "ExxonMobil Chemical Plant"
+        }
+      ]
+    },
+    {
+      "id": "shadow:1:r~wsro2Fn0NA2OT-iCHWZ1rw==",
+      "name": "Distillation Tower: Distilled Water",
+      "kind": "gregtech_machine",
+      "machineType": "Distillation Tower",
+      "eut": 120,
+      "durationTicks": 32,
+      "inputs": [
+        {
+          "kind": "fluid",
+          "id": "water",
+          "amount": 1000,
+          "displayName": "Water"
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "fluid",
+          "id": "ic2distilledwater",
+          "amount": 1000,
+          "displayName": "Distilled Water"
+        }
+      ],
+      "source": {
+        "machineBlock": {
+          "id": "gregtech:gt.blockmachines@1126",
+          "displayName": "Distillation Tower"
+        },
+        "datasetVersionId": "shadow-2.9.0-beta-2",
+        "rawRecipeId": "",
+        "shadowRecipeId": "r~wsro2Fn0NA2OT-iCHWZ1rw=="
+      },
+      "runtimeCalculation": {
+        "sourceKind": "gtnh-shadow-convert",
+        "variants": [
+          {
+            "id": "shadow",
+            "overclockTier": "MV",
+            "coilTier": null,
+            "eut": 120,
+            "durationTicks": 32,
+            "parallel": 1
+          }
+        ]
+      },
+      "machineHandlers": [
+        {
+          "id": "shadow",
+          "kind": "multiblock",
+          "label": "Distillation Tower"
+        }
+      ]
+    },
+    {
+      "id": "shadow:2:r~QBtOSezKN1arz5H0iYHl2g==",
+      "name": "Distillation Tower: Creosote Oil",
+      "kind": "gregtech_machine",
+      "machineType": "Distillation Tower",
+      "eut": 240,
+      "durationTicks": 40,
+      "inputs": [
+        {
+          "kind": "item",
+          "id": "gregtech:gt.integrated_circuit@2",
+          "amount": 1,
+          "displayName": "Programmed Circuit",
+          "consumed": false
+        },
+        {
+          "kind": "fluid",
+          "id": "woodtar",
+          "amount": 1000,
+          "displayName": "Wood Tar"
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "fluid",
+          "id": "creosote",
+          "amount": 250,
+          "displayName": "Creosote Oil"
+        },
+        {
+          "kind": "fluid",
+          "id": "phenol",
+          "amount": 100,
+          "displayName": "Phenol"
+        },
+        {
+          "kind": "fluid",
+          "id": "benzene",
+          "amount": 400,
+          "displayName": "Benzene"
+        },
+        {
+          "kind": "fluid",
+          "id": "liquid_toluene",
+          "amount": 100,
+          "displayName": "Toluene"
+        },
+        {
+          "kind": "fluid",
+          "id": "1,3dimethylbenzene",
+          "amount": 150,
+          "displayName": "1,3-Dimethylbenzene"
+        }
+      ],
+      "source": {
+        "machineBlock": {
+          "id": "gregtech:gt.blockmachines@1126",
+          "displayName": "Distillation Tower"
+        },
+        "datasetVersionId": "shadow-2.9.0-beta-2",
+        "rawRecipeId": "",
+        "shadowRecipeId": "r~QBtOSezKN1arz5H0iYHl2g=="
+      },
+      "runtimeCalculation": {
+        "sourceKind": "gtnh-shadow-convert",
+        "variants": [
+          {
+            "id": "shadow",
+            "overclockTier": "HV",
+            "coilTier": null,
+            "eut": 240,
+            "durationTicks": 40,
+            "parallel": 1
+          }
+        ]
+      },
+      "machineHandlers": [
+        {
+          "id": "shadow",
+          "kind": "multiblock",
+          "label": "Distillation Tower"
+        }
+      ]
+    },
+    {
+      "id": "shadow:3:r~Mrjn8DDwM8CNu_1_dui6vw==",
+      "name": "Coke Oven: Charcoal",
+      "kind": "gregtech_machine",
+      "machineType": "Industrial Coke Oven",
+      "eut": 96,
+      "durationTicks": 256,
+      "inputs": [
+        {
+          "kind": "item",
+          "id": "gregtech:gt.integrated_circuit@10",
+          "amount": 1,
+          "displayName": "Programmed Circuit",
+          "consumed": false
+        },
+        {
+          "kind": "item",
+          "id": "minecraft:log@32767",
+          "amount": 16,
+          "displayName": "Oak Log"
+        },
+        {
+          "kind": "fluid",
+          "id": "nitrogen",
+          "amount": 1000,
+          "displayName": "Nitrogen"
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "item",
+          "id": "minecraft:coal@1",
+          "amount": 20,
+          "displayName": "Charcoal"
+        },
+        {
+          "kind": "fluid",
+          "id": "woodtar",
+          "amount": 1500,
+          "displayName": "Wood Tar"
+        }
+      ],
+      "source": {
+        "machineBlock": {
+          "id": "gregtech:gt.blockmachines@15543",
+          "displayName": "Industrial Coke Oven"
+        },
+        "datasetVersionId": "shadow-2.9.0-beta-2",
+        "rawRecipeId": "",
+        "shadowRecipeId": "r~Mrjn8DDwM8CNu_1_dui6vw=="
+      },
+      "runtimeCalculation": {
+        "sourceKind": "gtnh-shadow-convert",
+        "variants": [
+          {
+            "id": "shadow",
+            "overclockTier": "MV",
+            "coilTier": "cupronickel",
+            "eut": 97.95918367346938,
+            "durationTicks": 256,
+            "parallel": 1
+          }
+        ]
+      },
+      "machineHandlers": [
+        {
+          "id": "shadow",
+          "kind": "multiblock",
+          "label": "Industrial Coke Oven"
+        }
+      ]
+    },
+    {
+      "id": "shadow:4/0:r~1UkuNk-KO6yy0csZYA0njQ==",
+      "name": "Large Chemical Reactor: Sulfuric Acid",
+      "kind": "gregtech_machine",
+      "machineType": "Large Chemical Reactor",
+      "eut": 480,
+      "durationTicks": 260,
+      "inputs": [
+        {
+          "kind": "item",
+          "id": "gregtech:gt.integrated_circuit@7",
+          "amount": 1,
+          "displayName": "Programmed Circuit",
+          "consumed": false
+        },
+        {
+          "kind": "item",
+          "id": "ic2:itemdust@13",
+          "amount": 9,
+          "displayName": "Sulfur Dust"
+        },
+        {
+          "kind": "fluid",
+          "id": "oxygen",
+          "amount": 27000,
+          "displayName": "Oxygen"
+        },
+        {
+          "kind": "fluid",
+          "id": "water",
+          "amount": 9000,
+          "displayName": "Water"
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "fluid",
+          "id": "sulfuricacid",
+          "amount": 9000,
+          "displayName": "Sulfuric Acid"
+        }
+      ],
+      "source": {
+        "machineBlock": {
+          "id": "gregtech:gt.blockmachines@1169",
+          "displayName": "Large Chemical Reactor"
+        },
+        "datasetVersionId": "shadow-2.9.0-beta-2",
+        "rawRecipeId": "",
+        "shadowRecipeId": "r~1UkuNk-KO6yy0csZYA0njQ=="
+      },
+      "runtimeCalculation": {
+        "sourceKind": "gtnh-shadow-convert",
+        "variants": [
+          {
+            "id": "shadow",
+            "overclockTier": "HV",
+            "coilTier": null,
+            "eut": 480,
+            "durationTicks": 260,
+            "parallel": 1
+          }
+        ]
+      },
+      "machineHandlers": [
+        {
+          "id": "shadow",
+          "kind": "multiblock",
+          "label": "Large Chemical Reactor"
+        }
+      ]
+    },
+    {
+      "id": "shadow:4/1:r~4ALDcWV7NX-M2dgIWofuyg==",
+      "name": "Large Chemical Reactor: Nitric Acid",
+      "kind": "gregtech_machine",
+      "machineType": "Large Chemical Reactor",
+      "eut": 30,
+      "durationTicks": 320,
+      "inputs": [
+        {
+          "kind": "item",
+          "id": "gregtech:gt.integrated_circuit@24",
+          "amount": 1,
+          "displayName": "Programmed Circuit",
+          "consumed": false
+        },
+        {
+          "kind": "fluid",
+          "id": "ammonia",
+          "amount": 1000,
+          "displayName": "Ammonia"
+        },
+        {
+          "kind": "fluid",
+          "id": "oxygen",
+          "amount": 4000,
+          "displayName": "Oxygen"
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "fluid",
+          "id": "nitricacid",
+          "amount": 1000,
+          "displayName": "Nitric Acid"
+        },
+        {
+          "kind": "fluid",
+          "id": "water",
+          "amount": 1000,
+          "displayName": "Water"
+        }
+      ],
+      "source": {
+        "machineBlock": {
+          "id": "gregtech:gt.blockmachines@1169",
+          "displayName": "Large Chemical Reactor"
+        },
+        "datasetVersionId": "shadow-2.9.0-beta-2",
+        "rawRecipeId": "",
+        "shadowRecipeId": "r~4ALDcWV7NX-M2dgIWofuyg=="
+      },
+      "runtimeCalculation": {
+        "sourceKind": "gtnh-shadow-convert",
+        "variants": [
+          {
+            "id": "shadow",
+            "overclockTier": "LV",
+            "coilTier": null,
+            "eut": 30,
+            "durationTicks": 320,
+            "parallel": 1
+          }
+        ]
+      },
+      "machineHandlers": [
+        {
+          "id": "shadow",
+          "kind": "multiblock",
+          "label": "Large Chemical Reactor"
+        }
+      ]
+    },
+    {
+      "id": "shadow:4/2:r~kUefzVo0Oj-LJjAia9l9IQ==",
+      "name": "Large Chemical Reactor: Ammonia",
+      "kind": "gregtech_machine",
+      "machineType": "Large Chemical Reactor",
+      "eut": 384,
+      "durationTicks": 3200,
+      "inputs": [
+        {
+          "kind": "item",
+          "id": "gregtech:gt.integrated_circuit@24",
+          "amount": 1,
+          "displayName": "Programmed Circuit",
+          "consumed": false
+        },
+        {
+          "kind": "fluid",
+          "id": "nitrogen",
+          "amount": 10000,
+          "displayName": "Nitrogen"
+        },
+        {
+          "kind": "fluid",
+          "id": "hydrogen",
+          "amount": 30000,
+          "displayName": "Hydrogen"
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "fluid",
+          "id": "ammonia",
+          "amount": 10000,
+          "displayName": "Ammonia"
+        }
+      ],
+      "source": {
+        "machineBlock": {
+          "id": "gregtech:gt.blockmachines@1169",
+          "displayName": "Large Chemical Reactor"
+        },
+        "datasetVersionId": "shadow-2.9.0-beta-2",
+        "rawRecipeId": "",
+        "shadowRecipeId": "r~kUefzVo0Oj-LJjAia9l9IQ=="
+      },
+      "runtimeCalculation": {
+        "sourceKind": "gtnh-shadow-convert",
+        "variants": [
+          {
+            "id": "shadow",
+            "overclockTier": "HV",
+            "coilTier": null,
+            "eut": 384,
+            "durationTicks": 3200,
+            "parallel": 1
+          }
+        ]
+      },
+      "machineHandlers": [
+        {
+          "id": "shadow",
+          "kind": "multiblock",
+          "label": "Large Chemical Reactor"
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "id": "node-0",
+      "recipeId": "shadow:0:r~lbiMPNCCNS6AdBtSLQ3-gw==",
+      "machineCount": 1,
+      "parallel": 1,
+      "overclockTier": "HV",
+      "coilTier": "cupronickel",
+      "machineConfigTiers": {
+        "pipeCasing": "bronze",
+        "solidCasing": "titanium"
+      }
+    },
+    {
+      "id": "node-1",
+      "recipeId": "shadow:1:r~wsro2Fn0NA2OT-iCHWZ1rw==",
+      "machineCount": 1,
+      "parallel": 1,
+      "overclockTier": "MV"
+    },
+    {
+      "id": "node-2",
+      "recipeId": "shadow:2:r~QBtOSezKN1arz5H0iYHl2g==",
+      "machineCount": 1,
+      "parallel": 1,
+      "overclockTier": "HV"
+    },
+    {
+      "id": "node-3",
+      "recipeId": "shadow:3:r~Mrjn8DDwM8CNu_1_dui6vw==",
+      "machineCount": 2,
+      "parallel": 1,
+      "overclockTier": "MV",
+      "coilTier": "cupronickel",
+      "machineConfigTiers": {
+        "cokeOvenCasing": "heat_resistant",
+        "cokeOvenSlices": "slice-1"
+      }
+    },
+    {
+      "id": "node-4-0",
+      "recipeId": "shadow:4/0:r~1UkuNk-KO6yy0csZYA0njQ==",
+      "machineCount": 1,
+      "parallel": 1,
+      "overclockTier": "HV"
+    },
+    {
+      "id": "node-4-1",
+      "recipeId": "shadow:4/1:r~4ALDcWV7NX-M2dgIWofuyg==",
+      "machineCount": 2,
+      "parallel": 1,
+      "overclockTier": "LV"
+    },
+    {
+      "id": "node-4-2",
+      "recipeId": "shadow:4/2:r~kUefzVo0Oj-LJjAia9l9IQ==",
+      "machineCount": 2,
+      "parallel": 1,
+      "overclockTier": "HV"
+    }
+  ],
+  "storages": [
+    {
+      "id": "drain-1",
+      "kind": "fluid",
+      "resourceId": "nitrobenzene",
+      "displayName": "Nitrobenzene"
+    },
+    {
+      "id": "feed-2",
+      "kind": "fluid",
+      "resourceId": "water",
+      "displayName": "Water"
+    },
+    {
+      "id": "feed-3",
+      "kind": "fluid",
+      "resourceId": "nitrogen",
+      "displayName": "Nitrogen"
+    },
+    {
+      "id": "feed-4",
+      "kind": "fluid",
+      "resourceId": "oxygen",
+      "displayName": "Oxygen"
+    },
+    {
+      "id": "feed-5",
+      "kind": "fluid",
+      "resourceId": "hydrogen",
+      "displayName": "Hydrogen"
+    },
+    {
+      "id": "feed-6",
+      "kind": "item",
+      "resourceId": "minecraft:log@32767",
+      "displayName": "Oak Log"
+    },
+    {
+      "id": "feed-7",
+      "kind": "item",
+      "resourceId": "ic2:itemdust@13",
+      "displayName": "Sulfur Dust"
+    },
+    {
+      "id": "drain-8",
+      "kind": "fluid",
+      "resourceId": "creosote",
+      "displayName": "Creosote Oil"
+    },
+    {
+      "id": "drain-9",
+      "kind": "fluid",
+      "resourceId": "phenol",
+      "displayName": "Phenol"
+    },
+    {
+      "id": "drain-10",
+      "kind": "fluid",
+      "resourceId": "liquid_toluene",
+      "displayName": "Toluene"
+    },
+    {
+      "id": "drain-11",
+      "kind": "fluid",
+      "resourceId": "1,3dimethylbenzene",
+      "displayName": "1,3-Dimethylbenzene"
+    },
+    {
+      "id": "drain-12",
+      "kind": "item",
+      "resourceId": "minecraft:coal@1",
+      "displayName": "Charcoal"
+    },
+    {
+      "id": "drain-13",
+      "kind": "fluid",
+      "resourceId": "water",
+      "displayName": "Water"
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-1",
+      "source": "node-4-2",
+      "target": "node-4-1",
+      "resourceKind": "fluid",
+      "resourceId": "ammonia",
+      "label": "Ammonia"
+    },
+    {
+      "id": "edge-2",
+      "source": "node-0",
+      "target": "drain-1",
+      "resourceKind": "fluid",
+      "resourceId": "nitrobenzene",
+      "label": "Nitrobenzene"
+    },
+    {
+      "id": "edge-3",
+      "source": "node-2",
+      "target": "node-0",
+      "resourceKind": "fluid",
+      "resourceId": "benzene",
+      "label": "Benzene"
+    },
+    {
+      "id": "edge-4",
+      "source": "node-4-0",
+      "target": "node-0",
+      "resourceKind": "fluid",
+      "resourceId": "sulfuricacid",
+      "label": "Sulfuric Acid"
+    },
+    {
+      "id": "edge-5",
+      "source": "node-4-1",
+      "target": "node-0",
+      "resourceKind": "fluid",
+      "resourceId": "nitricacid",
+      "label": "Nitric Acid"
+    },
+    {
+      "id": "edge-6",
+      "source": "node-1",
+      "target": "node-0",
+      "resourceKind": "fluid",
+      "resourceId": "ic2distilledwater",
+      "label": "Distilled Water"
+    },
+    {
+      "id": "edge-7",
+      "source": "node-3",
+      "target": "node-2",
+      "resourceKind": "fluid",
+      "resourceId": "woodtar",
+      "label": "Wood Tar"
+    },
+    {
+      "id": "edge-8",
+      "source": "feed-2",
+      "target": "node-1",
+      "resourceKind": "fluid",
+      "resourceId": "water",
+      "label": "Water"
+    },
+    {
+      "id": "edge-9",
+      "source": "feed-2",
+      "target": "node-4-0",
+      "resourceKind": "fluid",
+      "resourceId": "water",
+      "label": "Water"
+    },
+    {
+      "id": "edge-10",
+      "source": "feed-3",
+      "target": "node-3",
+      "resourceKind": "fluid",
+      "resourceId": "nitrogen",
+      "label": "Nitrogen"
+    },
+    {
+      "id": "edge-11",
+      "source": "feed-3",
+      "target": "node-4-2",
+      "resourceKind": "fluid",
+      "resourceId": "nitrogen",
+      "label": "Nitrogen"
+    },
+    {
+      "id": "edge-12",
+      "source": "feed-4",
+      "target": "node-4-0",
+      "resourceKind": "fluid",
+      "resourceId": "oxygen",
+      "label": "Oxygen"
+    },
+    {
+      "id": "edge-13",
+      "source": "feed-4",
+      "target": "node-4-1",
+      "resourceKind": "fluid",
+      "resourceId": "oxygen",
+      "label": "Oxygen"
+    },
+    {
+      "id": "edge-14",
+      "source": "feed-5",
+      "target": "node-4-2",
+      "resourceKind": "fluid",
+      "resourceId": "hydrogen",
+      "label": "Hydrogen"
+    },
+    {
+      "id": "edge-15",
+      "source": "feed-6",
+      "target": "node-3",
+      "resourceKind": "item",
+      "resourceId": "minecraft:log@32767",
+      "label": "Oak Log"
+    },
+    {
+      "id": "edge-16",
+      "source": "feed-7",
+      "target": "node-4-0",
+      "resourceKind": "item",
+      "resourceId": "ic2:itemdust@13",
+      "label": "Sulfur Dust"
+    },
+    {
+      "id": "edge-17",
+      "source": "node-2",
+      "target": "drain-8",
+      "resourceKind": "fluid",
+      "resourceId": "creosote",
+      "label": "Creosote Oil"
+    },
+    {
+      "id": "edge-18",
+      "source": "node-2",
+      "target": "drain-9",
+      "resourceKind": "fluid",
+      "resourceId": "phenol",
+      "label": "Phenol"
+    },
+    {
+      "id": "edge-19",
+      "source": "node-2",
+      "target": "drain-10",
+      "resourceKind": "fluid",
+      "resourceId": "liquid_toluene",
+      "label": "Toluene"
+    },
+    {
+      "id": "edge-20",
+      "source": "node-2",
+      "target": "drain-11",
+      "resourceKind": "fluid",
+      "resourceId": "1,3dimethylbenzene",
+      "label": "1,3-Dimethylbenzene"
+    },
+    {
+      "id": "edge-21",
+      "source": "node-3",
+      "target": "drain-12",
+      "resourceKind": "item",
+      "resourceId": "minecraft:coal@1",
+      "label": "Charcoal"
+    },
+    {
+      "id": "edge-22",
+      "source": "node-4-1",
+      "target": "drain-13",
+      "resourceKind": "fluid",
+      "resourceId": "water",
+      "label": "Water"
+    }
+  ]
+}

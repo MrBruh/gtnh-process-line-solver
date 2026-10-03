@@ -324,6 +324,27 @@ class AppInfo(BaseModel):
     exported_at: str = ""
 
 
+class ConverterInfo(BaseModel):
+    """Which converter wrote the plan, when no gtnh-factory-flow fork exported it.
+
+    gtnh-shadow-convert writes a ShadowTheAge calculator plan (``.gtnh``) in this shape, and stamps
+    this block on it: it is what identifies such a plan (:func:`producer.detect_producer`), and it
+    records what the plan was solved against. Provenance only otherwise; the mapping reads none of
+    it, since the pack also reaches each recipe's ``source.datasetVersionId``.
+    """
+
+    model_config = _CFG
+
+    name: str = ""
+    version: str = ""
+    #: The ShadowTheAge/gtnh commit whose solver and machine rules the converter ports.
+    shadow_commit: str = ""
+    #: The calculator data the plan was solved against: its format version and sha256.
+    data_version: int = 0
+    data_sha256: str = ""
+    pack_version: str = ""
+
+
 class ResolvedFlow(BaseModel):
     """v2: one resolved resource rate (an input, output, or external boundary flow)."""
 
@@ -422,3 +443,6 @@ class Plan(BaseModel):
     app: AppInfo | None = None
     dataset_version_id: str | None = None
     resolved: ResolvedBlock | None = None
+    #: Present only on a plan a converter wrote (a ShadowTheAge ``.gtnh`` plan); see
+    #: :class:`ConverterInfo`.
+    converter: ConverterInfo | None = None

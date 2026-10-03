@@ -11,7 +11,8 @@ typed schemas in `src/gtnh_solver/ir/` (Pydantic v2).
 ## Input IR - the problem
 
 What the solver consumes (produced by the adapter from gtnh-factory-flow's exported plan JSON,
-recipes embedded, plus the physical-rules dataset). Source format: gtnh-factory-flow's plan
+recipes embedded, plus the physical-rules dataset; a ShadowTheAge calculator plan is first
+converted into that same JSON by gtnh-shadow-convert, #293). Source format: gtnh-factory-flow's plan
 JSON (graph nodes/edges, fuel profiles, targets, and the exact recipes placed), which the
 *upstream exporter* validates with Zod; the adapter re-parses that → InputIR with Pydantic.
 (Pinning an explicit plan-schema + recipe-dataset version is Phase 2, lane A.)

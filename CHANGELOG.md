@@ -7,6 +7,20 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Plans from ShadowTheAge's GT:NH calculator (#293).** `gtnh-solve MyPlan.gtnh --shadow-data
+  data.bin` reads a plan saved by [the calculator](https://shadowtheage.github.io/gtnh/), through
+  the new optional `shadow` extra (`pip install -e ".[shadow]"`): gtnh-shadow-convert, a separate
+  MIT repository pinned to its `v0.1.0` commit, which ports the calculator's recipe-data reader,
+  its LP and 123 of its 133 machine rules (each checked against the calculator's own test plans)
+  and writes the plan JSON the adapter already reads. Its `fetch-data` command downloads the
+  calculator's `data.bin` once; that file has no license and is never committed. A converted plan
+  carries a `converter` block, which the adapter detects as the new `shadow-v1` producer ahead of
+  the arodoid fork's `machineHandlers` it also carries (`--plan-schema shadow-v1` pins it); its
+  tiers are not re-tiered, since the player chose them and the calculator's rules set its draw.
+  A `.gtnh` without `--shadow-data`, `--shadow-data` on a JSON plan, a missing extra, and a plan
+  the converter refuses (an unported machine, an unbalanceable plan) all exit 2 with the reason.
+  `examples/Shadow-NB.gtnh` and its conversion `examples/shadow-nitrobenzene.json` are new
+  examples.
 - **The preview's legend shows each machine type by its front face.** The "machines" section used
   to mark each type with the colour its placeholder boxes are painted in, which said nothing once
   the 3D view drew real textures. Each textured type is now marked by its controller's front face,

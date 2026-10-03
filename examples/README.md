@@ -12,6 +12,7 @@ producer from structural markers and `--plan-schema` overrides it:
 | `gtnh-sand.json`, `gtnh-nitrobenzene.json` | [MrBruh/gtnh-factory-flow](https://github.com/MrBruh/gtnh-factory-flow) | a `resolved` throughput block, `app`, `schemaVersion: 2` |
 | `gtnh-parallel-sand.json` | the arodoid fork | `recipes[].machineHandlers`; no `resolved`, `schemaVersion: 1` |
 | `ev-nitrobenzene.json` | the arodoid fork | as above; a real GTNH 2.9 line (see below) |
+| `shadow-nitrobenzene.json` | [ShadowTheAge's calculator](https://shadowtheage.github.io/gtnh/), converted by [gtnh-shadow-convert](https://github.com/MrBruh/gtnh-shadow-convert) from `Shadow-NB.gtnh` | a `converter` block (it also carries `machineHandlers`) |
 
 The original upstream both forks descend from is
 [Samiracle64/gtnh-factory-flow](https://github.com/Samiracle64/gtnh-factory-flow).
@@ -22,6 +23,19 @@ gtnh-solve examples/<your-plan>.json > layout.json   # ...which is how it goes t
 gtnh-solve examples/<your-plan>.json --preview view.html  # ...or a double-clickable 3D preview
 gtnh-solve examples/<your-plan>.json --schematic line.schematic  # ...or a Schematica build ghost
 ```
+
+`Shadow-NB.gtnh` is the calculator's own save: hashed recipe ids, tiers and machine options, and
+nothing the adapter can map. `gtnh-solve` reads it with the `shadow` extra and the calculator's
+recipe data (`pip install -e ".[shadow]"`, then `gtnh-shadow-convert fetch-data`), which is
+fetched, never committed:
+
+```bash
+gtnh-solve examples/Shadow-NB.gtnh --shadow-data <data.bin> --preview view.html
+gtnh-shadow-convert examples/Shadow-NB.gtnh --data <data.bin> -o examples/shadow-nitrobenzene.json
+```
+
+The second line is how `shadow-nitrobenzene.json` was made, so that it solves with no extra and no
+data.
 
 These are user-exported data files (the GTNH recipe/texture data inside them belongs to its
 owners). Keep large or proprietary plans out of version control; small representative plans
