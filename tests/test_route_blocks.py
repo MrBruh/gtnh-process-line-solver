@@ -41,6 +41,7 @@ from gtnh_solver.ir import (
     Terminal,
 )
 from gtnh_solver.ir.geometry import FACE_DELTAS, FACE_OFFSETS
+from gtnh_solver.previewer.textures import TextureManifest
 from gtnh_solver.route_blocks import (
     RouteBox,
     open_end_faces,
@@ -345,6 +346,9 @@ def test_a_real_solves_blocks_all_resolve_in_the_committed_manifest() -> None:
     if not names:
         pytest.skip("no pipes in the committed manifest (fixture-only checkout)")
 
+    # Looked up the way a preview looks it up, under either of GT's spellings: the committed
+    # manifest is cut from a 2.9 dump, which files cable.tin.02 as "2x Tin Cable" (#319).
+    manifest = TextureManifest(raw, source=_COMMITTED_MANIFEST)
     layout = _sand()
     blocks = [b for b, _ in route_block_counts(layout)]
     assert blocks, "the sand line routes power; its cables must appear"
@@ -352,7 +356,10 @@ def test_a_real_solves_blocks_all_resolve_in_the_committed_manifest() -> None:
         assert block.stand_in, (
             "every v1 material is representative; a bill of materials must be able to say so"
         )
-        assert block.dataset_name in names, f"{block.label} resolves to nothing"
+        assert block.dataset_name is not None
+        assert manifest.pipe_block(block.dataset_name) is not None, (
+            f"{block.label} resolves to nothing"
+        )
 
 
 def _sand() -> LayoutResult:

@@ -169,9 +169,10 @@ def _warn_if_stale(rel: str, local: Path, committed: Path) -> None:
     """Warn when ``local`` shadows a ``committed`` counterpart that was generated later.
 
     Both stamps have to be readable for this to say anything: an undated dump is not evidence of
-    being old. The cross-pack case (a 2.9 dump older than a 2.8.4-derived committed manifest) warns
-    too, and rightly - the claim is about *when* the dump was taken, not which pack it covers, and a
-    dump taken before a field existed lacks that field whatever pack it is for.
+    being old. The cross-pack case (a 2.8.4 dump older than the committed manifest, which is cut
+    from a 2.9 one) warns too, and rightly - the claim is about *when* the dump was taken, not
+    which pack it covers, and a dump taken before a field existed lacks that field whatever pack it
+    is for.
     """
     if not committed.exists():
         return

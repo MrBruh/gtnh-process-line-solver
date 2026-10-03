@@ -13,12 +13,13 @@ fixtures'. So is every block those fixtures' tiered channels accept (``dataset.c
 since a node may build its coil, casing or pipe from any of them. A fixture only an unscoped
 example needs stays unskinned (``_NOT_MANIFEST_SCOPED``).
 
-**Cables and pipes are kept the same way, and for the same reason.** ``cable.tin.02`` contains
-no machine-type name either, so the name rule can never reach one. The stand-in policy in
-``dataset/pipes.py`` says which material each tier is drawn as; this asks it, for every tier the
-examples use and every gauge the router can size to, and keeps exactly those. One the dump does
-not carry is a hard error rather than a gap: a committed manifest silently missing its cables is
-indistinguishable from a correctly pruned one (#176).
+**Cables and pipes are kept the same way, and for the same reason.** ``cable.tin.02`` (a 2.9 dump
+spells it ``2x Tin Cable``) contains no machine-type name either, so the name rule can never reach
+one. The stand-in policy in ``dataset/pipes.py`` says which material each tier is drawn as; this
+asks it, for every tier the examples use and every gauge the router can size to, and keeps exactly
+those, under whichever spelling the dump uses. One the dump does not carry is a hard error rather
+than a gap: a committed manifest silently missing its cables is indistinguishable from a correctly
+pruned one (#176).
 
 **Hatches are kept by resolution, not by name.** A hatch can never match an example machine's name
 ("Input Bus (LV)" contains no machine type), so keeping them needs a second rule: for every hatch
@@ -32,11 +33,13 @@ localized name, which the machine's own name often lacks ("Ore Washer" runs in a
 Plant"), so the name rule alone drops it. For every example machine, the previewer's own
 ``TextureManifest.mte_block`` is asked with the machine's recipe map and tier, and its answer is kept.
 
-Usage (from the repo root, in the dev venv)::
+**The committed manifest is cut from the 2.9.0-beta-3 dump** (#319), one pack for every block in
+it, so pass that dump explicitly. Usage (from the repo root, in the dev venv)::
 
-    python tools/derive_small_manifest.py [FULL_MANIFEST]
+    python tools/derive_small_manifest.py data/2.9.0-beta-3/textures/manifest.json
 
-``FULL_MANIFEST`` defaults to the newest local ``data/<version>/textures/manifest.json``.
+With no argument the newest local full ``data/<version>/textures/manifest.json`` is used, which is
+whichever dump was written last, not necessarily the pack the committed manifest comes from.
 """
 
 from __future__ import annotations
@@ -68,7 +71,7 @@ _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 _FULL_MIN_BLOCKS = 100  # a real dump has ~1470 blocks; the small one has a few dozen
 #: Examples the committed manifest deliberately does NOT skin. ``ev-nitrobenzene.json`` is a real
 #: GTNH 2.9 line committed as an acceptance fixture (#204), not as a showcase: keeping blocks for it
-#: would pull its EV tier and its 2.9 machine names into the small committed manifest.
+#: would pull its EV tier and every machine only it uses into the small committed manifest.
 _NOT_MANIFEST_SCOPED = frozenset({"ev-nitrobenzene.json"})
 
 
@@ -168,13 +171,14 @@ def _hatch_keys(full: dict[str, Any], tiers: set[str]) -> set[str]:
 def _route_keys(full: dict[str, Any], tiers: set[str]) -> set[str]:
     """``"<block>|<meta>"`` for every cable and pipe a preview of the examples could draw.
 
-    Cables and pipes are ``kind: "pipe"`` entries whose names ("cable.tin.02", "gt_pipe_bronze")
-    contain no machine type, so the name rule at the call site can never keep one - the same hole
-    hatches have, closed the same way. The policy in ``dataset/pipes.py`` says which blocks are
-    wanted and the previewer's own ``TextureManifest.pipe_block`` finds each one, for the reason
-    ``_hatch_keys`` asks ``hatch_block``: asking the function the preview will ask is what stops the
-    committed manifest drifting from what a preview looks up. It also makes GT's 2.9 rename a
-    non-event here, because that lookup knows both spellings of a block (#176).
+    Cables and pipes are ``kind: "pipe"`` entries whose names ("cable.tin.02" or "2x Tin Cable",
+    "gt_pipe_bronze" or "Bronze Fluid Pipe", depending on the pack) contain no machine type, so the
+    name rule at the call site can never keep one - the same hole hatches have, closed the same
+    way. The policy in ``dataset/pipes.py`` says which blocks are wanted and the previewer's own
+    ``TextureManifest.pipe_block`` finds each one, for the reason ``_hatch_keys`` asks
+    ``hatch_block``: asking the function the preview will ask is what stops the committed manifest
+    drifting from what a preview looks up. It also makes GT's 2.9 rename a non-event here, because
+    that lookup knows both spellings of a block (#176).
 
     Every gauge is kept for each tier the examples use, not just the gauges those lines happen to
     route today: cable thickness follows summed amperage, so re-solving a line at a different seed
