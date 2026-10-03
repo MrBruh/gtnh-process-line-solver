@@ -10,7 +10,7 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Plans from ShadowTheAge's GT:NH calculator (#293).** `gtnh-solve MyPlan.gtnh --shadow-data
   data.bin` reads a plan saved by [the calculator](https://shadowtheage.github.io/gtnh/), through
   the new optional `shadow` extra (`pip install -e ".[shadow]"`): gtnh-shadow-convert, a separate
-  MIT repository pinned to its `v0.1.0` commit, which ports the calculator's recipe-data reader,
+  MIT repository pinned to its `v0.1.1` commit, which ports the calculator's recipe-data reader,
   its LP and 123 of its 133 machine rules (each checked against the calculator's own test plans)
   and writes the plan JSON the adapter already reads. Its `fetch-data` command downloads the
   calculator's `data.bin` once; that file has no license and is never committed. A converted plan

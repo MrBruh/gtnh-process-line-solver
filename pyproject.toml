@@ -38,10 +38,10 @@ cpsat = ["ortools>=9.8"]
 preview = ["pillow>=10"]
 # Reading a ShadowTheAge calculator plan (.gtnh): gtnh-shadow-convert ports the calculator's
 # data.bin reader, solver and machine rules (MIT) and writes the plan JSON the adapter reads
-# (adapter/shadow.py, #293). Pinned to a reviewed commit, the v0.1.0 tag. It is standard library
+# (adapter/shadow.py, #293). Pinned to a reviewed commit, the v0.1.1 tag. It is standard library
 # only, so the extra adds nothing else. `pip install -e ".[shadow]"` enables it.
 shadow = [
-    "gtnh-shadow-convert @ git+https://github.com/MrBruh/gtnh-shadow-convert@9abcf2d8e4f4ac7c3a5563a1c90059f86f733926",
+    "gtnh-shadow-convert @ git+https://github.com/MrBruh/gtnh-shadow-convert@e443281949cc546613bff244fff6fede755e1ab6",
 ]
 dev = [
     "pytest>=8.0",
