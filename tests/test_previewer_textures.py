@@ -1045,6 +1045,44 @@ def test_single_block_machine_renders_one_textured_cube(dataset: tuple[Path, Pat
     assert "Test Macerator" in summary.textured_types
 
 
+def test_each_textured_type_is_marked_in_the_legend_by_its_controllers_front_face(
+    dataset: tuple[Path, Path],
+) -> None:
+    """The legend marks a machine type by the face a builder knows it by: its controller's front,
+    idle. The dump builds every controller facing NORTH, so that face is the one read from GT's
+    NORTH side whichever way the machine was placed (both of these are turned). A type that stays a
+    placeholder box keeps its colour swatch, so it gets no tile."""
+    mb, manifest = dataset
+    scene = _scene(
+        [
+            _machine("m1", "Test EBF", [0, 0, 0], [2, 2, 2], front="east"),
+            _machine("m2", "Test Macerator", [5, 0, 5], [1, 1, 1], front="south"),
+            _machine("m3", "Unknown Multi", [8, 0, 0], [3, 3, 3]),
+        ]
+    )
+    scene["legend"] = [
+        {"label": t, "color": "#6ca0dc"} for t in ("Test EBF", "Test Macerator", "Unknown Multi")
+    ]
+    texturize_scene(scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=_provider)
+    tiles = {entry["label"]: entry.get("tile") for entry in scene["legend"]}
+    assert tiles == {
+        "Test EBF": "gregtech:gt.blockmachines|1000|NORTH|inactive",
+        "Test Macerator": "gregtech:gt.blockmachines|5|NORTH|inactive",
+        "Unknown Multi": None,
+    }
+    assert all(tile in scene["textures"] for tile in tiles.values() if tile is not None)
+
+
+def test_a_legend_tile_is_only_a_face_that_baked(dataset: tuple[Path, Path]) -> None:
+    # No sprite at all: every face falls back to the placeholder, so no pool key exists and the
+    # legend must not name one (the viewer would crop a tile the atlas does not have).
+    mb, manifest = dataset
+    scene = _scene([_machine("m1", "Test EBF", [0, 0, 0], [2, 2, 2])])
+    scene["legend"] = [{"label": "Test EBF", "color": "#6ca0dc"}]
+    texturize_scene(scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=lambda _: {})
+    assert "tile" not in scene["legend"][0]
+
+
 def test_generic_single_block_machine_textures_via_tier(dataset: tuple[Path, Path]) -> None:
     """A generically named 1x1x1 machine ("Test Hammer" at LV) textures via tier-prefixed resolution."""
     mb, manifest = dataset
