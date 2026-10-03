@@ -74,6 +74,10 @@ doc as intent and reconcile.
   Generated data is local and version-namespaced (`data/<version>/`) with committed fixtures as the
   fallback (`dataset/roots.py`); how the extractor resolves a block's sprite is in
   [`dataset-extraction/texture-resolution.md`](dataset-extraction/texture-resolution.md).
+  `dataset/structure_blocks.py` holds the tier ladders a multiblock's channels choose between
+  (solid casing, pipe casing, coil, machine casing) and `channel_blocks`, the one answer to which
+  blocks a channel accepts; the adapter's `structure_blocks.py` picks among them per node (#312,
+  docs/DOMAIN.md).
 - **placement/** - simulated annealing + LNS ruin-and-recreate over a coarse cell grid;
   orientation is a placement variable; cost = per-net wirelength (HPWL) + an auto-output reward
   + an **objective-weighted compactness** term (floor footprint and/or bounding-box volume, the
@@ -152,8 +156,10 @@ doc as intent and reconcile.
   not its *logic*). The only automated correctness gate.
 - **previewer/**, **schematic/**, **cli.py** - outputs and entry point. `--preview` writes the
   three.js page, `--schematic` the Schematica ghost; asked for neither, the CLI prints the output
-  IR itself as JSON on stdout (decision 12). The previewer skins each block with its extracted GT
-  sprite; a face that resolves none renders Minecraft's magenta/black missing-texture
+  IR itself as JSON on stdout (decision 12). Both outputs expand a multiblock through one function
+  (`previewer/textures.expand_machine`), which first builds each tiered part from
+  `Machine.structure_blocks`, so the preview and the export cannot disagree about a casing (#312).
+  The previewer skins each block with its extracted GT sprite; a face that resolves none renders Minecraft's magenta/black missing-texture
   checkerboard, **not** a neutral grey, because so many GT casings are plain grey that a gap was
   indistinguishable from a correct render (`previewer/html.py`, `_MISSING`). The emitted page
   treats **plan text as untrusted**: it never builds markup from it (the legend is DOM text

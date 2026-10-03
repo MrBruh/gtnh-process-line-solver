@@ -44,6 +44,11 @@ Per multiblock controller, one JSON file carrying **raw facts only** (no solver 
 - **Tiered substitutions**: when a channel only swaps a *tiered block* without changing the shape
   (coil, glass, pipe-casing tiers), the alternatives are recorded once as a substitution table
   rather than exploded into one variant per tier.
+  **Known gap (#312, #315):** the table holds what `construct` places, not what `check()` accepts,
+  and no cell is tagged with its channel. So a tier GT accepts but never places is missing (GT++'s
+  `addTieredBlock` lowest tier: the Chemical Plant's Bronze pipe casing and ULV machine casing),
+  and a consumer has to match cells to a channel by block membership. Python fills those two tiers
+  from a cited rule (`dataset/structure_blocks.py`) until the dump records both facts.
 - A derived **bounding box**, for the consumer to cross-check.
 
 Plus a run summary (`_meta.json`): schema version, pack and mod versions, generation timestamp,

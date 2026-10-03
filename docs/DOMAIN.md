@@ -552,6 +552,58 @@ do I/O through hatches/buses on casing faces). Full internal StructureLib materi
 deferred to the export milestone. Fallback if metadata is too costly to author early:
 single-block-machines-only for the first solver, multiblocks added via round-trip import.
 
+### A multiblock's tiered blocks (#312)
+
+Some parts of a GT multiblock are named by a StructureLib **channel** (`GTStructureChannels`)
+rather than by one block: the part is built from any block on a tier ladder, and the tier changes
+what the machine does. The ExxonMobil Chemical Plant (`MTEChemicalPlant`, controller
+`gregtech:gt.blockmachines@998`) has four, and each decides whether, or how fast, it runs (GT
+5.09.54.133):
+
+| Channel | Blocks GT accepts | What GT does with the tier |
+|---|---|---|
+| `casing` (solid casing) | 8 tiers: bronze, steel, aluminium, stainless steel, titanium, tungstensteel, laurenium, botmium (`GregtechAlgaeContent` lines 37-52) | a recipe runs only if its special value is at or below the tier (`validateRecipe`, line 584); the whole build is one tier, and the controller and every hatch take its texture (`updateHatchTexture`) |
+| `pipe` (pipe casing) | `gt.blockcasings2` metas 12-15, bronze to tungstensteel | parallels = 2 x (meta - 11) (`getMaxParallelRecipes`, line 492) |
+| `coil` | `gt.blockcasings5`, 14 coils | speed bonus 2 / (1 + coil tier), Cupronickel tier 0 (line 634) |
+| `machine_casing` | `gt.blockcasings` metas 0-9, meta = tier ULV..UHV | refuses to form if the meta is below the highest hatch tier, unless UHV (`checkMachine`, lines 398-403) |
+
+The adapter chooses each from the plan (`adapter/structure_blocks.py`) onto
+`Machine.structure_blocks`:
+
+- **Solid casing:** the cheapest whose tier meets the highest special value the node's recipes
+  state. arodoid states it three ways (`specialValue`, `metadata.specialValue`, an NEI "Special
+  value: 4" line); MrBruh's fork only in the NEI line. A casing the plan names
+  (`machineConfigTiers.solidCasing`, written by gtnh-shadow-convert) is kept if it meets that, and
+  raised with a warning if not. With nothing stated it is bronze, with a warning.
+- **Pipe casing:** the node's `pipeCasing`, else the control's default, else bronze. gtnh-factory-flow
+  also offers PTFE and PBI, which the plant's `check()` refuses; they build as tungstensteel, which
+  the planner rates the same.
+- **Coil, on every multiblock whose coil channel offers a choice:** `coilTier`, else
+  `machineConfigTiers.heatingCoil`, else the control's default. A channel of one block is a fixed
+  coil and is left alone. A plant with no coil stated warns: the dump's Cupronickel runs it at half
+  speed.
+- **Machine casing:** the casing of the tier the plant is supplied at, read after the power
+  synthesis, which can raise it (`adapter.power._supply_tier`). Every hatch the export places is
+  that tier or below, so the plant forms.
+
+**Two tiers are valid in game and absent from every dump.** GT++'s `addTieredBlock`
+(`GTPPMultiBlockBase` lines 699-748) places meta `minMeta + stack` for a stack of at least 1, but
+`check()` accepts from `minMeta`, so the extractor, which records what `construct` places, never
+sees the lowest tier: Bronze pipe casing (meta 12) and the ULV machine casing (meta 0).
+`dataset.channel_blocks` adds them from that rule, for the plant only, and a dump listing a block
+outside the rule's set wins with a warning (#315 will record what `check()` accepts instead).
+
+**A cell belongs to a channel by membership.** The dump tags no cell with its channel, so a cell is
+in a channel when its block is one the channel accepts. Never by a channel's first entry (each
+Industrial Coke Oven form built from stack N carries coil N) and never by `channel_value` (the
+hand-written EBF fixture numbers its coils from 0). The previewer swaps every cell of a chosen
+channel in the form itself, all at once, and only when exactly one of the channel's blocks is in
+the form; the hatches then wear the swapped casing and the controller is drawn over it, as GT draws
+both. The `.schematic` export draws through the same expansion.
+
+Not modelled yet: the plant's 70-casing minimum, which caps it at 22 hatches (#317); a validator
+check of both casing rules (#316); an EBF-family coil's heat against the recipe's (#318).
+
 ## Cell↔block realizability (don't let the abstraction lie)
 
 Placement/routing run on a coarse cell grid; block-accuracy is materialized only at export. A
