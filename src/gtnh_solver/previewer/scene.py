@@ -228,6 +228,12 @@ def build_scene(
             # The GT recipe map it runs ("gt.recipe.orewasher"), which with the tier names a
             # single-block machine exactly where `type` ("Ore Washer") does not (#232).
             "recipe_map": machines[pl.machine_id].recipe_map,
+            # The block each tiered part is built from, channel -> [block, meta] (#312): the texture
+            # pass, and so the .schematic export, swaps that channel's cells for it.
+            "structure_blocks": {
+                channel: [chosen.block, chosen.meta]
+                for channel, chosen in sorted(machines[pl.machine_id].structure_blocks.items())
+            },
             "role": _role(machines[pl.machine_id]),
             # What a boundary storage holds, so a hover can tell four identical Super Tanks apart
             # (GitHub #155). Empty for every other machine - a machine's ports are its recipe, not

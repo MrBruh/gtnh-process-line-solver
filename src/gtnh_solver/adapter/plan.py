@@ -211,6 +211,24 @@ class RuntimeCalculation(BaseModel):
     variants: list[RuntimeVariant] = Field(default_factory=list)
 
 
+class RecipeMetadata(BaseModel):
+    """The arodoid exporter's ``metadata`` block on a recipe. Only the special value is read."""
+
+    model_config = _CFG
+
+    special_value: int | None = None
+
+
+class RecipeNei(BaseModel):
+    """What NEI shows for a recipe. Its ``additionalInfo`` lines are the one place every exporter
+    states the recipe's special value ("Special value: 4"); MrBruh's fork states it nowhere else.
+    ``None`` when a recipe has no such lines, which several do."""
+
+    model_config = _CFG
+
+    additional_info: list[str] | None = None
+
+
 class Recipe(BaseModel):
     """A placed recipe: its machine type, power/time, and item/fluid I/O."""
 
@@ -230,6 +248,12 @@ class Recipe(BaseModel):
     machine_config_controls: list[MachineConfigControl] = Field(default_factory=list)
     #: Empty on a MrBruh-fork plan, which never emits it; see :class:`MachineHandler`.
     machine_handlers: list[MachineHandler] = Field(default_factory=list)
+    #: GT's ``mSpecialValue``: a requirement each machine reads its own way (the Chemical Plant's
+    #: minimum solid casing tier). arodoid states it here, in :attr:`metadata` and in :attr:`nei`;
+    #: MrBruh's fork only in :attr:`nei`. Read through ``structure_blocks.recipe_special_value``.
+    special_value: int | None = None
+    metadata: RecipeMetadata | None = None
+    nei: RecipeNei | None = None
 
 
 class RecipeSection(BaseModel):

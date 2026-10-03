@@ -36,13 +36,15 @@ import logging
 import re
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from gtnh_solver.dataset.multiblocks import dumped_channels
 from gtnh_solver.dataset.pipes import manifest_names
 from gtnh_solver.dataset.roots import extractor_hint, resolve_dataset_path
 from gtnh_solver.dataset.schema import MultiblockDoc, Variant, load_multiblock_doc
+from gtnh_solver.dataset.structure_blocks import BlockId, channel_blocks
 from gtnh_solver.dataset.voltage import VOLTAGE_BY_TIER
 
 from .bake import BakeUnavailableError, bake_layers
@@ -713,6 +715,11 @@ class BlockCube:
     ``casing`` is the multiblock casing a **formed** hatch is re-skinned to (see
     :func:`_hatch_layers`). It is ``None`` on an ordinary structure block, and on a hatch whose
     casing the manifest does not know - which then keeps the standalone look the dump recorded.
+
+    ``rebase`` is ``(old casing, new casing)`` on a controller whose casing the node swapped
+    (:func:`structure_swaps`): the dump drew the controller over the default casing, and GT draws it
+    over the casing it was built with, so each face whose base layer is the old casing's takes the
+    new one's (see :func:`_rebased`). ``None`` everywhere else.
     """
 
     cell: tuple[int, int, int]
@@ -723,6 +730,7 @@ class BlockCube:
     idle_state: str = _STATE
     active_state: str = _STATE_ACTIVE
     casing: tuple[str, int] | None = None  # the (block, meta) casing a formed hatch wears
+    rebase: tuple[BlockId, BlockId] | None = None  # a re-cased controller's (old, new) casing
 
 
 def _place_blocks(variant: Variant, cell: list[int], steps: int) -> list[BlockCube]:
@@ -772,6 +780,12 @@ def expand_machine(
     clamp stays: any cube outside the reserved box is discarded, so one machine's blocks can never
     spill into a neighbour's cells.
 
+    **The node's tiered parts are built first** (``structure_blocks``, #312): each channel the
+    adapter chose a block for has its cells swapped to it in the form itself
+    (:func:`structure_swaps`), before anything reads the form, so the hatches wear a swapped casing
+    and the controller is drawn over it (``BlockCube.rebase``) exactly as GT draws both. This
+    happens with or without a manifest, because the ``.schematic`` export builds the same cubes.
+
     With a ``manifest``, the machine's ``hatches`` then **replace** the casing cubes they sit on: a
     hatch is not an extra block, it is one of the structure's own cells built as something else,
     which is why it spends the casing budget. Each carries its own facing rather than the machine's
@@ -780,13 +794,104 @@ def expand_machine(
     cell = machine["cell"]
     size = machine.get("size", [1, 1, 1])
     steps = _FRONT_CW_STEPS.get(str(machine.get("front", "north")), 0)
-    variant = variant_for_size(doc, size, steps)
+    dumped = variant_for_size(doc, size, steps)
+    swaps = structure_swaps(doc, dumped, _chosen_blocks(machine))
+    variant = _swapped(dumped, swaps)
+    rebase = _casing_swap(dumped, swaps)
+    controller = (doc.controller.registry_name, doc.controller.meta)
     cubes = [
-        c for c in _place_blocks(variant, cell, steps) if _within_footprint(c.cell, cell, size)
+        replace(c, rebase=rebase) if rebase is not None and (c.block, c.meta) == controller else c
+        for c in _place_blocks(variant, cell, steps)
+        if _within_footprint(c.cell, cell, size)
     ]
     if manifest is None:
         return cubes
     return _substitute_hatches(cubes, machine, manifest, variant)
+
+
+def _chosen_blocks(machine: Mapping[str, Any]) -> dict[str, BlockId]:
+    """The scene machine's ``structure_blocks`` (channel -> ``[block, meta]``) as block ids."""
+    chosen = machine.get("structure_blocks") or {}
+    return {str(channel): (str(block[0]), int(block[1])) for channel, block in chosen.items()}
+
+
+def structure_swaps(
+    doc: MultiblockDoc, variant: Variant, chosen: Mapping[str, BlockId]
+) -> dict[BlockId, BlockId]:
+    """``dumped block -> chosen block`` for each channel the node chose a block for (#312).
+
+    The dump tags no cell with its channel, so a cell belongs to one by **membership**: its block is
+    one the channel accepts (:func:`~gtnh_solver.dataset.structure_blocks.channel_blocks`). Never by
+    the channel's first entry, since each Industrial Coke Oven form carries a different coil, and
+    never by ``channel_value``. A channel is swapped only when exactly one of its blocks is in the
+    form: none means the form has no such part, and two would leave the swap ambiguous (logged; no
+    dump does it). A chosen block the channel does not accept is logged and ignored, which only an
+    IR adapted against another dump can produce.
+    """
+    if not chosen:
+        return {}
+    controller = f"{doc.controller.registry_name}@{doc.controller.meta}"
+    accepted = channel_blocks(controller, dict(dumped_channels(doc)))
+    in_form = {(b.block, b.meta) for b in variant.blocks}
+    swaps: dict[BlockId, BlockId] = {}
+    for channel, target in sorted(chosen.items()):
+        blocks = accepted.get(channel, ())
+        if target not in blocks:
+            _log.warning(
+                "textures: %s's %r channel does not accept %s@%d; drawing it as dumped",
+                controller,
+                channel,
+                target[0],
+                target[1],
+            )
+            continue
+        present = [block for block in blocks if block in in_form]
+        if len(present) > 1:
+            _log.warning(
+                "textures: %s's form holds %d blocks of its %r channel; drawing it as dumped",
+                controller,
+                len(present),
+                channel,
+            )
+        if len(present) == 1 and present[0] != target:
+            swaps[present[0]] = target
+    return swaps
+
+
+def _swapped(variant: Variant, swaps: Mapping[BlockId, BlockId]) -> Variant:
+    """``variant`` with every block ``swaps`` names replaced, all at once.
+
+    One pass over the dumped blocks, so ``A -> B`` and ``B -> C`` never chain into ``A -> C``: a cell
+    takes the target of the block it was dumped as, whatever another channel's target is.
+    """
+    if not swaps:
+        return variant
+    blocks = []
+    for block in variant.blocks:
+        target = swaps.get((block.block, block.meta))
+        if target is not None:
+            block = block.model_copy(update={"block": target[0], "meta": target[1]})
+        blocks.append(block)
+    return variant.model_copy(update={"blocks": blocks})
+
+
+def _casing_swap(
+    variant: Variant, swaps: Mapping[BlockId, BlockId]
+) -> tuple[BlockId, BlockId] | None:
+    """``(old, new)`` when the casing dominating ``variant``'s hatch cells is swapped, else ``None``.
+
+    GT draws a multiblock's controller and every hatch over one casing (``updateHatchTexture``,
+    ``GTPPMultiBlockBase.getTexture``), the one its hatch cells are built from. The dumped hatch
+    cells' mode is that casing, the same estimate :func:`_hatch_casing` makes, with the same
+    tie-break; the swapped form hands the hatches the new one, and this hands the controller.
+    """
+    by_offset = {tuple(b.d): (b.block, b.meta) for b in variant.blocks}
+    counts = Counter(by_offset[tuple(s.d)] for s in variant.hatch_slots if tuple(s.d) in by_offset)
+    if not counts:
+        return None
+    casing = min(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0]
+    target = swaps.get(casing)
+    return None if target is None else (casing, target)
 
 
 def _hatch_cell(hatch: Mapping[str, Any]) -> tuple[int, int, int]:
@@ -1052,8 +1157,13 @@ def machine_cubes(
 def face_key(cube: BlockCube, source: str) -> str:
     """The pool key of an ordinary (non-hatch) cube's face read from GT side ``source``: the block,
     its meta, the side and the idle state, so one block's face bakes once however many cubes show
-    it. A hatch's key carries more (its facing and casing), see :func:`_face_icons`."""
-    return f"{cube.block}|{cube.meta}|{source}|{cube.idle_state}"
+    it. A re-cased controller's key also carries the casing it is drawn over, or two plants built
+    from different casings would share one bake. A hatch's key carries more (its facing and
+    casing), see :func:`_face_icons`."""
+    key = f"{cube.block}|{cube.meta}|{source}|{cube.idle_state}"
+    if cube.rebase is not None:
+        key += f"|{cube.rebase[1][0]}|{cube.rebase[1][1]}"
+    return key
 
 
 def _legend_tiles(
@@ -1103,8 +1213,8 @@ def _face_icons(
     for side in range(_FACE_SLOTS):
         if cube.facing is None:
             source = _SIDE_NAMES[_rotate_side(side, -cube.steps)]
-            idle = manifest.layers(cube.block, cube.meta, source, cube.idle_state)
-            running = manifest.layers(cube.block, cube.meta, source, cube.active_state)
+            idle = _rebased(manifest, cube, source, cube.idle_state)
+            running = _rebased(manifest, cube, source, cube.active_state)
             key = face_key(cube, source)
         else:
             source = _SIDE_NAMES[side]
@@ -1122,6 +1232,28 @@ def _face_icons(
         faces[_GT_SIDE_TO_THREE_SLOT[side]] = key
         stacks[key] = (idle, running)
     return faces, stacks
+
+
+def _rebased(
+    manifest: TextureManifest, cube: BlockCube, source: str, state: str
+) -> list[dict[str, Any]]:
+    """An ordinary cube's face from GT side ``source``, drawn over its new casing if re-cased.
+
+    A controller's face is its casing plus its overlays (``GTPPMultiBlockBase.getTexture``), and
+    the dump drew it over the default casing. So where the face's base layer IS the old casing's
+    (the Chemical Plant's ``MACHINE_BRONZEPLATEDBRICKS`` on every side), it is replaced by the new
+    casing's stack and the overlays stay. A face whose base is anything else is left alone, and so
+    is every face when the manifest cannot skin either casing.
+    """
+    layers = manifest.layers(cube.block, cube.meta, source, state)
+    if cube.rebase is None or not layers:
+        return layers
+    (old_block, old_meta), (new_block, new_meta) = cube.rebase
+    old = manifest.layers(old_block, old_meta, source, _STATE)
+    new = manifest.layers(new_block, new_meta, source, _STATE)
+    if not old or not new or layers[0]["icon"] != old[0]["icon"]:
+        return layers
+    return [*new, *layers[1:]]
 
 
 def _hatch_layers(

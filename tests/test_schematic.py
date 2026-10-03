@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 
 from gtnh_solver.adapter import adapt_file
+from gtnh_solver.dataset import CHEMICAL_PLANT, load_physical_dataset
 from gtnh_solver.dataset import roots as dataset_roots
 from gtnh_solver.dataset.roots import DatasetWarning
 from gtnh_solver.ir import (
@@ -38,7 +39,8 @@ from gtnh_solver.ir import (
     Segment,
     Terminal,
 )
-from gtnh_solver.previewer.textures import BlockCube, TextureManifest
+from gtnh_solver.previewer.scene import build_scene
+from gtnh_solver.previewer.textures import BlockCube, TextureManifest, load_multiblock_docs
 from gtnh_solver.schematic import (
     SchematicError,
     build_schematic,
@@ -53,6 +55,8 @@ from tests._helpers import at, consumer, net, producer
 _GOLDEN = Path(__file__).resolve().parents[1] / "tests" / "golden" / "schematic"
 _COMMITTED_MANIFEST = Path(__file__).resolve().parents[1] / "data" / "textures" / "manifest.json"
 _SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
+_EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+_COMMITTED_MULTIBLOCKS = Path(__file__).resolve().parents[1] / "data" / "multiblocks"
 
 
 # ------------------------------------------------------------------------------------------- nbt
@@ -615,3 +619,75 @@ def test_to_nbt_refuses_a_data_value_it_cannot_hold() -> None:
     # The last line of defence: this used to escape as a bare ValueError from bytearray.
     with pytest.raises(SchematicError, match="Data 305"):
         schematic_core.to_nbt((1, 1, 1), {(0, 0, 0): schematic_core.Cell(_FRAMES, 305)})
+
+
+# ------------------------------------------------------------------ tiered parts (#312, InputIR v7)
+
+
+def _plant_box(problem: InputIR, layout: LayoutResult) -> dict[tuple[str, int | str], int]:
+    """What the export puts in the plant's reserved box: ``(block, Data)`` per plain block, and
+    ``(block, "mID n")`` per machine, counted. Read back through ``read_schematic``."""
+    root = build_schematic(
+        problem,
+        layout,
+        manifest=_manifest(),
+        docs=load_multiblock_docs(_COMMITTED_MULTIBLOCKS),
+    )
+    schematic = read_schematic(nbt.dumps("Schematic", root))
+    scene = build_scene(problem, layout)
+    origin = [int(v) for v in scene["bounds"]["min"]]
+    plant = next(m for m in scene["machines"] if m["block_key"] == CHEMICAL_PLANT)
+    counts: dict[tuple[str, int | str], int] = {}
+    for x in range(plant["cell"][0], plant["cell"][0] + plant["size"][0]):
+        for y in range(plant["cell"][1], plant["cell"][1] + plant["size"][1]):
+            for z in range(plant["cell"][2], plant["cell"][2] + plant["size"][2]):
+                at_cell = (x - origin[0], y - origin[1], z - origin[2])
+                name, data = schematic.block_at(*at_cell)
+                tile = schematic.tile_at(*at_cell)
+                key: tuple[str, int | str] = (name, data if tile is None else f"mID {tile.mid}")
+                counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def test_the_chemical_plant_exports_with_the_casings_its_node_needs() -> None:
+    """gtnh-nitrobenzene's plant: special value 4 (Stable Titanium solid casing), Titanium pipe, and
+    HV supply (HV machine casing). The dump's default build, Bronze solid casing on LV machine
+    casings, is one GT refuses the recipe on and will not form with HV hatches."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        problem = adapt_file(
+            str(_EXAMPLES / "gtnh-nitrobenzene.json"),
+            physical=load_physical_dataset(_COMMITTED_MULTIBLOCKS),
+        )
+    box = _plant_box(problem, solve(problem, optimize=False))
+
+    hatches = sum(
+        n for (name, data), n in box.items() if str(data).startswith("mID") and data != "mID 998"
+    )
+    assert box[("gregtech:gt.blockcasings4", 2)] + hatches == 92  # every hatch cell is the casing
+    assert box[("gregtech:gt.blockcasings", 3)] == 57
+    assert box[("gregtech:gt.blockcasings5", 0)] == 27
+    assert box[("gregtech:gt.blockcasings2", 14)] == 18
+    assert box[("gregtech:gt.blockmachines", "mID 998")] == 1
+    assert not [name for name, _ in box if "blockspecialcasings" in name]
+
+
+def test_a_tier_the_dump_never_places_exports() -> None:
+    """The converted shadow plant's Bronze pipe casing (meta 12) is valid in game and absent from
+    every dump; the committed manifest must still name it, or the export refuses the block. Only
+    the plant is placed: the plan's Industrial Coke Ovens are not in the 2.8.4-derived manifest."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        adapted = adapt_file(
+            str(_EXAMPLES / "shadow-nitrobenzene.json"),
+            physical=load_physical_dataset(_COMMITTED_MULTIBLOCKS),
+        )
+    plant = next(m for m in adapted.machines if m.block_key == CHEMICAL_PLANT)
+    plant = plant.model_copy(update={"faces": plant.faces.model_copy(update={"ports": []})})
+    problem = InputIR(bounding_region=plant.footprint, machines=[plant])
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=[at(plant.id, 0, 0, 0)])
+
+    box = _plant_box(problem, layout)
+    assert box[("gregtech:gt.blockcasings2", 12)] == 18
+    assert box[("gregtech:gt.blockcasings4", 2)] == 92
+    assert box[("gregtech:gt.blockcasings", 3)] == 57

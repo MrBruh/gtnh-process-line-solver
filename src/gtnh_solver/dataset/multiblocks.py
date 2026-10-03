@@ -20,7 +20,10 @@ it would become a second, untested codebase (that constraint's whole point), so 
 
 The result is consumed by the gtnh-factory-flow adapter (``adapter/core.py``): given a plan whose
 nodes name a machine by display name, it looks the physical record up and stamps the machine's real
-footprint on the ``InputIR`` instead of the crude 1x1x1 default. The lookup is **opt-in**: passing
+footprint on the ``InputIR`` instead of the crude 1x1x1 default. The record also keeps each tiered
+channel's alternatives as dumped (``MachinePhysical.substitutions``); what a channel accepts is
+``channel_blocks``, which adds the tiers GT accepts but the dump cannot record
+(``structure_blocks.py``), and the adapter picks among them per node (#312). The lookup is **opt-in**: passing
 no dataset keeps the existing single-block behaviour, so the solver stays runnable with or without
 a committed ``data/multiblocks/`` dump.
 """
