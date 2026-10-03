@@ -43,12 +43,19 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the converter refuses (an unported machine, an unbalanceable plan) all exit 2 with the reason.
   `examples/Shadow-NB.gtnh` and its conversion `examples/shadow-nitrobenzene.json` are new
   examples.
-- **The preview's legend shows each machine type by its front face.** The "machines" section used
-  to mark each type with the colour its placeholder boxes are painted in, which said nothing once
-  the 3D view drew real textures. Each textured type is now marked by its controller's front face,
-  idle, exactly as the 3D view draws it (the GT++ machines that share one controller screen in game
-  share it here too). A Super or Quantum Tank shows its top instead, where it draws its tank
-  display; its front carries only an output pipe. It is cropped out of the page's own texture
+- **The preview's legend shows each machine type by the face that shows its own art.** The
+  "machines" section used to mark each type with the colour its placeholder boxes are painted in,
+  which said nothing once the 3D view drew real textures. Each textured type is now marked by its
+  controller's front face, idle, exactly as the 3D view draws it (the GT++ machines that share one
+  controller screen in game share it here too). Where the front shows nothing but its casing and
+  a port mark (an energy plug, a pipe, an in/out sign), the top is used instead, else the first
+  side that shows the machine's art (#322). The rule reads the loaded texture manifest and the
+  sprites themselves, not a list of machines: a layer that GT draws invisible, or whose sprite is
+  empty (2.8.4 ships empty ones that 2.9 deleted), is not art. So tanks, solar panels, Tesla
+  transceivers, energy buffers, solar boilers, the Cleanroom, Charcoal Pit, Solar Tower, Lightning
+  Rod and Monster Repellator show their top, as do the Combustion, Geothermal and (on 2.9) Acid
+  generators; Semifluid Generators and Gas and Steam Turbines show their right-hand side. A chosen
+  face that did not bake falls back to the front. It is cropped out of the page's own texture
   atlas, so it costs no extra image.
   A type that stays a placeholder box, such as the synthetic power sources, keeps its colour
   square, now at the same 16 px so every name lines up.
