@@ -1,9 +1,10 @@
 """cli - the ``gtnh-solve`` entry point.
 
-Wires the Phase 1 pipeline into one command: a gtnh-factory-flow exported plan JSON in, the
-solved layout out::
+Wires the Phase 1 pipeline into one command: a gtnh-factory-flow exported plan JSON in (or a
+ShadowTheAge calculator plan, ``.gtnh``, with the 'shadow' extra), the solved layout out::
 
     gtnh-solve examples/gtnh-sand.json            # print the LayoutResult contract as JSON
+    gtnh-solve plan.gtnh --shadow-data data.bin   # a ShadowTheAge plan, against its recipe data
     gtnh-solve plan.json > layout.json            # ...which is how it goes to a file
     gtnh-solve plan.json --preview view.html      # write a double-clickable 3D preview
     gtnh-solve plan.json --schematic line.schematic  # write a Schematica build ghost
@@ -57,6 +58,7 @@ from pydantic import ValidationError
 
 from gtnh_solver import __version__
 from gtnh_solver.adapter import (
+    AdapterError,
     InfeasiblePlanError,
     Node,
     Plan,
@@ -64,6 +66,7 @@ from gtnh_solver.adapter import (
     Recipe,
     describe_markers,
     load_plan,
+    load_shadow_plan,
     plan_pack_version,
     resolve_producer,
     to_input_ir,
@@ -131,12 +134,28 @@ def build_parser() -> argparse.ArgumentParser:
         prog="gtnh-solve",
         description=(
             "Physical place-and-route solver for GregTech: New Horizons - turns a "
-            "gtnh-factory-flow exported plan into a buildable layout. With no --preview or "
-            "--schematic, prints the layout (the LayoutResult contract) as JSON on stdout."
+            "gtnh-factory-flow exported plan (or a ShadowTheAge calculator .gtnh plan, with "
+            "--shadow-data) into a buildable layout. With no --preview or --schematic, prints the "
+            "layout (the LayoutResult contract) as JSON on stdout."
         ),
     )
     parser.add_argument("--version", action="version", version=f"gtnh-solve {__version__}")
-    parser.add_argument("export", nargs="?", help="path to a gtnh-factory-flow exported plan JSON")
+    parser.add_argument(
+        "export",
+        nargs="?",
+        help=(
+            "path to a gtnh-factory-flow exported plan JSON, or to a ShadowTheAge calculator plan "
+            "(.gtnh, which needs --shadow-data)"
+        ),
+    )
+    parser.add_argument(
+        "--shadow-data",
+        metavar="DATA_BIN",
+        help=(
+            "the ShadowTheAge calculator's data.bin, which a .gtnh plan is read against (download "
+            "it with 'gtnh-shadow-convert fetch-data'); needs the 'shadow' extra"
+        ),
+    )
     parser.add_argument("--seed", type=int, default=0, help="RNG seed for the solver (default: 0)")
     parser.add_argument(
         "--fast",
@@ -229,8 +248,10 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
         help=(
             "which gtnh-factory-flow fork exported the plan: 'mrbruh-v2' (carries a resolved "
-            "throughput block) or 'arodoid-v1' (carries machineHandlers instead); 'auto', "
-            "the default, reads the plan's own structure and warns if it cannot tell"
+            "throughput block) or 'arodoid-v1' (carries machineHandlers instead), or "
+            "'shadow-v1' for a ShadowTheAge plan gtnh-shadow-convert wrote (carries a converter "
+            "block); 'auto', the default, reads the plan's own structure and warns if it cannot "
+            "tell"
         ),
     )
     parser.add_argument(
@@ -755,6 +776,31 @@ def _inspect_schematic(path: str, version: str | None) -> int:
     return 0
 
 
+#: The suffix the ShadowTheAge calculator gives a saved plan.
+_SHADOW_SUFFIX: Final = ".gtnh"
+
+
+def _read_plan(args: argparse.Namespace) -> Plan:
+    """The plan ``args.export`` names: a gtnh-factory-flow export as is, or a ShadowTheAge
+    ``.gtnh`` plan converted against ``--shadow-data``. Each needs the other's flag absent, so a
+    mistyped path is refused rather than read the wrong way; every refusal is an
+    :class:`AdapterError`, which ``main`` reports as an unloadable export (exit 2)."""
+    shadow = Path(args.export).suffix.lower() == _SHADOW_SUFFIX
+    if shadow:
+        if args.shadow_data is None:
+            raise AdapterError(
+                "a ShadowTheAge .gtnh plan holds only recipe ids; pass the calculator's data.bin "
+                "with --shadow-data (download it with 'gtnh-shadow-convert fetch-data')"
+            )
+        return load_shadow_plan(args.export, args.shadow_data)
+    if args.shadow_data is not None:
+        raise AdapterError(
+            f"--shadow-data is only read with a ShadowTheAge {_SHADOW_SUFFIX} plan, and "
+            f"{args.export!r} is not one"
+        )
+    return load_plan(args.export)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -784,7 +830,7 @@ def main(argv: list[str] | None = None) -> int:
     # so an undetermined producer can be reported first: the advice is to pass --plan-schema, which
     # only the CLI can give.
     try:
-        plan = load_plan(args.export)
+        plan = _read_plan(args)
     except _LOAD_ERRORS as exc:
         print(f"error: could not load {args.export!r}: {exc}", file=sys.stderr)
         return 2
@@ -794,8 +840,8 @@ def main(argv: list[str] | None = None) -> int:
     producer = resolve_producer(plan, pin)
     if producer is None:
         print(
-            f"warning: could not tell which gtnh-factory-flow fork exported {args.export} "
-            f"({describe_markers(plan)}); producer-specific handling is disabled. "
+            f"warning: could not tell which gtnh-factory-flow fork or converter wrote "
+            f"{args.export} ({describe_markers(plan)}); producer-specific handling is disabled. "
             f"Pass --plan-schema to say which it is.",
             file=sys.stderr,
         )

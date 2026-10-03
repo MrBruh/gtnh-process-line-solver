@@ -192,6 +192,15 @@ doc as intent and reconcile.
    decoupled from the fork's health. *(Phase 2, lane A: validate against an explicit **pinned
    plan-schema version** and **pinned recipe-dataset version**; Phase 1 only tolerates the current
    export shape.)* No upstream code is vendored. (Supersedes the old fork/patch-gtnh-flow plan.)
+   **A second plan source (#293):** a plan made in ShadowTheAge's GT:NH calculator (`.gtnh`)
+   reaches the same adapter through **gtnh-shadow-convert**, a separate MIT repository
+   (`MrBruh/gtnh-shadow-convert`). A `.gtnh` holds only hashed recipe ids and tiers, so the
+   converter ports the calculator's `data.bin` reader, its LP and its machine rules, checked row
+   by row against the calculator's own test snapshot, and writes the forks' plan JSON with a
+   `converter` block that identifies it (`PlanProducer.SHADOW_V1`). It is an optional extra
+   (`[shadow]`), pinned to a commit in `pyproject.toml` and called in-process by the CLI on a
+   `.gtnh` (`adapter/shadow.py`). The calculator's recipe data has no license, so it is never
+   vendored or committed: a user fetches it and passes it with `--shadow-data`.
 4. **Validator - shared rule data, independent checking logic** so it can catch router bugs.
 5. **Ground truth - golden corpus + property tests now**; harvested corpus via round-trip
    import is v1.1. Plus an in-game spot-check of the starter dataset during the Assignment.

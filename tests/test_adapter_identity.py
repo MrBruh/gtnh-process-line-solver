@@ -50,6 +50,9 @@ _FIXTURES = [
     _EXAMPLES / "gtnh-sand.json",
     _EXAMPLES / "gtnh-nitrobenzene.json",
     _EXAMPLES / "gtnh-parallel-sand.json",
+    # Converted from a ShadowTheAge plan (#293): it carries the controller-block id, and each
+    # handler's label is its recipe's machineType, so the ladder has nothing to add here either.
+    _EXAMPLES / "shadow-nitrobenzene.json",
 ]
 
 

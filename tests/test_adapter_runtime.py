@@ -46,7 +46,9 @@ from gtnh_solver.adapter.core import (
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 #: The fixtures that run at their recipe's own tier. ``ev-nitrobenzene.json`` is deliberately not
-#: one: most of its nodes run overclocked, so its figures are *meant* to move (#204).
+#: one: most of its nodes run overclocked, so its figures are *meant* to move (#204). Nor is
+#: ``shadow-nitrobenzene.json``: its variants carry the calculator's rules (its Coke Oven draws 2%
+#: over the recipe for its first-tier coil), so they differ from the base figures by design.
 _FIXTURES = [
     _EXAMPLES / "gtnh-sand.json",
     _EXAMPLES / "gtnh-nitrobenzene.json",

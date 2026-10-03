@@ -32,6 +32,17 @@ it tells them apart by the plan's structure (see [`examples/README.md`](examples
 original upstream both forks descend from is
 [Samiracle64/gtnh-factory-flow](https://github.com/Samiracle64/gtnh-factory-flow).
 
+**A plan from [ShadowTheAge's GT:NH calculator](https://shadowtheage.github.io/gtnh/) works too**
+(a `.gtnh` file), through the optional `shadow` extra,
+[gtnh-shadow-convert](https://github.com/MrBruh/gtnh-shadow-convert). It needs the calculator's
+recipe data, which is fetched once and never committed:
+
+```bash
+pip install -e ".[shadow]"
+gtnh-shadow-convert fetch-data                      # prints where data.bin went
+gtnh-solve MyPlan.gtnh --shadow-data <that path> --preview view.html
+```
+
 ![The three.js previewer: a solved nitrobenzene line in 3D, machines drawn with their real GT block textures, item, fluid and power runs routed between them, and a legend of machines, route types and system I/O.](docs/images/previewer.png)
 
 *The `--preview` viewer on `examples/gtnh-nitrobenzene.json`: 23 machines in a 15x10x7 build,
@@ -118,5 +129,7 @@ quality upgrades on top of it (deeper phase context in [`docs/ROADMAP.md`](docs/
 Apache-2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). Consumes plan/recipe JSON
 exported by two forks of the MIT-licensed
 [`gtnh-factory-flow`](https://github.com/Samiracle64/gtnh-factory-flow)
-([MrBruh/gtnh-factory-flow](https://github.com/MrBruh/gtnh-factory-flow) and the arodoid fork);
-no third-party code is vendored.
+([MrBruh/gtnh-factory-flow](https://github.com/MrBruh/gtnh-factory-flow) and the arodoid fork),
+and ShadowTheAge calculator plans through the optional, separately licensed (MIT)
+[gtnh-shadow-convert](https://github.com/MrBruh/gtnh-shadow-convert); no third-party code is
+vendored.

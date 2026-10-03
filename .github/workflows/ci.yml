@@ -30,7 +30,7 @@ jobs:
       - name: Install
         # -c pins the dev toolchain (see constraints-dev.txt): the checks are only
         # meaningful if every run makes them with the same tools.
-        run: pip install -e ".[dev]" -c constraints-dev.txt
+        run: pip install -e ".[dev,shadow]" -c constraints-dev.txt
       # Runs the same hooks as local pre-commit: ruff (lint + format), mypy --strict,
       # and file hygiene. Single source of truth for "what static checks mean here".
       - name: pre-commit
@@ -67,7 +67,7 @@ jobs:
       - name: Install
         # -c pins the dev toolchain (see constraints-dev.txt): the checks are only
         # meaningful if every run makes them with the same tools.
-        run: pip install -e ".[dev]" -c constraints-dev.txt
+        run: pip install -e ".[dev,shadow]" -c constraints-dev.txt
       - name: Test
         if: ${{ !matrix.coverage }}
         run: pytest --no-cov

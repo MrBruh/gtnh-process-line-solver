@@ -1,10 +1,10 @@
 """Map a gtnh-factory-flow exported plan to the solver's ``InputIR``.
 
 Mapping (see docs/ARCHITECTURE.md, docs/IR.md):
-- ``node``    -> ``Machine`` (recipe.machineType -> type, overclockTier -> voltage_tier
-                via ``_run_tier``,
-                recipe.eut * parallel -> eut); recipe inputs/outputs -> item/fluid ``Port``s.
-                ``machineCount`` must be 1 - multi-instance nodes are rejected (see below).
+- ``node``    -> one ``Machine`` per physical machine it stands for (``machineCount``, see
+                below): recipe.machineType -> type, overclockTier -> voltage_tier via
+                ``_run_tier``, the node's runtime draw -> eut; recipe inputs/outputs ->
+                item/fluid ``Port``s.
 - ``storage`` -> a boundary ``Machine`` typed **Super Chest** (items) or **Super Tank**
                 (fluids) - blocks that take I/O covers on their faces, so every cover rides a
                 machine/storage face and never a pipe (a deliberate Phase 1 simplification).
@@ -562,14 +562,16 @@ def to_input_ir(
     # state a basic machine's own intake ceiling without guessing at a multiblock's.
     # _supply_tier absorbs an implausible draw from the MrBruh fork's recipe model. An arodoid
     # plan does not have that defect - its figures come from GT's own overclock calculator - so there
-    # the workaround would re-tier machines that were already right. Disabled only for the producer
-    # positively known not to need it: an undetermined plan keeps the defensive behaviour, since the
-    # workaround changes only the voltage supplied and never the stated draw.
+    # the workaround would re-tier machines that were already right. Nor does a converted
+    # ShadowTheAge plan: its tiers are the player's explicit choice, and its EU/t comes from the
+    # calculator's own machine rules. Disabled only for the producers positively known not to need
+    # it: an undetermined plan keeps the defensive behaviour, since the workaround changes only the
+    # voltage supplied and never the stated draw.
     machines, nets = synthesize_power(
         machines,
         nets,
         single_block_ids=frozenset(single_block_ids),
-        allow_retier=resolved_producer is not PlanProducer.ARODOID_V1,
+        allow_retier=resolved_producer not in (PlanProducer.ARODOID_V1, PlanProducer.SHADOW_V1),
     )
     _check_resolved_power(plan, nets)
     toggles = me_toggles if me_toggles is not None else METoggles()

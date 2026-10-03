@@ -1,7 +1,8 @@
 """Provenance of an exported plan: which gtnh-factory-flow fork made it, against which pack.
 
-Two live forks emit plans this solver can load, and they are **not** distinguishable by
-``schemaVersion``: MrBruh's fork bumped to 2 when it added the ``resolved`` block, while
+Two live forks emit plans this solver can load, plus one converter (gtnh-shadow-convert, which
+writes a ShadowTheAge calculator plan in the forks' shape), and the forks are **not**
+distinguishable by ``schemaVersion``: MrBruh's fork bumped to 2 when it added the ``resolved`` block, while
 arodoid's kept 1 through a thousand diverging commits. So an arodoid plan loads with
 ``schema_version=1, resolved=None`` and no warning at all, then takes a power-sizing path that
 understates its EU/t: measured against the plans' own per-tier figures, 6.1x low across a whole
@@ -11,6 +12,8 @@ machine running an LV recipe draws 4^3 times it. Closing that silence is what th
 Detection reads **structural markers that only one producer emits**, never the schema integer:
 
 ===================  ====================================================================
+gtnh-shadow-convert  a ``converter`` block named ``gtnh-shadow-convert``, checked first, since
+                     its plans also carry ``machineHandlers``
 MrBruh fork          ``resolved`` or ``app`` present, or ``schemaVersion >= 2``
 arodoid fork         ``recipes[].machineHandlers`` non-empty on any recipe
 ===================  ====================================================================
@@ -18,7 +21,9 @@ arodoid fork         ``recipes[].machineHandlers`` non-empty on any recipe
 Resolution order::
 
     explicit pin given  -------------------------------------> that producer, no detection
-    otherwise, markers of exactly one producer present ------> that producer
+    otherwise, a gtnh-shadow-convert block ------------------> SHADOW_V1
+    otherwise, a converter block naming another converter ---> None
+    otherwise, markers of exactly one fork present ----------> that fork
     otherwise (none present, or both) -----------------------> None
 
 ``None`` means *undetermined*, not *invalid*: the mapping still runs, but anything that keys off a
@@ -51,16 +56,27 @@ class PlanProducer(str, Enum):
     #: ``arodoid/gtnh-factory-flow``: no ``resolved`` block; carries ``machineHandlers`` and
     #: per-tier ``runtimeCalculation`` instead.
     ARODOID_V1 = "arodoid-v1"
+    #: ``MrBruh/gtnh-shadow-convert``: a ShadowTheAge calculator plan (``.gtnh``), solved by the
+    #: calculator's own rules and written in the arodoid shape, one runtime variant per recipe.
+    SHADOW_V1 = "shadow-v1"
+
+
+#: The name gtnh-shadow-convert stamps on its ``converter`` block.
+SHADOW_CONVERTER = "gtnh-shadow-convert"
 
 
 def detect_producer(plan: Plan) -> PlanProducer | None:
     """The producer inferred from ``plan``'s structural markers, or ``None`` if undetermined.
 
-    ``None`` covers both "no marker" (a minimal plan that happens to carry neither, e.g. one whose
-    every recipe has an empty ``machineHandlers``) and "both markers", which would mean a fork has
-    grown the other's field and this heuristic needs revisiting. Neither is an error: the caller
-    warns and abstains.
+    A ``converter`` block decides it outright, since a converted plan also carries the arodoid
+    fork's ``machineHandlers``: gtnh-shadow-convert's is :attr:`PlanProducer.SHADOW_V1`, and any
+    other converter is undetermined. Without one, ``None`` covers both "no marker" (a minimal plan
+    that happens to carry neither, e.g. one whose every recipe has an empty ``machineHandlers``) and
+    "both markers", which would mean a fork has grown the other's field and this heuristic needs
+    revisiting. Neither is an error: the caller warns and abstains.
     """
+    if plan.converter is not None:
+        return PlanProducer.SHADOW_V1 if plan.converter.name == SHADOW_CONVERTER else None
     mrbruh = plan.resolved is not None or plan.app is not None or plan.schema_version >= 2
     arodoid = any(recipe.machine_handlers for recipe in plan.recipes)
     if mrbruh and not arodoid:
@@ -84,12 +100,14 @@ def resolve_producer(plan: Plan, explicit: PlanProducer | None = None) -> PlanPr
 
 def describe_markers(plan: Plan) -> str:
     """The detection evidence, for a caller reporting why a producer could not be determined."""
+    converter = (plan.converter.name or "unnamed") if plan.converter is not None else "absent"
     return (
         f"schemaVersion={plan.schema_version}, "
         f"resolved={'present' if plan.resolved is not None else 'absent'}, "
         f"app={'present' if plan.app is not None else 'absent'}, "
         f"machineHandlers="
-        f"{'present' if any(r.machine_handlers for r in plan.recipes) else 'absent'}"
+        f"{'present' if any(r.machine_handlers for r in plan.recipes) else 'absent'}, "
+        f"converter={converter}"
     )
 
 

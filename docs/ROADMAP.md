@@ -20,6 +20,8 @@ not cut** - it is the bulk of v1, queued right after the basics hold.
 export/throughput/dataset path we consume, pin a fork commit + dataset version, and **snapshot a
 known-good dataset + sample exports as fixtures** in `examples/`. The solver's progress must
 never depend on the fork's health. Offer fixes upstream as PRs; don't adopt the whole app.
+A plan made in ShadowTheAge's GT:NH calculator is a second source: gtnh-shadow-convert, a separate
+repository pinned as the optional `shadow` extra, converts it into the same JSON (#293).
 
 **Already landed:** the **entire Phase 1 pipeline**, end to end - package skeleton + lint/type/
 test CI; the **IR** contracts (`ir/`); the **adapter** (real gtnh-factory-flow exports ->
