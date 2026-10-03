@@ -43,6 +43,7 @@ from gtnh_solver.ir import (
     Route,
     RouteMaterial,
     Segment,
+    StructureBlock,
     Terminal,
 )
 from gtnh_solver.ir._base import FrozenModel, StrictModel
@@ -1052,3 +1053,50 @@ def test_a_resource_colour_must_be_six_hex_digits(bad: str) -> None:
     # that is not plainly a colour.
     with pytest.raises(ValidationError, match="#rrggbb"):
         InputIR(bounding_region=CellBox(sx=1, sy=1, sz=1), resource_colors={"x": bad})
+
+
+# --------------------------------------------------------------- structure blocks (InputIR v7)
+
+
+def test_a_machine_names_no_structure_block_by_default() -> None:
+    assert _machine().structure_blocks == {}
+
+
+def test_structure_blocks_round_trip_through_a_payload() -> None:
+    machine = _machine().model_copy(
+        update={
+            "structure_blocks": {
+                "casing": StructureBlock(block="gregtech:gt.blockcasings4", meta=2),
+                "pipe": StructureBlock(block="gregtech:gt.blockcasings2", meta=12),
+            }
+        }
+    )
+    ir = InputIR(bounding_region=CellBox(sx=1, sy=1, sz=1), machines=[machine])
+    again = InputIR.model_validate_json(ir.model_dump_json())
+    assert again.machines[0].structure_blocks == machine.structure_blocks
+    assert json.loads(ir.model_dump_json())["machines"][0]["structure_blocks"]["pipe"] == {
+        "block": "gregtech:gt.blockcasings2",
+        "meta": 12,
+    }
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [{"block": "", "meta": 0}, {"block": "gregtech:gt.blockcasings", "meta": -1}],
+    ids=["no-block", "negative-meta"],
+)
+def test_a_structure_block_names_a_real_block(bad: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        StructureBlock.model_validate(bad)
+
+
+def test_a_structure_block_refuses_a_field_it_does_not_know() -> None:
+    with pytest.raises(ValidationError, match="channel_value"):
+        StructureBlock.model_validate({"block": "b", "meta": 0, "channel_value": 3})
+
+
+def test_a_structure_block_names_its_channel() -> None:
+    payload = _machine().model_dump()
+    payload["structure_blocks"] = {"": {"block": "gregtech:gt.blockcasings", "meta": 3}}
+    with pytest.raises(ValidationError, match="channel must name something"):
+        Machine.model_validate(payload)

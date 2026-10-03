@@ -26,7 +26,7 @@ from .enums import HORIZONTAL_FACINGS, Commodity, Facing, IODirection, RelativeF
 from .geometry import CellBox, CellCoord, allowed_faces
 
 #: Bump on any breaking change to the input contract; record it in ``ir/__init__.py``.
-INPUT_IR_VERSION = 6
+INPUT_IR_VERSION = 7
 
 #: What :attr:`InputIR.resource_colors` holds, once lowercased: ``#`` and six hex digits.
 _HEX_COLOR = re.compile(r"#[0-9a-f]{6}")
@@ -157,6 +157,19 @@ class HatchSlot(FrozenModel):
     output_layer: int | None = Field(default=None, ge=0)
 
 
+class StructureBlock(FrozenModel):
+    """The block one tiered part of a multiblock is built from (InputIR v7, #312).
+
+    A GT multiblock names some parts by a StructureLib channel rather than by a block (a coil, a
+    solid casing, a pipe casing, a machine casing), and the tier it is built from decides whether,
+    or how fast, the machine runs. ``block`` is the registry name and ``meta`` the block meta, the
+    identity a structure dump and the texture manifest share.
+    """
+
+    block: str = Field(min_length=1)  # registry name, e.g. "gregtech:gt.blockcasings4"
+    meta: int = Field(default=0, ge=0)
+
+
 #: Which ``gregtech.api.enums.HatchElement`` kinds could host a port's hatch, by what the port
 #: carries. The bus/hatch split is lexical in GT and means items/fluids: ``InputBus`` takes items
 #: (``MTEHatchInputBus``), ``InputHatch`` fluids (``MTEHatchInput``). Power input is the one
@@ -242,6 +255,14 @@ class Machine(StrictModel):
     #: not part of the build (#282). Like a power source's feed face, that front lies flush on the
     #: region boundary. A power source needs no flag (:attr:`fronts_outside` reads its port).
     outside_front: bool = False
+    #: The block each tiered part of this machine is built from, keyed by GT's channel id as the
+    #: structure dump names it (``"coil"``, ``"casing"``, ``"pipe"``, ``"machine_casing"``;
+    #: InputIR v7, #312). The adapter chooses them from the plan: the node's coil on any multiblock
+    #: with a coil channel, and on a Chemical Plant the solid casing its recipes' special value
+    #: needs, the pipe casing the plan names and the machine casing of the tier it is supplied at.
+    #: A channel this does not name is built as the dump draws it. Empty for a single block, for a
+    #: plan adapted without the physical dataset, and for a multiblock with no tiered part.
+    structure_blocks: dict[str, StructureBlock] = Field(default_factory=dict)
 
     @property
     def fronts_outside(self) -> bool:
@@ -257,6 +278,13 @@ class Machine(StrictModel):
             raise ValueError("a filter item must name something")
         if len(value) != len(set(value)):
             raise ValueError("a filter's items must not repeat")
+        return value
+
+    @field_validator("structure_blocks")
+    @classmethod
+    def _check_structure_blocks(cls, value: dict[str, StructureBlock]) -> dict[str, StructureBlock]:
+        if any(not channel for channel in value):
+            raise ValueError("a structure block's channel must name something")
         return value
 
     def allowed_faces(self, port_id: str, orientation: Facing) -> frozenset[Facing]:

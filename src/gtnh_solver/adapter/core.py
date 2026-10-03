@@ -48,6 +48,12 @@ calls for: a Coke Oven's slice count (``_trigger_stack``), a tower's fluid-outpu
 *census* miss means depends on ``handler.kind`` and the two readings are opposites - see
 ``_classify_census_miss``.
 
+**A machine's tiered parts are built from what the plan says** (#312, ``structure_blocks``): the
+node's coil on any multiblock whose coil channel has a choice, and on a Chemical Plant the solid
+casing its recipes' special value needs, its pipe casing, and the machine casing of the tier it is
+supplied at, read after the power synthesis. They reach ``Machine.structure_blocks``, which the
+previewer and ``.schematic`` export build those parts from instead of the dump's default.
+
 **A node standing for several machines expands** into one ``Machine`` per physical machine
 (``_instance_ids``), all sharing the node's nets - which needed no IR concept, because
 ``Net.endpoints`` is already unbounded. The distinction that matters is per machine vs per group:
@@ -196,6 +202,7 @@ from .plan import (
 )
 from .power import synthesize_power
 from .producer import PlanProducer, plan_pack_version, resolve_producer
+from .structure_blocks import PlannedStructure, plan_structure
 
 # Crude single-block physical defaults until the dataset lane provides real footprints/faces.
 _DEFAULT_FOOTPRINT = CellBox()  # 1x1x1
@@ -454,6 +461,9 @@ def to_input_ir(
         and physical.meta.census
         and physical.meta.pack_version == plan_pack_version(plan)
     )
+    # What each machine's tiered parts are built from (#312), keyed by machine id and stamped on
+    # after the power synthesis, which settles the tier the machine casing follows.
+    planned: dict[str, PlannedStructure] = {}
     for node in plan.nodes:
         # Every recipe the node's machines run. The first is the node's own, and it alone says what
         # machine this is (handler, controller, footprint); the rest are recipes it time-shares.
@@ -499,6 +509,14 @@ def to_input_ir(
             multiblock_ids.update(_instance_ids(node))
         if _proven_single(recipe, node, record, census_for_plan=census_for_plan):
             proven_single_ids.update(_instance_ids(node))
+        structure = plan_structure(
+            [section_recipe for section_recipe, _ in sections],
+            node,
+            _effective_handler(recipe, node),
+            record,
+        )
+        if structure is not None:
+            planned.update(dict.fromkeys(_instance_ids(node), structure))
         # Every machine of a parallel node is the same build with the same ports and draw; they
         # differ only in id and, later, in where the placer puts them.
         machines.extend(
@@ -574,6 +592,15 @@ def to_input_ir(
         allow_retier=resolved_producer not in (PlanProducer.ARODOID_V1, PlanProducer.SHADOW_V1),
     )
     _check_resolved_power(plan, nets)
+    # The tier a machine is supplied at is final only now (_supply_tier can raise it), and the
+    # hatches the export places follow it, so the machine casing a Chemical Plant needs to form is
+    # read from it here rather than from the plan's tier.
+    machines = [
+        m.model_copy(update={"structure_blocks": planned[m.id].blocks(m.voltage_tier)})
+        if m.id in planned
+        else m
+        for m in machines
+    ]
     toggles = me_toggles if me_toggles is not None else METoggles()
     if toggles.toggled(Commodity.POWER):
         # After the cross-check above, which reads the synthesized nets' draw.

@@ -7,6 +7,28 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **A Chemical Plant is built from the casings, pipes and coils its node needs (#312).** GT's
+  ExxonMobil Chemical Plant builds four parts from a tier ladder, and each decides whether, or how
+  fast, it runs: its solid casing (a recipe runs only if its special value is at or below the
+  casing's tier), its pipe casing (2 parallels per tier), its coils (speed) and its machine casings
+  (it does not form below its highest hatch tier). The preview and the `.schematic` export drew the
+  structure dump's default build, Bronze solid casing on LV machine casings with Cupronickel coils
+  and Steel pipes, which GT refuses the nitrobenzene recipe on and which does not form with HV
+  hatches. The adapter now reads what the plan says: the cheapest solid casing for the highest
+  special value the node's recipes state (read from `specialValue`, `metadata.specialValue` or the
+  NEI "Special value" line, the only place MrBruh's fork states it), or the converter's
+  `machineConfigTiers.solidCasing` when that is enough; the node's `pipeCasing`, else the control's
+  default, else Bronze (PTFE and PBI build as Tungstensteel, which the plant accepts); and the
+  machine casing of the tier the plant is supplied at, read after the power synthesis. The node's
+  coil (`coilTier`, else `machineConfigTiers.heatingCoil`, else the control's default) now applies
+  to every multiblock whose coil channel offers a choice, the Industrial Coke Oven and the Large
+  Fluid Extractor included. Each choice that cannot be honoured warns, and so does a plant with no
+  coil stated, since the dump's Cupronickel runs it at half speed. The chosen blocks travel on the
+  new `Machine.structure_blocks` (InputIR v7, breaking: a v6 problem is refused; re-adapt the
+  plan), and the preview and the export swap each part's cells, re-skin the hatches and draw the
+  controller over the new casing, as GT does. Bronze pipe casing and the ULV machine casing are
+  valid in game but absent from every dump; `dataset.channel_blocks` adds them from GT's
+  `addTieredBlock` rule, and the committed texture manifest now carries both.
 - **Plans from ShadowTheAge's GT:NH calculator (#293).** `gtnh-solve MyPlan.gtnh --shadow-data
   data.bin` reads a plan saved by [the calculator](https://shadowtheage.github.io/gtnh/), through
   the new optional `shadow` extra (`pip install -e ".[shadow]"`): gtnh-shadow-convert, a separate

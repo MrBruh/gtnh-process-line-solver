@@ -11,8 +11,8 @@ validator lanes. Only the value types (``CellCoord``, ``CellBox``) surface here.
 - ``enums``      - Commodity, IODirection, Facing, RelativeFace, LayoutStatus, PipeFamily,
                    PipeSize
 - ``geometry``   - CellCoord, CellBox (integer cell-grid value types)
-- ``input_ir``   - Port, FaceSpec, HatchSlot, Machine, MachineFaceRef, Net, METoggles, PinnedIO,
-                   InputIR  (+ INPUT_IR_VERSION)
+- ``input_ir``   - Port, FaceSpec, HatchSlot, StructureBlock, Machine, MachineFaceRef, Net,
+                   METoggles, PinnedIO, InputIR  (+ INPUT_IR_VERSION)
 - ``nets``       - net helpers shared by the router and the system-IO summary
 - ``output``     - Placement, PlacedHatch, Segment, Terminal, Route, RouteMaterial,
                    LayoutMetrics, Infeasibility, LayoutResult  (+ LAYOUT_RESULT_VERSION)
@@ -45,6 +45,7 @@ from .input_ir import (
     Net,
     PinnedIO,
     Port,
+    StructureBlock,
 )
 from .output import (
     LAYOUT_RESULT_VERSION,
@@ -79,6 +80,7 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
     "Port",
     "FaceSpec",
     "HatchSlot",
+    "StructureBlock",
     "Machine",
     "MachineFaceRef",
     "Net",
@@ -391,5 +393,17 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   `dominantColor`), which the previewer draws as a swatch where it has no icon (#297). Display
 #   only, like `resource_names`. Values are lowercased and anything but `#` and six hex digits is
 #   refused on parse, so a consumer may put one into a stylesheet as it is.
+#
+# InputIR v7 (BREAKING) - added `Machine.structure_blocks: dict[str, StructureBlock]`, the block each
+#   tiered part of a multiblock is built from, keyed by GT's channel id (#312). `StructureBlock` is
+#   `{block, meta}`. The adapter fills the node's coil on any multiblock with a `coil` channel, and
+#   on an ExxonMobil Chemical Plant its solid casing (the cheapest whose tier meets the recipes'
+#   special value, `validateRecipe`), its pipe casing (the plan's, which sets its parallels) and its
+#   machine casing (the tier it is supplied at, so every hatch it gets forms, `checkMachine`). A
+#   channel the field does not name is built as the dump draws it.
+#   Breaking by omission, the rule `hatches` set: a v6 consumer that ignores the field draws and
+#   exports the dump's default build, Bronze solid casing on LV machine casings, where GT refuses
+#   the nitrobenzene recipe and HV hatches keep the plant from forming at all. A v6 payload is
+#   refused on parse; re-adapt the plan.
 #
 # ---------------------------------------------------------------------------

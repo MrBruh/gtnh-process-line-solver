@@ -169,3 +169,38 @@ def test_the_schematic_holds_the_controllers_the_plan_names(
     # Each oven is its one-slice base, the 10 frames GT's tooltip lists for it; at the 36-long form
     # it used to reserve whatever the plan asked for, it was 160 (#229).
     assert (machines[4096 + 305], machines[4096 + 334]) == (20, 24)
+
+
+def test_each_chemical_plant_exports_with_the_parts_its_node_needs(
+    solved: tuple[InputIR, LayoutResult],
+    docs: dict[str, MultiblockDoc],
+    manifest: TextureManifest,
+) -> None:
+    """Special value 4, Tungstensteel pipe, HSS-G coils and EV supply (#312): the plant is built
+    of Stable Titanium, Tungstensteel pipe casing, HSS-G coils and EV machine casings, the
+    materials of the hand-built reference plant (tests/golden/schematic/), where the dump's
+    default build was Bronze, Steel, Cupronickel and LV."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", SchematicWarning)  # the frame boxes, pinned above
+        root = build_schematic(*solved, manifest=manifest, docs=docs)
+    schematic = read_schematic(nbt.dumps("Schematic", root))
+    scene = build_scene(*solved)
+    origin = [int(v) for v in scene["bounds"]["min"]]
+    plants = [m for m in scene["machines"] if m["block_key"] == f"{_GT_MACHINES}@998"]
+    assert len(plants) == 2
+    for plant in plants:
+        blocks: Counter[tuple[str, int]] = Counter()
+        hatches = 0
+        for x in range(plant["cell"][0], plant["cell"][0] + plant["size"][0]):
+            for y in range(plant["cell"][1], plant["cell"][1] + plant["size"][1]):
+                for z in range(plant["cell"][2], plant["cell"][2] + plant["size"][2]):
+                    at_cell = (x - origin[0], y - origin[1], z - origin[2])
+                    tile = schematic.tile_at(*at_cell)
+                    if tile is None:
+                        blocks[schematic.block_at(*at_cell)] += 1
+                    elif tile.mid != 998:
+                        hatches += 1
+        assert blocks[("gregtech:gt.blockcasings4", 2)] + hatches == 92
+        assert blocks[("gregtech:gt.blockcasings2", 15)] == 18
+        assert blocks[("gregtech:gt.blockcasings5", 4)] == 27
+        assert blocks[("gregtech:gt.blockcasings", 4)] == 57

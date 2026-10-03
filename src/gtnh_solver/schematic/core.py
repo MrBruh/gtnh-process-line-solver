@@ -7,7 +7,8 @@ The pipeline, and why each step exists::
         |                         a preview can never disagree about what was solved
         v
     scene ---> machine_cubes()    per-block cubes: a multiblock's whole structure, or one cube for
-        |                         a single-block machine, each already yaw-rotated and clamped
+        |                         a single-block machine, each already yaw-rotated and clamped,
+        |                         its tiered parts already the blocks the node chose (#312)
         '---> route cells         one cell per cable/pipe block, with the sides it connects on
         |
         v  lower()
@@ -31,6 +32,12 @@ file and the preview cannot disagree; every other output face is a cover, which 
 does not carry, so :class:`SchematicWarning` names each (:func:`_single_block_tile`). Before this
 the export wrote only ``mFacing``, as the front: a 2.9 paste then worked on its bottom face and
 output out of its front.
+
+**A multiblock's tiered parts arrive already swapped** (#312). A Chemical Plant's solid casing,
+pipe casing, coils and machine casings are whatever ``Machine.structure_blocks`` names, applied in
+``previewer.textures.expand_machine`` before the cubes reach this module, so a swapped casing is
+just another plain block here and needs no code of its own; the manifest must name it like any
+other, which is why the committed one carries every block the plant's channels accept.
 
 **Block ids are ours to choose.** ``SchematicaMapping`` maps registry name to the id used in this
 file, and Schematica remaps onto whatever the loading instance assigned, so the ids here are
