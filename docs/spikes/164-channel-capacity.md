@@ -156,6 +156,11 @@ routes all four item nets.
    measurement. Re-measured with uniform facings, the reference and our own layout both score
    0.00. The argument that this term is wrong for terminal sharing stands on its own; the number
    does not. See the caveat in `tests/golden/schematic/README.md`.
+   **Second correction (2026-10-03).** The facings were faithful after all; it was the reading that
+   was wrong. The 10.00 took each hammer's `mFacing` as its front, but on a GT basic machine
+   `mFacing` is the output face (#249), which here points straight at a pipe. Read with the real
+   fronts (`mMainFacing`), no front touches a pipe or cable. The number still stands withdrawn; it
+   has not been re-measured with the real fronts.
 
    On the maintainer's own hand build it reads **10.00**, weighted `_W_FACES = 8.0` (`:104`) to
    **80.00**; on our sprawled 220-cell answer it reads **0.00**. The placement cost actively
@@ -498,7 +503,9 @@ correct value is 1.
 
 **R4. I could not determine whether the reference build actually runs.** It is a saved snapshot;
 every pipe in it has `mConnections = 0`, which is player state rather than a block property
-(`docs/DOMAIN.md:261-265`), so the snapshot carries no wiring to read. The topology I reconstructed is from geometry, facings, covers and inventory
+(`docs/DOMAIN.md:261-265`), so the snapshot carries no wiring to read. (Later found: the save
+reads 0 because a Schematica GUI save reads the client world, where GT never syncs
+`mConnections`; see `tests/golden/schematic/README.md`.) The topology I reconstructed is from geometry, facings, covers and inventory
 contents, and it is self-consistent (stone in the input chest with a NORTH cover, 39 sand in a
 stage-3 output slot), but I have not seen it run and there is no headless simulator
 (`docs/TESTING.md:5-9`).
