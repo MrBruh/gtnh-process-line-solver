@@ -1433,3 +1433,18 @@ def test_the_viewer_draws_a_picture_beside_each_resource() -> None:
     ):
         assert reads in page, reads
     assert "img-src data:" in _csp_of(page)
+
+
+def test_a_hover_tag_shows_each_icon_above_its_name_at_full_size() -> None:
+    """On a hover tag the picture is what a builder looks for, so every icon a line names is lifted
+    out of the text into a row above it, drawn at the 64 px the export rendered (1:1, so nothing is
+    resampled); a line without an icon keeps its inline colour dot. The panels keep 16 px icons."""
+    page = render_html(_sand_scene())
+    for reads in (
+        "function tagLine(line)",
+        "nametag.replaceChildren(...lines.map(tagLine))",
+        "row.className = 'icons'",
+        "#nametag .icons .ico { width: 64px; height: 64px;",
+        ".ico { width: 16px; height: 16px;",  # the panels' size is unchanged
+    ):
+        assert reads in page, reads

@@ -23,9 +23,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   resource since #296 (a route's, a cover's and a hatch's hover, a storage's contents, an Item
   Filter's slots, the nets panel and the system i/o panel) now puts its icon in front of the name,
   where a local icon index has one (`data/<version>/icons/`, see
-  `docs/dataset-extraction/icons.md`), and otherwise a dot in the plan's own colour for it. The
-  colour is factory-flow's `dominantColor`, which the adapter now keeps in a new
-  `InputIR.resource_colors` table (lowercased, `#rrggbb` only, for the resources the problem moves;
+  `docs/dataset-extraction/icons.md`), and otherwise a dot in the plan's own colour for it. On a
+  hover tag the icon stands above its name at the full 64 px it was exported at, side by side for a
+  pipe that carries several; the panels show it inline at 16 px. The colour is factory-flow's
+  `dominantColor`, which the adapter now keeps in a new `InputIR.resource_colors` table (lowercased, `#rrggbb` only, for the resources the problem moves;
   additive, so no version bump). Every resource of the four shipped examples has one, so a fresh
   clone shows dots everywhere. Only the icons the line uses are embedded, and an index from another
   pack stands in when the plan's pack has none, since a picture is display only. Where the plan

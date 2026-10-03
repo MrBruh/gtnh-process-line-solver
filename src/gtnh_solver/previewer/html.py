@@ -16,7 +16,9 @@ of a crossing bundle from the next (#155).
 Resource ids are shown verbatim as the plan carries them, behind the plan's own display name
 where it has one (#296), never a name invented here, and each with its picture where the page has
 one (#297): the item or fluid's own icon from a local icon index (``scene.icons``), else a dot in the
-plan's colour for it (``scene.resourceColors``); a state control swaps every machine between
+plan's colour for it (``scene.resourceColors``). On a hover tag an icon stands above its name at the
+full size it was exported at; in the panels it sits inline beside the name. A state control swaps
+every machine between
 its idle and running
 skin where the two differ (the running tiles ride ``scene.atlas.active``, default idle); routes
 (cables and
@@ -206,6 +208,12 @@ _STYLE = """
   /* What the hovered thing holds or carries, under its headline: the same secondary weight the
      legend's labels use, so the name/resource stays the thing the eye lands on. */
   #nametag div + div { color: #aab2bd; font-weight: 400; }
+  /* On a hover tag the picture is the point, so a resource's icon stands above the line that names
+     it at the size it was exported (64px, drawn 1:1 so nothing is resampled), side by side where
+     the line names several (a merged run). The panels keep it inline at 16px. */
+  #nametag .icons { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px;
+                    margin: 3px 0 1px; }
+  #nametag .icons .ico { width: 64px; height: 64px; margin: 0; }
   /* Phone width: the panels stop competing for the corners. The controls bar spans the screen so
      the layer slider is a full-width target instead of a 180px one with four buttons pushed off
      the right edge, and the HUD is held clear of the legend toggle. */
@@ -987,6 +995,22 @@ function partNodes(parts) {
   }
   return nodes;
 }
+// One line of the hover tag. Every resource it names that has an icon shows that icon ABOVE the
+// line at full size (CSS #nametag .icons), side by side where it names several; a colour dot, or
+// nothing, stays inline as in the panels. The text reads as it does without icons.
+function tagLine(line) {
+  const div = el('div');
+  const parts = typeof line === 'string' ? [line] : line;
+  const pictured = parts.filter((p) => typeof p !== 'string' && ICONS.has(p.icon));
+  if (pictured.length) {
+    const row = el('div');
+    row.className = 'icons';
+    row.append(...pictured.map((p) => mark(p.icon)));
+    div.append(row);
+  }
+  div.append(...partNodes(parts.filter((p) => !pictured.includes(p))));
+  return div;
+}
 // The suffix for a flow whose commodity rides ME (scene.io, a storage's contents): see #menote.
 function viaMe(flow) {
   return flow.me ? ' via ME' : '';
@@ -1286,19 +1310,16 @@ function updateNametag() {
   const a = hover.anchor;
   _tagPos.set(a[0], a[1], a[2]).project(camera);
   if (_tagPos.z >= 1) { nametag.style.display = 'none'; return; }   // behind the camera
-  // A <div> of DOM text nodes (and resource pictures) per line, never innerHTML: every line here
-  // is a machine name or a resource id out of the plan, which is somebody else's file (#111).
-  // Rebuilt only when the lines actually change, so an open tag is not re-created 60 times a
-  // second - and its size is measured in the same branch, because reading offsetWidth every frame
-  // forces a synchronous layout every frame.
+  // A <div> of DOM text nodes (and resource pictures, tagLine) per line, never innerHTML: every
+  // line here is a machine name or a resource id out of the plan, which is somebody else's file
+  // (#111). Rebuilt only when the lines actually change, so an open tag is not re-created 60 times
+  // a second - and its size is measured in the same branch, because reading offsetWidth every frame
+  // forces a synchronous layout every frame. An icon's box is sized in CSS, so the measure is right
+  // before the image has decoded.
   const text = JSON.stringify(lines);
   if (text !== _tagText) {
     _tagText = text;
-    nametag.replaceChildren(...lines.map((line) => {
-      const div = el('div');
-      div.append(...partNodes(typeof line === 'string' ? [line] : line));
-      return div;
-    }));
+    nametag.replaceChildren(...lines.map(tagLine));
     nametag.style.display = 'block';
     _tagW = nametag.offsetWidth;
     _tagH = nametag.offsetHeight;
