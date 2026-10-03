@@ -11,7 +11,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to mark each type with the colour its placeholder boxes are painted in, which said nothing once
   the 3D view drew real textures. Each textured type is now marked by its controller's front face,
   idle, exactly as the 3D view draws it (the GT++ machines that share one controller screen in game
-  share it here too). It is cropped out of the page's own texture atlas, so it costs no extra image.
+  share it here too). A Super or Quantum Tank shows its top instead, where it draws its tank
+  display; its front carries only an output pipe. It is cropped out of the page's own texture
+  atlas, so it costs no extra image.
   A type that stays a placeholder box, such as the synthetic power sources, keeps its colour
   square, now at the same 16 px so every name lines up.
 - **An icon index can now be made from a NESQL export (#297).** `tools/derive_icons.py` turns what

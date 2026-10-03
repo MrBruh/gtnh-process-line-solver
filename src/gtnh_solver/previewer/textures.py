@@ -158,6 +158,16 @@ _TIER_TOKEN = re.compile(r"\b(" + "|".join(sorted(_TIER_LADDER, key=len, reverse
 #: every MTE it walks, so the front stack is always recorded there whatever the block's real front.
 _FRONT_IN_DUMP = "NORTH"
 
+#: The dumped side a machine type's legend mark is read from where its front (the default,
+#: :data:`_FRONT_IN_DUMP`) is not what tells it apart, keyed by the block's own GT class (its
+#: manifest ``source_class``), never by a display name. A digital tank draws its tank display,
+#: ``OVERLAY_QTANK``, on its TOP and only an output pipe on its front (``MTEDigitalTankBase``,
+#: which both the Super and the Quantum Tank extend).
+_LEGEND_SIDE_BY_CLASS = {
+    "gregtech.common.tileentities.storage.MTESuperTank": "UP",
+    "gregtech.common.tileentities.storage.MTEQuantumTank": "UP",
+}
+
 #: Runs of non-alphanumeric characters, collapsed to one space when normalizing a machine name so
 #: matching tolerates case, punctuation, and whitespace differences between plan and manifest.
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
@@ -1052,8 +1062,9 @@ def _legend_tiles(
     """Give each machine type's legend entry the ``tile`` it is drawn with: the pool key of its
     controller's front face, idle, the face a builder recognises the machine by. The dump builds
     every controller facing NORTH, so that face is always the one read from GT's NORTH side,
-    whichever way the machine was placed. Only a face that baked is named; a type with none (a
-    placeholder box) keeps the colour swatch its boxes are painted in."""
+    whichever way the machine was placed. A block whose front says little reads another side
+    instead (:data:`_LEGEND_SIDE_BY_CLASS`: a digital tank's top). Only a face that baked is named;
+    a type with none (a placeholder box) keeps the colour swatch its boxes are painted in."""
     for entry in scene.get("legend", []):
         key = front_keys.get(entry.get("label", ""))
         if key is not None and key in pool:
@@ -1318,8 +1329,12 @@ def texturize_scene(
         front = front_cube(expanded, machine_doc(machine, docs))
         for cube in expanded:
             faces, stacks = _face_icons(cube, manifest)
-            if cube is front and face_key(cube, _FRONT_IN_DUMP) in stacks:
-                front_keys.setdefault(machine["type"], face_key(cube, _FRONT_IN_DUMP))
+            if cube is front:
+                side = _LEGEND_SIDE_BY_CLASS.get(
+                    manifest.source_class(cube.block, cube.meta), _FRONT_IN_DUMP
+                )
+                if face_key(cube, side) in stacks:
+                    front_keys.setdefault(machine["type"], face_key(cube, side))
             if all(face is None for face in faces):
                 unskinned.add(f"{cube.block}|{cube.meta}")
             elif cube.facing is not None:

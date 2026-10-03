@@ -1073,6 +1073,44 @@ def test_each_textured_type_is_marked_in_the_legend_by_its_controllers_front_fac
     assert all(tile in scene["textures"] for tile in tiles.values() if tile is not None)
 
 
+def test_a_digital_tank_is_marked_by_its_top_not_its_front(
+    dataset: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """A Super Tank's front carries only its output pipe; its tank display (``OVERLAY_QTANK``) is
+    on its top, so that is the face the legend shows. Chosen by the block's GT class, so a machine
+    of any other class still shows its front."""
+    mb, manifest = dataset
+    doc = json.loads(manifest.read_text(encoding="utf-8"))
+    side = [{"icon": MACH_SIDE, "rgba": [120, 130, 200, 0], "glow": False}]
+    doc["blocks"]["gregtech:gt.blockmachines|130"] = {
+        "kind": "mte",
+        "display_name": "Test Tank",
+        "source_class": "gregtech.common.tileentities.storage.MTESuperTank",
+        "sides": {
+            "NORTH": {"inactive": side},
+            "UP": {
+                "inactive": [*side, {"icon": OVERLAY, "rgba": [255, 255, 255, 0], "glow": False}]
+            },
+            "all": {"inactive": side},
+        },
+    }
+    tank_manifest = tmp_path / "tank-manifest.json"
+    tank_manifest.write_text(json.dumps(doc), encoding="utf-8")
+    scene = _scene(
+        [
+            _machine("t1", "Test Tank", [0, 0, 0], [1, 1, 1], front="west"),
+            _machine("m1", "Test Macerator", [3, 0, 0], [1, 1, 1]),
+        ]
+    )
+    scene["legend"] = [{"label": t, "color": "#6ca0dc"} for t in ("Test Tank", "Test Macerator")]
+    texturize_scene(scene, multiblocks_dir=mb, manifest_path=tank_manifest, png_provider=_provider)
+    tiles = {entry["label"]: entry.get("tile") for entry in scene["legend"]}
+    assert tiles == {
+        "Test Tank": "gregtech:gt.blockmachines|130|UP|inactive",
+        "Test Macerator": "gregtech:gt.blockmachines|5|NORTH|inactive",
+    }
+
+
 def test_a_legend_tile_is_only_a_face_that_baked(dataset: tuple[Path, Path]) -> None:
     # No sprite at all: every face falls back to the placeholder, so no pool key exists and the
     # legend must not name one (the viewer would crop a tile the atlas does not have).
