@@ -7,6 +7,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **The preview's legend shows each machine type by its front face.** The "machines" section used
+  to mark each type with the colour its placeholder boxes are painted in, which said nothing once
+  the 3D view drew real textures. Each textured type is now marked by its controller's front face,
+  idle, exactly as the 3D view draws it (the GT++ machines that share one controller screen in game
+  share it here too). A Super or Quantum Tank shows its top instead, where it draws its tank
+  display; its front carries only an output pipe. It is cropped out of the page's own texture
+  atlas, so it costs no extra image.
+  A type that stays a placeholder box, such as the synthetic power sources, keeps its colour
+  square, now at the same 16 px so every name lines up.
 - **An icon index can now be made from a NESQL export (#297).** `tools/derive_icons.py` turns what
   NESQL Exporter writes in a full 2.9 pack instance (`nesql-db.script` and `image.zip`) into the
   `data/<version>/icons/` the previewer reads, and `docs/dataset-extraction/icons.md` now has the

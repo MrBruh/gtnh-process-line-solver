@@ -1254,6 +1254,7 @@ def test_a_texture_pass_that_fails_part_way_leaves_plain_boxes(
     # invisible machine. The fallback takes every trace of the pass back out.
     def half_done(scene: dict[str, Any], **_: Any) -> None:
         scene["machines"][0]["expanded"] = True
+        scene["legend"][0]["tile"] = "gregtech:gt.blockmachines|1|NORTH|inactive"
         raise RuntimeError("the jar went away")
 
     monkeypatch.setattr(previewer_package, "texturize_scene", half_done)
@@ -1263,6 +1264,23 @@ def test_a_texture_pass_that_fails_part_way_leaves_plain_boxes(
     assert scene["blocks"] == []
     assert scene["atlas"] is None
     assert all(cell.get("tex") is None for r in scene["routes"] for cell in r["cells"])
+    # ...and the legend goes back to colour swatches, naming no tile of an atlas that is not there.
+    assert not any("tile" in entry for entry in scene["legend"])
+
+
+def test_the_legend_marks_a_machine_type_by_its_front_face() -> None:
+    """The template half of a legend tile, which no test can run: a type with a tile the atlas has
+    is drawn as that tile cropped out of the atlas image at 16 px (a CSSOM background, so no new
+    markup or image source), and any other type keeps its colour swatch."""
+    page = render_html(_sand_scene())
+    for reads in (
+        "for (const e of SCENE.legend) row(machines, machineMark(e), e.label)",
+        "const tile = entry.tile && ATLAS ? ATLAS.tiles[entry.tile] : null",
+        "plain.classList.add('mach')",  # a placeholder type keeps its colour, at the same size
+        "face.style.backgroundImage = 'url(\"' + ATLAS.image + '\")'",
+        ".sw.face, .sw.mach { width: 16px; height: 16px; }",
+    ):
+        assert reads in page, reads
 
 
 def test_scene_route_of_a_merged_run_names_every_item_it_carries() -> None:

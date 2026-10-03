@@ -158,6 +158,16 @@ _TIER_TOKEN = re.compile(r"\b(" + "|".join(sorted(_TIER_LADDER, key=len, reverse
 #: every MTE it walks, so the front stack is always recorded there whatever the block's real front.
 _FRONT_IN_DUMP = "NORTH"
 
+#: The dumped side a machine type's legend mark is read from where its front (the default,
+#: :data:`_FRONT_IN_DUMP`) is not what tells it apart, keyed by the block's own GT class (its
+#: manifest ``source_class``), never by a display name. A digital tank draws its tank display,
+#: ``OVERLAY_QTANK``, on its TOP and only an output pipe on its front (``MTEDigitalTankBase``,
+#: which both the Super and the Quantum Tank extend).
+_LEGEND_SIDE_BY_CLASS = {
+    "gregtech.common.tileentities.storage.MTESuperTank": "UP",
+    "gregtech.common.tileentities.storage.MTEQuantumTank": "UP",
+}
+
 #: Runs of non-alphanumeric characters, collapsed to one space when normalizing a machine name so
 #: matching tolerates case, punctuation, and whitespace differences between plan and manifest.
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
@@ -964,6 +974,37 @@ def _glyph_steps(machine: Mapping[str, Any], auto_out_face: Mapping[str, str] | 
     return _FRONT_CW_STEPS.get(str(machine.get("front", "north")), 0)
 
 
+def machine_doc(
+    machine: Mapping[str, Any], docs: Mapping[str, MultiblockDoc]
+) -> MultiblockDoc | None:
+    """The multiblock doc ``machine`` draws from: by its ``block_key`` first, then its ``type``.
+
+    The one lookup :func:`machine_cubes` expands through and the legend's front tile is read from,
+    so the two can never pick different controllers (see :func:`machine_cubes` for why the key
+    comes first).
+    """
+    return docs.get(machine.get("block_key") or "") or docs.get(machine["type"])
+
+
+def front_cube(cubes: list[BlockCube], doc: MultiblockDoc | None) -> BlockCube | None:
+    """The cube that carries ``cubes``' machine's front: the controller of a multiblock, or the one
+    cube of a single block. A multiblock's controller is the cube of the doc's own controller block
+    (it sits at offset 0 of every form); ``None`` when no cube is."""
+    if doc is None:
+        return cubes[0] if len(cubes) == 1 else None
+    controller = doc.controller
+    return next(
+        (
+            cube
+            for cube in cubes
+            if cube.facing is None
+            and cube.block == controller.registry_name
+            and cube.meta == controller.meta
+        ),
+        None,
+    )
+
+
 def machine_cubes(
     machine: Mapping[str, Any],
     docs: Mapping[str, MultiblockDoc],
@@ -994,7 +1035,7 @@ def machine_cubes(
     ``auto_out_face`` (machine id -> auto-output face) lets a boundary-storage block point its output
     glyph the way it actually ejects rather than its placed front (see :func:`_glyph_steps`).
     """
-    doc = docs.get(machine.get("block_key") or "") or docs.get(machine["type"])
+    doc = machine_doc(machine, docs)
     if doc is not None:
         return expand_machine(machine, doc, manifest)
     single = manifest.mte_block(
@@ -1006,6 +1047,28 @@ def machine_cubes(
         steps = _glyph_steps(machine, auto_out_face)
         return [BlockCube((cell[0], cell[1], cell[2]), block, meta, steps)]
     return []
+
+
+def face_key(cube: BlockCube, source: str) -> str:
+    """The pool key of an ordinary (non-hatch) cube's face read from GT side ``source``: the block,
+    its meta, the side and the idle state, so one block's face bakes once however many cubes show
+    it. A hatch's key carries more (its facing and casing), see :func:`_face_icons`."""
+    return f"{cube.block}|{cube.meta}|{source}|{cube.idle_state}"
+
+
+def _legend_tiles(
+    scene: dict[str, Any], front_keys: Mapping[str, str], pool: Mapping[str, str]
+) -> None:
+    """Give each machine type's legend entry the ``tile`` it is drawn with: the pool key of its
+    controller's front face, idle, the face a builder recognises the machine by. The dump builds
+    every controller facing NORTH, so that face is always the one read from GT's NORTH side,
+    whichever way the machine was placed. A block whose front says little reads another side
+    instead (:data:`_LEGEND_SIDE_BY_CLASS`: a digital tank's top). Only a face that baked is named;
+    a type with none (a placeholder box) keeps the colour swatch its boxes are painted in."""
+    for entry in scene.get("legend", []):
+        key = front_keys.get(entry.get("label", ""))
+        if key is not None and key in pool:
+            entry["tile"] = key
 
 
 def _face_icons(
@@ -1042,7 +1105,7 @@ def _face_icons(
             source = _SIDE_NAMES[_rotate_side(side, -cube.steps)]
             idle = manifest.layers(cube.block, cube.meta, source, cube.idle_state)
             running = manifest.layers(cube.block, cube.meta, source, cube.active_state)
-            key = f"{cube.block}|{cube.meta}|{source}|{cube.idle_state}"
+            key = face_key(cube, source)
         else:
             source = _SIDE_NAMES[side]
             idle = _hatch_layers(manifest, cube, source, cube.idle_state)
@@ -1255,14 +1318,23 @@ def texturize_scene(
     # ones landed on.
     recased = uncertain = standalone = 0
     uncertain_casings: set[str] = set()
+    # Machine type -> the pool key of its controller's front face, for the legend (_legend_tiles).
+    front_keys: dict[str, str] = {}
     for machine in scene["machines"]:
         # NOT `cubes`: that name is the output accumulator this loop appends scene blocks to.
         expanded = machine_cubes(machine, docs, manifest, auto_out_face)
         if not expanded:
             continue  # no doc and not a known single-block machine -> keep the placeholder box
         machine["expanded"] = True
+        front = front_cube(expanded, machine_doc(machine, docs))
         for cube in expanded:
             faces, stacks = _face_icons(cube, manifest)
+            if cube is front:
+                side = _LEGEND_SIDE_BY_CLASS.get(
+                    manifest.source_class(cube.block, cube.meta), _FRONT_IN_DUMP
+                )
+                if face_key(cube, side) in stacks:
+                    front_keys.setdefault(machine["type"], face_key(cube, side))
             if all(face is None for face in faces):
                 unskinned.add(f"{cube.block}|{cube.meta}")
             elif cube.facing is not None:
@@ -1362,6 +1434,7 @@ def texturize_scene(
     scene["blocks"] = cubes
     scene["textures"] = pool
     scene["texturesActive"] = pool_active
+    _legend_tiles(scene, front_keys, pool)
     expanded_types = {m["type"] for m in scene["machines"] if m.get("expanded")}
     placeholder = tuple(t for t in all_types if t not in expanded_types)
     summary = TextureSummary(

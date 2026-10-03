@@ -128,6 +128,8 @@ def _untextured(scene: dict[str, Any]) -> None:
     for route in scene.get("routes", []):
         for cell in route.get("cells", []):
             cell["tex"] = None
+    for entry in scene.get("legend", []):
+        entry.pop("tile", None)  # the legend falls back to each type's colour swatch
     scene["blocks"] = []
     scene.pop("textures", None)
     scene.pop("texturesActive", None)

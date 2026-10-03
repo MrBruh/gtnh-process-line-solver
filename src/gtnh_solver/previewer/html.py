@@ -35,7 +35,9 @@ pipe, red where that pipe also carries another machine's outputs and the builder
 to refuse input there (#278), and every other output face, which takes a cover, an amber cover marker
 (``scene.machines[].outputs``, #249); drawn for **single blocks only** - a multiblock ejects from a
 hatch's own face, not from its bounding box, so there is no box face to mark (#153). A side panel lists the
-machine/route legend (materials footnoted as stand-ins where they are), an inventory of the
+machine/route legend (each machine type marked by its controller's front face, as the 3D view draws it,
+where the texture pass baked one, else by its box colour; materials footnoted as stand-ins where
+they are), an inventory of the
 **nets** - what each carries and at what rate, every row a button that *solos* that net by hiding
 every other route, which is how one run reads end to end through a bundle the hover tag can only
 identify a block at a time (#240, keyed on ``netId``: a power route names no resource) - plus the
@@ -186,6 +188,11 @@ _STYLE = """
          image-rendering: pixelated; }
   .sw.dot { width: 9px; height: 9px; margin-right: 4px; border-radius: 50%;
             box-shadow: 0 0 0 1px #6b7482; }
+  /* A machine type's legend mark (machineMark): where its front face is textured, that face, 16px
+     and square with Minecraft's nearest-neighbour look; else its colour swatch at the same 16px,
+     so every machine's name starts at the same place. */
+  .sw.face, .sw.mach { width: 16px; height: 16px; }
+  .sw.face { border-radius: 0; image-rendering: pixelated; }
   b { color: #aab2bd; font-weight: 600; }
   button { font: inherit; color: #e8eaed; background: #2a2f37; border: 1px solid #3a4150;
            border-radius: 4px; padding: 3px 8px; cursor: pointer; }
@@ -954,6 +961,25 @@ function swatch(color) {
   s.style.background = color;
   return s;
 }
+// A machine type's legend mark: the front face of its controller as the 3D view draws it, idle,
+// cropped out of the atlas at 16px (scene.legend[].tile, previewer.textures), where the texture
+// pass baked one; else the colour swatch its placeholder boxes are painted in. The crop is a CSSOM
+// background on the atlas's own data: URI, so it is no new markup and no new image source.
+function machineMark(entry) {
+  const tile = entry.tile && ATLAS ? ATLAS.tiles[entry.tile] : null;
+  if (!tile) {
+    const plain = swatch(entry.color);
+    plain.classList.add('mach');
+    return plain;
+  }
+  const [x, y, w, h] = tile, [W, H] = ATLAS.size, sx = 16 / w, sy = 16 / h;
+  const face = el('span');
+  face.className = 'sw face';
+  face.style.backgroundImage = 'url("' + ATLAS.image + '")';
+  face.style.backgroundSize = W * sx + 'px ' + H * sy + 'px';
+  face.style.backgroundPosition = -x * sx + 'px ' + -y * sy + 'px';
+  return face;
+}
 function row(parent, ...parts) {
   parent.append(...parts, el('br'));   // strings here become text nodes, never markup
 }
@@ -1069,7 +1095,7 @@ function section(panel, name, heading = name) {
 function renderLegend() {
   const panel = document.createDocumentFragment();
   const machines = section(panel, 'machines');
-  for (const e of SCENE.legend) row(machines, swatch(e.color), e.label);
+  for (const e of SCENE.legend) row(machines, machineMark(e), e.label);
   const routes = section(panel, 'routes');
   for (const k of ['item', 'fluid', 'power']) row(routes, swatch(COMMODITY[k]), k);
   row(routes, swatch('#00e5ff'), 'auto-output');
