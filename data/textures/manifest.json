@@ -11,9 +11,9 @@
     "extractor_sha": "unknown",
     "note": "SMALL committed manifest: only the blocks the shipped example lines and the multiblock fixtures they resolve to need - plus every hatch kind at the tiers those lines use, the cables and pipes those tiers route, and the block that stands in for a synthesized power source, none of which matches a machine name - so `gtnh-solve --preview examples/*.json` skins out of the box. The full dump is local and version-namespaced (data/<version>/textures/manifest.json), never committed. Regenerate with tools/derive_small_manifest.py.",
     "coverage": {
-      "blocks": 109,
+      "blocks": 113,
       "mte": 47,
-      "icons": 166,
+      "icons": 172,
       "gaps": 0
     },
     "extractor_checks": {
@@ -41,6 +41,26 @@
           "inactive": [
             {
               "icon": "gregtech:iconsets/MACHINE_CASING_SOLID_STEEL",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        }
+      }
+    },
+    "gregtech:gt.blockcasings2|12": {
+      "kind": "block",
+      "source_class": "gregtech.common.blocks.BlockCasings2",
+      "sides": {
+        "all": {
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_CASING_PIPE_BRONZE",
               "rgba": [
                 255,
                 255,
@@ -3321,6 +3341,96 @@
         }
       }
     },
+    "gregtech:gt.blockcasings|0": {
+      "kind": "block",
+      "source_class": "gregtech.common.blocks.BlockCasings1",
+      "sides": {
+        "DOWN": {
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_ULV_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "EAST": {
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_ULV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "NORTH": {
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_ULV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "SOUTH": {
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_ULV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "UP": {
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_ULV_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "WEST": {
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_ULV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        }
+      }
+    },
     "gregtech:gt.blockcasings|1": {
       "kind": "block",
       "source_class": "gregtech.common.blocks.BlockCasings1",
@@ -4164,6 +4274,26 @@
                 255,
                 255,
                 255
+              ],
+              "glow": false
+            }
+          ]
+        }
+      }
+    },
+    "gregtech:gt.blockframes|305": {
+      "kind": "block",
+      "source_class": "gregtech.common.blocks.BlockFrameBox",
+      "sides": {
+        "all": {
+          "inactive": [
+            {
+              "icon": "gregtech:materialicons/METALLIC/frameGt",
+              "rgba": [
+                128,
+                128,
+                128,
+                0
               ],
               "glow": false
             }
@@ -16813,6 +16943,26 @@
           ]
         }
       }
+    },
+    "miscutils:miscutils.blockcasings|3": {
+      "kind": "block",
+      "source_class": "gtPlusPlus.xmod.gregtech.common.blocks.GregtechMetaCasingBlocks",
+      "sides": {
+        "all": {
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_CASING_FIREBOX_STEEL",
+              "rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "glow": false
+            }
+          ]
+        }
+      }
     }
   },
   "icons": {
@@ -16850,7 +17000,9 @@
     "gregtech:iconsets/MACHINE_CASING_CHEMICALLY_INERT": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_CHEMICALLY_INERT.png",
     "gregtech:iconsets/MACHINE_CASING_CLEAN_STAINLESSSTEEL": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_CLEAN_STAINLESSSTEEL.png",
     "gregtech:iconsets/MACHINE_CASING_FIREBOX_BRONZE": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_FIREBOX_BRONZE.png",
+    "gregtech:iconsets/MACHINE_CASING_FIREBOX_STEEL": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_FIREBOX_STEEL.png",
     "gregtech:iconsets/MACHINE_CASING_FROST_PROOF": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_FROST_PROOF.png",
+    "gregtech:iconsets/MACHINE_CASING_PIPE_BRONZE": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_PIPE_BRONZE.png",
     "gregtech:iconsets/MACHINE_CASING_PIPE_POLYTETRAFLUOROETHYLENE": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_PIPE_POLYTETRAFLUOROETHYLENE.png",
     "gregtech:iconsets/MACHINE_CASING_PIPE_STEEL": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_PIPE_STEEL.png",
     "gregtech:iconsets/MACHINE_CASING_PIPE_TITANIUM": "assets/gregtech/textures/blocks/iconsets/MACHINE_CASING_PIPE_TITANIUM.png",
@@ -16915,6 +17067,9 @@
     "gregtech:iconsets/MACHINE_UHV_BOTTOM": "assets/gregtech/textures/blocks/iconsets/MACHINE_UHV_BOTTOM.png",
     "gregtech:iconsets/MACHINE_UHV_SIDE": "assets/gregtech/textures/blocks/iconsets/MACHINE_UHV_SIDE.png",
     "gregtech:iconsets/MACHINE_UHV_TOP": "assets/gregtech/textures/blocks/iconsets/MACHINE_UHV_TOP.png",
+    "gregtech:iconsets/MACHINE_ULV_BOTTOM": "assets/gregtech/textures/blocks/iconsets/MACHINE_ULV_BOTTOM.png",
+    "gregtech:iconsets/MACHINE_ULV_SIDE": "assets/gregtech/textures/blocks/iconsets/MACHINE_ULV_SIDE.png",
+    "gregtech:iconsets/MACHINE_ULV_TOP": "assets/gregtech/textures/blocks/iconsets/MACHINE_ULV_TOP.png",
     "gregtech:iconsets/MACHINE_UV_BOTTOM": "assets/gregtech/textures/blocks/iconsets/MACHINE_UV_BOTTOM.png",
     "gregtech:iconsets/MACHINE_UV_SIDE": "assets/gregtech/textures/blocks/iconsets/MACHINE_UV_SIDE.png",
     "gregtech:iconsets/MACHINE_UV_TOP": "assets/gregtech/textures/blocks/iconsets/MACHINE_UV_TOP.png",
@@ -16969,6 +17124,7 @@
     "gregtech:materialicons/DULL/pipeMedium": "assets/gregtech/textures/blocks/materialicons/DULL/pipeMedium.png",
     "gregtech:materialicons/DULL/pipeSide": "assets/gregtech/textures/blocks/materialicons/DULL/pipeSide.png",
     "gregtech:materialicons/DULL/wire": "assets/gregtech/textures/blocks/materialicons/DULL/wire.png",
+    "gregtech:materialicons/METALLIC/frameGt": "assets/gregtech/textures/blocks/materialicons/METALLIC/frameGt.png",
     "gregtech:materialicons/METALLIC/pipeMedium": "assets/gregtech/textures/blocks/materialicons/METALLIC/pipeMedium.png",
     "gregtech:materialicons/METALLIC/pipeSide": "assets/gregtech/textures/blocks/materialicons/METALLIC/pipeSide.png",
     "gregtech:materialicons/SHINY/wire": "assets/gregtech/textures/blocks/materialicons/SHINY/wire.png",

@@ -83,6 +83,37 @@ def test_ebf_hints_on_the_hatch_layer(dataset: PhysicalDataset) -> None:
     assert Facing.UP not in ebf.io_faces
 
 
+def test_a_record_keeps_its_substitution_channels_sorted_and_as_dumped() -> None:
+    """Channels sorted by name, each channel's blocks in the dump's own order; ``channel_value`` is
+    dropped, because a hand-written fixture numbers its coils from 0 and it names no tier."""
+    doc = MultiblockDoc.model_validate(
+        {
+            **_doc(7, "Tiered"),
+            "substitutions": {
+                "pipe": [
+                    {"channel_value": 2, "block": "gregtech:gt.blockcasings2", "meta": 14},
+                    {"channel_value": 1, "block": "gregtech:gt.blockcasings2", "meta": 13},
+                ],
+                "coil": [{"channel_value": 0, "block": "gregtech:gt.blockcasings5", "meta": 0}],
+            },
+        }
+    )
+    record = to_physical(doc)
+    assert record.substitutions == (
+        ("coil", (("gregtech:gt.blockcasings5", 0),)),
+        ("pipe", (("gregtech:gt.blockcasings2", 14), ("gregtech:gt.blockcasings2", 13))),
+    )
+    assert record.channel_blocks == dict(record.substitutions)
+    hash(record)  # still a hashable record
+
+
+def test_a_machine_without_channels_records_none(dataset: PhysicalDataset) -> None:
+    vf = dataset.get("Vacuum Freezer")
+    assert vf is not None
+    assert vf.substitutions == ()
+    assert vf.channel_blocks == {}
+
+
 def test_vacuum_freezer_is_3x3x3(dataset: PhysicalDataset) -> None:
     vf = dataset.get("Vacuum Freezer")
     assert vf is not None

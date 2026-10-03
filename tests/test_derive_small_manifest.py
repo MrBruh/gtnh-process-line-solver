@@ -10,12 +10,14 @@ route rule fails the run instead of keeping what it happens to find - that is th
 The rest of the tool is exercised by running it; this covers only the guard, because the guard is
 the part that has to hold when a *new* dataset arrives and nobody is watching - plus the one example
 the tool must skip, which is the same kind of quiet failure pointed the other way: a committed
-manifest that grew to cover a line it was never meant to (#204).
+manifest that grew to cover a line it was never meant to (#204) - and the tiers a fixture's channels
+accept but its blocks never show, which a manifest pruned to the dump alone would drop (#312).
 """
 
 from __future__ import annotations
 
 import importlib.util
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -23,6 +25,8 @@ from types import ModuleType
 from typing import Any
 
 import pytest
+
+from gtnh_solver.dataset import CHEMICAL_PLANT, load_physical_dataset
 
 _REPO = Path(__file__).resolve().parents[1]
 _TOOL = _REPO / "tools" / "derive_small_manifest.py"
@@ -139,3 +143,21 @@ def test_the_2_9_acceptance_fixture_stays_out_of_the_committed_manifest(
     monkeypatch.setattr(tool, "REPO", tmp_path)
 
     assert tool._example_machines() == []
+
+
+def test_a_fixtures_channel_tiers_the_dump_never_places_are_kept() -> None:
+    """Bronze pipe casing and the ULV machine casing are valid in the Chemical Plant but absent from
+    its dump (``dataset.channel_blocks``); a plant built from either must still skin and export."""
+    kept = _tool()._fixture_block_keys({CHEMICAL_PLANT})
+    assert {"gregtech:gt.blockcasings2|12", "gregtech:gt.blockcasings|0"} <= kept
+
+
+def test_the_committed_manifest_skins_every_block_the_plants_channels_accept() -> None:
+    manifest = json.loads(
+        (_REPO / "data" / "textures" / "manifest.json").read_text(encoding="utf-8")
+    )
+    record = load_physical_dataset(_REPO / "data" / "multiblocks").by_block_key[CHEMICAL_PLANT]
+    wanted = {
+        f"{block}|{meta}" for blocks in record.channel_blocks.values() for block, meta in blocks
+    }
+    assert wanted - set(manifest["blocks"]) == set()
