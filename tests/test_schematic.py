@@ -675,7 +675,8 @@ def test_the_chemical_plant_exports_with_the_casings_its_node_needs() -> None:
 def test_a_tier_the_dump_never_places_exports() -> None:
     """The converted shadow plant's Bronze pipe casing (meta 12) is valid in game and absent from
     every dump; the committed manifest must still name it, or the export refuses the block. Only
-    the plant is placed: the plan's Industrial Coke Ovens are not in the 2.8.4-derived manifest."""
+    the plant is placed, because only its box is counted; the whole line's export, Industrial Coke
+    Ovens included, is ``test_derive_small_manifest``'s to check (#319)."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         adapted = adapt_file(

@@ -394,6 +394,23 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **Every shipped example exports on a fresh clone, the converted ShadowTheAge line included
+  (#319).** `gtnh-solve examples/shadow-nitrobenzene.json --schematic` was refused on a fresh
+  clone: the committed `data/textures/manifest.json` was cut from a 2.8.4 dump, which has no 2.9
+  Industrial Coke Oven (`gregtech:gt.blockmachines|15543`), so the exporter could not type the
+  line's coke ovens. The committed manifest is now cut whole from the 2.9.0-beta-3 dump
+  (GT5-Unofficial 5.09.54.133), one pack for every block in it rather than one 2.9 block patched
+  onto 2.8.4 data: 113 blocks and 172 icons before, 117 blocks and 150 icons now. The four added
+  are the Industrial Coke Oven, the Mega Distillation Tower, the Coke Oven and its Coke Oven Hatch,
+  and none was dropped. The previewer fetches the GT jar the manifest's provenance names, so a
+  fresh-clone preview now downloads 5.09.54.133 and draws 2.9 art. Cables and pipes are filed under
+  their 2.9 names (`2x Tin Cable` where 2.8.4 said `cable.tin.02`), which the previewer's and the
+  exporter's lookups already accepted. A new test solves every example the manifest is cut for and
+  exports it from the committed data alone, so a block the manifest lacks fails CI rather than a
+  user's export. A local dump generated before the beta-3 one (2026-10-02T23:21Z) that shadows the
+  committed manifest now warns that it is the older one (`DatasetWarning`), where before only a dump
+  older than 2026-09-28 did; pass `--dataset-version` to pin a dump, or re-run the extractor for
+  its pack.
 - **Each tower output's hatch stands on the layer GT fills it from, and every layer gets one
   (#299).** GT fills a Distillation Tower by layer, not first fit: recipe fluid output `i` goes only
   to the output hatches on its `i`-th layer above the base, and the tower does not form while any

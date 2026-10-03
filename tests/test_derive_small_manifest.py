@@ -12,6 +12,9 @@ the part that has to hold when a *new* dataset arrives and nobody is watching - 
 the tool must skip, which is the same kind of quiet failure pointed the other way: a committed
 manifest that grew to cover a line it was never meant to (#204) - and the tiers a fixture's channels
 accept but its blocks never show, which a manifest pruned to the dump alone would drop (#312).
+
+What the tool wrote is checked end to end as well: every example it prunes for must export a
+``.schematic`` from the committed data alone, as on a fresh clone (#319).
 """
 
 from __future__ import annotations
@@ -20,16 +23,23 @@ import importlib.util
 import json
 import shutil
 import sys
+import warnings
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 import pytest
 
+from gtnh_solver.adapter import adapt_file
 from gtnh_solver.dataset import CHEMICAL_PLANT, load_physical_dataset
+from gtnh_solver.previewer.textures import TextureManifest, load_multiblock_docs
+from gtnh_solver.schematic import build_schematic
+from gtnh_solver.solver import solve
 
 _REPO = Path(__file__).resolve().parents[1]
 _TOOL = _REPO / "tools" / "derive_small_manifest.py"
+_COMMITTED_MANIFEST = _REPO / "data" / "textures" / "manifest.json"
+_COMMITTED_MULTIBLOCKS = _REPO / "data" / "multiblocks"
 
 
 def _tool() -> ModuleType:
@@ -127,7 +137,7 @@ def test_the_2_9_acceptance_fixture_stays_out_of_the_committed_manifest(
 ) -> None:
     """``ev-nitrobenzene.json`` is committed to test 2.9 work against, not to be skinned out of the
     box (#204). Were the tool to prune for it, the next regeneration would quietly pull its EV tier
-    and its 2.9 machine names into the committed manifest.
+    and every machine only it uses into the committed manifest.
 
     Run against an ``examples/`` holding only the excluded plans, so the answer cannot lean on what
     the other examples happen to use: skipped by name, they contribute nothing at all. A name that
@@ -153,11 +163,40 @@ def test_a_fixtures_channel_tiers_the_dump_never_places_are_kept() -> None:
 
 
 def test_the_committed_manifest_skins_every_block_the_plants_channels_accept() -> None:
-    manifest = json.loads(
-        (_REPO / "data" / "textures" / "manifest.json").read_text(encoding="utf-8")
-    )
-    record = load_physical_dataset(_REPO / "data" / "multiblocks").by_block_key[CHEMICAL_PLANT]
+    manifest = json.loads(_COMMITTED_MANIFEST.read_text(encoding="utf-8"))
+    record = load_physical_dataset(_COMMITTED_MULTIBLOCKS).by_block_key[CHEMICAL_PLANT]
     wanted = {
         f"{block}|{meta}" for blocks in record.channel_blocks.values() for block, meta in blocks
     }
     assert wanted - set(manifest["blocks"]) == set()
+
+
+@pytest.mark.parametrize("example", _tool()._scoped_examples(), ids=lambda path: path.name)
+def test_every_scoped_example_exports_against_the_committed_data(example: Path) -> None:
+    """What a fresh clone does with a shipped example: solve it and export a ``.schematic``, from
+    the committed manifest and fixtures alone. The manifest is cut for exactly these lines, so a
+    block one of them needs and it lacks is a manifest cut wrong, and the exporter refuses that
+    block by raising, uncaught here (#319: 2.9's Industrial Coke Oven, absent from a manifest cut
+    from a 2.8.4 dump).
+
+    Both files are read by path rather than resolved, since resolution prefers a local dump and
+    would test that instead on any machine that has one. Every machine must be placed first: a
+    partial layout exports only what was placed, and would pass with the missing block left out.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # pack and cover notes; an untypeable block is an error
+        problem = adapt_file(str(example), physical=load_physical_dataset(_COMMITTED_MULTIBLOCKS))
+        layout = solve(problem, optimize=False)
+        assert {p.machine_id for p in layout.placements} == {m.id for m in problem.machines}
+        build_schematic(
+            problem,
+            layout,
+            manifest=TextureManifest.load(_COMMITTED_MANIFEST),
+            docs=load_multiblock_docs(_COMMITTED_MULTIBLOCKS),
+        )
+
+
+def test_the_shadow_line_is_in_the_manifests_scope() -> None:
+    """The converted ShadowTheAge line is the one #319 broke, so the export test above has to run
+    it. Its parameters come from the tool, and an empty or shrunken set would skip quietly."""
+    assert "shadow-nitrobenzene.json" in {path.name for path in _tool()._scoped_examples()}
