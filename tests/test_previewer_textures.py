@@ -22,11 +22,13 @@ from gtnh_solver.dataset import load_physical_dataset
 from gtnh_solver.dataset import roots as dataset_roots
 from gtnh_solver.dataset.schema import SCHEMA_VERSION, MultiblockDoc
 from gtnh_solver.ir import InputIR, LayoutResult, LayoutStatus
-from gtnh_solver.previewer.bake import bake_layers
+from gtnh_solver.previewer.bake import bake_layers, is_blank
 from gtnh_solver.previewer.scene import FACE_CAP, FACE_COVERED, block_face_cover, build_scene
 from gtnh_solver.previewer.textures import (
     _GT_SIDE_TO_THREE_SLOT,
     TextureManifest,
+    _icon_name,
+    _legend_side,
     expand_machine,
     primary_variant,
     texturize_scene,
@@ -588,6 +590,17 @@ def test_bake_skips_missing_icons_and_returns_none_when_all_missing() -> None:
     assert baked is not None  # the available casing layer still bakes
 
 
+def test_a_sprite_is_blank_only_when_the_frame_a_bake_takes_draws_nothing() -> None:
+    """2.8.4's GT jar ships empty sprites (``DIESEL_GENERATOR_FRONT``) under names that read as art.
+    One faint pixel is a drawing; a strip whose first frame is empty bakes to nothing, so it is
+    blank whatever its later frames hold."""
+    assert is_blank(_ICON_PNG[CLEAR])
+    assert not is_blank(_png((0, 0, 0, 1)))
+    assert not is_blank(_ICON_PNG[OVERLAY])
+    assert is_blank(_strip([(0, 0, 0, 0), (200, 200, 200, 255)]))
+    assert not is_blank(_strip([(200, 200, 200, 255), (0, 0, 0, 0)]))
+
+
 # --------------------------------------------------------------------------------------------------
 # Manifest v2 loader
 # --------------------------------------------------------------------------------------------------
@@ -1073,42 +1086,119 @@ def test_each_textured_type_is_marked_in_the_legend_by_its_controllers_front_fac
     assert all(tile in scene["textures"] for tile in tiles.values() if tile is not None)
 
 
-def test_a_digital_tank_is_marked_by_its_top_not_its_front(
-    dataset: tuple[Path, Path], tmp_path: Path
-) -> None:
-    """A Super Tank's front carries only its output pipe; its tank display (``OVERLAY_QTANK``) is
-    on its top, so that is the face the legend shows. Chosen by the block's GT class, so a machine
-    of any other class still shows its front."""
+#: Real icon names for the legend-side tests (#322): what a dump records on a machine's faces.
+_LV_TOP = "gregtech:iconsets/MACHINE_LV_TOP"
+_LV_BOTTOM = "gregtech:iconsets/MACHINE_LV_BOTTOM"
+_ENERGY_OUT = "gregtech:iconsets/OVERLAY_ENERGY_OUT_LV"
+_PIPE = "gregtech:iconsets/OVERLAY_PIPE"
+_INVISIBLE = "minecraft:invisible"
+_ART = "gregtech:iconsets/OVERLAY_SOLAR_PANEL"
+_TEST_BLOCK = "gregtech:gt.blockmachines|130"
+
+
+def _one_block(**sides: list[str]) -> dict[str, Any]:
+    """A manifest holding one MTE, meta 130 named "Test Block", whose idle stack on each named side
+    is that list of icons, its base first; ``all`` stands for every side not named."""
+    return {
+        "blocks": {
+            _TEST_BLOCK: {
+                "kind": "mte",
+                "display_name": "Test Block",
+                "source_class": "test.MTETestBlock",
+                "sides": {
+                    side: {
+                        "inactive": [
+                            {"icon": icon, "rgba": [255, 255, 255, 0], "glow": False}
+                            for icon in icons
+                        ]
+                    }
+                    for side, icons in sides.items()
+                },
+            }
+        }
+    }
+
+
+def _legend_tile(
+    dataset: tuple[Path, Path],
+    tmp_path: Path,
+    sides: dict[str, list[str]],
+    *,
+    front: str = "north",
+    source_class: str = "test.MTETestBlock",
+) -> str | None:
+    """The legend tile ``texturize_scene`` gives a one-block machine type whose idle stacks are
+    ``sides``, placed facing ``front`` beside the fixture's other blocks."""
     mb, manifest = dataset
     doc = json.loads(manifest.read_text(encoding="utf-8"))
-    side = [{"icon": MACH_SIDE, "rgba": [120, 130, 200, 0], "glow": False}]
-    doc["blocks"]["gregtech:gt.blockmachines|130"] = {
-        "kind": "mte",
-        "display_name": "Test Tank",
-        "source_class": "gregtech.common.tileentities.storage.MTESuperTank",
-        "sides": {
-            "NORTH": {"inactive": side},
-            "UP": {
-                "inactive": [*side, {"icon": OVERLAY, "rgba": [255, 255, 255, 0], "glow": False}]
-            },
-            "all": {"inactive": side},
-        },
+    doc["blocks"].update(_one_block(**sides)["blocks"])
+    doc["blocks"][_TEST_BLOCK]["source_class"] = source_class
+    path = tmp_path / "legend-manifest.json"
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    scene = _scene([_machine("b1", "Test Block", [0, 0, 0], [1, 1, 1], front=front)])
+    scene["legend"] = [{"label": "Test Block", "color": "#6ca0dc"}]
+    texturize_scene(scene, multiblocks_dir=mb, manifest_path=path, png_provider=_provider)
+    tile = scene["legend"][0].get("tile")
+    assert tile is None or tile in scene["textures"]
+    return None if tile is None else str(tile)
+
+
+@pytest.mark.parametrize(
+    "source_class",
+    [
+        "gregtech.common.tileentities.storage.MTESuperTank",
+        "gregtech.common.tileentities.storage.MTEQuantumTank",
+        "gregtech.common.tileentities.machines.basic.MTEMassfabricator",
+    ],
+)
+def test_a_block_whose_front_shows_only_a_port_is_marked_by_its_top(
+    dataset: tuple[Path, Path], tmp_path: Path, source_class: str
+) -> None:
+    """A digital tank's front carries only its output pipe, and its tank display is on its top, so
+    that is the face the legend shows, turned however the tank is placed. The stacks decide, not
+    the class: any block of that shape is marked the same way."""
+    sides = {"all": [MACH_SIDE], "NORTH": [MACH_SIDE, _PIPE], "UP": [MACH_SIDE, OVERLAY]}
+    tile = _legend_tile(dataset, tmp_path, sides, front="west", source_class=source_class)
+    assert tile == f"{_TEST_BLOCK}|UP|inactive"
+
+
+def test_a_side_is_named_in_the_dumps_frame_not_the_worlds(
+    dataset: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """A 2.9 Gas Turbine draws its art on its sides only. Placed facing south, its own right-hand
+    side faces world west, but the dump recorded it as EAST and the tile is keyed that way."""
+    sides = {
+        "all": [MACH_SIDE, _INVISIBLE],
+        "NORTH": [MACH_SIDE, _INVISIBLE, _ENERGY_OUT],
+        "EAST": [MACH_SIDE, OVERLAY, _INVISIBLE],
     }
-    tank_manifest = tmp_path / "tank-manifest.json"
-    tank_manifest.write_text(json.dumps(doc), encoding="utf-8")
-    scene = _scene(
-        [
-            _machine("t1", "Test Tank", [0, 0, 0], [1, 1, 1], front="west"),
-            _machine("m1", "Test Macerator", [3, 0, 0], [1, 1, 1]),
-        ]
-    )
-    scene["legend"] = [{"label": t, "color": "#6ca0dc"} for t in ("Test Tank", "Test Macerator")]
-    texturize_scene(scene, multiblocks_dir=mb, manifest_path=tank_manifest, png_provider=_provider)
-    tiles = {entry["label"]: entry.get("tile") for entry in scene["legend"]}
-    assert tiles == {
-        "Test Tank": "gregtech:gt.blockmachines|130|UP|inactive",
-        "Test Macerator": "gregtech:gt.blockmachines|5|NORTH|inactive",
+    tile = _legend_tile(dataset, tmp_path, sides, front="south")
+    assert tile == f"{_TEST_BLOCK}|EAST|inactive"
+
+
+def test_a_front_whose_overlay_sprite_is_blank_is_passed_over(
+    dataset: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """A 2.8.4 Combustion Generator names ``DIESEL_GENERATOR_FRONT`` on its front, but GT shipped
+    that sprite empty; its art is on its top. The sprite is fetched, so the pixels decide."""
+    sides = {
+        "all": [MACH_SIDE],
+        "NORTH": [MACH_SIDE, CLEAR, _ENERGY_OUT],
+        "UP": [MACH_SIDE, OVERLAY, CLEAR],
     }
+    assert _legend_tile(dataset, tmp_path, sides) == f"{_TEST_BLOCK}|UP|inactive"
+
+
+def test_a_chosen_face_that_did_not_bake_falls_back_to_the_front(
+    dataset: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """The top names art, but none of its sprites can be fetched, so it bakes nothing. The front
+    did bake, and a machine's own face beats the colour swatch."""
+    sides = {
+        "all": [MACH_SIDE],
+        "UP": ["gregtech:iconsets/UNFETCHABLE", "gregtech:iconsets/OVERLAY_UNFETCHABLE"],
+    }
+    assert _legend_tile(dataset, tmp_path, sides) == f"{_TEST_BLOCK}|NORTH|inactive"
 
 
 def test_a_legend_tile_is_only_a_face_that_baked(dataset: tuple[Path, Path]) -> None:
@@ -1119,6 +1209,141 @@ def test_a_legend_tile_is_only_a_face_that_baked(dataset: tuple[Path, Path]) -> 
     scene["legend"] = [{"label": "Test EBF", "color": "#6ca0dc"}]
     texturize_scene(scene, multiblocks_dir=mb, manifest_path=manifest, png_provider=lambda _: {})
     assert "tile" not in scene["legend"][0]
+
+
+@pytest.mark.parametrize(
+    ("sides", "chosen"),
+    [
+        pytest.param(
+            {"all": [MACH_SIDE], "NORTH": [MACH_SIDE, _ENERGY_OUT], "UP": [_LV_TOP, _ART]},
+            "UP",
+            id="a solar panel's top",
+        ),
+        pytest.param(
+            {
+                "all": [MACH_SIDE],
+                "NORTH": [MACH_SIDE, _PIPE],
+                "UP": [
+                    _LV_TOP,
+                    "gregtech:iconsets/OVERLAY_QTANK",
+                    "gregtech:iconsets/OVERLAY_QTANK_GLOW",
+                ],
+            },
+            "UP",
+            id="a digital tank's top",
+        ),
+        pytest.param(
+            {
+                "all": [MACH_SIDE, _INVISIBLE, _INVISIBLE],
+                "NORTH": [MACH_SIDE, _INVISIBLE, _INVISIBLE, _ENERGY_OUT],
+                "UP": [_LV_TOP, _INVISIBLE, _INVISIBLE],
+                "EAST": [MACH_SIDE, "gregtech:iconsets/GAS_TURBINE_SIDE", _INVISIBLE],
+                "WEST": [MACH_SIDE, "gregtech:iconsets/GAS_TURBINE_SIDE", _INVISIBLE],
+            },
+            "EAST",
+            id="a 2.9 turbine's right-hand side",
+        ),
+        pytest.param(
+            {"all": [MACH_SIDE], "WEST": [MACH_SIDE, _ART], "SOUTH": [MACH_SIDE, _ART]},
+            "WEST",
+            id="the left-hand side before the back",
+        ),
+        pytest.param({"all": [MACH_SIDE], "SOUTH": [MACH_SIDE, _ART]}, "SOUTH", id="the back"),
+        pytest.param(
+            {"all": [MACH_SIDE], "NORTH": [MACH_SIDE, OVERLAY], "UP": [_LV_TOP, _ART]},
+            "NORTH",
+            id="a front with art of its own beats a top with art",
+        ),
+        pytest.param({"all": [MACH_SIDE, _ENERGY_OUT]}, "NORTH", id="energy marks on every face"),
+        pytest.param(
+            {
+                "all": [MACH_SIDE],
+                "NORTH": [
+                    MACH_SIDE,
+                    "gregtech:iconsets/OVERLAY_ENERGY_IN_MULTI_16A_EV",
+                    "gregtech:iconsets/OVERLAY_ENERGY_OUT_MULTI_4A_ULV",
+                    "gregtech:iconsets/OVERLAY_PIPE_OUT",
+                    "gregtech:iconsets/OVERLAY_PIPE_COLOR_NONE",
+                    "gregtech:iconsets/ITEM_OUT_SIGN",
+                    "gregtech:iconsets/FLUID_STEAM_IN_SIGN",
+                ],
+                "UP": [_LV_TOP, _ART],
+            },
+            "UP",
+            id="every port mark is no art",
+        ),
+        pytest.param({"all": [MACH_SIDE], "UP": [_ART]}, "NORTH", id="art only in a base layer"),
+        pytest.param(
+            {"all": [MACH_SIDE], "DOWN": [_LV_BOTTOM, _ART]}, "NORTH", id="art only underneath"
+        ),
+        pytest.param(
+            {
+                "all": [MACH_SIDE],
+                "NORTH": [MACH_SIDE, "gregtech:iconsets/OVERLAY_PIPELINE_FLUID_FRONT"],
+                "UP": [_LV_TOP, "gregtech:iconsets/OVERLAY_PIPELINE_FLUID_SIDE_UP_DOWN"],
+            },
+            "NORTH",
+            id="a pipeline's own front is not a pipe mark",
+        ),
+        pytest.param(
+            {
+                "all": [MACH_SIDE],
+                "NORTH": [
+                    MACH_SIDE,
+                    "gregtech:iconsets/MACHINE_CASING_MAGIC",
+                    "gregtech:iconsets/MACHINE_CASING_MAGIC_GLOW",
+                    _ENERGY_OUT,
+                ],
+                "UP": [_LV_TOP, _ART],
+            },
+            "NORTH",
+            id="a casing above the base counts as art",
+        ),
+        pytest.param({"NORTH": [MACH_SIDE]}, "NORTH", id="a block that records its front only"),
+    ],
+)
+def test_a_machine_is_marked_by_the_first_face_that_shows_its_own_art(
+    sides: dict[str, list[str]], chosen: str
+) -> None:
+    """The front if it shows the machine's own art, else the first of the top, its right, its left
+    and its back that does, else the front. Port marks (an energy plug, a pipe, a sign) and layers
+    GT draws invisible are not art, and neither is a face's base layer. With no sprites in hand,
+    as here, a layer is judged by its name."""
+    manifest = TextureManifest(_one_block(**sides))
+    assert _legend_side(manifest, "gregtech:gt.blockmachines", 130, {}) == chosen
+
+
+def test_a_block_the_manifest_does_not_hold_keeps_its_front() -> None:
+    manifest = TextureManifest(_one_block())
+    assert _legend_side(manifest, "gregtech:gt.blockmachines", 9, {}) == "NORTH"
+
+
+def test_a_blank_sprite_is_no_art_and_an_unfetched_one_is_judged_by_name() -> None:
+    """A 2.8.4 Combustion Generator: its front names two overlays GT shipped empty, and its top the
+    art it shows. Given the sprites, its top marks it; without them, the names say front."""
+    front = "gregtech:iconsets/DIESEL_GENERATOR_FRONT"
+    front_glow = "gregtech:iconsets/DIESEL_GENERATOR_FRONT_GLOW"
+    top = "gregtech:iconsets/DIESEL_GENERATOR_TOP"
+    manifest = TextureManifest(
+        _one_block(
+            all=[MACH_SIDE],
+            NORTH=[MACH_SIDE, front, front_glow, _ENERGY_OUT],
+            UP=[_LV_TOP, top],
+        )
+    )
+    blank, drawn = _png((0, 0, 0, 0)), _png((90, 90, 90, 255))
+    sprites = {front: blank, front_glow: blank, top: drawn}
+    assert _legend_side(manifest, "gregtech:gt.blockmachines", 130, sprites) == "UP"
+    assert _legend_side(manifest, "gregtech:gt.blockmachines", 130, {}) == "NORTH"
+    # Only the front's sprites: the top is judged by its name, and its name is art.
+    del sprites[top]
+    assert _legend_side(manifest, "gregtech:gt.blockmachines", 130, sprites) == "UP"
+
+
+def test_an_icons_name_is_read_past_its_domain_and_folder() -> None:
+    assert _icon_name("gregtech:iconsets/OVERLAY_QTANK") == "OVERLAY_QTANK"
+    assert _icon_name("miscutils:TileEntities/adv_machine_screen_logo") == "adv_machine_screen_logo"
+    assert _icon_name("minecraft:invisible") == "invisible"
 
 
 def test_generic_single_block_machine_textures_via_tier(dataset: tuple[Path, Path]) -> None:
@@ -1726,6 +1951,23 @@ def test_committed_heat_proof_casing_is_not_a_tier_casing() -> None:
         manifest["icons"]["gregtech:iconsets/MACHINE_HEATPROOFCASING"]
         == "assets/gregtech/textures/blocks/iconsets/MACHINE_HEATPROOFCASING.png"
     )
+
+
+@pytest.mark.parametrize(
+    ("meta", "side"),
+    [
+        *((meta, "UP") for meta in range(130, 135)),  # Super Tank I to V
+        (135, "NORTH"),  # Super Chest I: its front carries its display
+        (611, "NORTH"),  # Basic Forge Hammer
+        (998, "NORTH"),  # ExxonMobil Chemical Plant
+        (1169, "NORTH"),  # Large Chemical Reactor
+    ],
+)
+def test_committed_legend_sides(meta: int, side: str) -> None:
+    """Golden guard (#322): in the SHIPPED manifest only the Super Tanks leave their front, for the
+    tank display on their top. CI has no sprites, so this pins the rule's name half."""
+    manifest = TextureManifest.load(_COMMITTED_MANIFEST)
+    assert _legend_side(manifest, "gregtech:gt.blockmachines", meta, {}) == side
 
 
 # --------------------------------------------------------------------------------------------------

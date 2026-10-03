@@ -21,6 +21,7 @@ from gtnh_solver.previewer.textures import (
     BlockCube,
     TextureManifest,
     _face_icons,
+    _legend_keys,
     _swapped,
     expand_machine,
     face_key,
@@ -280,6 +281,15 @@ def test_two_plants_on_different_casings_bake_distinct_faces() -> None:
     plain = BlockCube(cell=(0, 0, 0), block=_CONTROLLER[0], meta=_CONTROLLER[1], steps=0)
     keys = {face_key(cube, "NORTH") for cube in (titanium, tungstensteel, plain)}
     assert len(keys) == 3
+
+
+def test_a_recased_controller_is_marked_in_the_legend_by_its_recased_front() -> None:
+    """Its overlays, read off the dump, keep the legend on its front (#322), and the tile is that
+    front as drawn over the casing it was built with."""
+    recased = _controller(expand_machine(_plant(_NITROBENZENE), _PLANT_DOC, _MANIFEST))
+    assert _legend_keys(recased, _MANIFEST, {}) == [
+        "gregtech:gt.blockmachines|998|NORTH|inactive|gregtech:gt.blockcasings4|2"
+    ]
 
 
 def test_a_choice_the_form_already_holds_swaps_nothing() -> None:

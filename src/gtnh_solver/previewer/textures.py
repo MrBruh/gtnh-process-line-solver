@@ -47,7 +47,7 @@ from gtnh_solver.dataset.schema import MultiblockDoc, Variant, load_multiblock_d
 from gtnh_solver.dataset.structure_blocks import BlockId, channel_blocks
 from gtnh_solver.dataset.voltage import VOLTAGE_BY_TIER
 
-from .bake import BakeUnavailableError, bake_layers
+from .bake import BakeUnavailableError, bake_layers, is_blank
 from .scene import block_face_cover
 
 _log = logging.getLogger(__name__)
@@ -160,15 +160,42 @@ _TIER_TOKEN = re.compile(r"\b(" + "|".join(sorted(_TIER_LADDER, key=len, reverse
 #: every MTE it walks, so the front stack is always recorded there whatever the block's real front.
 _FRONT_IN_DUMP = "NORTH"
 
-#: The dumped side a machine type's legend mark is read from where its front (the default,
-#: :data:`_FRONT_IN_DUMP`) is not what tells it apart, keyed by the block's own GT class (its
-#: manifest ``source_class``), never by a display name. A digital tank draws its tank display,
-#: ``OVERLAY_QTANK``, on its TOP and only an output pipe on its front (``MTEDigitalTankBase``,
-#: which both the Super and the Quantum Tank extend).
-_LEGEND_SIDE_BY_CLASS = {
-    "gregtech.common.tileentities.storage.MTESuperTank": "UP",
-    "gregtech.common.tileentities.storage.MTEQuantumTank": "UP",
-}
+#: The dumped sides a machine type's legend mark may be read from, best first. The first whose
+#: idle stack shows the machine's own art wins (:func:`_legend_side`), and a block with none keeps
+#: its front. They are the dump's sides, in the controller's own frame (it is built facing NORTH),
+#: so EAST is the machine's right-hand side looking out of its front, wherever it was placed.
+#:
+#: The front comes first because it is the face a builder knows a machine by. Where it shows only a
+#: casing and a port mark, the top is next: a tank's display, a solar panel, a cleanroom's lamp. A
+#: side is for the few that draw their art nowhere else (a turbine, a semifluid generator). DOWN is
+#: left out: no MTE in the three local dumps draws its art only there.
+#:
+#: Measured on each pack with its own jar (#322): 85 of 2.8.4's 1856 MTEs leave the front (72 for
+#: the top, 13 for a side) and 92 of 2.9.0-beta-3's 1966 (79, 13), each class on the same side at
+#: every tier. Judged by icon names alone, 2.8.4 would keep 21 combustion, geothermal, semifluid and
+#: turbine generators on their front: it names sprites there that GT shipped empty
+#: (:func:`~gtnh_solver.previewer.bake.is_blank`), which 2.9 records as :data:`_INVISIBLE_ICON`.
+_LEGEND_SIDES = (_FRONT_IN_DUMP, "UP", "EAST", "WEST", "SOUTH")
+
+#: The icon a 2.9 dump records for an optional GT sprite no resource pack supplies. GT registers
+#: ``Textures.InvisibleIcon`` for it (``GTOptionalBlockIconContainer``), so the layer draws nothing.
+_INVISIBLE_ICON = "minecraft:invisible"
+
+#: The marks GT draws on ANY machine's ports, so a face showing only these says nothing about which
+#: machine it is: the energy plug (``OVERLAY_ENERGY_IN_LV``, ``OVERLAY_ENERGY_OUT_MULTI_EV``), the
+#: pipe and its colour ring (``OVERLAY_PIPE_OUT``, ``OVERLAY_PIPE_COLOR_NONE``) and the in/out signs
+#: (``ITEM_OUT_SIGN``, ``FLUID_IN_SIGN``). Matched against an icon's whole base name, so the Long
+#: Distance Pipeline's own ``OVERLAY_PIPELINE_FLUID_FRONT`` is art, not a pipe mark.
+#:
+#: A casing sprite above layer 0 is NOT a mark, though a few machines carry one on a front that
+#: shows nothing else (the magic Absorber's ``MACHINE_CASING_MAGIC``): the Lightning Rod's top is
+#: such a layer and nothing more, and it is that machine's whole look. Those few magic machines keep
+#: a front that reads as a casing, which is the cheaper miss.
+_PORT_MARK = re.compile(
+    r"OVERLAY_ENERGY_(?:IN|OUT)(?:_\w+)?"
+    r"|OVERLAY_PIPE(?:_\w+)?"
+    r"|(?:ITEM|FLUID)_\w+_SIGN(?:_GLOW|_ACTIVE)*"
+)
 
 #: Runs of non-alphanumeric characters, collapsed to one space when normalizing a machine name so
 #: matching tolerates case, punctuation, and whitespace differences between plan and manifest.
@@ -1166,19 +1193,76 @@ def face_key(cube: BlockCube, source: str) -> str:
     return key
 
 
+def _icon_name(icon: str) -> str:
+    """An icon's base name, without its domain or folder: ``OVERLAY_QTANK`` for
+    ``gregtech:iconsets/OVERLAY_QTANK``."""
+    return re.split(r"[/:]", icon)[-1]
+
+
+def _draws_art(icon: str, icon_png: Mapping[str, bytes]) -> bool:
+    """Whether a layer drawing ``icon`` is a machine's own art: not invisible, not a port mark
+    (:data:`_PORT_MARK`), and not a blank sprite. An icon whose PNG was not fetched is judged by
+    its name alone."""
+    if icon == _INVISIBLE_ICON or _PORT_MARK.fullmatch(_icon_name(icon)):
+        return False
+    png = icon_png.get(icon)
+    return png is None or not is_blank(png)
+
+
+def _shows_own_art(stack: Sequence[Mapping[str, Any]], icon_png: Mapping[str, bytes]) -> bool:
+    """Whether a face's layer stack draws any of its machine's own art above its base. Layer 0 is
+    left out: it is the casing every face of the block has."""
+    return any(_draws_art(layer["icon"], icon_png) for layer in stack[1:])
+
+
+def _legend_side(
+    manifest: TextureManifest,
+    block: str,
+    meta: int,
+    icon_png: Mapping[str, bytes],
+    state: str = _STATE,
+) -> str:
+    """The dumped side whose face marks ``(block, meta)`` in the legend: the first of
+    :data:`_LEGEND_SIDES` whose stack shows the machine's own art, else its front.
+
+    It reads the dump's stacks, never :func:`_rebased` ones. A re-cased controller's overlays are
+    the same either way, and the layers of the casing it is drawn over are not its art.
+    """
+    return next(
+        (
+            side
+            for side in _LEGEND_SIDES
+            if _shows_own_art(manifest.layers(block, meta, side, state), icon_png)
+        ),
+        _FRONT_IN_DUMP,
+    )
+
+
+def _legend_keys(
+    cube: BlockCube, manifest: TextureManifest, icon_png: Mapping[str, bytes]
+) -> list[str]:
+    """The pool keys ``cube``'s machine type is marked by in the legend, best first: the face
+    :func:`_legend_side` chose, then the front, once."""
+    side = _legend_side(manifest, cube.block, cube.meta, icon_png, cube.idle_state)
+    return [face_key(cube, source) for source in dict.fromkeys((side, _FRONT_IN_DUMP))]
+
+
 def _legend_tiles(
-    scene: dict[str, Any], front_keys: Mapping[str, str], pool: Mapping[str, str]
+    scene: dict[str, Any], legend_keys: Mapping[str, Sequence[str]], pool: Mapping[str, str]
 ) -> None:
-    """Give each machine type's legend entry the ``tile`` it is drawn with: the pool key of its
-    controller's front face, idle, the face a builder recognises the machine by. The dump builds
-    every controller facing NORTH, so that face is always the one read from GT's NORTH side,
-    whichever way the machine was placed. A block whose front says little reads another side
-    instead (:data:`_LEGEND_SIDE_BY_CLASS`: a digital tank's top). Only a face that baked is named;
-    a type with none (a placeholder box) keeps the colour swatch its boxes are painted in."""
+    """Give each machine type's legend entry the ``tile`` it is drawn with: the pool key of the face
+    that tells the machine apart, idle, read off the first machine of the type. That is its
+    controller's front, unless the front shows nothing of its own and another side does
+    (:func:`_legend_side`: a tank's top, a turbine's side). The dump builds every controller facing
+    NORTH, so the side is named in that frame, whichever way the machine was placed.
+
+    Only a face that baked is named. A chosen side that did not falls back to the front, and a type
+    with neither (a placeholder box) keeps the colour swatch its boxes are painted in."""
     for entry in scene.get("legend", []):
-        key = front_keys.get(entry.get("label", ""))
-        if key is not None and key in pool:
-            entry["tile"] = key
+        keys = legend_keys.get(entry.get("label", ""), ())
+        tile = next((key for key in keys if key in pool), None)
+        if tile is not None:
+            entry["tile"] = tile
 
 
 def _face_icons(
@@ -1450,8 +1534,9 @@ def texturize_scene(
     # ones landed on.
     recased = uncertain = standalone = 0
     uncertain_casings: set[str] = set()
-    # Machine type -> the pool key of its controller's front face, for the legend (_legend_tiles).
-    front_keys: dict[str, str] = {}
+    # Machine type -> the cube carrying its first machine's front, for the legend (_legend_keys).
+    # Which of its faces marks the type waits for the sprites, because a blank one is not art.
+    legend_cubes: dict[str, BlockCube] = {}
     for machine in scene["machines"]:
         # NOT `cubes`: that name is the output accumulator this loop appends scene blocks to.
         expanded = machine_cubes(machine, docs, manifest, auto_out_face)
@@ -1461,12 +1546,8 @@ def texturize_scene(
         front = front_cube(expanded, machine_doc(machine, docs))
         for cube in expanded:
             faces, stacks = _face_icons(cube, manifest)
-            if cube is front:
-                side = _LEGEND_SIDE_BY_CLASS.get(
-                    manifest.source_class(cube.block, cube.meta), _FRONT_IN_DUMP
-                )
-                if face_key(cube, side) in stacks:
-                    front_keys.setdefault(machine["type"], face_key(cube, side))
+            if cube is front and stacks:
+                legend_cubes.setdefault(machine["type"], cube)
             if all(face is None for face in faces):
                 unskinned.add(f"{cube.block}|{cube.meta}")
             elif cube.facing is not None:
@@ -1566,7 +1647,10 @@ def texturize_scene(
     scene["blocks"] = cubes
     scene["textures"] = pool
     scene["texturesActive"] = pool_active
-    _legend_tiles(scene, front_keys, pool)
+    legend_keys = {
+        kind: _legend_keys(cube, manifest, icon_png) for kind, cube in legend_cubes.items()
+    }
+    _legend_tiles(scene, legend_keys, pool)
     expanded_types = {m["type"] for m in scene["machines"] if m.get("expanded")}
     placeholder = tuple(t for t in all_types if t not in expanded_types)
     summary = TextureSummary(

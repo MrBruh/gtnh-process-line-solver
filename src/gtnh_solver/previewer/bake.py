@@ -114,6 +114,19 @@ def _tinted(png: bytes, rgba: Sequence[int], image_mod: Any, normalize: bool = T
     return img
 
 
+def is_blank(png: bytes) -> bool:
+    """Whether ``png`` draws nothing: every pixel of the frame a bake takes is fully transparent.
+
+    GT up to pack 2.8.4 shipped empty sprites for overlays it never drew art for (the Combustion
+    Generator's front, sides and back, most ``_GLOW`` layers), and a manifest names them like any
+    other icon. 2.9 deleted the files and registers those icons as ``minecraft:invisible``, so on a
+    2.8.4 manifest only the pixels tell one apart.
+    """
+    image_mod = _require_pillow()
+    image = _frame0(image_mod.open(io.BytesIO(png)).convert("RGBA"), image_mod)
+    return bool(image.getchannel("A").getextrema()[1] == 0)
+
+
 def bake_layers(
     layers: Sequence[Mapping[str, Any]],
     icon_png: Mapping[str, bytes],
