@@ -28,10 +28,14 @@ meta IS block metadata and it needs no tile entity.
 is ``mMainFacing`` and ``mFacing`` is its OUTPUT face, the one it auto-outputs items and fluids
 through; a Super Tank auto-outputs out of its front. Which face that is comes from
 :func:`gtnh_solver.output_faces.output_faces`, the reading the previewer's arrows use too, so the
-file and the preview cannot disagree; every other output face is a cover, which a ``.schematic``
-does not carry, so :class:`SchematicWarning` names each (:func:`_single_block_tile`). Before this
-the export wrote only ``mFacing``, as the front: a 2.9 paste then worked on its bottom face and
-output out of its front.
+file and the preview cannot disagree. Every other output face needs a cover, which the export does
+not write, so :class:`SchematicWarning` names each (:func:`_single_block_tile`). A ``.schematic``
+can hold covers (every save in ``tests/golden/schematic/`` does), but GT names a cover's item by the
+world's *numeric* item id, and Schematica remaps only block ids (``SchematicaMapping``), never
+anything inside tile-entity NBT. A wrong id loses the cover, swaps in another, or can crash the
+client drawing it, so a cover is only safe to write with the loading world's own ids. Before this
+the export wrote only ``mFacing``, as the front, so the 2.9 ghost drew each machine working on its
+bottom face and outputting out of its front.
 
 **A multiblock's tiered parts arrive already swapped** (#312). A Chemical Plant's solid casing,
 pipe casing, coils and machine casings are whatever ``Machine.structure_blocks`` names, applied in
@@ -51,9 +55,9 @@ maintainer's own saves (``tests/golden/schematic/28-sfb`` and ``29-sfb``, one pe
 writes the **low nibble** of the material (Steel 1, Black Steel 14) and keeps the material only in a
 frame that has a tile entity, as ``BaseMetaPipeEntity`` with ``mID = 4096 + material``. So every
 frame is written in that covered-frame shape (:func:`_frame_cell`): the file then says what each
-frame is made of. It cannot make a paste right, and :class:`SchematicWarning` says so: GT keeps a
-frame's tile entity only when ``MTE_BIT`` is in the metadata, which a nibble cannot carry, so in
-game the ghost and a paste show material 1 or 14 (Hydrogen, Fluorine) instead.
+frame is made of. It cannot make the ghost right, and :class:`SchematicWarning` says so: GT keeps a
+frame's tile entity only when ``MTE_BIT`` is in the metadata, which a nibble cannot carry, so the
+ghost shows material 1 or 14 (Hydrogen, Fluorine) instead.
 """
 
 from __future__ import annotations
@@ -183,9 +187,9 @@ DIGITAL_TANK_CLASSES: Final = frozenset(
 class SchematicWarning(UserWarning):
     """The file was written, but part of it will not rebuild faithfully in game.
 
-    GT frame boxes, whose material a ``.schematic`` cannot carry into a paste (#212); output faces
-    that need a cover, which a ``.schematic`` does not carry; and Item Filters, whose slots it does
-    not carry (#249). Each warning names what to build by hand and where.
+    GT frame boxes, whose material the ghost cannot show (#212); output faces that need a cover, and
+    Item Filters' slots, neither of which the export writes (#249). Each warning names what to build
+    by hand and where.
     """
 
 
@@ -355,7 +359,7 @@ def _single_block_tile(
                                   the first tick unless set; 2.9 has no such field and ignores it
     mAllowInputFromOutputSide 0   the solver never docks an input on the output face
     mDisableFilter         1      the field defaults on, but loads with ``getBoolean``, so an
-    mDisableMultiStack     1      absent tag would switch both off in a paste
+    mDisableMultiStack     1      absent tag would switch both off on load
     ====================== ====== =============================================================
 
     A **Super or Quantum Tank** auto-outputs fluid out of its front (``mFacing``) and only once
@@ -480,7 +484,7 @@ def lower(
 
 
 def _warn_about_frames(grid: dict[tuple[int, int, int], Cell], manifest: TextureManifest) -> None:
-    """Say how many frame boxes a paste will get wrong, and of which materials (#212)."""
+    """Say how many frame boxes the ghost shows wrong, and of which materials (#212)."""
     mids: Counter[int] = Counter(
         int(cell.tile["mID"]) for cell in grid.values() if cell.block == FRAME_BLOCK and cell.tile
     )
@@ -492,8 +496,9 @@ def _warn_about_frames(grid: dict[tuple[int, int, int], Cell], manifest: Texture
     )
     warnings.warn(
         f"{sum(mids.values())} GT frame box(es) ({named}): a .schematic keeps only the low 4 bits "
-        "of a frame's material, and GT drops a pasted frame's tile entity, so in game the ghost "
-        "and a paste show these frames as the wrong material. The file records each frame's real "
+        "of a frame's material, and GT ignores a frame's tile entity without the bit that nibble "
+        "cannot hold, so the ghost shows these frames as the wrong material. The file records each "
+        "frame's real "
         "material (--inspect-schematic names it); build them from that (GitHub #212).",
         SchematicWarning,
         stacklevel=3,
@@ -501,7 +506,7 @@ def _warn_about_frames(grid: dict[tuple[int, int, int], Cell], manifest: Texture
 
 
 def _warn_about_covers(covers: list[tuple[str, tuple[int, int, int], CoverFace]]) -> None:
-    """Name every output face that takes a cover, since a ``.schematic`` carries no covers.
+    """Name every output face that takes a cover, since the export writes none (module docstring).
 
     GT auto-outputs a single block through one face only, and a Super Chest through none
     (``output_faces``), so each other output face needs the cover named: a conveyor for items, a
@@ -519,7 +524,7 @@ def _warn_about_covers(covers: list[tuple[str, tuple[int, int, int], CoverFace]]
         f"{kind} x{len(faces)}: {', '.join(faces)}" for kind, faces in by_cover.items()
     )
     warnings.warn(
-        f"{len(covers)} output face(s) need a cover, which a .schematic does not carry, so fit them "
+        f"{len(covers)} output face(s) need a cover, which the export does not write, so fit them "
         "by hand: GT auto-outputs a single block through one face only, and a Super Chest through "
         f"none. {listed}",
         SchematicWarning,
@@ -528,10 +533,10 @@ def _warn_about_covers(covers: list[tuple[str, tuple[int, int, int], CoverFace]]
 
 
 def _warn_about_filters(filters: list[tuple[str, tuple[int, int, int], list[str]]]) -> None:
-    """Say what each Item Filter must let through, since a ``.schematic`` carries no inventory.
+    """Say what each Item Filter must let through, since the export writes no inventory.
 
-    A filter's nine slots are what it sorts by (``MTEFilter.allowPutStack``); a pasted one is empty
-    and passes nothing, so the builder sets each from this list (#249).
+    A filter's nine slots are what it sorts by (``MTEFilter.allowPutStack``); one built from the ghost
+    starts empty and passes nothing, so the builder sets each from this list (#249).
     """
     if not filters:
         return
@@ -540,7 +545,7 @@ def _warn_about_filters(filters: list[tuple[str, tuple[int, int, int], list[str]
         for name, (x, y, z), items in sorted(filters, key=lambda f: f[1])
     )
     warnings.warn(
-        f"{len(filters)} Item Filter(s): a .schematic carries no inventory, so set each filter's "
+        f"{len(filters)} Item Filter(s): the export writes no inventory, so set each filter's "
         f"slots to the item it lets through. {listed}",
         SchematicWarning,
         stacklevel=3,

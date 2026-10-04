@@ -598,7 +598,7 @@ def test_a_frame_keeps_its_material_when_it_already_carries_the_tile_entity_bit(
     assert int(cell.tile["mID"]) == 4096 + _STEEL
 
 
-def test_frames_warn_naming_what_a_paste_will_get_wrong() -> None:
+def test_frames_warn_naming_what_the_ghost_shows_wrong() -> None:
     manifest = TextureManifest(
         {"blocks": {"gregtech:gt.blockmachines|4401": {"kind": "pipe", "display_name": "Steel"}}}
     )

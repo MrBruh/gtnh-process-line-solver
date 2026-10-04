@@ -684,7 +684,7 @@ def _print_basic_machine_facings(schematic: Schematic) -> None:
 
     A basic machine is the tile that records ``mMainFacing``; its ``mFacing`` is the output face,
     and ``mItemTransfer`` / ``mFluidTransfer`` say whether items and fluids leave through it. This
-    is what a pasted build does, so it is how an export is checked without hand-parsing it.
+    is what GT reads from the file, so it is how an export is checked without hand-parsing it.
     """
     machines = [t for t in schematic.tile_entities if t.main_facing is not None]
     if not machines:

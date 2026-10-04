@@ -154,11 +154,11 @@ metadata (`BlockFrameBox.MATERIAL_MASK`, 0xFFF; Steel is 305, Black Steel 334), 
 | x=2 | Steel frame with a cover | 1 | `BaseMetaPipeEntity`, `mID` 4401 = 4096 + 305, with the cover |
 
 So Schematica keeps the **low nibble** of the material and nothing else, and the material survives
-only in a frame that has a tile entity. It cannot survive a paste either: GT creates a frame's tile
+only in a frame that has a tile entity. The ghost cannot show it either: GT creates a frame's tile
 entity only when `MTE_BIT` is in the metadata (`BlockFrameBox.hasTileEntity`), and the nibble cannot
-carry it, so a pasted frame becomes material 1 or 14 (Hydrogen, Fluorine). The exporter therefore
-writes every frame in the covered-frame shape, so the file at least records each frame's material,
-and warns that a paste will get it wrong (`schematic.core._frame_cell`, `SchematicWarning`).
+carry it, so a frame in the ghost shows material 1 or 14 (Hydrogen, Fluorine). The exporter
+therefore writes every frame in the covered-frame shape, so the file at least records each frame's
+material, and warns that the ghost shows it wrong (`schematic.core._frame_cell`, `SchematicWarning`).
 
 The two saves differ only in what each instance assigns: the block's numeric id (2433 against 3027 in
 `SchematicaMapping`), GT's `nbtVersion` stamp (5.09.51.476 against 5.09.54.133), the cover's encoded

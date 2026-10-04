@@ -153,7 +153,8 @@ interface). Then the CLI ties it together.
   yields a harvested validation corpus + a compactness benchmark.
 - **Paste-ready `.schematic` export** - gated on the Assignment's fidelity result. *Shipped
   ahead of this list: `--schematic` writes a Schematica ghost that loads in game (#96, #161), and
-  `--inspect-schematic` reads one back (#162).*
+  `--inspect-schematic` reads one back (#162).* A real paste, with GT's facings, wiring and covers
+  applied, needs a GT-aware printer: Schematica's own applies no tile-entity NBT (`DOMAIN.md`).
 - **GT++ quad/nonuple multi-fluid pipes** - channel-packing within a single block.
 - **EnderIO conduits** - early/mid-game item transport backend.
 - **CP-SAT placement backend** - optional exact solver for small sub-blocks.

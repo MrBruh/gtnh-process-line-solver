@@ -973,6 +973,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **The `.schematic` export's warnings say what the export leaves out, and stop promising a
+  paste.** The cover and Item Filter warnings said a `.schematic` cannot carry covers or inventory.
+  It can, but GT names a cover's item, and an inventory's items, by the world's numeric item id,
+  which Schematica does not remap, so the export does not write them; the warnings now say so. The
+  frame warning said a paste gets a frame's material wrong. Schematica's printer applies no
+  tile-entity NBT, so there is no paste in that sense; the warning now says the ghost shows the
+  wrong material. `docs/DOMAIN.md` records what Schematica remaps, saves and prints.
 - **The placer moves a node's parallel single blocks as one column, back to front.** A plan node
   with a `machineCount` becomes `node#1` .. `node#N`, and the annealer used to move each copy on its
   own, so siblings came out side by side or scattered, every side-by-side contact costing a usable
