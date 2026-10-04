@@ -393,9 +393,12 @@ class MERole(str, Enum):
     - ``attach``: the dense cable on the region's edge the player's main network enters through.
       Its front faces outside the build, like a power source's feed face, and the network's
       channels arrive through it (at most a dense cable's 32, and at most the network's budget);
-    - ``link``: a cable bus on the region's edge whose storage bus(es) face out, at the ME
-      Interface the player places on their main network there; a ``link`` subnet's way to the
-      player's storage, costing the main network one channel;
+    - ``link``: a cable bus on the region's edge carrying one storage bus on its front, facing out
+      at the ME Interface the player places on their main network there; a ``link`` subnet's way
+      to the player's storage. A cell outside the region touches one cell inside it at most, so
+      one link carries one storage bus: a subnet moving items and fluids has two links, an item
+      storage bus facing an ME Interface and a fluid one facing an ME Dual Interface, and costs the
+      main network a channel for each;
     - ``controller``: an ME Controller block, which gives a subnet its channels;
     - ``acceptor``: an Energy Acceptor on the line's EU supply (#336).
     """
@@ -427,7 +430,8 @@ class MEEndpoint(FrozenModel):
     """One ME device a machine needs: the ME counterpart of a hatch or a pipe's terminal.
 
     It serves ``ports``, ports of its machine whose nets ride ``network``: usually one, but a
-    single block's Dual Interface takes its item and its fluid output together. A port too fast for
+    single block's Dual Interface takes its item and its fluid output together. An infrastructure
+    machine's endpoint serves none: a link's storage bus (``MERole``). A port too fast for
     one device has two endpoints, each carrying ``share`` of the port's rate, the way a heavy
     machine's draw is split across energy hatches. ``hatch_kind`` is set on a multiblock: the kind
     of hatch slot the connection takes, the GT ME hatch itself or the normal hatch its AE2 part
@@ -436,7 +440,7 @@ class MEEndpoint(FrozenModel):
 
     id: str = Field(min_length=1)
     network: str = Field(min_length=1)
-    ports: tuple[str, ...] = Field(min_length=1)
+    ports: tuple[str, ...] = ()
     device: MEDeviceSpec
     hatch_kind: str | None = None
     share: float = Field(default=1.0, gt=0.0, le=1.0)
@@ -469,14 +473,14 @@ class MEPlacedDevice(FrozenModel):
     """One ME device a layout builds: an AE2 part on a cable, or one of GT's ME hatches.
 
     ``machine_id`` is the machine it serves, and ``endpoint_id`` the :class:`MEEndpoint` of that
-    machine it builds, ``None`` for a part an infrastructure machine carries (a ``link``'s storage
-    bus). For a **part**, ``cell`` is the cable block it sits on and ``side`` the side of that block
+    machine it builds (a ``link``'s storage bus included). For a **part**, ``cell`` is the cable
+    block it sits on and ``side`` the side of that block
     it sits on, which faces the block it works on. For a **GT ME hatch**, ``cell`` is the casing
     cell the hatch takes and ``side`` the way its front faces, where AE reaches it.
     """
 
     machine_id: str = Field(min_length=1)
-    endpoint_id: str | None = None
+    endpoint_id: str = Field(min_length=1)
     kind: MEDeviceKind
     cell: CellCoord
     side: Facing

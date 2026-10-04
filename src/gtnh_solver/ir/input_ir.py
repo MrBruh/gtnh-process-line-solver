@@ -265,8 +265,8 @@ class Machine(StrictModel):
     #: plan adapted without the physical dataset, and for a multiblock with no tiered part.
     structure_blocks: dict[str, StructureBlock] = Field(default_factory=dict)
     #: The ME devices this machine needs built (InputIR v9, #333): one per AE2 part or GT ME hatch
-    #: that serves its ports on a net riding ME. Empty for a machine with no port on ME, and for
-    #: every machine until the end-to-end build places them (#335).
+    #: that serves its ports on a net riding ME, and a link's one storage bus. Empty for a machine
+    #: with no port on ME, and for every machine until the end-to-end build places them (#335).
     me_endpoints: tuple[MEEndpoint, ...] = ()
     #: What this machine is when it is ME infrastructure rather than a machine of the line: an
     #: attach stub, a link, a controller or an acceptor (InputIR v9). ``None`` for every other.
@@ -446,6 +446,11 @@ class Machine(StrictModel):
             raise ValueError(f"machine {self.id!r} has two ME endpoints with one id")
         ports = {p.id for p in self.faces.ports}
         for endpoint in self.me_endpoints:
+            if (not endpoint.ports) is (self.me_role is None):
+                raise ValueError(
+                    f"ME endpoint {endpoint.id!r} of {self.id!r}: a machine's endpoint serves its "
+                    f"ports, and only an infrastructure block's (a link's storage bus) serves none"
+                )
             unknown = [port for port in endpoint.ports if port not in ports]
             if unknown:
                 raise ValueError(
