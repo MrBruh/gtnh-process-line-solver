@@ -11,8 +11,8 @@ The pipeline, and why each step exists::
         |                         its tiered parts already the blocks the node chose (#312)
         '---> route cells         one cell per cable/pipe block, with the sides it connects on
         |
-        v  lower()
-    grid[W*H*L] of Cell(block, data, tile)
+        v  lower()                a single block also gets its covers (gt.covers) when the
+    grid[W*H*L] of Cell(block, data, tile)   target world's item ids are given (world.item_ids)
         |
         v  to_nbt()
     NBT compound  --gzip-->  .schematic
@@ -28,12 +28,15 @@ meta IS block metadata and it needs no tile entity.
 is ``mMainFacing`` and ``mFacing`` is its OUTPUT face, the one it auto-outputs items and fluids
 through; a Super Tank auto-outputs out of its front. Which face that is comes from
 :func:`gtnh_solver.output_faces.output_faces`, the reading the previewer's arrows use too, so the
-file and the preview cannot disagree. Every other output face needs a cover, which the export does
-not write, so :class:`SchematicWarning` names each (:func:`_single_block_tile`). A ``.schematic``
-can hold covers (every save in ``tests/golden/schematic/`` does), but GT names a cover's item by the
-world's *numeric* item id, and Schematica remaps only block ids (``SchematicaMapping``), never
-anything inside tile-entity NBT. A wrong id loses the cover, swaps in another, or can crash the
-client drawing it, so a cover is only safe to write with the loading world's own ids. Before this
+file and the preview cannot disagree. Every other output face needs a cover, and
+:class:`SchematicWarning` names each with the tier to fit (:func:`gtnh_solver.dataset.cover_for`,
+from the rate leaving through the face). A ``.schematic`` holds covers the way GT saves them (every
+file in ``tests/golden/schematic/`` does), but GT names a cover's item by the world's *numeric* item
+id, and Schematica remaps only block ids (``SchematicaMapping``), never anything inside tile-entity
+NBT. A wrong id loses the cover, swaps in another, or can crash the client drawing it. So covers are
+written only when the caller passes the target world's ids (``item_ids``, read by
+:func:`gtnh_solver.schematic.world.item_ids`), and then the ghost shows each one; Schematica's
+printer still places none, so the warning stands either way (:func:`_cover_entry`). Before this
 the export wrote only ``mFacing``, as the front, so the 2.9 ghost drew each machine working on its
 bottom face and outputting out of its front.
 
@@ -64,10 +67,12 @@ from __future__ import annotations
 
 import warnings
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+from gtnh_solver.dataset.covers import COVER_ITEM, CoverChoice, cover_for
 from gtnh_solver.dataset.pipes import manifest_names
 from gtnh_solver.ir import Facing, InputIR, LayoutResult
 from gtnh_solver.ir.geometry import OPPOSITE_FACE
@@ -187,9 +192,9 @@ DIGITAL_TANK_CLASSES: Final = frozenset(
 class SchematicWarning(UserWarning):
     """The file was written, but part of it will not rebuild faithfully in game.
 
-    GT frame boxes, whose material the ghost cannot show (#212); output faces that need a cover, and
-    Item Filters' slots, neither of which the export writes (#249). Each warning names what to build
-    by hand and where.
+    GT frame boxes, whose material the ghost cannot show (#212); output faces that need a cover,
+    which the printer never fits even when the ghost shows them; and Item Filters' slots, which the
+    export does not write (#249). Each warning names what to build by hand and where.
     """
 
 
@@ -217,10 +222,11 @@ def _gt_tile(
 
     Only the fields that decide *what the block is and which way it points*. A single block's
     auto-output is added on top by :func:`_single_block_tile`, since which face it pushes through is
-    part of which way it points. The rest of what GT writes (covers, colour, recipe locks, stored
-    energy) is machine configuration, which is the paste-fidelity half of #96 and deliberately
-    absent: a build ghost wants the right block in the right orientation, and inventing a
-    half-configured machine would be a worse lie than an unconfigured one.
+    part of which way it points, and its covers by :func:`_with_covers` when the target world's
+    item ids are known. The rest of what GT writes (colour, recipe locks, stored energy) is machine
+    configuration, which is the paste-fidelity half of #96 and deliberately absent: a build ghost
+    wants the right block in the right orientation, and inventing a half-configured machine would
+    be a worse lie than an unconfigured one.
 
     **``eRotation`` / ``eFlip`` are deliberately not written.** A multiblock controller
     (``MTEEnhancedMultiBlockBase``) stores its StructureLib alignment in them, but they default to
@@ -429,12 +435,15 @@ def lower(
     *,
     manifest: TextureManifest,
     docs: dict[str, Any] | None = None,
+    item_ids: Mapping[str, int] | None = None,
 ) -> tuple[tuple[int, int, int], dict[tuple[int, int, int], Cell]]:
     """Flatten ``layout`` into ``((width, height, length), {(x, y, z): Cell})``.
 
     Coordinates are relative to the layout's tight content bounds, so the emitted file is the
-    built structure rather than the solver's oversized search region.
+    built structure rather than the solver's oversized search region. ``item_ids`` is the target
+    world's item id table; with it, every cover face gets its cover written (module docstring).
     """
+    cover_item = _cover_item_id(item_ids)
     scene = build_scene(problem, layout)
     docs = docs if docs is not None else {}
     bounds = scene["bounds"]
@@ -444,7 +453,7 @@ def lower(
 
     auto_out = auto_output_faces(scene)
     outputs = output_faces(problem, layout)
-    covers: list[tuple[str, tuple[int, int, int], CoverFace]] = []
+    covers: list[tuple[str, tuple[int, int, int], CoverFace, CoverChoice]] = []
     filters: list[tuple[str, tuple[int, int, int], list[str]]] = []
     forbids: list[tuple[str, tuple[int, int, int], Facing]] = []
     for machine in scene["machines"]:
@@ -463,7 +472,13 @@ def lower(
                 )
                 name = manifest.display_name(cube.block, cube.meta) or str(machine["type"])
                 if machine_outputs is not None:
-                    covers.extend((name, key, c) for c in machine_outputs.covers)  # type: ignore[misc]
+                    chosen = [
+                        (face, cover_for(face.cover, face.rate, machine.get("voltage_tier")))
+                        for face in machine_outputs.covers
+                    ]
+                    covers.extend((name, key, face, choice) for face, choice in chosen)  # type: ignore[misc]
+                    if cover_item is not None and chosen:
+                        cell = _with_covers(cell, chosen, cover_item)
                     if machine_outputs.forbid_input_from_output and machine_outputs.auto_face:
                         forbids.append((name, key, machine_outputs.auto_face))  # type: ignore[arg-type]
                 if machine.get("filter_items"):
@@ -477,7 +492,7 @@ def lower(
             grid[key] = cell  # type: ignore[index]
 
     _warn_about_frames(grid, manifest)
-    _warn_about_covers(covers)
+    _warn_about_covers(covers, written=cover_item is not None)
     _warn_about_filters(filters)
     _warn_about_output_side(forbids)
     return size, grid  # type: ignore[return-value]
@@ -505,28 +520,82 @@ def _warn_about_frames(grid: dict[tuple[int, int, int], Cell], manifest: Texture
     )
 
 
-def _warn_about_covers(covers: list[tuple[str, tuple[int, int, int], CoverFace]]) -> None:
-    """Name every output face that takes a cover, since the export writes none (module docstring).
+def _cover_item_id(item_ids: Mapping[str, int] | None) -> int | None:
+    """The target world's numeric id for the cover item, or ``None`` when no world was given.
+
+    A world whose table lacks it is refused rather than exported without covers: it is not a GT:NH
+    world, or not the one the build goes in, and a silent cover-less file would hide that.
+    """
+    if item_ids is None:
+        return None
+    if COVER_ITEM not in item_ids:
+        raise SchematicError(
+            f"the world's item table has no {COVER_ITEM}, so it is not a GT:NH world and the "
+            "export cannot name a cover in it; pass the save folder of the world the build goes in"
+        )
+    return item_ids[COVER_ITEM]
+
+
+def _cover_entry(face: Facing, choice: CoverChoice, cover_item: int) -> nbt.Compound:
+    """One ``gt.covers`` entry, in the shape and tag types GT writes (``CoverableTileEntity``).
+
+    ``s`` is the side's ForgeDirection ordinal and ``id`` is ``GTUtility.stackToInt``, the world's
+    item id with the meta in the high half. ``d = 0`` is a conveyor's or pump's default: export,
+    always on, input blocked (``CoverIOBase``), which is what an output face wants. ``tra = 0`` is
+    the default tick rate. Every save in ``tests/golden/schematic/`` writes the same four tags.
+    """
+    return nbt.Compound(
+        {
+            "s": nbt.Byte(FORGE_DIRECTION[face]),
+            "id": nbt.Int(cover_item | (choice.meta << 16)),
+            "d": nbt.Int(0),
+            "tra": nbt.Int(0),
+        }
+    )
+
+
+def _with_covers(cell: Cell, chosen: list[tuple[CoverFace, CoverChoice]], cover_item: int) -> Cell:
+    """``cell`` with a ``gt.covers`` list holding each chosen cover, so the ghost draws them."""
+    if cell.tile is None:
+        return cell
+    tile = nbt.Compound(cell.tile)
+    tile["gt.covers"] = nbt.List(
+        nbt.TAG_COMPOUND, [_cover_entry(face.face, choice, cover_item) for face, choice in chosen]
+    )
+    return Cell(cell.block, cell.data, tile)
+
+
+def _warn_about_covers(
+    covers: list[tuple[str, tuple[int, int, int], CoverFace, CoverChoice]], *, written: bool
+) -> None:
+    """Name every output face that takes a cover, and which cover, whether or not it was written.
 
     GT auto-outputs a single block through one face only, and a Super Chest through none
-    (``output_faces``), so each other output face needs the cover named: a conveyor for items, a
-    pump for fluids. Grouped by cover, each with the block and where it stands in the file, so a
-    builder can walk the ghost and fit them.
+    (``output_faces``), so each other output face needs a cover: a conveyor for items, a pump for
+    fluids, at the tier :func:`gtnh_solver.dataset.cover_for` picks. Grouped by cover, each with the
+    block and where it stands in the file, so a builder can walk the ghost and fit them. Written or
+    not, they are fitted by hand: the ghost can show a cover, but Schematica's printer places none.
     """
     if not covers:
         return
     by_cover: dict[str, list[str]] = {}
-    for name, (x, y, z), cover in sorted(covers, key=lambda c: (c[2].cover, c[1], c[2].face.value)):
-        by_cover.setdefault(cover.cover, []).append(
+    for name, (x, y, z), cover, choice in sorted(
+        covers, key=lambda c: (c[3].kind, c[3].meta, c[1], c[2].face.value)
+    ):
+        by_cover.setdefault(choice.label, []).append(
             f"{cover.face.value} face of {name} at ({x}, {y}, {z})"
         )
     listed = "; ".join(
-        f"{kind} x{len(faces)}: {', '.join(faces)}" for kind, faces in by_cover.items()
+        f"{label} x{len(faces)}: {', '.join(faces)}" for label, faces in by_cover.items()
+    )
+    where = (
+        ". The ghost shows each one, but Schematica's printer places none"
+        if written
+        else ", which the export writes only for a named world (--world)"
     )
     warnings.warn(
-        f"{len(covers)} output face(s) need a cover, which the export does not write, so fit them "
-        "by hand: GT auto-outputs a single block through one face only, and a Super Chest through "
-        f"none. {listed}",
+        f"{len(covers)} output face(s) need a cover{where}, so fit them by hand: GT auto-outputs "
+        f"a single block through one face only, and a Super Chest through none. {listed}",
         SchematicWarning,
         stacklevel=3,
     )
@@ -679,9 +748,10 @@ def build_schematic(
     *,
     manifest: TextureManifest,
     docs: dict[str, Any] | None = None,
+    item_ids: Mapping[str, int] | None = None,
 ) -> nbt.Compound:
-    """The ``Schematic`` root compound for ``layout``."""
-    size, grid = lower(problem, layout, manifest=manifest, docs=docs)
+    """The ``Schematic`` root compound for ``layout``; ``item_ids`` as :func:`lower` takes them."""
+    size, grid = lower(problem, layout, manifest=manifest, docs=docs, item_ids=item_ids)
     return to_nbt(size, grid)
 
 
@@ -691,12 +761,14 @@ def write_schematic(
     path: str | Path,
     *,
     version: str | None = None,
+    item_ids: Mapping[str, int] | None = None,
 ) -> Path:
     """Write ``layout`` to ``path`` as a Schematica-loadable ``.schematic``.
 
     Resolves the dataset the same way the previewer does, so a preview and an export of one solve
     describe the same blocks - provided the caller passes both the same ``version``, which is why
-    the CLI hands each of them the version it derived from the plan (#206).
+    the CLI hands each of them the version it derived from the plan (#206). ``item_ids``, the
+    target world's item table (:func:`gtnh_solver.schematic.world.item_ids`), adds the covers.
 
     **A missing half of the dataset is refused by name** rather than surfacing as a bare
     ``FileNotFoundError``, which the CLI can only report as "could not write" the output:
@@ -728,7 +800,7 @@ def write_schematic(
         )
     manifest = TextureManifest.load(manifest_path)
     docs = load_multiblock_docs(multiblocks)
-    root = build_schematic(problem, layout, manifest=manifest, docs=docs)
+    root = build_schematic(problem, layout, manifest=manifest, docs=docs, item_ids=item_ids)
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(nbt.dumps("Schematic", root))

@@ -8,6 +8,7 @@ ShadowTheAge calculator plan, ``.gtnh``, with the 'shadow' extra), the solved la
     gtnh-solve plan.json > layout.json            # ...which is how it goes to a file
     gtnh-solve plan.json --preview view.html      # write a double-clickable 3D preview
     gtnh-solve plan.json --schematic line.schematic  # write a Schematica build ghost
+    gtnh-solve plan.json --schematic line.schematic --world saves/MyWorld  # ...with its covers
     gtnh-solve --inspect-schematic line.schematic # ...and read one back: blocks + machines
     gtnh-solve --dataset-coverage                 # what the local dataset cannot draw, ranked
     gtnh-solve plan.json --seed 3                 # pick the solver seed
@@ -79,7 +80,7 @@ from gtnh_solver.ir import Commodity, Infeasibility, InputIR, LayoutResult, Layo
 from gtnh_solver.previewer import write_preview
 from gtnh_solver.previewer.jar import cached_jar
 from gtnh_solver.previewer.textures import TextureManifest
-from gtnh_solver.schematic import SchematicError, read_schematic, write_schematic
+from gtnh_solver.schematic import SchematicError, item_ids, read_schematic, write_schematic
 from gtnh_solver.schematic.read import Schematic
 from gtnh_solver.solver import Effort, solve
 from gtnh_solver.validator import validate
@@ -233,6 +234,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--schematic",
         metavar="FILE",
         help="write a Schematica .schematic build ghost to FILE (1.7.10; not Litematica)",
+    )
+    parser.add_argument(
+        "--world",
+        metavar="DIR",
+        help=(
+            "with --schematic: the save folder (or level.dat) of the world the build goes in. Its "
+            "item ids let the export write each conveyor and pump cover, so the ghost shows them; "
+            "the ids differ per world, so the file is right only for that one"
+        ),
     )
     parser.add_argument(
         "--inspect-schematic",
@@ -825,6 +835,18 @@ def main(argv: list[str] | None = None) -> int:
         print("error: an export path is required (try 'gtnh-solve --help')", file=sys.stderr)
         return 2
 
+    # Read before solving, so a wrong --world fails in a second rather than after a long search.
+    world_items: dict[str, int] | None = None
+    if args.world is not None:
+        if not args.schematic:
+            print("error: --world only applies with --schematic", file=sys.stderr)
+            return 2
+        try:
+            world_items = item_ids(args.world)
+        except SchematicError as exc:
+            print(f"error: cannot read --world: {exc}", file=sys.stderr)
+            return 2
+
     # The plan is loaded before the dataset, because it says which pack it was balanced against and
     # that is the better default for which dump to load. Loaded here rather than through adapt_file
     # so an undetermined producer can be reported first: the advice is to pass --plan-schema, which
@@ -939,7 +961,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.schematic:
         try:
-            write_schematic(problem, layout, args.schematic, version=dataset_version)
+            write_schematic(
+                problem, layout, args.schematic, version=dataset_version, item_ids=world_items
+            )
         except SchematicError as exc:
             # A block the dataset cannot type is refused rather than guessed: a .schematic that
             # rebuilds a cable as a machine looks buildable and is not (GitHub #96).

@@ -20,14 +20,15 @@ an output route's terminal face). This module turns that into one reading::
       |            connection is not free), else the face carrying the most outputs, ties broken in
       |            the routers' FACE_ORDER
       v
-    every other output face: a cover, conveyor for an item, pump for a fluid
-      |
+    every other output face: a cover, conveyor for an item, pump for a fluid, carrying the summed
+      |                      rate of the ports leaving through it (what picks the cover's tier)
       v
     a basic machine whose auto face docks on a pipe another machine also feeds: on a pack whose
     new machines take input through the output face (2.9), it must be set to refuse it (#278)
 
 The previewer draws the arrow on the auto face and a cover marker on each cover face; the
-``.schematic`` export writes the auto face as the block's output facing and warns about each cover.
+``.schematic`` export writes the auto face as the block's output facing, writes each cover when it
+is given the target world's item ids, and warns about every cover either way.
 Both say which machines need "Input from Output Side forbidden" set by hand.
 Reading it from here is what keeps the picture and the build from disagreeing (docs/DOMAIN.md). A
 multiblock is left out: its outputs leave through hatches, each with its own front, not through a
@@ -72,11 +73,17 @@ def output_side_takes_input(pack_version: str | None) -> bool:
 
 @dataclass(frozen=True)
 class CoverFace:
-    """An output face GT empties with a cover: which face, which cover, and the nets through it."""
+    """An output face GT empties with a cover: which face, which cover, and the nets through it.
+
+    ``rate`` is what leaves through the face per tick, items/t or L/t: the sum of its ports'
+    ``Port.rate``, or ``None`` when any of them states none (a partial sum would undersize the
+    cover). It is what :func:`gtnh_solver.dataset.cover_for` picks the cover's tier from.
+    """
 
     face: Facing
     cover: str  # "conveyor" (items) or "pump" (fluids), COVER_FOR
     net_ids: tuple[str, ...]
+    rate: float | None = None
 
 
 @dataclass(frozen=True)
@@ -123,6 +130,8 @@ def output_faces(problem: InputIR, layout: LayoutResult) -> dict[str, BlockOutpu
     # whose outputs feed that pipe: what says another machine's output passes this face.
     piped_at: dict[tuple[str, Facing], set[str]] = defaultdict(set)
     feeding: dict[str, set[str]] = defaultdict(set)
+    # (machine, face) -> port id -> its rate, for what a cover on that face has to move.
+    rates: dict[tuple[str, Facing], dict[str, float | None]] = defaultdict(dict)
     for connection in layout.auto_connections:
         auto_at.setdefault(connection.source_machine_id, connection.source_face)
         net = nets.get(connection.net_id)
@@ -140,6 +149,7 @@ def output_faces(problem: InputIR, layout: LayoutResult) -> dict[str, BlockOutpu
             leaving[terminal.machine_id][terminal.face].append((port.commodity, route.net_id))
             piped_at[(terminal.machine_id, terminal.face)].add(route.net_id)
             feeding[route.net_id].add(terminal.machine_id)
+            rates[(terminal.machine_id, terminal.face)][port.id] = port.rate
 
     takes_input = output_side_takes_input(problem.pack_version)
     result: dict[str, BlockOutputs] = {}
@@ -158,6 +168,7 @@ def output_faces(problem: InputIR, layout: LayoutResult) -> dict[str, BlockOutpu
                 face=face,
                 cover=COVER_FOR[by_face[face][0][0]],
                 net_ids=tuple(dict.fromkeys(net_id for _, net_id in by_face[face])),
+                rate=_face_rate(rates[(machine_id, face)]),
             )
             for face in _FACE_ORDER
             if face in by_face and face is not auto_face
@@ -174,6 +185,14 @@ def output_faces(problem: InputIR, layout: LayoutResult) -> dict[str, BlockOutpu
             and any(feeding[net_id] - {machine_id} for net_id in piped_at[(machine_id, auto_face)]),
         )
     return result
+
+
+def _face_rate(port_rates: dict[str, float | None]) -> float | None:
+    """What leaves through one face per tick: its ports' rates summed, ``None`` if any is unknown."""
+    known = [rate for rate in port_rates.values() if rate is not None]
+    if not port_rates or len(known) < len(port_rates):
+        return None
+    return sum(known)
 
 
 def _is_basic_machine(machine: Machine) -> bool:

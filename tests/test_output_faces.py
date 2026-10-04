@@ -191,6 +191,62 @@ def test_a_second_piped_output_face_takes_a_conveyor() -> None:
     assert got["m"].covers == (CoverFace(Facing.EAST, "conveyor", ("na",)),)
 
 
+@pytest.mark.parametrize(
+    ("rate_a", "rate_b", "expected"),
+    [(0.25, 0.5, 0.75), (0.25, None, None), (None, None, None)],
+)
+def test_a_cover_face_carries_the_summed_rate_of_its_ports(
+    rate_a: float | None, rate_b: float | None, expected: float | None
+) -> None:
+    """What picks the cover's tier: every port leaving through the face, summed, and unknown when
+    any of them is, since a partial sum would undersize the cover."""
+    machines = [
+        _block(
+            "m", [_out("output:auto"), _out("output:a", rate=rate_a), _out("output:b", rate=rate_b)]
+        ),
+        _block("s", [_in("in")]),
+        _block("c", [_in("in:a"), _in("in:b")]),
+    ]
+    nets = [
+        _net("ns", ("m", "output:auto"), ("s", "in"), Commodity.ITEM),
+        _net("na", ("m", "output:a"), ("c", "in:a"), Commodity.ITEM),
+        _net("nb", ("m", "output:b"), ("c", "in:b"), Commodity.ITEM),
+    ]
+    auto = AutoConnection(
+        net_id="ns",
+        source_machine_id="m",
+        source_face=Facing.SOUTH,
+        target_machine_id="s",
+        target_face=Facing.NORTH,
+    )
+    routes = [
+        _pipe(
+            nets[1],
+            Commodity.ITEM,
+            ("m", "output:a", Facing.EAST),
+            ("c", "in:a", Facing.WEST),
+            (2, 1, 1),
+        ),
+        _pipe(
+            nets[2],
+            Commodity.ITEM,
+            ("m", "output:b", Facing.EAST),
+            ("c", "in:b", Facing.WEST),
+            (2, 1, 1),
+        ),
+    ]
+    got = _solve(
+        machines,
+        nets,
+        [_place("m", 1, 1, 1), _place("s", 1, 1, 2), _place("c", 3, 1, 1)],
+        routes=routes,
+        autos=[auto],
+    )
+    (cover,) = got["m"].covers
+    assert cover.face is Facing.EAST
+    assert cover.rate == expected
+
+
 def test_an_auto_connection_wins_over_a_piped_output() -> None:
     machines = [
         _block("m", [_out("output:a"), _out("output:b")]),

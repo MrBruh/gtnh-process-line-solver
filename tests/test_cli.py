@@ -65,6 +65,7 @@ from gtnh_solver.ir import (
     METoggles,
 )
 from gtnh_solver.previewer.textures import TextureManifest
+from gtnh_solver.schematic import SchematicWarning, nbt, read_schematic
 from gtnh_solver.solver import solve
 from tests._helpers import hatched_dataset
 
@@ -1065,6 +1066,52 @@ def test_cli_schematic_with_a_pinned_version_missing_its_manifest_exits_2(
     assert "could not write" not in err
     assert str(Path("does-not-exist") / "textures" / "manifest.json") in err
     assert "runClient" in err
+    assert not target.exists()
+
+
+def _world(root: Path, items: dict[str, int]) -> Path:
+    """A world save folder whose level.dat lists ``items`` the way FML does (``\\x02`` = item)."""
+    world = root / "MyWorld"
+    world.mkdir()
+    table = nbt.List(
+        nbt.TAG_COMPOUND,
+        [nbt.Compound({"K": nbt.String(f"\x02{k}"), "V": nbt.Int(v)}) for k, v in items.items()],
+    )
+    level = nbt.Compound({"FML": nbt.Compound({"ItemData": table})})
+    (world / "level.dat").write_bytes(nbt.dumps("", level))
+    return world
+
+
+def test_cli_schematic_with_a_world_writes_its_covers_by_that_worlds_ids(
+    tmp_path: Path, solve_calls: list[dict[str, object]]
+) -> None:
+    """The sand line's input chest needs a conveyor, and the file names it by the world's item id."""
+    world = _world(tmp_path, {"gregtech:gt.metaitem.01": 7639})
+    target = tmp_path / "line.schematic"
+    with pytest.warns(SchematicWarning, match="The ghost shows each one"):
+        assert main([_SAND, "--schematic", str(target), "--world", str(world)]) == 0
+    covers = [c for t in read_schematic(target).tile_entities for c in t.raw.get("gt.covers", [])]
+    assert covers
+    assert all(int(c["id"]) & 0xFFFF == 7639 for c in covers)
+
+
+def test_cli_world_without_a_schematic_exits_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    world = _world(tmp_path, {"gregtech:gt.metaitem.01": 7639})
+    assert main([_SAND, "--world", str(world)]) == 2
+    assert "--world only applies with --schematic" in capsys.readouterr().err
+    assert not solve_calls
+
+
+def test_cli_an_unreadable_world_exits_2_before_solving(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    """A typo in ``--world`` costs a second, not a full search followed by a refused export."""
+    target = tmp_path / "line.schematic"
+    assert main([_SAND, "--schematic", str(target), "--world", str(tmp_path / "nope")]) == 2
+    assert "cannot read --world: no level.dat" in capsys.readouterr().err
+    assert not solve_calls
     assert not target.exists()
 
 

@@ -7,6 +7,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **The `.schematic` export can write each conveyor and pump cover, so the ghost shows where it
+  goes.** Pass `--world` with the save folder (or `level.dat`) of the world the build goes in. GT
+  names a cover's item by the world's numeric item id, which FML assigns per world (two worlds of
+  one 2.9 instance put `gt.metaitem.01` at 7639 and 7436) and Schematica never remaps, so the
+  export reads that world's own table and the file is right for that world only. Without
+  `--world` nothing changes: no cover is written and the warning lists each one. Either way the
+  warning now names the tier to fit, the lowest conveyor or pump that keeps up with what leaves
+  through the face (`dataset.cover_for`, from GT's own rates: an LV conveyor moves 0.16 items/t,
+  an HV one 3.2), falling back to the machine's tier when the plan states no rate. Each cover is
+  written as GT saves one, tag for tag, and pinned against the conveyor in the maintainer's 2.9
+  save; Schematica's printer still places none, so they are fitted by hand.
 - **A blast furnace is built with a coil hot enough for its recipes (#318).** GT refuses a recipe
   whose special value, its heat in kelvin, is above what the furnace reaches: its coil's heat
   (1801 K for Cupronickel, then 900 K a tier), plus, for the Electric Blast Furnace, the Mega

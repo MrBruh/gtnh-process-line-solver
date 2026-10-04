@@ -13,7 +13,9 @@ JSON plus the adapter (``multiblocks``) that interprets those raw facts into IR-
 records (footprints, hint-derived faces, coil tiers); the **tiered structure blocks**
 (``structure_blocks``) a multiblock's casing, pipe, coil and machine-casing channels accept (#312),
 with each coil's heat and the machines that refuse a recipe hotter than it (#318);
-and the **item pipe capacity** per size (``pipe_capacity``) a route's gauge is chosen from (#165). Still TODO(dataset): per-material cable
+the **item pipe capacity** per size (``pipe_capacity``) a route's gauge is chosen from (#165);
+and the conveyor and pump **covers** per tier (``covers``) an exported output face is fitted with.
+Still TODO(dataset): per-material cable
 loss; fluid pipe throughput; the real extractor (issue #45) replacing the illustrative fixtures;
 spot-check tiers/face-rules/throughputs in-game (docs/ROADMAP.md step 0).
 """
@@ -25,6 +27,7 @@ from __future__ import annotations
 # in an import cycle with the dataset loader (which needs ir types for footprints/facings).
 from gtnh_solver.ir.output import CABLE_THICKNESSES, MAX_CABLE_THICKNESS
 
+from .covers import COVER_ITEM, COVER_TIERS, CoverChoice, cover_for
 from .multiblocks import (
     DEFAULT_DATA_DIR,
     DatasetError,
@@ -138,6 +141,11 @@ __all__ = [  # noqa: RUF022 - grouped by submodule, not alphabetized
     "endpoint_insertions",
     "item_pipe_insertions",
     "item_pipe_size_for",
+    # covers on output faces (conveyor / pump tier)
+    "COVER_ITEM",
+    "COVER_TIERS",
+    "CoverChoice",
+    "cover_for",
     # voltage / power sizing
     "CABLE_LOSS_PER_BLOCK",
     "CABLE_THICKNESSES",
