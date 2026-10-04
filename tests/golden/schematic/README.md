@@ -14,7 +14,7 @@ question: what a file Schematica accepts actually contains.
 | `sand.schematic` | **golden** | Close enough to the line the solver builds to pin the format. The exporter's output for the sand plan should match its *shape*: same tag layout, same lowering of machines/cables to blocks + tile entities. |
 | `nitrobenzene-reference.schematic` | reference only | A hand-built example of one way to arrange the blocks. **Not solver output**, and not the layout the solver produces. Kept because it is the only sample containing multiblock casings, a controller and hatches. Never assert our output against it cell for cell. |
 | `sand-parallel-reference.schematic` | reference only | The maintainer's own build of `examples/gtnh-parallel-sand.json`, saved from the instance: the same 9 Forge Hammers, 2 Super Chests and power source the solver places, in a 3x3x4 box. **Not solver output**, and well beyond what the solver can currently express. It is the quality target for that line, and the evidence behind the routing limits it is filed under. Never assert our output against it cell for cell. |
-| `sand-parallel-exported.schematic` | **proven in game, in part** | The same build as `sand-parallel-reference.schematic`, written by **our own exporter** rather than by Schematica, and built in game by the maintainer. It carries the wiring and facings the Schematica copy loses. Proven for geometry, wiring, facings and power; **not** for item throughput, which it gets wrong (see below). |
+| `sand-parallel-exported.schematic` | **proven in game, in part** | The same build as `sand-parallel-reference.schematic`, written by **our own exporter** rather than by Schematica, and built in game by the maintainer. It carries the pipe wiring the Schematica copy loses. Proven for geometry, wiring, facings and power; **not** for item throughput, which it gets wrong (see below). |
 | `28-sfb.schematic`, `29-sfb.schematic` | **golden, format only** | The maintainer's saves from a 2.8.4 and a 2.9 instance of three frame boxes in a row along +X: a plain Steel frame, a plain Black Steel frame, and a Steel frame with a cover. They settle how Schematica stores a frame, whose world metadata is a material id rather than a nibble (see below). |
 
 None of these is a byte-for-byte expectation for our exporter. All were built by hand in
@@ -43,13 +43,35 @@ opposite, that one pipe column carried several material flows at once; that was 
 layer dump without checking connectivity and is wrong. The router forbids the sharing it does
 do, in three places, and #164 tracks them.
 
-**Only the geometry and the block identities in this file are evidence.** Schematica does not
-capture GT:NH tile entity detail faithfully: all 12 of its pipes carry `mConnections = 0`, and
-its machine facings are not reliable either. Our own exporter writes both, on 63 of 63 pipes
-for the same line. So the box size, the block counts and the run shapes above can be trusted,
-while which net each run carries, and any measurement that depends on a facing, cannot be read
-off this file at all. That regeneration has now been done: `sand-parallel-exported.schematic` is this build written by
-our own exporter and built in game, and it is the file to read for topology and facings.
+**Its pipe wiring is not evidence; everything else in it is.** All 15 of its pipe and cable
+blocks carry `mConnections = 0`. The cause is the GT version it was saved on, not the build and
+not Schematica. The file is stamped GT 5.09.51.476 (the 2.8 pack), and Schematica's GUI save reads
+the *client* world. That GT synced a pipe's connections to the client only on its
+`BaseMetaPipeEntity`, and an item pipe's or cable's own `saveNBTData` then writes its own copy,
+never synced and so 0, over them. GT 5.09.54 syncs that copy too
+(`MetaPipeEntity.receiveClientEvent`).
+
+Measured on 2026-10-04 in the 2.9.0-beta-3 instance (GT 5.09.54.133): a GUI save and a
+`/schematicaSave` of the same 3x3x4 parallel sand build have all 15 pipe and cable blocks wired,
+with identical connection masks, facings and auto-output settings. (The build has since been
+rebuilt with huge brass pipes, so those saves are not this file, and they are not committed.) The
+two differ only in live state, which the GUI save lacks or has stale: items in transit, stored
+energy, progress.
+
+Our own exporter writes the wiring, on 63 of 63 pipes for the same line. So the box size, the block
+counts and the run shapes above can be trusted, while which net each run carries cannot be read off
+this file at all. `sand-parallel-exported.schematic` is this build written by our own exporter and
+built in game, and it is the file to read for topology; a fresh 2.9 save of a build would serve too.
+
+**Its facings are faithful**, because GT does sync those. An earlier version of this section
+called them unreliable too. That came from reading `mFacing` as the front, before #249 settled that
+on a GT basic machine `mFacing` is the OUTPUT face and `mMainFacing` the working one. Read that way
+(2026-10-03), all nine hammers agree with the build: each `mFacing` points at the run that carries
+its product on (stage 1 east, stage 2 up, stage 3 west into the run to the output chest), each has
+auto-output on (`mItemTransfer = 1`), and no `mMainFacing` touches a pipe or cable (each faces a
+neighbouring hammer, air or the edge of the box). The power source fronts away from its cable, the
+one face a Debug Power Generator does not output on, and the input chest's cover sits on the face
+its pipe touches.
 
 Never assert our output against it cell for cell either way: it is hand built, so it differs
 from any solved layout in placement.
@@ -58,8 +80,8 @@ from any solved layout in placement.
 
 It was produced by authoring the build as a `LayoutResult` and exporting it, not by saving a world.
 The positions come from the Schematica reference, which carries geometry faithfully. The net each
-pipe run carries, and every facing, were **chosen** rather than read, because that file cannot supply
-them: each run is assigned to the one net whose producers and consumers it touches, every hammer
+pipe run carries, and every facing, were **chosen** rather than read: that file cannot supply the
+wiring, and at the time its facings were wrongly thought unreliable too (see above). Each run is assigned to the one net whose producers and consumers it touches, every hammer
 fronts north, and the chests and power source front south, on faces that carry no I/O.
 
 Before export it passed `validate()` with no violations, and `route_power`, given only that

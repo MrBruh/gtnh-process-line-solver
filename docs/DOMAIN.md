@@ -12,8 +12,23 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
 - GT:NH is **Minecraft 1.7.10 / Forge**. Block identity is numeric ID + metadata
   (pre-flattening), which matters for the eventual export.
 - **Litematica does NOT support 1.7.10.** The in-game schematic consumer is
-  **Schematica-Plus**, which can paste tile-entity NBT including GregTech machine
-  configurations. Target classic `.schematic`, not `.litematic`.
+  **Schematica (GT:NH's fork)**. Target classic `.schematic`, not `.litematic`. What the fork
+  does with one, read from its source:
+  - A loaded file is a client-side **hologram**. Its printer places each block by a simulated
+    right-click with the block's pick-block item and **applies no tile-entity NBT**, and it has no
+    paste command. GT then places the block as if by hand: a machine is the right machine (the
+    pick-block reads the hologram's `mID`) but fronts the player, and a pipe connects only to the
+    block it was clicked against. So the facings, pipe wiring and auto-output an export records
+    show in the hologram only; the player sets them in game.
+  - A **GUI save reads the client world.** On GT 2.9 that keeps the pipe wiring, facings and
+    covers, the same as a server-side save. On GT 2.8 (5.09.51) every pipe in it reads unwired:
+    GT synced a pipe's connections to the client only on its base tile entity, and an item pipe or
+    cable then saves its own unsynced copy over them. What a GUI save lacks on any version is live
+    state (what is in a pipe, stored energy, progress). `tests/golden/schematic/README.md` has the
+    measurements. `/schematicaSave x1 y1 z1 x2 y2 z2 name` reads the server world instead. In
+    single-player it writes to the same `schematics/` folder as the GUI; on a dedicated server, to
+    that player's own folder on the server.
+  - Block metadata is kept to **4 bits**, which loses a GT 2.9 frame's material (#212).
 - There is **no headless GT simulator**, so true correctness is only verifiable in-game.
 
 ## Machine faces

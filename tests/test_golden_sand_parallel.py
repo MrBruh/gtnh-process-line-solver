@@ -1,7 +1,7 @@
 """The maintainer's parallel-sand build, decoded from the file our exporter wrote and he built.
 
-``tests/golden/schematic/sand-parallel-exported.schematic`` is the one golden whose wiring and
-facings are real (the Schematica copy's are not; see that directory's README). It was built in game
+``tests/golden/schematic/sand-parallel-exported.schematic`` is the one golden whose pipe wiring is
+real (the Schematica copy's is not; see that directory's README). It was built in game
 and runs on 3 cable blocks and 12 pipe blocks. Its pipes do what the router could not before #164:
 several terminals of ONE net on one pipe block, 20 item terminals on 12 cells. This module turns the
 file back into a ``LayoutResult``, pins what the validator makes of it, and pins that the solver,
@@ -29,7 +29,7 @@ run is wired to, and the decode fails if there is none.
 item pipe, so each run is published at that size: it is what was built, and what ran at a third of
 its designed rate. The validator refuses it (#190). The gauges that then worked are read from
 ``sand-parallel-reference.schematic``, the Schematica copy of the working build: its block
-identities are trustworthy (only its wiring and facings are not; see the README), and its twelve
+identities are trustworthy (only its wiring is not; see the README), and its twelve
 pipes sit on exactly the export's twelve cells. It has huge on the two runs to and from a chest and
 large on the two between hammer stages, and the validator must accept that.
 """

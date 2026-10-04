@@ -14,8 +14,8 @@ compactness under fixed constraints (pinned I/O chest locations, reserved cells,
 region). It is **place-and-route** (VLSI/PCB problem family) + the **facility layout
 problem**, retargeted to GregTech with full physical fidelity.
 
-The primary v1 deliverable is an **interactive 3D previewer**, with a paste-ready Schematica
-`.schematic` export as the fidelity-gated milestone after it (now shipped). v1 also had a
+The primary v1 deliverable is an **interactive 3D previewer**, with a Schematica `.schematic`
+export (an in-game build hologram) as the fidelity-gated milestone after it (now shipped). v1 also had a
 layer-by-layer text build guide; it was retired (#203) once the export and the preview said
 everything it did.
 
@@ -65,11 +65,14 @@ shared-amperage power model, etc.) lives in [`ARCHITECTURE.md`](ARCHITECTURE.md)
   suggested relaxation - never a silent failure or a silently-invalid layout.
 - The previewer renders any candidate in 3D and supports comparing multiple seeds.
 - The previewer and the `.schematic` ghost are precise enough to reproduce the layout by hand.
-- (Later) An exported schematic pastes into GT:NH via Schematica-Plus and runs.
+- (Later) An exported schematic pastes into GT:NH and runs. Schematica's printer cannot do this:
+  it places blocks by simulated right-clicks and applies none of the GT configuration the file
+  carries (facings, pipe wiring, auto-output). So this goal needs a GT-aware printer, which means
+  forking GT:NH's Schematica, not more export work ([`DOMAIN.md`](DOMAIN.md)).
 
 ## Platform reality
 
 GT:NH is **Minecraft 1.7.10 / Forge**. Litematica does not support 1.7.10; the in-game
-schematic consumer is **Schematica-Plus** (classic `.schematic`, numeric block IDs). See
+schematic consumer is **Schematica (GT:NH's fork)** (classic `.schematic`, numeric block IDs). See
 [`DOMAIN.md`](DOMAIN.md). There is **no headless GT simulator**, which shapes the test
 strategy ([`TESTING.md`](TESTING.md)).
