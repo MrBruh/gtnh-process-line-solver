@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Sequence
 
 from .enums import Commodity, Facing, IODirection
-from .input_ir import InputIR, MachineFaceRef, Net
+from .input_ir import InputIR, Machine, MachineFaceRef, Net
 from .output import Placement
 
 #: The faces of a single block that can carry a connection: every face but the front, which carries
@@ -66,6 +66,28 @@ def machines_with_me_outputs(problem: InputIR, commodity: Commodity) -> frozense
         for ep in net.endpoints
         if port_dir.get((ep.machine_id, ep.port_id)) is IODirection.OUTPUT
     )
+
+
+def me_device_ports(machine: Machine) -> list[tuple[str, str]]:
+    """``(port, network)`` per ME device of ``machine`` that docks on the line: the first port each
+    endpoint serves, the one its face is chosen by (a Dual Interface takes its second port along on
+    the same face). Each takes a face and a cell of its own, like a pipe's terminal. A link's
+    storage bus serves no port and faces out of the build, so it docks nothing here (#335)."""
+    return [(e.ports[0], e.network) for e in machine.me_endpoints if e.ports]
+
+
+def me_network_machines(problem: InputIR) -> dict[str, list[str]]:
+    """``ME network -> the machines on it``, in problem order: every machine with an ME endpoint on
+    it, and its infrastructure (stubs, links, controller, acceptor). What the placement pulls
+    together, the way a net's endpoints are pulled together (#335)."""
+    members: dict[str, list[str]] = {}
+    for machine in problem.machines:
+        networks = [e.network for e in machine.me_endpoints]
+        if machine.me_network is not None:
+            networks.append(machine.me_network)
+        for network in dict.fromkeys(networks):
+            members.setdefault(network, []).append(machine.id)
+    return members
 
 
 def port_direction_map(problem: InputIR) -> dict[tuple[str, str], IODirection]:

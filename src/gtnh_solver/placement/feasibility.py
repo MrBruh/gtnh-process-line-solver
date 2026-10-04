@@ -72,7 +72,12 @@ from dataclasses import dataclass
 
 from gtnh_solver.ir import Facing, InputIR, Machine, Placement
 from gtnh_solver.ir.geometry import Cell
-from gtnh_solver.ir.nets import SINGLE_BLOCK_IO_FACES, connection_counts, placement_index
+from gtnh_solver.ir.nets import (
+    SINGLE_BLOCK_IO_FACES,
+    connection_counts,
+    me_device_ports,
+    placement_index,
+)
 from gtnh_solver.router._grid import dock_candidates, obstacle_cells
 from gtnh_solver.router.auto import assign_auto_outputs
 
@@ -159,8 +164,10 @@ def single_block_shortfalls(problem: InputIR) -> dict[str, int]:
     Needs no placement, unlike :func:`crowded_machines`, and is exact under the solver's own rule:
     each connection of a machine takes a face of its own, whether a pipe or cable docks on it or an
     auto-output spends it touching its sink, so no placement hosts more than
-    :data:`SINGLE_BLOCK_IO_FACES` on a single block. A commodity riding the ME network docks nothing
-    and counts nothing. Machines come in problem order.
+    :data:`SINGLE_BLOCK_IO_FACES` on a single block. A net riding the ME network docks nothing; the
+    ME device serving its port takes the face instead, one per device (``ir.nets.me_device_ports``,
+    #335), so a Dual Interface carrying an item and a fluid output costs one. Machines come in
+    problem order.
 
     A single block here is any one-cell footprint, which is also what a multiblock falls back to
     when the dataset lacks its structure, the case this mostly catches. It states a limit of the
@@ -174,6 +181,10 @@ def single_block_shortfalls(problem: InputIR) -> dict[str, int]:
     every machine the adapter may still merge, all unpinned, is judged exactly as before.
     """
     connections = connection_counts(problem.nets, problem.rides_me)
+    for machine in problem.machines:
+        if devices := me_device_ports(machine):
+            # Each ME device takes a face of its own, like a pipe's terminal (#335).
+            connections[machine.id] = connections.get(machine.id, 0) + len(devices)
     pinned = {
         machine.id: machine
         for machine in problem.machines
@@ -186,6 +197,8 @@ def single_block_shortfalls(problem: InputIR) -> dict[str, int]:
         for endpoint in net.endpoints:
             if endpoint.machine_id in pinned:
                 ports_on.setdefault(endpoint.machine_id, []).append(endpoint.port_id)
+    for machine_id, machine in pinned.items():
+        ports_on.setdefault(machine_id, []).extend(port for port, _ in me_device_ports(machine))
     return {
         machine.id: connections[machine.id]
         for machine in problem.machines
@@ -214,7 +227,7 @@ def _faces_fit(machine: Machine, port_ids: Sequence[str]) -> bool:
 
 
 def _docked_connections(problem: InputIR, placements: Sequence[Placement]) -> list[_Connection]:
-    """Every net endpoint a router will dock, with the cells it could dock on."""
+    """Every net endpoint and ME device a router will dock, with the cells it could dock on."""
     machines = {m.id: m for m in problem.machines}
     placement_by_machine = placement_index(placements)
     obstacles = obstacle_cells(problem, placements, machines)
@@ -246,6 +259,27 @@ def _docked_connections(problem: InputIR, placements: Sequence[Placement]) -> li
                 )
             }
             connections.append(_Connection(endpoint.machine_id, net.id, tuple(sorted(cells))))
+    # Each ME device docks like a terminal: a part on the cable beside the face it works through, a
+    # GT ME hatch a cable in front of it (#335). Devices of one network may share a cable, as one
+    # pipe block serves several machines of a net, so they are grouped under their network.
+    for machine in problem.machines:
+        placement = placement_by_machine.get(machine.id)
+        if placement is None:
+            continue
+        for port_id, network in me_device_ports(machine):
+            cells = {
+                t.cell.as_tuple()
+                for t in dock_candidates(
+                    port_id,
+                    placement,
+                    machine,
+                    obstacles,
+                    set(),
+                    region,
+                    assignment.claimed.get(machine.id, ()),
+                )
+            }
+            connections.append(_Connection(machine.id, f"me:{network}", tuple(sorted(cells))))
     return connections
 
 
