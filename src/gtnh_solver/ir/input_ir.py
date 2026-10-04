@@ -24,10 +24,10 @@ from pydantic import Field, field_validator, model_validator
 from ._base import FrozenModel, StrictModel, check_contract_version
 from .enums import HORIZONTAL_FACINGS, Commodity, Facing, IODirection, RelativeFace
 from .geometry import CellBox, CellCoord, allowed_faces
-from .me import MEConfig
+from .me import MEConfig, MEEndpoint, MERole
 
 #: Bump on any breaking change to the input contract; record it in ``ir/__init__.py``.
-INPUT_IR_VERSION = 8
+INPUT_IR_VERSION = 9
 
 #: What :attr:`InputIR.resource_colors` holds, once lowercased: ``#`` and six hex digits.
 _HEX_COLOR = re.compile(r"#[0-9a-f]{6}")
@@ -264,6 +264,16 @@ class Machine(StrictModel):
     #: A channel this does not name is built as the dump draws it. Empty for a single block, for a
     #: plan adapted without the physical dataset, and for a multiblock with no tiered part.
     structure_blocks: dict[str, StructureBlock] = Field(default_factory=dict)
+    #: The ME devices this machine needs built (InputIR v9, #333): one per AE2 part or GT ME hatch
+    #: that serves its ports on a net riding ME. Empty for a machine with no port on ME, and for
+    #: every machine until the end-to-end build places them (#335).
+    me_endpoints: tuple[MEEndpoint, ...] = ()
+    #: What this machine is when it is ME infrastructure rather than a machine of the line: an
+    #: attach stub, a link, a controller or an acceptor (InputIR v9). ``None`` for every other.
+    me_role: MERole | None = None
+    #: The ME network an infrastructure machine belongs to (``InputIR.me``), set exactly when
+    #: :attr:`me_role` is.
+    me_network: str | None = Field(default=None, min_length=1)
 
     @property
     def fronts_outside(self) -> bool:
@@ -425,7 +435,28 @@ class Machine(StrictModel):
                     f"power input port rates sum to {total} EU/t but the machine draws {self.eut}"
                 )
         self._check_output_layers()
+        self._check_me()
         return self
+
+    def _check_me(self) -> None:
+        """An endpoint serves ports this machine has, under an id of its own, and an infrastructure
+        machine names its network; an attach stub and a link face outside the build."""
+        ids = [e.id for e in self.me_endpoints]
+        if len(ids) != len(set(ids)):
+            raise ValueError(f"machine {self.id!r} has two ME endpoints with one id")
+        ports = {p.id for p in self.faces.ports}
+        for endpoint in self.me_endpoints:
+            unknown = [port for port in endpoint.ports if port not in ports]
+            if unknown:
+                raise ValueError(
+                    f"ME endpoint {endpoint.id!r} of {self.id!r} serves unknown port(s) {unknown}"
+                )
+        if (self.me_role is None) is not (self.me_network is None):
+            raise ValueError("an ME infrastructure machine names its network, and only it does")
+        if self.me_role in (MERole.ATTACH, MERole.LINK) and not self.outside_front:
+            raise ValueError(
+                f"an ME {self.me_role.value} faces outside the build, so it must be outside_front"
+            )
 
     def _check_output_layers(self) -> None:
         """A port's layer must be one the slots record, and a layered machine names every fluid
@@ -567,6 +598,35 @@ class InputIR(StrictModel):
     def _check_version(cls, value: int) -> int:
         return check_contract_version(value, INPUT_IR_VERSION, "InputIR")
 
+    def _check_me_endpoints(self, networks: set[str]) -> None:
+        """Every ME endpoint and infrastructure machine is on one of the problem's networks, and
+        an endpoint serves only ports whose nets ride that network: a device on one network cannot
+        move a net another carries, nor one that is piped."""
+        riding: dict[tuple[str, str], set[str | None]] = {}
+        for net in self.nets:
+            for ep in net.endpoints:
+                riding.setdefault((ep.machine_id, ep.port_id), set()).add(net.me_network)
+        for machine in self.machines:
+            if machine.me_network is not None and machine.me_network not in networks:
+                raise ValueError(
+                    f"ME {machine.me_role.value if machine.me_role else 'machine'} "
+                    f"{machine.id!r} is on unknown ME network {machine.me_network!r}"
+                )
+            for endpoint in machine.me_endpoints:
+                if endpoint.network not in networks:
+                    raise ValueError(
+                        f"ME endpoint {endpoint.id!r} of {machine.id!r} is on unknown ME network "
+                        f"{endpoint.network!r}"
+                    )
+                for port in endpoint.ports:
+                    on = riding.get((machine.id, port), set())
+                    if on != {endpoint.network}:
+                        raise ValueError(
+                            f"ME endpoint {endpoint.id!r} of {machine.id!r} serves port {port!r}, "
+                            f"whose nets ride {sorted(str(n) for n in on) or 'nothing'}, not ME "
+                            f"network {endpoint.network!r} alone"
+                        )
+
     def rides_me(self, net: Net) -> bool:
         """Whether ``net`` is left to ME rather than built: an item or fluid net on one of
         :attr:`me`'s networks (``Net.rides_me``), or a power net while the problem's power is the
@@ -616,6 +676,7 @@ class InputIR(StrictModel):
         for net in self.nets:
             if net.me_network is not None and net.me_network not in networks:
                 raise ValueError(f"net {net.id!r} rides unknown ME network {net.me_network!r}")
+        self._check_me_endpoints(networks)
 
         net_id_set = set(net_ids)
         for pin in self.pinned:

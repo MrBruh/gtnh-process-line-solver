@@ -12,7 +12,6 @@ import pytest
 from pydantic import ValidationError
 
 from gtnh_solver.ir import (
-    INPUT_IR_VERSION,
     ME_PLAN_VERSION,
     NETLIST_VERSION,
     AEColor,
@@ -131,8 +130,7 @@ def test_connection_counts_skip_what_rides_me() -> None:
     assert connection_counts(power, on_me(_problem(), power=True).rides_me) == {}
 
 
-def test_input_ir_v8_refuses_the_v7_toggles() -> None:
-    assert INPUT_IR_VERSION == 8
+def test_input_ir_refuses_the_v7_toggles() -> None:
     payload = _problem().model_dump()
     payload["me_toggles"] = {"items": True, "fluids": False, "power": False}
     with pytest.raises(ValidationError, match="me_toggles"):

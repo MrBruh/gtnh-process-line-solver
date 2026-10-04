@@ -17,7 +17,9 @@ versioned contracts::
     gtnh-solve plan.json --me-plan FILE   <-  MEPlan    the ME networks, and which net rides which
 
 The adapter stamps the choice onto the problem as :class:`MEConfig` (``InputIR.me``) and
-``Net.me_network``. Net ids in both files are the adapter's **pre-merge** ids, deterministic for a
+``Net.me_network``, and what each machine needs built as its :class:`MEEndpoint` s and, for an
+infrastructure block, its :class:`MERole` (InputIR v9). A layout answers with an
+:class:`MENetworkLayout` per network: its cable blocks and its devices (LayoutResult v5). Net ids in both files are the adapter's **pre-merge** ids, deterministic for a
 plan and a dataset, which is why both carry the plan's digest and the dataset's identity: a choice
 made against another plan or dataset is refused rather than applied to nets it never saw.
 """
@@ -29,7 +31,8 @@ from enum import Enum
 from pydantic import Field, field_validator, model_validator
 
 from ._base import FrozenModel, StrictModel, check_contract_version
-from .enums import Commodity
+from .enums import Commodity, Facing
+from .geometry import CellCoord
 
 #: Bump on any breaking change to the NetList contract (``gtnh-solve --list-nets``).
 NETLIST_VERSION = 1
@@ -378,4 +381,134 @@ class MEPlan(StrictModel):
         unknown = sorted({network for network in self.nets.values() if network not in known})
         if unknown:
             raise ValueError(f"ME plan assigns nets to unknown ME network(s) {unknown}")
+        return self
+
+
+# --- what a problem asks the ME side to build (InputIR v9, #333) ----------------------------------
+
+
+class MERole(str, Enum):
+    """What an ME infrastructure machine is: a block the line needs for its network, serving no port.
+
+    - ``attach``: the dense cable on the region's edge the player's main network enters through.
+      Its front faces outside the build, like a power source's feed face, and the network's
+      channels arrive through it (at most a dense cable's 32, and at most the network's budget);
+    - ``link``: a cable bus on the region's edge whose storage bus(es) face out, at the ME
+      Interface the player places on their main network there; a ``link`` subnet's way to the
+      player's storage, costing the main network one channel;
+    - ``controller``: an ME Controller block, which gives a subnet its channels;
+    - ``acceptor``: an Energy Acceptor on the line's EU supply (#336).
+    """
+
+    ATTACH = "attach"
+    LINK = "link"
+    CONTROLLER = "controller"
+    ACCEPTOR = "acceptor"
+
+
+class MEDeviceSpec(FrozenModel):
+    """The device an :class:`MEEndpoint` is built as: its kind, a GT ME hatch's mID, its cards, and
+    ``config``, the resources it is set to (an export or import bus's filter, a storage bus's
+    partition). Chosen by ``dataset.me.me_devices_for``."""
+
+    kind: MEDeviceKind
+    gt_mid: int | None = None
+    cards: MECards = Field(default_factory=MECards)
+    config: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def _check(self) -> MEDeviceSpec:
+        if (self.gt_mid is not None) is not self.kind.value.startswith("gt_"):
+            raise ValueError("a GT ME hatch names its mID, and nothing else does")
+        return self
+
+
+class MEEndpoint(FrozenModel):
+    """One ME device a machine needs: the ME counterpart of a hatch or a pipe's terminal.
+
+    It serves ``ports``, ports of its machine whose nets ride ``network``: usually one, but a
+    single block's Dual Interface takes its item and its fluid output together. A port too fast for
+    one device has two endpoints, each carrying ``share`` of the port's rate, the way a heavy
+    machine's draw is split across energy hatches. ``hatch_kind`` is set on a multiblock: the kind
+    of hatch slot the connection takes, the GT ME hatch itself or the normal hatch its AE2 part
+    stands in front of.
+    """
+
+    id: str = Field(min_length=1)
+    network: str = Field(min_length=1)
+    ports: tuple[str, ...] = Field(min_length=1)
+    device: MEDeviceSpec
+    hatch_kind: str | None = None
+    share: float = Field(default=1.0, gt=0.0, le=1.0)
+
+    @field_validator("ports")
+    @classmethod
+    def _check_ports(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(value) != len(set(value)):
+            raise ValueError("an ME endpoint's ports must not repeat")
+        return value
+
+
+# --- what a layout builds (LayoutResult v5, #333) ---------------------------------------------------
+
+
+class MECableCell(FrozenModel):
+    """One AE2 cable block of an ME network: where it is and what it is built from.
+
+    ``me_channels`` is the solver's own count of the channel devices it routed through this cable,
+    which the previewer lights; the validator re-derives it from the blocks themselves and never
+    trusts it. An ``attach`` or ``link`` machine's cell is listed here too: those blocks are cables.
+    """
+
+    cell: CellCoord
+    kind: MECableKind
+    me_channels: int = Field(default=0, ge=0)
+
+
+class MEPlacedDevice(FrozenModel):
+    """One ME device a layout builds: an AE2 part on a cable, or one of GT's ME hatches.
+
+    ``machine_id`` is the machine it serves, and ``endpoint_id`` the :class:`MEEndpoint` of that
+    machine it builds, ``None`` for a part an infrastructure machine carries (a ``link``'s storage
+    bus). For a **part**, ``cell`` is the cable block it sits on and ``side`` the side of that block
+    it sits on, which faces the block it works on. For a **GT ME hatch**, ``cell`` is the casing
+    cell the hatch takes and ``side`` the way its front faces, where AE reaches it.
+    """
+
+    machine_id: str = Field(min_length=1)
+    endpoint_id: str | None = None
+    kind: MEDeviceKind
+    cell: CellCoord
+    side: Facing
+    gt_mid: int | None = None
+    cards: MECards = Field(default_factory=MECards)
+    config: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def _check(self) -> MEPlacedDevice:
+        if (self.gt_mid is not None) is not self.kind.value.startswith("gt_"):
+            raise ValueError("a GT ME hatch names its mID, and nothing else does")
+        return self
+
+
+class MENetworkLayout(StrictModel):
+    """One ME network as a layout builds it: its cable blocks and its devices.
+
+    ``id`` names one of the problem's ``InputIR.me`` networks, and ``colour`` the colour its cables
+    are built in. Its controller, acceptor, attach stub and link are machines, placed like any
+    other (``Machine.me_role``); the stub and the link are cable blocks too, so their cells are
+    in ``cables``. Which blocks actually join which network in game is not this record's to say: AE
+    connects whatever compatible blocks touch, so the validator rebuilds that from the blocks.
+    """
+
+    id: str = Field(min_length=1)
+    colour: AEColor
+    cables: list[MECableCell] = Field(default_factory=list)
+    devices: list[MEPlacedDevice] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check(self) -> MENetworkLayout:
+        cells = [c.cell for c in self.cables]
+        if len(cells) != len(set(cells)):
+            raise ValueError(f"ME network {self.id!r} lists a cable cell twice")
         return self

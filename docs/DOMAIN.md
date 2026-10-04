@@ -613,6 +613,54 @@ hatches by mID, AE2's power figures, and which device serves a machine's port. I
 - **Cards**: the fewest Acceleration Cards that keep up, and Hyper-Acceleration Cards only on a line
   that has reached LuV, which their recipe needs.
 
+### What a valid ME build is (#333)
+
+The validator's ME gate (`validator/me.py`) holds a layout to these rules, each read from AE2's
+source (spike sections in brackets). The router builds to them; the validator re-derives every one
+from the blocks the layout places, never from the router's own bookkeeping.
+
+**The blocks.** A layout lists, per ME network, its cable blocks (each a kind: smart, dense, ...)
+and its devices (an AE2 part on one side of a cable block, or a GT ME hatch). Its controller,
+acceptor, attach stub and link are machines (`Machine.me_role`); the stub and the link are cable
+blocks too, a dense and a smart one, at their own cell.
+
+1. **Every cable block stands on free ground**: inside the region, on no machine (but its own stub
+   or link), no pipe or cable, no reserved cell, and no other network's cable.
+2. **Every device is where its job is.** A part sits on a cable block that takes parts (not dense,
+   spike 3), on a side no other part takes, facing the block it works on: a single block's face
+   its port may use (never its front), or a multiblock's normal hatch whose front faces back at the
+   part (the hatch kind the endpoint names). A GT ME hatch takes a hatch slot of its parent kind,
+   front out (spike 5.2). A link's storage buses sit on its front, facing out. Each of a machine's
+   ME endpoints is built exactly once, as the device it specifies (kind, mID, cards, config).
+3. **A single block's interfaces share one face**, its auto-output face, and an item interface
+   never serves a fluid: a single block with both on one network takes them through one Dual
+   Interface (spike 4.6).
+4. **Every device keeps up** with its share of its ports' rate: a bus by its cards (spike 4.2,
+   4.3), a GT ME output hatch by its flush (spike 5.3), an interface in front of a normal output bus
+   by that bus's push (spike 4.8); a bus takes four cards at most.
+
+**Which blocks join which network** is AE's to decide, not the layout's (spike 3): a cable block
+joins every compatible neighbour (Fluix joins every colour) on a side no part takes; a part joins
+only its own cable; a controller and an acceptor join on all six sides; a GT ME hatch only through
+its front. The validator builds that graph from the blocks, and:
+
+5. **Each network is one piece, and only itself.** A connected group of AE blocks holds one
+   network's blocks (two touching are merged in game), and a network's blocks are one group, except
+   an attached network, whose groups may each reach the main network through a stub of their own.
+
+**Channels**, by AE's own pathing (spike 2):
+
+6. **A network gets its channels from a source**: an attached network from the main network through
+   its stubs (a dense cable each, so 32 a stub), a subnet from a controller, whose every neighbour
+   is a root carrying its own capacity. An attached network spends at most its channel budget.
+7. **A subnet with no controller is ad hoc**: 8 channel devices at most, on any cable; a 9th takes
+   every channel away.
+8. **No block carries more channels than it can**: every channel device beyond a cable block (or a
+   block device, or a stub) on AE's path to it counts against that block's capacity, 8 or 32
+   (dense). On a tree that count is exact and does not depend on the order AE visits blocks in
+   (spike 2.4); where blocks form a cycle, the validator counts every device AE could route through
+   a block, which is sound for any order AE picks (spike 2.5).
+
 ## Multiblocks
 
 Represented as a **bounding box + controller-face and hatch/bus-face metadata** (multiblocks
