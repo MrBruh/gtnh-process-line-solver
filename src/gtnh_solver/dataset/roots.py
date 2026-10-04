@@ -37,9 +37,11 @@ from typing import Final
 #: is the repo root; resolves in the editable/dev install the repo is used through.
 DEFAULT_DATA = Path(__file__).resolve().parents[3] / "data"
 
-#: Fixed sub-directories of ``data/`` that hold the committed fixtures - never a generated version
-#: folder, so :func:`list_versions` skips them.
-_RESERVED = frozenset({"multiblocks", "textures"})
+#: Fixed sub-directories of ``data/`` that hold committed data - never a generated version folder,
+#: so :func:`list_versions` skips them. ``ae2`` holds the ME render data, keyed by AE2's own version
+#: rather than the pack's (``dataset.ae_render``): read as a pack, it would be the newest "version"
+#: on a fresh clone, and ``--list-dataset-versions`` would print it.
+_RESERVED = frozenset({"multiblocks", "textures", "ae2"})
 
 #: A generated multiblock dump keeps its provenance in a sidecar; the texture manifest keeps its own
 #: inline. Either way the stamp is :data:`_STAMP`, so one reader dates both sub-paths.

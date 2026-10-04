@@ -181,6 +181,17 @@ which this project neither downloads nor could redistribute the way it handles G
 reading of "no block renders as a placeholder" cannot be met without that decision, so #98's
 acceptance is scoped to blocks reachable from the GT5-Unofficial jar.
 
+**AE2 and AE2FluidCraft now have that second source, outside this manifest (#337).** An ME
+network's cables, buses and interfaces are not GT blocks and get no manifest entry: their geometry
+and texture names are derived from the two mods' source into `data/ae2/<AE2 version>/render.json`
+(`tools/derive_ae_render.py`), and their PNGs come from the mods' own jars, pinned in
+`dataset/mod_jars.py` and fetched at preview time like GT's. `previewer/jar.py`'s
+`multi_jar_png_provider` sends each asset path to the jar that owns its `assets/<modid>/`
+namespace, and downloads a jar only once one of its icons is asked for. AE2's textures are
+CC BY-NC-SA 3.0, not LGPL, so a preview that embeds them carries the credit in `NOTICE`. Until the
+previewer draws ME networks (#338) it still fetches only the GT jar, so the `BlockQuartzLamp` row
+above still draws as a placeholder.
+
 The third is **not** a non-goal and should not be written off with them. It is the **domain** mode
 from the table at the top of this file, caught here rather than at name resolution: the four
 `OVERLAY_FRONT_ADV_ASSLINE*` layers of ggfab's Advanced Assembly Line really live at

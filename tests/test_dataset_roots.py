@@ -71,6 +71,17 @@ def test_list_versions_excludes_reserved_dirs_and_files(tmp_path: Path) -> None:
     assert {p.name for p in list_versions(tmp_path)} == {"2.8.4", "2.9.0-beta-1"}
 
 
+def test_the_me_render_data_folder_is_never_a_pack_version(tmp_path: Path) -> None:
+    # data/ae2/<AE2 version>/render.json is committed and keyed by AE2's version (#337). On a fresh
+    # clone it is the newest folder in data/, so unreserved it would be listed first and picked.
+    _mkdir(tmp_path / "2.8.4" / "textures", mtime=1000)
+    _mkfile(tmp_path / "ae2" / "rv3-beta-1050-GTNH" / "render.json", mtime=2000)
+    _mkdir(tmp_path / "ae2" / "textures", mtime=2000)  # even with a sub-path a version would have
+    os.utime(tmp_path / "ae2", (3000, 3000))
+    assert [p.name for p in list_versions(tmp_path)] == ["2.8.4"]
+    assert resolve_dataset_path("textures", data_dir=tmp_path) == tmp_path / "2.8.4" / "textures"
+
+
 def test_list_versions_newest_first(tmp_path: Path) -> None:
     _mkdir(tmp_path / "2.8.4", mtime=1000)
     _mkdir(tmp_path / "2.9.0", mtime=2000)

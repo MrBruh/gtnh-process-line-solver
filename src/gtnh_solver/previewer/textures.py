@@ -24,8 +24,9 @@ route degrades differently and deliberately: an unresolved cable keeps its **fla
 never a checkerboard. A checkerboarded casing reads as "this block has no sprite" against the blocks
 around it that do; a checkerboarded noodle threaded through a layout reads as damage. Nothing
 here raises on a miss, and a Pillow-less install (no ``preview`` extra) degrades the whole pass to
-placeholders rather than failing. PNGs are LGPL and never committed; they are fetched at preview
-time and embedded only in the emitted HTML.
+placeholders rather than failing. PNGs are never committed: they are fetched at preview time and
+embedded only in the emitted HTML, and each keeps the licence of the jar it came from (GT's are
+LGPL, AE2's CC BY-NC-SA 3.0; see :mod:`.jar` and ``NOTICE``).
 """
 
 from __future__ import annotations

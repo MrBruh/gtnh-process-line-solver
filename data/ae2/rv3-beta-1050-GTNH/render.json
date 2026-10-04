@@ -1,0 +1,1072 @@
+{
+  "blocks": {
+    "controller": {
+      "cable_type": "dense",
+      "cable_type_source": "appeng/tile/networking/TileController.java:60",
+      "class": "appeng.block.networking.BlockController",
+      "faces": {
+        "down": "appliedenergistics2:BlockController",
+        "east": "appliedenergistics2:BlockController",
+        "north": "appliedenergistics2:BlockController",
+        "south": "appliedenergistics2:BlockController",
+        "up": "appliedenergistics2:BlockController",
+        "west": "appliedenergistics2:BlockController"
+      },
+      "faces_source": "appeng/block/AEBaseBlock.java:358-370",
+      "states": {
+        "column_conflict": {
+          "icon": "appliedenergistics2:BlockControllerColumnPowered",
+          "lights": "appliedenergistics2:BlockControllerColumnConflict"
+        },
+        "column_off": {
+          "icon": "appliedenergistics2:BlockControllerColumn",
+          "lights": null
+        },
+        "column_powered": {
+          "icon": "appliedenergistics2:BlockControllerColumnPowered",
+          "lights": "appliedenergistics2:BlockControllerColumnLights"
+        },
+        "conflict": {
+          "icon": "appliedenergistics2:BlockControllerPowered",
+          "lights": "appliedenergistics2:BlockControllerConflict"
+        },
+        "inside_a": {
+          "icon": "appliedenergistics2:BlockControllerInsideA",
+          "lights": null
+        },
+        "inside_b": {
+          "icon": "appliedenergistics2:BlockControllerInsideB",
+          "lights": null
+        },
+        "off": {
+          "icon": "appliedenergistics2:BlockController",
+          "lights": null
+        },
+        "powered": {
+          "icon": "appliedenergistics2:BlockControllerPowered",
+          "lights": "appliedenergistics2:BlockControllerLights"
+        }
+      },
+      "states_source": "appeng/client/render/blocks/RenderBlockController.java:33-141"
+    },
+    "drive": {
+      "cable_type": "smart",
+      "cable_type_source": "appeng/tile/storage/TileDrive.java:261",
+      "class": "appeng.block.storage.BlockDrive",
+      "faces": {
+        "down": "appliedenergistics2:BlockDriveBottom",
+        "east": "appliedenergistics2:BlockDriveSide",
+        "north": "appliedenergistics2:BlockDriveSide",
+        "south": "appliedenergistics2:BlockDriveFront",
+        "up": "appliedenergistics2:BlockDrive",
+        "west": "appliedenergistics2:BlockDriveSide"
+      },
+      "faces_source": "appeng/block/AEBaseBlock.java:358-370",
+      "states": null
+    },
+    "energy_acceptor": {
+      "cable_type": "covered",
+      "cable_type_source": "appeng/tile/networking/TileEnergyAcceptor.java:59",
+      "class": "appeng.block.networking.BlockEnergyAcceptor",
+      "faces": {
+        "down": "appliedenergistics2:BlockEnergyAcceptor",
+        "east": "appliedenergistics2:BlockEnergyAcceptor",
+        "north": "appliedenergistics2:BlockEnergyAcceptor",
+        "south": "appliedenergistics2:BlockEnergyAcceptor",
+        "up": "appliedenergistics2:BlockEnergyAcceptor",
+        "west": "appliedenergistics2:BlockEnergyAcceptor"
+      },
+      "faces_source": "appeng/block/AEBaseBlock.java:358-370",
+      "states": null
+    },
+    "interface": {
+      "cable_type": "smart",
+      "cable_type_source": "appeng/helpers/DualityInterface.java:621",
+      "class": "appeng.block.misc.BlockInterface",
+      "faces": {
+        "down": "appliedenergistics2:BlockInterface",
+        "east": "appliedenergistics2:BlockInterface",
+        "north": "appliedenergistics2:BlockInterface",
+        "south": "appliedenergistics2:BlockInterface",
+        "up": "appliedenergistics2:BlockInterface",
+        "west": "appliedenergistics2:BlockInterface"
+      },
+      "faces_source": "appeng/block/AEBaseBlock.java:358-370",
+      "states": null
+    }
+  },
+  "cable_icons": {
+    "covered": {
+      "by_colour": {
+        "black": "appliedenergistics2:MECovered_Black",
+        "blue": "appliedenergistics2:MECovered_Blue",
+        "brown": "appliedenergistics2:MECovered_Brown",
+        "cyan": "appliedenergistics2:MECovered_Cyan",
+        "fluix": "appliedenergistics2:ItemPart.CableCovered",
+        "gray": "appliedenergistics2:MECovered_Gray",
+        "green": "appliedenergistics2:MECovered_Green",
+        "light_blue": "appliedenergistics2:MECovered_LightBlue",
+        "light_gray": "appliedenergistics2:MECovered_LightGrey",
+        "lime": "appliedenergistics2:MECovered_Lime",
+        "magenta": "appliedenergistics2:MECovered_Magenta",
+        "orange": "appliedenergistics2:MECovered_Orange",
+        "pink": "appliedenergistics2:MECovered_Pink",
+        "purple": "appliedenergistics2:MECovered_Purple",
+        "red": "appliedenergistics2:MECovered_Red",
+        "white": "appliedenergistics2:MECovered_White",
+        "yellow": "appliedenergistics2:MECovered_Yellow"
+      },
+      "source": "appeng/parts/networking/PartCable.java:455-478"
+    },
+    "dense": {
+      "by_colour": {
+        "black": "appliedenergistics2:MEDense_Black",
+        "blue": "appliedenergistics2:MEDense_Blue",
+        "brown": "appliedenergistics2:MEDense_Brown",
+        "cyan": "appliedenergistics2:MEDense_Cyan",
+        "fluix": "appliedenergistics2:ItemPart.CableDense",
+        "gray": "appliedenergistics2:MEDense_Gray",
+        "green": "appliedenergistics2:MEDense_Green",
+        "light_blue": "appliedenergistics2:MEDense_LightBlue",
+        "light_gray": "appliedenergistics2:MEDense_LightGrey",
+        "lime": "appliedenergistics2:MEDense_Lime",
+        "magenta": "appliedenergistics2:MEDense_Magenta",
+        "orange": "appliedenergistics2:MEDense_Orange",
+        "pink": "appliedenergistics2:MEDense_Pink",
+        "purple": "appliedenergistics2:MEDense_Purple",
+        "red": "appliedenergistics2:MEDense_Red",
+        "white": "appliedenergistics2:MEDense_White",
+        "yellow": "appliedenergistics2:MEDense_Yellow"
+      },
+      "source": "appeng/parts/networking/PartDenseCable.java:352-372"
+    },
+    "dense_covered": {
+      "by_colour": {
+        "black": "appliedenergistics2:MEDenseCovered_Black",
+        "blue": "appliedenergistics2:MEDenseCovered_Blue",
+        "brown": "appliedenergistics2:MEDenseCovered_Brown",
+        "cyan": "appliedenergistics2:MEDenseCovered_Cyan",
+        "fluix": "appliedenergistics2:ItemPart.CableDenseCovered",
+        "gray": "appliedenergistics2:MEDenseCovered_Gray",
+        "green": "appliedenergistics2:MEDenseCovered_Green",
+        "light_blue": "appliedenergistics2:MEDenseCovered_LightBlue",
+        "light_gray": "appliedenergistics2:MEDenseCovered_LightGrey",
+        "lime": "appliedenergistics2:MEDenseCovered_Lime",
+        "magenta": "appliedenergistics2:MEDenseCovered_Magenta",
+        "orange": "appliedenergistics2:MEDenseCovered_Orange",
+        "pink": "appliedenergistics2:MEDenseCovered_Pink",
+        "purple": "appliedenergistics2:MEDenseCovered_Purple",
+        "red": "appliedenergistics2:MEDenseCovered_Red",
+        "white": "appliedenergistics2:MEDenseCovered_White",
+        "yellow": "appliedenergistics2:MEDenseCovered_Yellow"
+      },
+      "source": "appeng/parts/networking/PartDenseCableCovered.java:266-286"
+    },
+    "glass": {
+      "by_colour": {
+        "black": "appliedenergistics2:MECable_Black",
+        "blue": "appliedenergistics2:MECable_Blue",
+        "brown": "appliedenergistics2:MECable_Brown",
+        "cyan": "appliedenergistics2:MECable_Cyan",
+        "fluix": "appliedenergistics2:ItemPart.CableGlass",
+        "gray": "appliedenergistics2:MECable_Grey",
+        "green": "appliedenergistics2:MECable_Green",
+        "light_blue": "appliedenergistics2:MECable_LightBlue",
+        "light_gray": "appliedenergistics2:MECable_LightGrey",
+        "lime": "appliedenergistics2:MECable_Lime",
+        "magenta": "appliedenergistics2:MECable_Magenta",
+        "orange": "appliedenergistics2:MECable_Orange",
+        "pink": "appliedenergistics2:MECable_Pink",
+        "purple": "appliedenergistics2:MECable_Purple",
+        "red": "appliedenergistics2:MECable_Red",
+        "white": "appliedenergistics2:MECable_White",
+        "yellow": "appliedenergistics2:MECable_Yellow"
+      },
+      "source": "appeng/parts/networking/PartCable.java:235-258"
+    },
+    "smart": {
+      "by_colour": {
+        "black": "appliedenergistics2:MESmart_Black",
+        "blue": "appliedenergistics2:MESmart_Blue",
+        "brown": "appliedenergistics2:MESmart_Brown",
+        "cyan": "appliedenergistics2:MESmart_Cyan",
+        "fluix": "appliedenergistics2:ItemPart.CableSmart",
+        "gray": "appliedenergistics2:MESmart_Gray",
+        "green": "appliedenergistics2:MESmart_Green",
+        "light_blue": "appliedenergistics2:MESmart_LightBlue",
+        "light_gray": "appliedenergistics2:MESmart_LightGrey",
+        "lime": "appliedenergistics2:MESmart_Lime",
+        "magenta": "appliedenergistics2:MESmart_Magenta",
+        "orange": "appliedenergistics2:MESmart_Orange",
+        "pink": "appliedenergistics2:MESmart_Pink",
+        "purple": "appliedenergistics2:MESmart_Purple",
+        "red": "appliedenergistics2:MESmart_Red",
+        "white": "appliedenergistics2:MESmart_White",
+        "yellow": "appliedenergistics2:MESmart_Yellow"
+      },
+      "source": "appeng/parts/networking/PartCable.java:694-717"
+    }
+  },
+  "cables": {
+    "covered": {
+      "connections": {
+        "other": {
+          "arm": {
+            "box": [6, 0, 6, 10, 5, 10],
+            "icons": "covered",
+            "icons_source": "appeng/parts/networking/PartCable.java:574",
+            "lights": false,
+            "source": "appeng/parts/networking/PartCable.java:579"
+          },
+          "plug": {
+            "box": [5, 0, 5, 11, 4, 11],
+            "icons": "covered",
+            "icons_source": "appeng/parts/networking/PartCable.java:552",
+            "lights": false,
+            "source": "appeng/parts/networking/PartCable.java:554"
+          }
+        }
+      },
+      "core": {
+        "box": [5, 5, 5, 11, 11, 11],
+        "icons": "covered",
+        "icons_source": "appeng/parts/networking/PartCableCovered.java:168",
+        "lights": false,
+        "source": "appeng/parts/networking/PartCableCovered.java:169"
+      },
+      "part_arm": {
+        "drawn_below_length": 8,
+        "icons": "covered",
+        "icons_source": "appeng/parts/networking/PartCableCovered.java:129",
+        "lights": false,
+        "source": "appeng/parts/networking/PartCableCovered.java:144",
+        "top": 5,
+        "x": [6, 10],
+        "z": [6, 10]
+      },
+      "straight": {
+        "box": [5, 0, 5, 11, 16, 11],
+        "icons": "covered",
+        "icons_source": "appeng/parts/networking/PartCableCovered.java:172",
+        "lights": false,
+        "source": "appeng/parts/networking/PartCableCovered.java:179"
+      }
+    },
+    "dense": {
+      "connections": {
+        "dense": {
+          "arm": {
+            "box": [4, 0, 4, 12, 5, 12],
+            "icons": "smart",
+            "icons_source": "appeng/parts/networking/PartDenseCable.java:302",
+            "lights": true,
+            "source": "appeng/parts/networking/PartDenseCable.java:306"
+          },
+          "plug": null
+        },
+        "other": {
+          "arm": {
+            "box": [6, 0, 6, 10, 5, 10],
+            "icons": "covered",
+            "icons_source": "appeng/parts/networking/PartCable.java:574",
+            "lights": false,
+            "source": "appeng/parts/networking/PartCable.java:579"
+          },
+          "plug": {
+            "box": [5, 0, 5, 11, 4, 11],
+            "icons": "covered",
+            "icons_source": "appeng/parts/networking/PartCable.java:552",
+            "lights": false,
+            "source": "appeng/parts/networking/PartCable.java:554"
+          }
+        },
+        "smart": {
+          "arm": {
+            "box": [6, 0, 6, 10, 5, 10],
+            "icons": "smart",
+            "icons_source": "appeng/parts/networking/PartCable.java:656",
+            "lights": true,
+            "source": "appeng/parts/networking/PartCable.java:661"
+          },
+          "plug": {
+            "box": [5, 0, 5, 11, 4, 11],
+            "icons": "smart",
+            "icons_source": "appeng/parts/networking/PartCable.java:614",
+            "lights": true,
+            "source": "appeng/parts/networking/PartCable.java:616"
+          }
+        }
+      },
+      "core": {
+        "box": [3, 3, 3, 13, 13, 13],
+        "icons": "dense",
+        "icons_source": "appeng/parts/networking/PartDenseCable.java:195",
+        "lights": false,
+        "source": "appeng/parts/networking/PartDenseCable.java:196"
+      },
+      "part_arm": null,
+      "straight": {
+        "box": [3, 0, 3, 13, 16, 13],
+        "icons": "smart",
+        "icons_source": "appeng/parts/networking/PartDenseCable.java:209",
+        "lights": true,
+        "source": "appeng/parts/networking/PartDenseCable.java:222"
+      }
+    },
+    "dense_covered": {
+      "connections": {
+        "dense": {
+          "arm": {
+            "box": [4, 0, 4, 12, 5, 12],
+            "icons": "covered",
+            "icons_source": "appeng/parts/networking/PartDenseCableCovered.java:247",
+            "lights": false,
+            "source": "appeng/parts/networking/PartDenseCableCovered.java:251"
+          },
+          "plug": null
+        },
+        "other": {
+          "arm": {
+            "box": [6, 0, 6, 10, 5, 10],
+            "icons": "covered",
+            "icons_source": "appeng/parts/networking/PartCable.java:574",
+            "lights": false,
+            "source": "appeng/parts/networking/PartCable.java:579"
+          },
+          "plug": {
+            "box": [5, 0, 5, 11, 4, 11],
+            "icons": "covered",
+            "icons_source": "appeng/parts/networking/PartCable.java:552",
+            "lights": false,
+            "source": "appeng/parts/networking/PartCable.java:554"
+          }
+        }
+      },
+      "core": {
+        "box": [3, 3, 3, 13, 13, 13],
+        "icons": "dense_covered",
+        "icons_source": "appeng/parts/networking/PartDenseCableCovered.java:179",
+        "lights": false,
+        "source": "appeng/parts/networking/PartDenseCableCovered.java:180"
+      },
+      "part_arm": null,
+      "straight": {
+        "box": [3, 0, 3, 13, 16, 13],
+        "icons": "covered",
+        "icons_source": "appeng/parts/networking/PartDenseCableCovered.java:192",
+        "lights": false,
+        "source": "appeng/parts/networking/PartDenseCableCovered.java:197"
+      }
+    },
+    "glass": {
+      "connections": {
+        "other": {
+          "arm": {
+            "box": [6, 0, 6, 10, 6, 10],
+            "icons": "glass",
+            "icons_source": "appeng/parts/networking/PartCable.java:517",
+            "lights": false,
+            "source": "appeng/parts/networking/PartCable.java:522"
+          },
+          "plug": {
+            "box": [5, 0, 5, 11, 4, 11],
+            "icons": "covered",
+            "icons_source": "appeng/parts/networking/PartCable.java:501",
+            "lights": false,
+            "source": "appeng/parts/networking/PartCable.java:503"
+          }
+        }
+      },
+      "core": {
+        "box": [6, 6, 6, 10, 10, 10],
+        "icons": "glass",
+        "icons_source": "appeng/parts/networking/PartCable.java:291",
+        "lights": false,
+        "source": "appeng/parts/networking/PartCable.java:322"
+      },
+      "part_arm": {
+        "drawn_below_length": 8,
+        "icons": "glass",
+        "icons_source": "appeng/parts/networking/PartCable.java:291",
+        "lights": false,
+        "source": "appeng/parts/networking/PartCable.java:302",
+        "top": 6,
+        "x": [6, 10],
+        "z": [6, 10]
+      },
+      "straight": {
+        "box": [6, 0, 6, 10, 16, 10],
+        "icons": "glass",
+        "icons_source": "appeng/parts/networking/PartCable.java:330",
+        "lights": false,
+        "source": "appeng/parts/networking/PartCable.java:337"
+      }
+    },
+    "smart": {
+      "connections": {
+        "other": {
+          "arm": {
+            "box": [6, 0, 6, 10, 5, 10],
+            "icons": "smart",
+            "icons_source": "appeng/parts/networking/PartCable.java:656",
+            "lights": true,
+            "source": "appeng/parts/networking/PartCable.java:661"
+          },
+          "plug": {
+            "box": [5, 0, 5, 11, 4, 11],
+            "icons": "smart",
+            "icons_source": "appeng/parts/networking/PartCable.java:614",
+            "lights": true,
+            "source": "appeng/parts/networking/PartCable.java:616"
+          }
+        }
+      },
+      "core": {
+        "box": [5, 5, 5, 11, 11, 11],
+        "icons": "covered",
+        "icons_source": "appeng/parts/networking/PartCableSmart.java:212",
+        "lights": false,
+        "source": "appeng/parts/networking/PartCableSmart.java:213"
+      },
+      "part_arm": {
+        "drawn_below_length": 8,
+        "icons": "smart",
+        "icons_source": "appeng/parts/networking/PartCableSmart.java:147",
+        "lights": true,
+        "source": "appeng/parts/networking/PartCableSmart.java:163",
+        "top": 5,
+        "x": [6, 10],
+        "z": [6, 10]
+      },
+      "straight": {
+        "box": [5, 0, 5, 11, 16, 11],
+        "icons": "smart",
+        "icons_source": "appeng/parts/networking/PartCableSmart.java:226",
+        "lights": true,
+        "source": "appeng/parts/networking/PartCableSmart.java:239"
+      }
+    }
+  },
+  "channel_lights": {
+    "by_count": {
+      "0": ["appliedenergistics2:MECableSmart00", "appliedenergistics2:MECableSmart10"],
+      "1": ["appliedenergistics2:MECableSmart01", "appliedenergistics2:MECableSmart10"],
+      "2": ["appliedenergistics2:MECableSmart02", "appliedenergistics2:MECableSmart10"],
+      "3": ["appliedenergistics2:MECableSmart03", "appliedenergistics2:MECableSmart10"],
+      "4": ["appliedenergistics2:MECableSmart04", "appliedenergistics2:MECableSmart10"],
+      "5": ["appliedenergistics2:MECableSmart04", "appliedenergistics2:MECableSmart11"],
+      "6": ["appliedenergistics2:MECableSmart04", "appliedenergistics2:MECableSmart12"],
+      "7": ["appliedenergistics2:MECableSmart04", "appliedenergistics2:MECableSmart13"],
+      "8": ["appliedenergistics2:MECableSmart04", "appliedenergistics2:MECableSmart14"]
+    },
+    "count_when_unpowered": 0,
+    "counts_source": "appeng/parts/networking/PartCable.java:374-376",
+    "dense_cap": 32,
+    "dense_per_count": 4,
+    "max_count": 8,
+    "pass_tints": ["black_variant", "white_variant"],
+    "source": "appeng/parts/networking/PartCable.java:747-769"
+  },
+  "colours": {
+    "black": {
+      "ae_name": "Black",
+      "black_variant": [43, 43, 43],
+      "medium_variant": [86, 86, 86],
+      "ordinal": 15,
+      "source": "appeng/api/util/AEColor.java:60",
+      "white_variant": [132, 132, 132]
+    },
+    "blue": {
+      "ae_name": "Blue",
+      "black_variant": [45, 41, 160],
+      "medium_variant": [81, 74, 255],
+      "ordinal": 11,
+      "source": "appeng/api/util/AEColor.java:52",
+      "white_variant": [221, 230, 255]
+    },
+    "brown": {
+      "ae_name": "Brown",
+      "black_variant": [114, 78, 53],
+      "medium_variant": [183, 150, 127],
+      "ordinal": 12,
+      "source": "appeng/api/util/AEColor.java:54",
+      "white_variant": [224, 210, 200]
+    },
+    "cyan": {
+      "ae_name": "Cyan",
+      "black_variant": [47, 155, 165],
+      "medium_variant": [81, 170, 198],
+      "ordinal": 9,
+      "source": "appeng/api/util/AEColor.java:48",
+      "white_variant": [174, 221, 244]
+    },
+    "fluix": {
+      "ae_name": "Transparent",
+      "black_variant": [27, 35, 68],
+      "medium_variant": [137, 92, 168],
+      "ordinal": 16,
+      "source": "appeng/api/util/AEColor.java:62",
+      "white_variant": [215, 187, 236]
+    },
+    "gray": {
+      "ae_name": "Gray",
+      "black_variant": [124, 124, 124],
+      "medium_variant": [160, 160, 160],
+      "ordinal": 7,
+      "source": "appeng/api/util/AEColor.java:44",
+      "white_variant": [201, 201, 201]
+    },
+    "green": {
+      "ae_name": "Green",
+      "black_variant": [69, 160, 33],
+      "medium_variant": [96, 227, 46],
+      "ordinal": 13,
+      "source": "appeng/api/util/AEColor.java:56",
+      "white_variant": [227, 242, 227]
+    },
+    "light_blue": {
+      "ae_name": "LightBlue",
+      "black_variant": [98, 141, 203],
+      "medium_variant": [130, 172, 231],
+      "ordinal": 3,
+      "source": "appeng/api/util/AEColor.java:36",
+      "white_variant": [216, 246, 255]
+    },
+    "light_gray": {
+      "ae_name": "LightGray",
+      "black_variant": [157, 157, 157],
+      "medium_variant": [205, 205, 205],
+      "ordinal": 8,
+      "source": "appeng/api/util/AEColor.java:46",
+      "white_variant": [239, 239, 239]
+    },
+    "lime": {
+      "ae_name": "Lime",
+      "black_variant": [124, 255, 74],
+      "medium_variant": [187, 255, 81],
+      "ordinal": 5,
+      "source": "appeng/api/util/AEColor.java:40",
+      "white_variant": [231, 247, 215]
+    },
+    "magenta": {
+      "ae_name": "Magenta",
+      "black_variant": [130, 30, 130],
+      "medium_variant": [184, 42, 184],
+      "ordinal": 2,
+      "source": "appeng/api/util/AEColor.java:34",
+      "white_variant": [197, 152, 200]
+    },
+    "orange": {
+      "ae_name": "Orange",
+      "black_variant": [249, 151, 57],
+      "medium_variant": [250, 174, 68],
+      "ordinal": 1,
+      "source": "appeng/api/util/AEColor.java:32",
+      "white_variant": [244, 222, 195]
+    },
+    "pink": {
+      "ae_name": "Pink",
+      "black_variant": [220, 141, 181],
+      "medium_variant": [248, 181, 215],
+      "ordinal": 6,
+      "source": "appeng/api/util/AEColor.java:42",
+      "white_variant": [247, 222, 235]
+    },
+    "purple": {
+      "ae_name": "Purple",
+      "black_variant": [130, 48, 178],
+      "medium_variant": [164, 83, 206],
+      "ordinal": 10,
+      "source": "appeng/api/util/AEColor.java:50",
+      "white_variant": [199, 163, 204]
+    },
+    "red": {
+      "ae_name": "Red",
+      "black_variant": [165, 0, 41],
+      "medium_variant": [255, 0, 60],
+      "ordinal": 14,
+      "source": "appeng/api/util/AEColor.java:58",
+      "white_variant": [255, 230, 237]
+    },
+    "white": {
+      "ae_name": "White",
+      "black_variant": [190, 190, 190],
+      "medium_variant": [219, 219, 219],
+      "ordinal": 0,
+      "source": "appeng/api/util/AEColor.java:30",
+      "white_variant": [250, 250, 250]
+    },
+    "yellow": {
+      "ae_name": "Yellow",
+      "black_variant": [255, 247, 170],
+      "medium_variant": [248, 255, 74],
+      "ordinal": 4,
+      "source": "appeng/api/util/AEColor.java:38",
+      "white_variant": [255, 255, 232]
+    }
+  },
+  "note": "AE2 and AE2FluidCraft render geometry and icon names for drawing an ME network (#337, #338). Numbers and icon NAMES only: every PNG is read from the pinned mod jar at preview time and is never committed. A box is [x0, y0, z0, x1, y1, z1] in sixteenths of a block. A cable box is given toward DOWN, with y = 0 the face toward what it connects to; a part box is in the part's own frame, where z = 16 is the face the part sits on (part_frame turns it to each side). An icon is a block-atlas name, modid:Name, read from assets/<modid>/textures/blocks/Name.png. A cable's connections are keyed by what the neighbour reports: dense (dense or dense_covered), smart, or other; a plug is drawn only at a device block, never at another cable bus. UV offsets and rotations are not recorded. Derived by tools/derive_ae_render.py from the clones in provenance; docs/spikes/329-me-ae2.md section 8 explains each number.",
+  "part_frame": {
+    "axes": {
+      "down": {
+        "x": "east",
+        "y": "north",
+        "z": "down"
+      },
+      "east": {
+        "x": "south",
+        "y": "up",
+        "z": "east"
+      },
+      "north": {
+        "x": "west",
+        "y": "up",
+        "z": "north"
+      },
+      "south": {
+        "x": "east",
+        "y": "up",
+        "z": "south"
+      },
+      "up": {
+        "x": "east",
+        "y": "south",
+        "z": "up"
+      },
+      "west": {
+        "x": "north",
+        "y": "up",
+        "z": "west"
+      }
+    },
+    "source": "appeng/parts/BusCollisionHelper.java:58-87"
+  },
+  "parts": {
+    "dual_interface": {
+      "arm_length": 4,
+      "arm_length_source": "appeng/parts/misc/PartInterface.java:209",
+      "boxes": [
+        [2, 2, 14, 14, 14, 16],
+        [5, 5, 12, 11, 11, 14]
+      ],
+      "boxes_source": "appeng/parts/misc/PartInterface.java:108-109",
+      "class": "com.glodblock.github.common.parts.PartFluidInterface",
+      "front_source": "com/glodblock/github/common/item/ItemPartFluidInterface.java:49",
+      "mod": "ae2fc",
+      "render": [
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [2, 2, 14, 14, 14, 16],
+          "front": "ae2fc:part_fluid_interface",
+          "icons_source": "appeng/parts/misc/PartInterface.java:148-154",
+          "sides": "appliedenergistics2:PartMonitorSides",
+          "source": "appeng/parts/misc/PartInterface.java:156",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [5, 5, 12, 11, 11, 13],
+          "front": "ae2fc:part_fluid_interface",
+          "icons_source": "appeng/parts/misc/PartInterface.java:159-165",
+          "sides": "appliedenergistics2:PartMonitorSides",
+          "source": "appeng/parts/misc/PartInterface.java:167",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [5, 5, 13, 11, 11, 14],
+          "front": "ae2fc:part_fluid_interface",
+          "icons_source": "appeng/parts/misc/PartInterface.java:170-176",
+          "sides": "appliedenergistics2:PartMonitorSidesStatus",
+          "source": "appeng/parts/misc/PartInterface.java:178",
+          "status_lights": true
+        }
+      ],
+      "status_lights": "appliedenergistics2:PartMonitorSidesStatusLights",
+      "status_lights_source": "appeng/parts/PartBasicState.java:63-66"
+    },
+    "export_bus": {
+      "arm_length": 5,
+      "arm_length_source": "appeng/parts/automation/PartSharedItemBus.java:245",
+      "boxes": [
+        [4, 4, 12, 12, 12, 14],
+        [5, 5, 14, 11, 11, 15],
+        [6, 6, 15, 10, 10, 16],
+        [6, 6, 11, 10, 10, 12]
+      ],
+      "boxes_source": "appeng/parts/automation/PartBaseExportBus.java:151-154",
+      "class": "appeng.parts.automation.PartExportBus",
+      "front_source": "appeng/items/parts/PartType.java:131",
+      "mod": "appliedenergistics2",
+      "render": [
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [4, 4, 12, 12, 12, 14],
+          "front": "appliedenergistics2:ItemPart.ExportBus",
+          "icons_source": "appeng/parts/automation/PartBaseExportBus.java:183-189",
+          "sides": "appliedenergistics2:PartExportSides",
+          "source": "appeng/parts/automation/PartBaseExportBus.java:191",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [5, 5, 14, 11, 11, 15],
+          "front": "appliedenergistics2:ItemPart.ExportBus",
+          "icons_source": "appeng/parts/automation/PartBaseExportBus.java:183-189",
+          "sides": "appliedenergistics2:PartExportSides",
+          "source": "appeng/parts/automation/PartBaseExportBus.java:194",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [6, 6, 15, 10, 10, 16],
+          "front": "appliedenergistics2:ItemPart.ExportBus",
+          "icons_source": "appeng/parts/automation/PartBaseExportBus.java:183-189",
+          "sides": "appliedenergistics2:PartExportSides",
+          "source": "appeng/parts/automation/PartBaseExportBus.java:197",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [6, 6, 11, 10, 10, 12],
+          "front": "appliedenergistics2:ItemPart.ExportBus",
+          "icons_source": "appeng/parts/automation/PartBaseExportBus.java:200-206",
+          "sides": "appliedenergistics2:PartMonitorSidesStatus",
+          "source": "appeng/parts/automation/PartBaseExportBus.java:208",
+          "status_lights": true
+        }
+      ],
+      "status_lights": "appliedenergistics2:PartMonitorSidesStatusLights",
+      "status_lights_source": "appeng/parts/PartBasicState.java:63-66"
+    },
+    "fluid_export_bus": {
+      "arm_length": 5,
+      "arm_length_source": "appeng/parts/automation/PartSharedItemBus.java:245",
+      "boxes": [
+        [4, 4, 12, 12, 12, 14],
+        [5, 5, 14, 11, 11, 15],
+        [6, 6, 15, 10, 10, 16],
+        [6, 6, 11, 10, 10, 12]
+      ],
+      "boxes_source": "appeng/parts/automation/PartBaseExportBus.java:151-154",
+      "class": "com.glodblock.github.common.parts.PartFluidExportBus",
+      "front_source": "com/glodblock/github/client/textures/FCPartsTexture.java:20",
+      "mod": "ae2fc",
+      "render": [
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [4, 4, 12, 12, 12, 14],
+          "front": "ae2fc:fluid_export_face",
+          "icons_source": "appeng/parts/automation/PartBaseExportBus.java:183-189",
+          "sides": "appliedenergistics2:PartExportSides",
+          "source": "appeng/parts/automation/PartBaseExportBus.java:191",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [5, 5, 14, 11, 11, 15],
+          "front": "ae2fc:fluid_export_face",
+          "icons_source": "appeng/parts/automation/PartBaseExportBus.java:183-189",
+          "sides": "appliedenergistics2:PartExportSides",
+          "source": "appeng/parts/automation/PartBaseExportBus.java:194",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [6, 6, 15, 10, 10, 16],
+          "front": "ae2fc:fluid_export_face",
+          "icons_source": "appeng/parts/automation/PartBaseExportBus.java:183-189",
+          "sides": "appliedenergistics2:PartExportSides",
+          "source": "appeng/parts/automation/PartBaseExportBus.java:197",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [6, 6, 11, 10, 10, 12],
+          "front": "ae2fc:fluid_export_face",
+          "icons_source": "appeng/parts/automation/PartBaseExportBus.java:200-206",
+          "sides": "appliedenergistics2:PartMonitorSidesStatus",
+          "source": "appeng/parts/automation/PartBaseExportBus.java:208",
+          "status_lights": true
+        }
+      ],
+      "status_lights": "appliedenergistics2:PartMonitorSidesStatusLights",
+      "status_lights_source": "appeng/parts/PartBasicState.java:63-66"
+    },
+    "fluid_import_bus": {
+      "arm_length": 5,
+      "arm_length_source": "appeng/parts/automation/PartSharedItemBus.java:245",
+      "boxes": [
+        [6, 6, 11, 10, 10, 13],
+        [5, 5, 13, 11, 11, 14],
+        [4, 4, 14, 12, 12, 16]
+      ],
+      "boxes_source": "appeng/parts/automation/PartBaseImportBus.java:42-44",
+      "class": "com.glodblock.github.common.parts.PartFluidImportBus",
+      "front_source": "com/glodblock/github/client/textures/FCPartsTexture.java:19",
+      "mod": "ae2fc",
+      "render": [
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [4, 4, 14, 12, 12, 16],
+          "front": "ae2fc:fluid_import_face",
+          "icons_source": "appeng/parts/automation/PartBaseImportBus.java:73-79",
+          "sides": "appliedenergistics2:PartImportSides",
+          "source": "appeng/parts/automation/PartBaseImportBus.java:81",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [5, 5, 13, 11, 11, 14],
+          "front": "ae2fc:fluid_import_face",
+          "icons_source": "appeng/parts/automation/PartBaseImportBus.java:73-79",
+          "sides": "appliedenergistics2:PartImportSides",
+          "source": "appeng/parts/automation/PartBaseImportBus.java:84",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [6, 6, 12, 10, 10, 13],
+          "front": "ae2fc:fluid_import_face",
+          "icons_source": "appeng/parts/automation/PartBaseImportBus.java:73-79",
+          "sides": "appliedenergistics2:PartImportSides",
+          "source": "appeng/parts/automation/PartBaseImportBus.java:87",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [6, 6, 11, 10, 10, 12],
+          "front": "ae2fc:fluid_import_face",
+          "icons_source": "appeng/parts/automation/PartBaseImportBus.java:89-95",
+          "sides": "appliedenergistics2:PartMonitorSidesStatus",
+          "source": "appeng/parts/automation/PartBaseImportBus.java:97",
+          "status_lights": true
+        }
+      ],
+      "status_lights": "appliedenergistics2:PartMonitorSidesStatusLights",
+      "status_lights_source": "appeng/parts/PartBasicState.java:63-66"
+    },
+    "fluid_storage_bus": {
+      "arm_length": 4,
+      "arm_length_source": "appeng/parts/misc/PartStorageBus.java:500",
+      "boxes": [
+        [3, 3, 15, 13, 13, 16],
+        [2, 2, 14, 14, 14, 15],
+        [5, 5, 12, 11, 11, 14]
+      ],
+      "boxes_source": "appeng/parts/misc/PartStorageBus.java:400-402",
+      "class": "com.glodblock.github.common.parts.PartFluidStorageBus",
+      "front_source": "com/glodblock/github/common/item/ItemPartFluidStorageBus.java:53",
+      "mod": "ae2fc",
+      "render": [
+        {
+          "back": "appliedenergistics2:PartStorageBack",
+          "box": [3, 3, 15, 13, 13, 16],
+          "front": "ae2fc:fluid_storage_bus",
+          "icons_source": "appeng/parts/misc/PartStorageBus.java:431-437",
+          "sides": "appliedenergistics2:PartStorageSides",
+          "source": "appeng/parts/misc/PartStorageBus.java:439",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartStorageBack",
+          "box": [2, 2, 14, 14, 14, 15],
+          "front": "ae2fc:fluid_storage_bus",
+          "icons_source": "appeng/parts/misc/PartStorageBus.java:431-437",
+          "sides": "appliedenergistics2:PartStorageSides",
+          "source": "appeng/parts/misc/PartStorageBus.java:442",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartStorageBack",
+          "box": [5, 5, 12, 11, 11, 13],
+          "front": "ae2fc:fluid_storage_bus",
+          "icons_source": "appeng/parts/misc/PartStorageBus.java:445-451",
+          "sides": "appliedenergistics2:PartStorageSides",
+          "source": "appeng/parts/misc/PartStorageBus.java:453",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [5, 5, 13, 11, 11, 14],
+          "front": "ae2fc:fluid_storage_bus",
+          "icons_source": "appeng/parts/misc/PartStorageBus.java:456-462",
+          "sides": "appliedenergistics2:PartMonitorSidesStatus",
+          "source": "appeng/parts/misc/PartStorageBus.java:464",
+          "status_lights": true
+        }
+      ],
+      "status_lights": "appliedenergistics2:PartMonitorSidesStatusLights",
+      "status_lights_source": "appeng/parts/PartBasicState.java:63-66"
+    },
+    "import_bus": {
+      "arm_length": 5,
+      "arm_length_source": "appeng/parts/automation/PartSharedItemBus.java:245",
+      "boxes": [
+        [6, 6, 11, 10, 10, 13],
+        [5, 5, 13, 11, 11, 14],
+        [4, 4, 14, 12, 12, 16]
+      ],
+      "boxes_source": "appeng/parts/automation/PartBaseImportBus.java:42-44",
+      "class": "appeng.parts.automation.PartImportBus",
+      "front_source": "appeng/items/parts/PartType.java:129",
+      "mod": "appliedenergistics2",
+      "render": [
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [4, 4, 14, 12, 12, 16],
+          "front": "appliedenergistics2:ItemPart.ImportBus",
+          "icons_source": "appeng/parts/automation/PartBaseImportBus.java:73-79",
+          "sides": "appliedenergistics2:PartImportSides",
+          "source": "appeng/parts/automation/PartBaseImportBus.java:81",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [5, 5, 13, 11, 11, 14],
+          "front": "appliedenergistics2:ItemPart.ImportBus",
+          "icons_source": "appeng/parts/automation/PartBaseImportBus.java:73-79",
+          "sides": "appliedenergistics2:PartImportSides",
+          "source": "appeng/parts/automation/PartBaseImportBus.java:84",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [6, 6, 12, 10, 10, 13],
+          "front": "appliedenergistics2:ItemPart.ImportBus",
+          "icons_source": "appeng/parts/automation/PartBaseImportBus.java:73-79",
+          "sides": "appliedenergistics2:PartImportSides",
+          "source": "appeng/parts/automation/PartBaseImportBus.java:87",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [6, 6, 11, 10, 10, 12],
+          "front": "appliedenergistics2:ItemPart.ImportBus",
+          "icons_source": "appeng/parts/automation/PartBaseImportBus.java:89-95",
+          "sides": "appliedenergistics2:PartMonitorSidesStatus",
+          "source": "appeng/parts/automation/PartBaseImportBus.java:97",
+          "status_lights": true
+        }
+      ],
+      "status_lights": "appliedenergistics2:PartMonitorSidesStatusLights",
+      "status_lights_source": "appeng/parts/PartBasicState.java:63-66"
+    },
+    "interface": {
+      "arm_length": 4,
+      "arm_length_source": "appeng/parts/misc/PartInterface.java:209",
+      "boxes": [
+        [2, 2, 14, 14, 14, 16],
+        [5, 5, 12, 11, 11, 14]
+      ],
+      "boxes_source": "appeng/parts/misc/PartInterface.java:108-109",
+      "class": "appeng.parts.misc.PartInterface",
+      "front_source": "appeng/items/parts/PartType.java:168",
+      "mod": "appliedenergistics2",
+      "render": [
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [2, 2, 14, 14, 14, 16],
+          "front": "appliedenergistics2:ItemPart.Interface",
+          "icons_source": "appeng/parts/misc/PartInterface.java:148-154",
+          "sides": "appliedenergistics2:PartMonitorSides",
+          "source": "appeng/parts/misc/PartInterface.java:156",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [5, 5, 12, 11, 11, 13],
+          "front": "appliedenergistics2:ItemPart.Interface",
+          "icons_source": "appeng/parts/misc/PartInterface.java:159-165",
+          "sides": "appliedenergistics2:PartMonitorSides",
+          "source": "appeng/parts/misc/PartInterface.java:167",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [5, 5, 13, 11, 11, 14],
+          "front": "appliedenergistics2:ItemPart.Interface",
+          "icons_source": "appeng/parts/misc/PartInterface.java:170-176",
+          "sides": "appliedenergistics2:PartMonitorSidesStatus",
+          "source": "appeng/parts/misc/PartInterface.java:178",
+          "status_lights": true
+        }
+      ],
+      "status_lights": "appliedenergistics2:PartMonitorSidesStatusLights",
+      "status_lights_source": "appeng/parts/PartBasicState.java:63-66"
+    },
+    "storage_bus": {
+      "arm_length": 4,
+      "arm_length_source": "appeng/parts/misc/PartStorageBus.java:500",
+      "boxes": [
+        [3, 3, 15, 13, 13, 16],
+        [2, 2, 14, 14, 14, 15],
+        [5, 5, 12, 11, 11, 14]
+      ],
+      "boxes_source": "appeng/parts/misc/PartStorageBus.java:400-402",
+      "class": "appeng.parts.misc.PartStorageBus",
+      "front_source": "appeng/items/parts/PartType.java:127",
+      "mod": "appliedenergistics2",
+      "render": [
+        {
+          "back": "appliedenergistics2:PartStorageBack",
+          "box": [3, 3, 15, 13, 13, 16],
+          "front": "appliedenergistics2:ItemPart.StorageBus",
+          "icons_source": "appeng/parts/misc/PartStorageBus.java:431-437",
+          "sides": "appliedenergistics2:PartStorageSides",
+          "source": "appeng/parts/misc/PartStorageBus.java:439",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartStorageBack",
+          "box": [2, 2, 14, 14, 14, 15],
+          "front": "appliedenergistics2:ItemPart.StorageBus",
+          "icons_source": "appeng/parts/misc/PartStorageBus.java:431-437",
+          "sides": "appliedenergistics2:PartStorageSides",
+          "source": "appeng/parts/misc/PartStorageBus.java:442",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartStorageBack",
+          "box": [5, 5, 12, 11, 11, 13],
+          "front": "appliedenergistics2:ItemPart.StorageBus",
+          "icons_source": "appeng/parts/misc/PartStorageBus.java:445-451",
+          "sides": "appliedenergistics2:PartStorageSides",
+          "source": "appeng/parts/misc/PartStorageBus.java:453",
+          "status_lights": false
+        },
+        {
+          "back": "appliedenergistics2:PartMonitorBack",
+          "box": [5, 5, 13, 11, 11, 14],
+          "front": "appliedenergistics2:ItemPart.StorageBus",
+          "icons_source": "appeng/parts/misc/PartStorageBus.java:456-462",
+          "sides": "appliedenergistics2:PartMonitorSidesStatus",
+          "source": "appeng/parts/misc/PartStorageBus.java:464",
+          "status_lights": true
+        }
+      ],
+      "status_lights": "appliedenergistics2:PartMonitorSidesStatusLights",
+      "status_lights_source": "appeng/parts/PartBasicState.java:63-66"
+    }
+  },
+  "provenance": {
+    "derived_by": "tools/derive_ae_render.py",
+    "pack_version": "2.9.0-beta-3",
+    "sources": {
+      "ae2fc": {
+        "cited_from": "src/main/java",
+        "commit": "31746024ee5482959f882fdadfe050d56427bd28",
+        "repo": "https://github.com/GTNewHorizons/AE2FluidCraft-Rework",
+        "tag": "1.5.106-gtnh"
+      },
+      "appliedenergistics2": {
+        "cited_from": "src/main/java",
+        "commit": "f9f49159899bdcdbf88a341e22b159cd58a61585",
+        "repo": "https://github.com/GTNewHorizons/Applied-Energistics-2-Unofficial",
+        "tag": "rv3-beta-1050-GTNH"
+      }
+    },
+    "spike": "docs/spikes/329-me-ae2.md"
+  },
+  "schema": 1
+}
