@@ -406,9 +406,9 @@ def _route_cell(
     base = manifest.te_base_type(block, meta)
     if base is None:
         raise _untypeable(f"{name} ({block}|{meta})", manifest)
-    # mConnections is a ForgeDirection bitmask. NOTE: both golden files carry 0 throughout, so the
-    # bit order is taken from ForgeDirection rather than confirmed against a real wired pipe - it
-    # is the one thing here still wanting an in-game check (#96).
+    # mConnections is a ForgeDirection bitmask, one bit per side the route connects. The bit order
+    # is confirmed against real GT wiring: in a 2.9 save (golden sand-parallel-29-gui) every bit,
+    # read this way, lands on a block and every pipe-to-pipe link is set at both ends (#96).
     mask = 0
     for step in raw.get("dirs", []):
         ordinal = _STEP_DIRECTION.get((int(step[0]), int(step[1]), int(step[2])))

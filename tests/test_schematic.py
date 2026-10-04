@@ -39,6 +39,7 @@ from gtnh_solver.ir import (
     Segment,
     Terminal,
 )
+from gtnh_solver.ir.geometry import FACE_DELTAS
 from gtnh_solver.previewer.scene import build_scene
 from gtnh_solver.previewer.textures import BlockCube, TextureManifest, load_multiblock_docs
 from gtnh_solver.schematic import (
@@ -203,13 +204,27 @@ def test_the_mapping_names_every_block_the_file_uses() -> None:
 def test_a_pipe_is_wired_to_the_sides_its_route_connects() -> None:
     """``mConnections`` is a ForgeDirection bitmask taken from the route cell's own ``dirs``.
 
-    The goldens carry 0 throughout (nothing to compare against), so this pins the derivation
-    rather than a recorded value - see the note in ``core._route_cell``.
+    Read by the convention a real 2.9 save is checked against
+    (``test_schematic_read.test_a_29_save_wires_its_pipes_by_the_bit_order_the_exporter_writes``),
+    every set bit has to point at a block the route really meets: another of its cells or the
+    machine it docks into. A bit order that disagreed with GT's would point some of them at air.
     """
     root = _sand_schematic()
-    masks = [int(t["mConnections"]) for t in root["TileEntities"] if "mConnections" in t]
+    tiles = {(int(t["x"]), int(t["y"]), int(t["z"])) for t in root["TileEntities"]}
+    masks = {
+        (int(t["x"]), int(t["y"]), int(t["z"])): int(t["mConnections"])
+        for t in root["TileEntities"]
+        if "mConnections" in t
+    }
     assert masks, "the sand line cables its power net; those cells are pipes"
-    assert all(0 < m < 64 for m in masks), "six directions, at least one connection each"
+    for (x, y, z), mask in masks.items():
+        assert 0 < mask < 64, "six directions, at least one connection each"
+        for face, ordinal in schematic_core.FORGE_DIRECTION.items():
+            if mask & (1 << ordinal):
+                dx, dy, dz = FACE_DELTAS[face]
+                assert (x + dx, y + dy, z + dz) in tiles, (
+                    f"({x}, {y}, {z}) wired {face.value} to air"
+                )
 
 
 def test_an_untypeable_block_is_refused_not_guessed() -> None:
