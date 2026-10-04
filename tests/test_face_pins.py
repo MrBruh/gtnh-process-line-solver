@@ -30,7 +30,6 @@ from gtnh_solver.ir import (
     LayoutStatus,
     Machine,
     MachineFaceRef,
-    METoggles,
     Net,
     Placement,
     Port,
@@ -50,7 +49,7 @@ from gtnh_solver.placement.search import _bodies, _face_shortfall
 from gtnh_solver.router import assign_auto_outputs, route, route_power
 from gtnh_solver.router._grid import FACE_ORDER, dock_candidates, filter_backs, host_cells
 from gtnh_solver.validator import ViolationCode, validate
-from tests._helpers import at, consumer, machine, power_source, producer
+from tests._helpers import at, consumer, machine, on_me, power_source, producer
 
 _HORIZONTAL = (Facing.NORTH, Facing.EAST, Facing.SOUTH, Facing.WEST)
 _FILTER_INPUT_FACES = (
@@ -376,31 +375,33 @@ def test_the_face_term_charges_no_port_the_gate_exempts() -> None:
         Machine(id=f"w{i}", type="w", voltage_tier="LV", orientation_options=[Facing.NORTH])
         for i in range(2)
     ]
-    problem = InputIR(
-        bounding_region=CellBox(sx=3, sy=1, sz=3),
-        machines=[
-            hub,
-            consumer("c"),
-            *(consumer(f"d{i}", commodity=Commodity.FLUID) for i in range(3)),
-            *walls,
-        ],
-        nets=[
-            _item_net("item", ("h", "out"), ("c", "in")),
-            *(
-                Net(
-                    id=f"fl{i}",
-                    commodity=Commodity.FLUID,
-                    fluid_or_item=f"x{i}",
-                    throughput=1.0,
-                    endpoints=[
-                        MachineFaceRef(machine_id="h", port_id=f"f{i}"),
-                        MachineFaceRef(machine_id=f"d{i}", port_id="in"),
-                    ],
-                )
-                for i in range(3)
-            ),
-        ],
-        me_toggles=METoggles(fluids=True),
+    problem = on_me(
+        InputIR(
+            bounding_region=CellBox(sx=3, sy=1, sz=3),
+            machines=[
+                hub,
+                consumer("c"),
+                *(consumer(f"d{i}", commodity=Commodity.FLUID) for i in range(3)),
+                *walls,
+            ],
+            nets=[
+                _item_net("item", ("h", "out"), ("c", "in")),
+                *(
+                    Net(
+                        id=f"fl{i}",
+                        commodity=Commodity.FLUID,
+                        fluid_or_item=f"x{i}",
+                        throughput=1.0,
+                        endpoints=[
+                            MachineFaceRef(machine_id="h", port_id=f"f{i}"),
+                            MachineFaceRef(machine_id=f"d{i}", port_id="in"),
+                        ],
+                    )
+                    for i in range(3)
+                ),
+            ],
+        ),
+        Commodity.FLUID,
     )
     # h stands mid-row against the region's south wall facing it, walls on either side, so its
     # one free cell is north of it; the consumers fill the rest of the region.

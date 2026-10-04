@@ -32,7 +32,9 @@ from gtnh_solver.ir import (
     LayoutStatus,
     Machine,
     MachineFaceRef,
-    METoggles,
+    MEConfig,
+    MEMode,
+    MENetworkSpec,
     Net,
     PinnedIO,
     PipeFamily,
@@ -107,7 +109,7 @@ def _valid_input_ir() -> InputIR:
         ],
         pinned=[PinnedIO(net_id="n1", cell=CellCoord(x=0, y=0, z=0), kind=IODirection.OUTPUT)],
         reserved_cells=[CellCoord(x=7, y=0, z=7)],
-        me_toggles=METoggles(fluids=True),
+        me=MEConfig(networks=[MENetworkSpec(id="main", mode=MEMode.ATTACHED)]),
     )
 
 
@@ -517,8 +519,12 @@ def test_connection_counts_count_endpoints_and_skip_an_me_commodity() -> None:
             ],
         ),
     ]
-    assert connection_counts(nets, METoggles()) == {"m": 2, "n": 1}
-    assert connection_counts(nets, METoggles(fluids=True)) == {"m": 1}
+    assert connection_counts(nets) == {"m": 2, "n": 1}
+    fluid_on_me = [
+        n.model_copy(update={"me_network": "main"}) if n.commodity is Commodity.FLUID else n
+        for n in nets
+    ]
+    assert connection_counts(fluid_on_me) == {"m": 1}
 
 
 def test_power_net_must_not_name_a_commodity() -> None:
@@ -875,7 +881,7 @@ def test_enums_serialize_to_doc_strings() -> None:
     assert Commodity.FLUID.value == "fluid"
     assert IODirection.OUTPUT.value == "output"
     assert LayoutStatus.PARTIAL_INVALID.value == "partial_invalid"
-    assert _valid_input_ir().model_dump(mode="json")["me_toggles"]["fluids"] is True
+    assert _valid_input_ir().model_dump(mode="json")["me"]["networks"][0]["mode"] == "attached"
 
 
 # Both models' JSON round trips are asserted where they earn their keep, next to the contract

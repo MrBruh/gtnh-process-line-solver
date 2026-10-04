@@ -18,7 +18,9 @@ ShadowTheAge calculator plan, ``.gtnh``, with the 'shadow' extra), the solved la
     gtnh-solve plan.json --rounds 3               # exactly 3 rounds (replays a timed run)
     gtnh-solve plan.json --objective volume       # what "compact" means: footprint|volume|balanced
     gtnh-solve plan.json --jobs 1                 # keep every attempt in one process
-    gtnh-solve plan.json --me items --me fluids   # leave those to ME: no pipes laid for them
+    gtnh-solve plan.json --list-nets              # the nets a user may move to ME (NetList JSON)
+    gtnh-solve plan.json --me-plan me.json        # move the nets an MEPlan names to ME
+    gtnh-solve plan.json --me items --me fluids   # ...or every item and fluid net, to one network
 
 It loads + adapts the export, solves (place -> auto-output -> item/fluid + power route ->
 self-validate), and writes what was asked for: a self-contained three.js viewer with
@@ -39,6 +41,14 @@ exit 2 and exit 3 print nothing on stdout, because there is no layout to print.
 ``--preview`` and ``--schematic`` are written whatever the status, because a partial layout is what
 someone debugging a line needs to see; for a non-VALID one a warning comes first, naming what is
 unconnected and saying not to build it (#214).
+
+**ME is chosen per net, in two runs** (#332): ``--list-nets`` adapts the plan, prints its NetList
+(every item and fluid net, its ends, its rate and the ME device each end would get) and exits
+without solving; ``--me-plan FILE`` reads back an MEPlan naming the ME networks and the nets that
+ride them. ``--me items`` / ``--me fluids`` is shorthand for one attached network carrying every net
+of that commodity, so it cannot be given with ``--me-plan``; ``--me power`` leaves the line's EU
+supply to the builder and combines with either. A plan made against another plan or dataset is
+refused (exit 2), since its net ids may name other nets.
 """
 
 from __future__ import annotations
@@ -61,11 +71,13 @@ from gtnh_solver import __version__
 from gtnh_solver.adapter import (
     AdapterError,
     InfeasiblePlanError,
+    MEPlanError,
     Node,
     Plan,
     PlanProducer,
     Recipe,
     describe_markers,
+    list_nets,
     load_plan,
     load_shadow_plan,
     plan_pack_version,
@@ -76,7 +88,7 @@ from gtnh_solver.adapter.core import _effective_handler, _recipe_map
 from gtnh_solver.dataset import PhysicalDataset, list_versions, load_physical_dataset
 from gtnh_solver.dataset.coverage import format_report, measure
 from gtnh_solver.dataset.roots import extractor_hint, resolve_dataset_path
-from gtnh_solver.ir import Commodity, Infeasibility, InputIR, LayoutResult, LayoutStatus, METoggles
+from gtnh_solver.ir import Commodity, Infeasibility, InputIR, LayoutResult, LayoutStatus, MEPlan
 from gtnh_solver.previewer import write_preview
 from gtnh_solver.previewer.jar import cached_jar
 from gtnh_solver.previewer.textures import TextureManifest
@@ -105,8 +117,13 @@ _DUMP_HALVES: Final = {
     "textures/manifest.json": "--preview draws placeholder boxes and --schematic cannot export",
 }
 
-#: The ``--me`` choices: ``METoggles``' own field names, so the flag and the contract cannot drift.
-_ME_COMMODITIES: Final = tuple(METoggles.model_fields)
+#: The ``--me`` choices, and the commodity each names: items and fluids ride one attached network
+#: (the shorthand for an MEPlan), power is left to the builder (``MEConfig.power_external``).
+_ME_COMMODITIES: Final = {
+    "items": Commodity.ITEM,
+    "fluids": Commodity.FLUID,
+    "power": Commodity.POWER,
+}
 
 #: Exit code for an exception no stage claimed: a bug in this program, not a verdict about the
 #: plan. Distinct from 1 (an explicit infeasibility) and 2 (the export could not be loaded)
@@ -207,12 +224,30 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--me",
         action="append",
-        choices=_ME_COMMODITIES,
+        choices=tuple(_ME_COMMODITIES),
         metavar="COMMODITY",
         help=(
             "move COMMODITY over ME (AE2) instead of pipes and cables: one of "
-            f"{', '.join(_ME_COMMODITIES)}; repeat for more than one. Nothing is routed for it, "
-            "and no ME interface is placed or drawn yet, so the builder supplies that"
+            f"{', '.join(_ME_COMMODITIES)}; repeat for more than one. items and fluids put every "
+            "net of that kind on one network attached to your main ME network (not with "
+            "--me-plan); power leaves the line's EU supply to you. Nothing is routed for a net on "
+            "ME, and no ME device is placed or drawn yet, so the builder supplies that"
+        ),
+    )
+    parser.add_argument(
+        "--list-nets",
+        action="store_true",
+        help=(
+            "print the plan's item and fluid nets (the NetList contract, as JSON), with the ME "
+            "device each end would get, then exit; solves nothing. Choose from it for --me-plan"
+        ),
+    )
+    parser.add_argument(
+        "--me-plan",
+        metavar="FILE",
+        help=(
+            "move the nets the MEPlan JSON in FILE names onto its ME networks; made against "
+            "--list-nets for this same plan and dataset"
         ),
     )
     parser.add_argument(
@@ -288,29 +323,46 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _me_toggles(commodities: list[str] | None) -> METoggles:
-    """The ``METoggles`` that ``--me`` asked for: each named commodity on, the rest off.
+def _me_commodities(words: list[str] | None) -> tuple[frozenset[Commodity], bool]:
+    """What ``--me`` asked for: the commodities whose nets ride the shorthand network, and whether
+    power is left to the builder.
 
-    ``None`` is argparse's answer when the flag was never given, and means every commodity is routed
+    ``None`` is argparse's answer when the flag was never given, and means everything is built
     physically, the contract's default. Naming one twice is the same as naming it once.
     """
-    return METoggles.model_validate(dict.fromkeys(commodities or (), True))
+    named = {_ME_COMMODITIES[word] for word in words or ()}
+    return frozenset(named - {Commodity.POWER}), Commodity.POWER in named
 
 
-def _note_me_toggles(toggles: METoggles) -> None:
-    """Say which commodities were left to ME, and that nothing stands in for them in the build yet.
+def _read_me_plan(path: str | None) -> MEPlan | None:
+    """The MEPlan ``--me-plan`` names, or ``None`` without the flag. Raises what a load raises
+    (``OSError``, ``ValidationError``), which ``main`` reports as unloadable input (exit 2)."""
+    if path is None:
+        return None
+    return MEPlan.model_validate_json(Path(path).read_text(encoding="utf-8"))
 
-    A toggled commodity is only skipped: the solver lays no pipe, cable or auto-output for its nets,
-    and nothing places the ME interface, bus or P2P tunnel that would carry it instead
-    (docs/DOMAIN.md, Phase 2). Without this the layout reads as a line that forgot its pipes, so the
-    run says so once, on stderr beside the other notes, and leaves the exit code alone.
+
+def _note_me(problem: InputIR) -> None:
+    """Say which nets were left to ME, and that nothing stands in for them in the build yet.
+
+    A net on ME is only skipped: the solver lays no pipe, cable or auto-output for it, and nothing
+    places the ME interface, bus or hatch that would carry it instead until the end-to-end build
+    (#335). Without this the layout reads as a line that forgot its pipes, so the run says so once,
+    on stderr beside the other notes, and leaves the exit code alone.
     """
-    left = [c.value for c in Commodity if toggles.toggled(c)]
-    if not left:
+    on_me = [net for net in problem.nets if problem.rides_me(net)]
+    power = problem.me.power_external
+    if not on_me and not power:
         return
+    parts = []
+    if on_me:
+        networks = sorted({net.me_network for net in on_me if net.me_network is not None})
+        parts.append(f"{len(on_me)} net(s) ride ME network(s) {', '.join(networks)}")
+    if power:
+        parts.append("power is left to you (--me power)")
     print(
-        f"note: {', '.join(left)} nets left to ME (--me) - nothing is routed for them, and no ME "
-        f"interface or endpoint is placed or drawn yet, so the builder must supply it",
+        f"note: {'; '.join(parts)} - nothing is routed for them, and no ME device is placed or "
+        f"drawn yet, so the builder must supply it",
         file=sys.stderr,
     )
 
@@ -513,11 +565,11 @@ def _warn_unmeasured_power_intake(problem: InputIR, layout: LayoutResult) -> Non
     warnings, so the layout JSON on stdout stays parseable; it is a coverage note, not a defect, and
     it does not touch the exit code.
 
-    Silent when power is left to ME (#225): no cable is laid, so there is nothing for the gate to
-    measure, and blaming a missing amp ceiling would give the wrong reason. The ``--me`` note
-    (:func:`_note_me_toggles`) already says power is the builder's to supply.
+    Silent when power is left to the builder (#225): no cable is laid, so there is nothing for the
+    gate to measure, and blaming a missing amp ceiling would give the wrong reason. The ME note
+    (:func:`_note_me`) already says power is the builder's to supply.
     """
-    if problem.me_toggles.toggled(Commodity.POWER):
+    if problem.me.power_external:
         return
     unmeasured = validate(problem, layout).unverified_power_intake
     if not unmeasured:
@@ -538,15 +590,11 @@ _NAMED_NETS: Final = 3
 def _unconnected_nets(problem: InputIR, layout: LayoutResult) -> list[str]:
     """The nets ``layout`` builds no connection for, in problem order.
 
-    A net is connected by a pipe ``Route`` or a free ``AutoConnection``; an ME-toggled commodity is
+    A net is connected by a pipe ``Route`` or a free ``AutoConnection``; a net left to ME is
     delivered by ME and needs neither, so it is never counted as missing.
     """
     connected = {r.net_id for r in layout.routes} | {a.net_id for a in layout.auto_connections}
-    return [
-        net.id
-        for net in problem.nets
-        if net.id not in connected and not problem.me_toggles.toggled(net.commodity)
-    ]
+    return [net.id for net in problem.nets if net.id not in connected and not problem.rides_me(net)]
 
 
 def _warn_incomplete_export(problem: InputIR, layout: LayoutResult, artifacts: list[str]) -> None:
@@ -786,6 +834,24 @@ def _inspect_schematic(path: str, version: str | None) -> int:
     return 0
 
 
+def _list_nets(plan: Plan, physical: PhysicalDataset | None, producer: PlanProducer | None) -> int:
+    """Print the plan's NetList as JSON on stdout (``--list-nets``). Returns the exit code.
+
+    0 with the list, 1 for a plan that maps cleanly and states a line no layout satisfies (the
+    reason on stderr, nothing on stdout: there is nothing to choose from), 2 for one that does not
+    map. ASCII-escaped like the layout (:func:`_layout_json`), for the same reason.
+    """
+    try:
+        nets = list_nets(plan, physical=physical, producer=producer)
+    except InfeasiblePlanError as exc:
+        return _report_infeasibility(LayoutStatus.INFEASIBLE, exc.infeasibility)
+    except _LOAD_ERRORS as exc:
+        print(f"error: could not map the plan: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(nets.model_dump(mode="json"), indent=2))
+    return 0
+
+
 #: The suffix the ShadowTheAge calculator gives a saved plan.
 _SHADOW_SUFFIX: Final = ".gtnh"
 
@@ -871,14 +937,31 @@ def main(argv: list[str] | None = None) -> int:
     dataset_version = _dataset_version_for(plan, args.dataset_version)
     physical = _load_physical_or_warn(dataset_version)  # real footprints; None -> 1x1x1
 
+    if args.list_nets:
+        return _list_nets(plan, physical, producer)
+
     # Asked for no artifact, the answer is the layout itself, as JSON on stdout. An artifact flag
     # makes the artifact the answer and keeps stdout empty.
     publish = not (args.preview or args.schematic)
 
+    me_commodities, me_power = _me_commodities(args.me)
+    try:
+        me_plan = _read_me_plan(args.me_plan)
+    except _LOAD_ERRORS as exc:
+        print(f"error: could not load --me-plan {args.me_plan!r}: {exc}", file=sys.stderr)
+        return 2
     try:
         problem = to_input_ir(
-            plan, physical=physical, producer=producer, me_toggles=_me_toggles(args.me)
+            plan,
+            physical=physical,
+            producer=producer,
+            me_plan=me_plan,
+            me_commodities=me_commodities,
+            me_power=me_power,
         )
+    except MEPlanError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     except InfeasiblePlanError as exc:
         # Listed first because it IS an AdapterError (a ValueError): a plan that maps cleanly and
         # states an unbuildable line is an infeasibility (exit 1), not an unloadable export
@@ -900,7 +983,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: could not load {args.export!r}: {exc}", file=sys.stderr)
         return 2
     _warn_if_plan_pack_undumped(plan, dataset_version, physical, problem)
-    _note_me_toggles(problem.me_toggles)
+    _note_me(problem)
     if args.fast and (args.time_budget is not None or args.rounds is not None):
         print(
             "note: --fast lays one constructive placement; --time-budget/--rounds ignored",

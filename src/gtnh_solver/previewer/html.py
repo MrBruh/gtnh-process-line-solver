@@ -42,7 +42,7 @@ its box colour; materials footnoted as stand-ins where they are), an inventory o
 every other route, which is how one run reads end to end through a bundle the hover tag can only
 identify a block at a time (#240, keyed on ``netId``: a power route names no resource) - plus the
 system's boundary inputs, outputs, and power (``scene.io``), with a per-tick / per-second rate
-toggle; a flow whose commodity rides ME (``--me``) is marked "via ME" there and in a storage's
+toggle; a flow whose net rides ME (``--me-plan``) is marked "via ME" there and in a storage's
 hover tag, because no pipe and no ME block is drawn for it, and an unconnected chest otherwise
 reads as a missing pipe. Each of the panel's sections (machines, routes, nets, materials, system
 i/o) is a native ``<details>`` its heading folds, and a folded section stays folded when the legend

@@ -157,8 +157,8 @@ def route_power(
     standing on. ``extra_obstacles`` cannot express that: it names the cells *outside* the machine
     a pipe occupies, and one casing cell has up to five free faces.
     """
-    if problem.me_toggles.toggled(Commodity.POWER):
-        return PowerRouteResult()  # power is on the ME network; nothing to route
+    if problem.me.power_external:
+        return PowerRouteResult()  # the builder supplies power; nothing to route
 
     power_nets = [net for net in problem.nets if net.commodity is Commodity.POWER]
     routes, failures = _rip_up_reroute(

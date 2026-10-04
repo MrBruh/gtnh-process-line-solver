@@ -35,7 +35,6 @@ from gtnh_solver.ir import (
     LayoutStatus,
     Machine,
     MachineFaceRef,
-    METoggles,
     Net,
     PinnedIO,
     PipeFamily,
@@ -53,7 +52,7 @@ from gtnh_solver.solver import solve
 from gtnh_solver.validator import validate
 from gtnh_solver.validator._geometry import usable_faces
 from gtnh_solver.validator.report import ViolationCode
-from tests._helpers import hatched_dataset, layered_tower
+from tests._helpers import hatched_dataset, layered_tower, on_me
 
 Mutator = Callable[[InputIR, LayoutResult], tuple[InputIR, LayoutResult]]
 
@@ -847,16 +846,16 @@ def test_routed_net_with_mixed_commodity_endpoints_is_flagged() -> None:
 # --------------------------------------------------------------- ME toggles & power
 
 
-def test_me_toggled_net_correctly_omitted_is_ok() -> None:
+def test_a_net_on_me_correctly_omitted_is_ok() -> None:
     problem, layout = _base()
-    problem = problem.model_copy(update={"me_toggles": METoggles(items=True), "pinned": []})
-    layout = layout.model_copy(update={"routes": []})  # ME-toggled item net must not be routed
+    problem = on_me(problem.model_copy(update={"pinned": []}), Commodity.ITEM)
+    layout = layout.model_copy(update={"routes": []})  # an item net on ME must not be routed
     assert validate(problem, layout).ok
 
 
-def test_me_toggled_net_that_is_routed_is_flagged() -> None:
+def test_a_net_on_me_that_is_routed_is_flagged() -> None:
     problem, layout = _base()
-    problem = problem.model_copy(update={"me_toggles": METoggles(items=True), "pinned": []})
+    problem = on_me(problem.model_copy(update={"pinned": []}), Commodity.ITEM)
     report = validate(problem, layout)  # route still present
     assert ViolationCode.UNEXPECTED_ME_ROUTE in report.codes()
 
@@ -1855,7 +1854,7 @@ def _auto_wrong_endpoints(p: InputIR, layout: LayoutResult) -> tuple[InputIR, La
 
 def _auto_illegal_commodity(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
     # an ME-routed commodity lives on the ME network; it must not be physically auto-connected
-    return p.model_copy(update={"me_toggles": METoggles(items=True)}), layout
+    return on_me(p, Commodity.ITEM), layout
 
 
 def _auto_unknown_net(p: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
@@ -2187,7 +2186,7 @@ def test_an_me_toggled_port_needs_no_hatch() -> None:
     like this (a routed ME net is ``UNEXPECTED_ME_ROUTE``).
     """
     problem, layout = _multiblock_line()
-    toggled = problem.model_copy(update={"me_toggles": METoggles(items=True)})
+    toggled = on_me(problem, Commodity.ITEM)
     unrouted = _without_hatches(layout, *_MB_PORTS).model_copy(update={"routes": []})
     report = validate(toggled, unrouted)
     assert report.ok, str(report)
@@ -2241,8 +2240,8 @@ def _mixed_commodity_line() -> tuple[InputIR, LayoutResult]:
                 ("n-fluid", Commodity.FLUID, "water", "p-fluid", "fluid"),
             )
         ],
-        me_toggles=METoggles(items=True),  # items ride the ME network; the fluid is piped
     )
+    problem = on_me(problem, Commodity.ITEM)  # items ride the ME network; the fluid is piped
     layout = LayoutResult(
         status=LayoutStatus.VALID,
         seed=0,
@@ -3516,12 +3515,31 @@ def _tower_line(
 ) -> tuple[InputIR, LayoutResult]:
     """One tower and nothing else, with its maintenance hatch and no output hatch yet."""
     tower = layered_tower(outputs=outputs, layers=layers)
-    problem = InputIR(
-        bounding_region=CellBox(sx=8, sy=layers + 2, sz=8),
-        machines=[tower],
-        nets=[],
-        me_toggles=METoggles(fluids=me),
-    )
+    problem = InputIR(bounding_region=CellBox(sx=8, sy=layers + 2, sz=8), machines=[tower], nets=[])
+    if me:
+        # Its first output rides ME to a tank, left unplaced: the tower is what is checked.
+        tank = Machine(
+            id="tank",
+            type="Super Tank",
+            voltage_tier="LV",
+            orientation_options=[Facing.NORTH],
+            faces=FaceSpec(
+                ports=[Port(id="in", commodity=Commodity.FLUID, direction=IODirection.INPUT)]
+            ),
+        )
+        on = Net(
+            id="on-me",
+            commodity=Commodity.FLUID,
+            fluid_or_item=outputs[0],
+            throughput=1.0,
+            endpoints=[
+                MachineFaceRef(machine_id="tower", port_id=f"output:{outputs[0]}"),
+                MachineFaceRef(machine_id="tank", port_id="in"),
+            ],
+        )
+        problem = on_me(
+            problem.model_copy(update={"machines": [tower, tank], "nets": [on]}), Commodity.FLUID
+        )
     maintenance = PlacedHatch(
         machine_id="tower", kind="Maintenance", cell=_coord(2, 0, 3), facing=Facing.WEST
     )

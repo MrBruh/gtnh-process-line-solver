@@ -13,10 +13,10 @@ its own arithmetic, it does not re-invent how to read the same input data.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 
-from .enums import Facing, IODirection
-from .input_ir import InputIR, MachineFaceRef, METoggles, Net
+from .enums import Commodity, Facing, IODirection
+from .input_ir import InputIR, MachineFaceRef, Net
 from .output import Placement
 
 #: The faces of a single block that can carry a connection: every face but the front, which carries
@@ -26,22 +26,46 @@ from .output import Placement
 SINGLE_BLOCK_IO_FACES = len(Facing) - 1
 
 
-def connection_counts(nets: Iterable[Net], me_toggles: METoggles) -> dict[str, int]:
+def connection_counts(
+    nets: Iterable[Net], rides_me: Callable[[Net], bool] | None = None
+) -> dict[str, int]:
     """``machine_id -> how many connections it carries``: one per net endpoint on it.
 
-    A net whose commodity rides the ME network docks nothing, so it counts nothing. Each endpoint is
+    A net left to ME docks nothing, so it counts nothing: ``rides_me`` says which, a problem's
+    ``InputIR.rides_me`` where there is one, else each net's own ``Net.rides_me``. Each endpoint is
     one connection, and on a single block one face of its own, whether a pipe or cable docks on it or
     an auto-output spends it touching its sink. It takes nets rather than a whole ``InputIR`` so the
     adapter can ask it of the nets it is still building, and decide which machines to merge with the
     same count ``placement.feasibility.single_block_shortfalls`` later reports from.
     """
     counts: dict[str, int] = {}
+    skip = rides_me if rides_me is not None else _net_rides_me
     for net in nets:
-        if me_toggles.toggled(net.commodity):
+        if skip(net):
             continue
         for endpoint in net.endpoints:
             counts[endpoint.machine_id] = counts.get(endpoint.machine_id, 0) + 1
     return counts
+
+
+def _net_rides_me(net: Net) -> bool:
+    return net.rides_me
+
+
+def machines_with_me_outputs(problem: InputIR, commodity: Commodity) -> frozenset[str]:
+    """The machines with an OUTPUT port of ``commodity`` on a net that rides ME.
+
+    Asked of a tower filling its fluid outputs by layer, whose output hatches the layout does not
+    draw while an output rides ME: a stage that would place or check one per layer abstains there.
+    """
+    port_dir = port_direction_map(problem)
+    return frozenset(
+        ep.machine_id
+        for net in problem.nets
+        if net.commodity is commodity and problem.rides_me(net)
+        for ep in net.endpoints
+        if port_dir.get((ep.machine_id, ep.port_id)) is IODirection.OUTPUT
+    )
 
 
 def port_direction_map(problem: InputIR) -> dict[tuple[str, str], IODirection]:

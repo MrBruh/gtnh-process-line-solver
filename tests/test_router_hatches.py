@@ -28,7 +28,6 @@ from gtnh_solver.ir import (
     LayoutStatus,
     Machine,
     MachineFaceRef,
-    METoggles,
     Net,
     Placement,
     Port,
@@ -46,7 +45,7 @@ from gtnh_solver.router._grid import claim_key, dock_candidates, hatch_faces
 from gtnh_solver.solver.core import _assemble
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
-from tests._helpers import at, layered_tower, power_source
+from tests._helpers import at, layered_tower, on_me, power_source
 
 #: The committed fixture sample, named so a test can pin it instead of inheriting
 #: whichever dataset this checkout happens to resolve.
@@ -330,7 +329,7 @@ def test_a_pipe_and_a_cable_do_not_share_one_casing_cell() -> None:
 
     # The power router's own guard, fed the claim of a bus that did take the cell (the item net
     # routed alone, with power on ME).
-    items = route(problem.model_copy(update={"me_toggles": METoggles(power=True)}), placements)
+    items = route(on_me(problem, power=True), placements)
     assert items.ok, items.infeasibility
     claims = claims_by_machine(items.routes, {mm.id: mm for mm in problem.machines})
     assert claims["m"] == {(2, 1, 3)}  # the input bus took the machine's one hatch cell

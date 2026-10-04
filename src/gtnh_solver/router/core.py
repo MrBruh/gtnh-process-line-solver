@@ -176,7 +176,7 @@ def route(
     nets = [
         assignment.piped(net)
         for net in problem.nets
-        if net.id not in assignment.covered and not problem.me_toggles.toggled(net.commodity)
+        if net.id not in assignment.covered and not problem.rides_me(net)
     ]
     # A free connection still costs its two machines a casing cell each (an output hatch ejects
     # through its own front face), so no terminal may dock onto one of those blocks.

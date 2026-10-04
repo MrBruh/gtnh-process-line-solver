@@ -31,6 +31,7 @@ diverge, the doc records the intent, so reconcile one to the other and say which
 | Doc | One line |
 |-----|----------|
 | [164-channel-capacity.md](spikes/164-channel-capacity.md) | The capacity model for lifting the one-route-per-cell cap, what the validator would assert instead, and the measurement showing the parallel-sand gap is a terminal-docking rule rather than a capacity one. |
+| [329-me-ae2.md](spikes/329-me-ae2.md) | The AE2 and AE2FluidCraft rules ME support rests on, each cited to the pack's source: channels and AE2's pathing, connections and colours, what each bus, interface and GT ME hatch moves, power, registry names and NBT, render geometry, and the jars and licences. |
 
 ## Keeping this current
 

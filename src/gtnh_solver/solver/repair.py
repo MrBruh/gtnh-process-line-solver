@@ -103,8 +103,8 @@ def repair_power_sources(
 
     current = list(placements)
     best_result = lay(current)
-    if problem.me_toggles.toggled(Commodity.POWER):
-        return current, best_result  # power rides the ME network; there is no cable to shorten
+    if problem.me.power_external:
+        return current, best_result  # the builder supplies power; there is no cable to shorten
     if best_result.failed_nets or best_result.infeasibility is not None:
         # This placement cannot carry its power at all, so the caller ranks it by the nets that
         # failed. Shuffling sources first would change which nets fail and rank the same

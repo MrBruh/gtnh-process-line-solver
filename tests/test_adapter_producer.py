@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import warnings
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -45,7 +46,7 @@ from gtnh_solver.adapter.core import (
 from gtnh_solver.cli import _dataset_version_for, main
 from gtnh_solver.dataset import DatasetMeta, PhysicalDataset, load_physical_dataset
 from gtnh_solver.dataset.schema import SCHEMA_VERSION
-from gtnh_solver.ir import InputIR, LayoutResult, METoggles
+from gtnh_solver.ir import InputIR, LayoutResult
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 _SAND = _EXAMPLES / "gtnh-sand.json"
@@ -329,10 +330,10 @@ def test_cli_threads_the_pinned_producer_into_the_mapping(
         *,
         physical: PhysicalDataset | None = None,
         producer: PlanProducer | None = None,
-        me_toggles: METoggles | None = None,
+        **me: Any,
     ) -> InputIR:
         captured["producer"] = producer
-        return to_input_ir(plan, physical=physical, producer=producer, me_toggles=me_toggles)
+        return to_input_ir(plan, physical=physical, producer=producer, **me)
 
     monkeypatch.setattr(cli_module, "to_input_ir", spy)
     assert main([str(_SAND), "--plan-schema", "arodoid-v1"]) == 0
@@ -350,10 +351,10 @@ def test_cli_auto_detects_when_the_flag_is_omitted(
         *,
         physical: PhysicalDataset | None = None,
         producer: PlanProducer | None = None,
-        me_toggles: METoggles | None = None,
+        **me: Any,
     ) -> InputIR:
         captured["producer"] = producer
-        return to_input_ir(plan, physical=physical, producer=producer, me_toggles=me_toggles)
+        return to_input_ir(plan, physical=physical, producer=producer, **me)
 
     monkeypatch.setattr(cli_module, "to_input_ir", spy)
     assert main([str(_SAND)]) == 0

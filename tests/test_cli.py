@@ -62,12 +62,11 @@ from gtnh_solver.ir import (
     InputIR,
     LayoutResult,
     LayoutStatus,
-    METoggles,
 )
 from gtnh_solver.previewer.textures import TextureManifest
 from gtnh_solver.schematic import SchematicWarning, nbt, read_schematic
 from gtnh_solver.solver import solve
-from tests._helpers import hatched_dataset
+from tests._helpers import hatched_dataset, on_me
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 _SAND = str(_EXAMPLES / "gtnh-sand.json")
@@ -1195,10 +1194,10 @@ def test_cli_threads_the_dataset_into_the_adapter(
         *,
         physical: PhysicalDataset | None = None,
         producer: PlanProducer | None = None,
-        me_toggles: METoggles | None = None,
+        **me: Any,
     ) -> InputIR:
         captured["physical"] = physical
-        return to_input_ir(plan, physical=physical, producer=producer, me_toggles=me_toggles)
+        return to_input_ir(plan, physical=physical, producer=producer, **me)
 
     monkeypatch.setattr(cli_module, "to_input_ir", spy)
     assert main([_SAND]) == 0
@@ -1397,10 +1396,10 @@ def test_many_unconnected_nets_are_summarised(
     assert " and 12 more)" in err
 
 
-def test_an_me_toggled_net_is_not_counted_as_unconnected(sand_layout: LayoutResult) -> None:
+def test_a_net_on_me_is_not_counted_as_unconnected(sand_layout: LayoutResult) -> None:
     problem = adapt_file(_SAND)
     stripped = sand_layout.model_copy(update={"routes": [], "auto_connections": []})
-    toggled = problem.model_copy(update={"me_toggles": METoggles(items=True)})
+    toggled = on_me(problem, Commodity.ITEM)
     remaining = _unconnected_nets(toggled, stripped)
     assert remaining, "the power net is still physical"
     assert all(net.commodity is not Commodity.ITEM for net in toggled.nets if net.id in remaining)

@@ -334,13 +334,13 @@ def _body(machine: Machine, docked: Collection[str] | None = None) -> _Body:
 def _bodies(problem: InputIR) -> dict[str, _Body]:
     """Every machine of ``problem`` as a :class:`_Body`, charged only for the ports a router docks.
 
-    A port docks when it sits on a net whose commodity is not on the ME network. The exact gate
+    A port docks when it sits on a net not left to ME (``InputIR.rides_me``). The exact gate
     (``placement.feasibility.crowded_machines``) charges nothing for any other port, so neither may
     the face term that approximates it.
     """
     docked: dict[str, set[str]] = {m.id: set() for m in problem.machines}
     for n in problem.nets:
-        if not problem.me_toggles.toggled(n.commodity):
+        if not problem.rides_me(n):
             for e in n.endpoints:
                 docked.setdefault(e.machine_id, set()).add(e.port_id)
     return {m.id: _body(m, docked[m.id]) for m in problem.machines}
@@ -592,14 +592,14 @@ def optimize_placement(
     bounds = (region.sx, region.sy, region.sz)
     reserved = {(c.x, c.y, c.z) for c in problem.reserved_cells}
     penalties = net_penalties or {}
-    # Nets that are physically routed (skip ME-toggled): each is (machine ids, weight), where a
+    # Nets that are physically routed (skip those left to ME): each is (machine ids, weight), where a
     # penalized net weighs more so the optimizer shortens it preferentially. Item/fluid nets pay
     # HPWL. Power nets have NO base term (module docstring says why) - one enters the cost, as
     # an MST trunk-length pull, only once the router fails it and the feedback penalizes it.
     wire_nets: list[_WeightedNet] = []
     power_nets: list[_WeightedNet] = []
     for n in problem.nets:
-        if problem.me_toggles.toggled(n.commodity):
+        if problem.rides_me(n):
             continue
         ids = [e.machine_id for e in n.endpoints]
         if n.commodity is Commodity.POWER:

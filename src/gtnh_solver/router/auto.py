@@ -166,7 +166,7 @@ def _net_candidates(
     port_dir: dict[tuple[str, str], IODirection],
 ) -> list[AutoCandidate]:
     """:func:`auto_candidates` for one net."""
-    if net.commodity is Commodity.POWER or problem.me_toggles.toggled(net.commodity):
+    if net.commodity is Commodity.POWER or problem.rides_me(net):
         return []
     sources, sinks = net_sources_sinks(net, port_dir)
     if len(sinks) != 1 or not sources:

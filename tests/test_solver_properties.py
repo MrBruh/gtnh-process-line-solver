@@ -72,7 +72,9 @@ from gtnh_solver.ir import (
     LayoutStatus,
     Machine,
     MachineFaceRef,
-    METoggles,
+    MEConfig,
+    MEMode,
+    MENetworkSpec,
     Net,
     PinnedIO,
     PipeFamily,
@@ -188,6 +190,26 @@ def _nets_over(draw: st.DrawFn, machines: list[Machine]) -> list[Net]:
     return nets
 
 
+def _me_config(draw: st.DrawFn, *, power: bool | None = None) -> MEConfig:
+    """One attached ME network nets may ride, and power left to the builder or not (drawn unless
+    ``power`` says)."""
+    return MEConfig(
+        networks=[MENetworkSpec(id="main", mode=MEMode.ATTACHED)],
+        power_external=draw(st.booleans()) if power is None else power,
+    )
+
+
+def _ride_me(draw: st.DrawFn, nets: list[Net]) -> list[Net]:
+    """``nets`` with each item and fluid net put on the ``main`` ME network or not, one draw each:
+    the per-net choice a user makes (#332), so any mix of piped and ME nets on one machine."""
+    return [
+        net.model_copy(update={"me_network": "main"})
+        if net.commodity is not Commodity.POWER and draw(st.booleans())
+        else net
+        for net in nets
+    ]
+
+
 @st.composite
 def _problems(draw: st.DrawFn) -> InputIR:
     """A small, referentially-intact ``InputIR``: machines, nets, region, reserved cells, ME."""
@@ -225,12 +247,10 @@ def _problems(draw: st.DrawFn) -> InputIR:
     return InputIR(
         bounding_region=region,
         machines=machines,
-        nets=nets,
+        nets=_ride_me(draw, nets),
         reserved_cells=draw(st.lists(cells, max_size=2)),
         pinned=pins,
-        me_toggles=METoggles(
-            items=draw(st.booleans()), fluids=draw(st.booleans()), power=draw(st.booleans())
-        ),
+        me=_me_config(draw),
     )
 
 
@@ -478,8 +498,8 @@ def _tower_problems(draw: st.DrawFn) -> InputIR:
             sz=floor + slack,
         ),
         machines=machines,
-        nets=nets,
-        me_toggles=METoggles(fluids=draw(st.integers(min_value=0, max_value=5)) == 0),
+        nets=_ride_me(draw, nets) if draw(st.integers(min_value=0, max_value=5)) == 0 else nets,
+        me=_me_config(draw, power=False),
     )
 
 

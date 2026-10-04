@@ -59,7 +59,7 @@ shared-amperage power model, etc.) lives in [`ARCHITECTURE.md`](ARCHITECTURE.md)
 
 - For a real small-to-medium balanced line, the solver produces a layout that is
   geometrically valid (no overlaps, within bounds, pinned I/O honored) **and** rule-valid
-  (every routed commodity within throughput/tier limits; ME-toggled commodities excluded and
+  (every routed commodity within throughput/tier limits; nets on ME excluded and
   endpoint-placed).
 - When no valid layout exists, the solver reports the tightest violated constraint and a
   suggested relaxation - never a silent failure or a silently-invalid layout.
