@@ -8,6 +8,11 @@ naming one that is not usable warns and falls through::
     coil (any multiblock whose coil channel has a choice)
         node.coilTier -> machineConfigTiers.heatingCoil -> heatingCoil control default
         -> nothing: the dump's own coil (a Chemical Plant warns: Cupronickel runs it at half speed)
+      then, on a machine that refuses a recipe hotter than its coil (the EBF family, #318) and
+      whose recipes state a heat, at the tier it is supplied at (PlannedStructure.blocks):
+        that coil (nothing named: the dump's coolest), if it reaches the hottest recipe's heat
+        -> the cheapest accepted coil that does, with a warning
+        -> none does: the hottest accepted coil, with a warning
 
     solid casing (Chemical Plant)
         machineConfigTiers.solidCasing, raised to the requirement with a warning if below it
@@ -30,8 +35,10 @@ skipped silently, since arodoid writes a ``coilTier`` on every node. A block the
 channel does not accept is never chosen: that warns and falls through like an unknown key.
 
 A recipe's **special value** (GT's ``mSpecialValue``) is a requirement each machine reads its own
-way; the Chemical Plant reads it as the lowest solid casing tier the recipe runs on. Exporters
-state it in up to three places, none of them on every plan::
+way; the Chemical Plant reads it as the lowest solid casing tier the recipe runs on, and an
+Electric Blast Furnace as the heat in kelvin its coil must reach (with 100 K per voltage tier above
+MV added to the coil's, ``dataset.heat_bonus_for``). Exporters state it in up to three places, none
+of them on every plan (a converted ShadowTheAge plan states it nowhere)::
 
     recipe.specialValue                arodoid
     recipe.metadata.specialValue       arodoid
@@ -50,6 +57,8 @@ from dataclasses import dataclass
 from gtnh_solver.dataset import (
     CHEMICAL_PLANT,
     COIL,
+    COIL_HEAT_GATES,
+    HEATING_COIL_HEATS,
     HEATING_COILS,
     MACHINE_CASING,
     PIPE,
@@ -60,6 +69,7 @@ from gtnh_solver.dataset import (
     BlockId,
     MachinePhysical,
     TieredBlock,
+    heat_bonus_for,
     machine_casing_for,
     tier_block,
 )
@@ -109,11 +119,27 @@ def recipe_special_value(recipe: Recipe) -> int | None:
 
 
 @dataclass(frozen=True)
+class CoilHeat:
+    """The heat a heat-gated machine's coil must reach (``dataset.COIL_HEAT_GATES``), which
+    :meth:`PlannedStructure.blocks` settles at the tier the machine is supplied at."""
+
+    #: The highest special value the node's recipes state, read as kelvin.
+    required: int
+    #: Whether GT adds the hatch-tier bonus (``dataset.heat_bonus_for``) to the coil's heat.
+    tier_bonus: bool
+    #: The coils the machine's channel accepts, in tier order (coolest first).
+    coils: tuple[TieredBlock, ...]
+    #: The coil the plan names, or ``None`` when it names none the channel accepts.
+    named: TieredBlock | None = None
+
+
+@dataclass(frozen=True)
 class PlannedStructure:
-    """The tiered blocks one node's machines are built from, all but the machine casing.
+    """The tiered blocks one node's machines are built from, all but those the supplied tier settles.
 
     The machine casing follows the voltage tier a machine is supplied at, which the power synthesis
-    can still raise, so :meth:`blocks` adds it from the final tier.
+    can still raise, and so does the heat an EBF's hatches add to its coil's, so :meth:`blocks`
+    adds the machine casing, and settles a heat-gated coil, from the final tier.
     """
 
     node_id: str
@@ -121,10 +147,17 @@ class PlannedStructure:
     chosen: tuple[tuple[str, BlockId], ...] = ()
     #: The machine casings the machine's channel accepts; empty when it has no such part to plan.
     machine_casings: tuple[BlockId, ...] = ()
+    #: What a heat-gated machine's coil must reach; ``None`` when nothing gates it, and then the
+    #: coil, if the plan names one, is in :attr:`chosen`.
+    coil_heat: CoilHeat | None = None
 
     def blocks(self, voltage_tier: str) -> dict[str, StructureBlock]:
         """``Machine.structure_blocks`` for one machine of the node, supplied at ``voltage_tier``."""
         blocks = dict(self.chosen)
+        if self.coil_heat is not None:
+            coil = _heated_coil(self.node_id, self.coil_heat, voltage_tier)
+            if coil is not None:
+                blocks[COIL] = coil
         if self.machine_casings:
             casing = machine_casing_for(voltage_tier)
             if casing is not None and casing in self.machine_casings:
@@ -152,16 +185,18 @@ def plan_structure(
     """What the plan says ``node``'s machines are built from, or ``None`` without a record.
 
     ``recipes`` are every recipe the machines run, the node's own first: the solid casing has to
-    meet the highest special value among them, since one plant runs them all. The node's own recipe
-    and ``handler`` supply the control defaults. Warns once per node for each rung that names
-    something unusable (see the module docstring for the ladders).
+    meet the highest special value among them, since one plant runs them all, and a heat-gated coil
+    the highest heat. The node's own recipe and ``handler`` supply the control defaults. Warns once
+    per node for each rung that names something unusable (see the module docstring for the
+    ladders); a heat-gated coil is settled, and warns, in :meth:`PlannedStructure.blocks`.
     """
     if record is None:
         return None
     accepted = record.channel_blocks
     chosen: dict[str, BlockId] = {}
     coil = _coil(node, handler, recipes[0], accepted.get(COIL, ()), record)
-    if coil is not None:
+    coil_heat = _coil_heat(recipes, record.block_key, coil, accepted.get(COIL, ()))
+    if coil is not None and coil_heat is None:
         chosen[COIL] = coil
     machine_casings: tuple[BlockId, ...] = ()
     if record.block_key == CHEMICAL_PLANT:
@@ -175,7 +210,10 @@ def plan_structure(
                 chosen[PIPE] = pipe
         machine_casings = accepted.get(MACHINE_CASING, ())
     return PlannedStructure(
-        node_id=node.id, chosen=tuple(sorted(chosen.items())), machine_casings=machine_casings
+        node_id=node.id,
+        chosen=tuple(sorted(chosen.items())),
+        machine_casings=machine_casings,
+        coil_heat=coil_heat,
     )
 
 
@@ -272,6 +310,77 @@ def _coil(
             stacklevel=3,
         )
     return None
+
+
+def _coil_heat(
+    recipes: Sequence[Recipe], block_key: str, named: BlockId | None, accepted: Sequence[BlockId]
+) -> CoilHeat | None:
+    """What a heat-gated machine's coil must reach, or ``None`` when there is nothing to check.
+
+    ``None`` for a controller GT does not gate on coil heat or whose channel offers no choice of
+    coils, both checked before any special value is read, so a Chemical Plant's recipes warn of a
+    disagreement once, not twice. ``None``, silently, when no recipe states a heat: a converted
+    ShadowTheAge plan states none, and its converter warns of a coil too cold itself. A node that
+    time-shares recipes is coiled for the hottest, since one furnace runs them all.
+    """
+    tier_bonus = COIL_HEAT_GATES.get(block_key)
+    coils = tuple(rung for rung in HEATING_COILS if rung.block_id in accepted)
+    if tier_bonus is None or len(coils) < 2:
+        return None
+    stated = [value for value in map(recipe_special_value, recipes) if value is not None]
+    if not stated:
+        return None
+    return CoilHeat(
+        required=max(stated),
+        tier_bonus=tier_bonus,
+        coils=coils,
+        named=next((rung for rung in coils if rung.block_id == named), None),
+    )
+
+
+def _heated_coil(node_id: str, heat: CoilHeat, voltage_tier: str) -> BlockId | None:
+    """The coil a heat-gated machine supplied at ``voltage_tier`` is built with, or ``None`` to
+    draw the dump's own.
+
+    A coil reaches its heat plus, where GT adds it, the supplied tier's bonus. The coil that would
+    be built (the plan's, else the dump's coolest) is kept when it reaches what the recipes need,
+    which is ``None`` when the plan names none, so the coil stays as dumped. Otherwise the cheapest
+    accepted coil that reaches it, in tier order, not meta order (HSS-G, meta 4, is followed by
+    HSS-S, meta 9), else the hottest accepted coil, on which GT still refuses the recipe; both warn.
+    """
+    bonus = heat_bonus_for(voltage_tier) if heat.tier_bonus else 0
+    reach = {rung: HEATING_COIL_HEATS[HEATING_COILS.index(rung)] + bonus for rung in heat.coils}
+    built = heat.named if heat.named is not None else heat.coils[0]
+    if reach[built] >= heat.required:
+        return None if heat.named is None else heat.named.block_id
+    cheapest = next((rung for rung in heat.coils if reach[rung] >= heat.required), None)
+    if cheapest is None:
+        top = heat.coils[-1]
+        warnings.warn(
+            f"node {node_id!r} runs a recipe of {heat.required} K, above the {reach[top]} K of "
+            f"{top.key} at {voltage_tier}, the hottest coil its machine's dump records; building "
+            f"it with {top.key}, on which GT will still refuse that recipe",
+            AdapterWarning,
+            stacklevel=3,
+        )
+        return top.block_id
+    if heat.named is not None:
+        warnings.warn(
+            f"node {node_id!r} names {heat.named.key} heating coil ({reach[heat.named]} K at "
+            f"{voltage_tier}), below the {heat.required} K its recipes need; building it with "
+            f"{cheapest.key}",
+            AdapterWarning,
+            stacklevel=3,
+        )
+    else:
+        warnings.warn(
+            f"node {node_id!r} names no heating coil its machine accepts, so it would be drawn "
+            f"with the dump's {built.key} ({reach[built]} K at {voltage_tier}), below the "
+            f"{heat.required} K its recipes need; building it with {cheapest.key}",
+            AdapterWarning,
+            stacklevel=3,
+        )
+    return cheapest.block_id
 
 
 def _solid_casing(

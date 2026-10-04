@@ -11,7 +11,8 @@ a *fractional* amp load and only aggregates round up to whole amps; and the **mu
 footprint/face dataset - a schema-v2 loader (``schema``) for the extractor's ``data/multiblocks/``
 JSON plus the adapter (``multiblocks``) that interprets those raw facts into IR-shaped physical
 records (footprints, hint-derived faces, coil tiers); the **tiered structure blocks**
-(``structure_blocks``) a multiblock's casing, pipe, coil and machine-casing channels accept (#312);
+(``structure_blocks``) a multiblock's casing, pipe, coil and machine-casing channels accept (#312),
+with each coil's heat and the machines that refuse a recipe hotter than it (#318);
 and the **item pipe capacity** per size (``pipe_capacity``) a route's gauge is chosen from (#165). Still TODO(dataset): per-material cable
 loss; fluid pipe throughput; the real extractor (issue #45) replacing the illustrative fixtures;
 spot-check tiers/face-rules/throughputs in-game (docs/ROADMAP.md step 0).
@@ -83,6 +84,8 @@ from .schema import (
 from .structure_blocks import (
     CHEMICAL_PLANT,
     COIL,
+    COIL_HEAT_GATES,
+    HEATING_COIL_HEATS,
     HEATING_COILS,
     MACHINE_CASING,
     PIPE,
@@ -93,6 +96,7 @@ from .structure_blocks import (
     BlockId,
     TieredBlock,
     channel_blocks,
+    heat_bonus_for,
     machine_casing_for,
     tier_block,
 )
@@ -177,6 +181,8 @@ __all__ = [  # noqa: RUF022 - grouped by submodule, not alphabetized
     "BlockId",
     "CHEMICAL_PLANT",
     "COIL",
+    "COIL_HEAT_GATES",
+    "HEATING_COIL_HEATS",
     "HEATING_COILS",
     "MACHINE_CASING",
     "PIPE",
@@ -186,6 +192,7 @@ __all__ = [  # noqa: RUF022 - grouped by submodule, not alphabetized
     "SOLID_CASINGS",
     "TieredBlock",
     "channel_blocks",
+    "heat_bonus_for",
     "machine_casing_for",
     "tier_block",
     # dataset location (version-namespaced local folders + committed fixtures)

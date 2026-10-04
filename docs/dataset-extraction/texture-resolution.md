@@ -366,7 +366,9 @@ Then install and measure:
 
 ```sh
 cp out/textures-run/manifest.json data/2.8.4/textures/manifest.json
-python tools/derive_small_manifest.py     # refresh the committed example-scoped manifest
+# The committed example-scoped manifest is cut from the 2.9.0-beta-3 dump (#319). Refresh it from
+# that dump, named explicitly, and only when it is the pack you re-dumped:
+python tools/derive_small_manifest.py data/2.9.0-beta-3/textures/manifest.json
 
 # silence is success. Match "no sprite": the rest of that warning has been reworded before.
 python -m gtnh_solver.cli examples/gtnh-nitrobenzene.json \

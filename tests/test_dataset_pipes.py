@@ -23,6 +23,7 @@ that reads it skips where nobody has. CI is one of those places, so CI does not 
 from __future__ import annotations
 
 import json
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,7 @@ from gtnh_solver.ir import Commodity, PipeFamily, PipeSize
 _COMMITTED_MANIFEST = Path(__file__).resolve().parents[1] / "data" / "textures" / "manifest.json"
 
 
+@cache
 def _pipes_by_name() -> dict[str, dict[str, object]]:
     """Every ``kind: "pipe"`` entry in the committed manifest, keyed by its dataset name."""
     raw = json.loads(_COMMITTED_MANIFEST.read_text(encoding="utf-8"))
@@ -60,6 +62,16 @@ def _pipes_by_name() -> dict[str, dict[str, object]]:
         for entry in raw["blocks"].values()
         if entry.get("kind") == "pipe" and entry.get("display_name")
     }
+
+
+def _shipped(canonical: str) -> dict[str, object] | None:
+    """The committed manifest's entry for the cable or pipe this policy names ``canonical``, or
+    ``None``. Asked under every spelling GT has filed it by (``manifest_names``), as a preview asks:
+    the committed manifest is cut from a 2.9 dump, which knows ``cable.tin.02`` only as
+    ``2x Tin Cable``, so asking for one spelling would find nothing and the checks below would skip
+    or fail on a manifest that ships every block (#319)."""
+    pipes = _pipes_by_name()
+    return next((pipes[name] for name in manifest_names(canonical) if name in pipes), None)
 
 
 #: Every ``kind: "pipe"`` display name a real GTNH 2.9 dump carries: GT's whole cable, wire and
@@ -222,15 +234,16 @@ def test_every_shipped_cable_is_complete_and_correctly_rated(tier: str) -> None:
     above the tier it stands for, at the thickness the previewer will draw. A half-shipped ladder
     would lose a cable at one gauge and render it as a bare flat bar with no error anywhere.
     """
-    pipes = _pipes_by_name()
     material = CABLE_MATERIAL_BY_TIER[tier]
-    shipped = [g for g in CABLE_THICKNESS_BLOCKS if cable_display_name(material, g) in pipes]
+    shipped = [
+        g for g in CABLE_THICKNESS_BLOCKS if _shipped(cable_display_name(material, g)) is not None
+    ]
     if not shipped:
         pytest.skip(f"no {tier} cable in the example-scoped manifest")
 
     for gauge, thickness in CABLE_THICKNESS_BLOCKS.items():
         name = cable_display_name(material, gauge)
-        entry = pipes.get(name)
+        entry = _shipped(name)
         assert entry is not None, f"{tier} ships {shipped} but not gauge {gauge} ({name})"
         pipe = entry["pipe"]
         assert isinstance(pipe, dict)
@@ -246,22 +259,14 @@ def test_the_committed_manifest_ships_the_examples_own_cables() -> None:
     keep one; without the dedicated rule the committed manifest would ship zero. The sand line is
     LV and nitrobenzene reaches HV, so those two tiers are the floor.
     """
-    pipes = _pipes_by_name()
-    if not any(name.startswith("cable.") for name in pipes):
-        pytest.skip("no cables in the committed manifest (fixture-only checkout)")
-
     for tier in ("LV", "HV"):
         name = cable_display_name(CABLE_MATERIAL_BY_TIER[tier], 1)
-        assert name in pipes, f"the examples use {tier}; {name} must ship"
+        assert _shipped(name) is not None, f"the examples use {tier}; {name} must ship"
 
 
 def test_both_pipe_stand_ins_exist_at_every_size_the_router_lays() -> None:
     """Every size, not only today's: the exporter refuses a pipe the manifest lacks and the
     previewer draws it as a flat bar, and the item sizes a line needs move with its endpoints."""
-    pipes = _pipes_by_name()
-    if not any(name.startswith("gt_pipe_") for name in pipes):
-        pytest.skip("no pipes in the committed manifest (fixture-only checkout)")
-
     assert PIPE_THICKNESS_BLOCKS[PipeFamily.ITEM_PIPE][DEFAULT_PIPE_SIZE] == pytest.approx(
         DEFAULT_PIPE_THICKNESS_BLOCKS
     )
@@ -271,7 +276,7 @@ def test_both_pipe_stand_ins_exist_at_every_size_the_router_lays() -> None:
     ):
         for size in ROUTED_PIPE_SIZES[commodity]:
             name = pipe_display_name(PIPE_MATERIAL[commodity], size)
-            entry = pipes.get(name)
+            entry = _shipped(name)
             assert entry is not None, f"{commodity.value} lays {name}, which is not present"
             pipe = entry["pipe"]
             assert isinstance(pipe, dict)
@@ -282,8 +287,8 @@ def test_a_real_29_dump_names_every_cable_and_pipe_the_policy_draws() -> None:
     """The same guard against the pack that did the renaming, which the committed one cannot give.
 
     The committed manifest is example-scoped and frozen at the pack that generated it, so it can
-    only ever prove that pack's spelling; it shipped three tiers at 2.8.4 and would keep passing
-    through any number of renames after. GT's 2.9 rename is where the join actually broke (#176),
+    only ever prove that pack's spelling; it ships three tiers and would keep passing through any
+    number of renames after. GT's 2.9 rename is where the join actually broke (#176),
     and a full 2.9 dump holds every cable and pipe GT has, so every name on the ladder must resolve
     under one spelling or the other.
 

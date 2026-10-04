@@ -35,9 +35,9 @@ pipe, red where that pipe also carries another machine's outputs and the builder
 to refuse input there (#278), and every other output face, which takes a cover, an amber cover marker
 (``scene.machines[].outputs``, #249); drawn for **single blocks only** - a multiblock ejects from a
 hatch's own face, not from its bounding box, so there is no box face to mark (#153). A side panel lists the
-machine/route legend (each machine type marked by its controller's front face, as the 3D view draws it,
-where the texture pass baked one, else by its box colour; materials footnoted as stand-ins where
-they are), an inventory of the
+machine/route legend (each machine type marked, where the texture pass baked one, by the face that
+shows its own art as the 3D view draws it: its controller's front, else its top or a side; else by
+its box colour; materials footnoted as stand-ins where they are), an inventory of the
 **nets** - what each carries and at what rate, every row a button that *solos* that net by hiding
 every other route, which is how one run reads end to end through a bundle the hover tag can only
 identify a block at a time (#240, keyed on ``netId``: a power route names no resource) - plus the
@@ -188,9 +188,10 @@ _STYLE = """
          image-rendering: pixelated; }
   .sw.dot { width: 9px; height: 9px; margin-right: 4px; border-radius: 50%;
             box-shadow: 0 0 0 1px #6b7482; }
-  /* A machine type's legend mark (machineMark): where its front face is textured, that face, 16px
-     and square with Minecraft's nearest-neighbour look; else its colour swatch at the same 16px,
-     so every machine's name starts at the same place. */
+  /* A machine type's legend mark (machineMark): where the face that shows its own art (its front,
+     else its top or a side) is textured, that face, 16px and square with Minecraft's
+     nearest-neighbour look; else its colour swatch at the same 16px, so every machine's name
+     starts at the same place. */
   .sw.face, .sw.mach { width: 16px; height: 16px; }
   .sw.face { border-radius: 0; image-rendering: pixelated; }
   b { color: #aab2bd; font-weight: 600; }
@@ -961,10 +962,11 @@ function swatch(color) {
   s.style.background = color;
   return s;
 }
-// A machine type's legend mark: the front face of its controller as the 3D view draws it, idle,
-// cropped out of the atlas at 16px (scene.legend[].tile, previewer.textures), where the texture
-// pass baked one; else the colour swatch its placeholder boxes are painted in. The crop is a CSSOM
-// background on the atlas's own data: URI, so it is no new markup and no new image source.
+// A machine type's legend mark: the face that shows its own art (its controller's front, else its
+// top or a side) as the 3D view draws it, idle, cropped out of the atlas at 16px
+// (scene.legend[].tile, previewer.textures), where the texture pass baked one; else the colour
+// swatch its placeholder boxes are painted in. The crop is a CSSOM background on the atlas's own
+// data: URI, so it is no new markup and no new image source.
 function machineMark(entry) {
   const tile = entry.tile && ATLAS ? ATLAS.tiles[entry.tile] : null;
   if (!tile) {

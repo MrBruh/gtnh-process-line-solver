@@ -7,6 +7,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **A blast furnace is built with a coil hot enough for its recipes (#318).** GT refuses a recipe
+  whose special value, its heat in kelvin, is above what the furnace reaches: its coil's heat
+  (1801 K for Cupronickel, then 900 K a tier), plus, for the Electric Blast Furnace, the Mega
+  Electric Blast Furnace and the Exothermic Hearth, 100 K per voltage tier the machine is supplied
+  above MV (100 K less per tier below it). The Volcanus, the Dimensionally Transcendent Plasma
+  Forge, the Digester and the Utupu-Tanuri read the coil alone. Since #312 the node's coil is
+  drawn and exported, but nothing checked it against the recipe, so an export could hold a furnace
+  that runs nothing. The adapter now keeps the coil the plan names when it reaches the hottest
+  recipe's heat at the tier the furnace is supplied at (read after the power synthesis, like the
+  plant's machine casing), and otherwise builds the cheapest coil the structure accepts that does,
+  with a warning; a heat above every coil builds the hottest, warning that GT will still refuse the
+  recipe. A coil that sets only speed, parallels or EU/t (the Pyrolyse Oven, the Industrial Coke
+  Oven, the Chemical Plant) is not checked. A converted ShadowTheAge plan states no heat, so it
+  builds as before; its converter warns of a coil too cold itself. No shipped example triggers the
+  check.
 - **A Chemical Plant is built from the casings, pipes and coils its node needs (#312).** GT's
   ExxonMobil Chemical Plant builds four parts from a tier ladder, and each decides whether, or how
   fast, it runs: its solid casing (a recipe runs only if its special value is at or below the
@@ -43,12 +58,19 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the converter refuses (an unported machine, an unbalanceable plan) all exit 2 with the reason.
   `examples/Shadow-NB.gtnh` and its conversion `examples/shadow-nitrobenzene.json` are new
   examples.
-- **The preview's legend shows each machine type by its front face.** The "machines" section used
-  to mark each type with the colour its placeholder boxes are painted in, which said nothing once
-  the 3D view drew real textures. Each textured type is now marked by its controller's front face,
-  idle, exactly as the 3D view draws it (the GT++ machines that share one controller screen in game
-  share it here too). A Super or Quantum Tank shows its top instead, where it draws its tank
-  display; its front carries only an output pipe. It is cropped out of the page's own texture
+- **The preview's legend shows each machine type by the face that shows its own art.** The
+  "machines" section used to mark each type with the colour its placeholder boxes are painted in,
+  which said nothing once the 3D view drew real textures. Each textured type is now marked by its
+  controller's front face, idle, exactly as the 3D view draws it (the GT++ machines that share one
+  controller screen in game share it here too). Where the front shows nothing but its casing and
+  a port mark (an energy plug, a pipe, an in/out sign), the top is used instead, else the first
+  side that shows the machine's art (#322). The rule reads the loaded texture manifest and the
+  sprites themselves, not a list of machines: a layer that GT draws invisible, or whose sprite is
+  empty (2.8.4 ships empty ones that 2.9 deleted), is not art. So tanks, solar panels, Tesla
+  transceivers, energy buffers, solar boilers, the Cleanroom, Charcoal Pit, Solar Tower, Lightning
+  Rod and Monster Repellator show their top, as do the Combustion, Geothermal and (on 2.9) Acid
+  generators; Semifluid Generators and Gas and Steam Turbines show their right-hand side. A chosen
+  face that did not bake falls back to the front. It is cropped out of the page's own texture
   atlas, so it costs no extra image.
   A type that stays a placeholder box, such as the synthetic power sources, keeps its colour
   square, now at the same 16 px so every name lines up.
@@ -387,6 +409,23 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **Every shipped example exports on a fresh clone, the converted ShadowTheAge line included
+  (#319).** `gtnh-solve examples/shadow-nitrobenzene.json --schematic` was refused on a fresh
+  clone: the committed `data/textures/manifest.json` was cut from a 2.8.4 dump, which has no 2.9
+  Industrial Coke Oven (`gregtech:gt.blockmachines|15543`), so the exporter could not type the
+  line's coke ovens. The committed manifest is now cut whole from the 2.9.0-beta-3 dump
+  (GT5-Unofficial 5.09.54.133), one pack for every block in it rather than one 2.9 block patched
+  onto 2.8.4 data: 113 blocks and 172 icons before, 117 blocks and 150 icons now. The four added
+  are the Industrial Coke Oven, the Mega Distillation Tower, the Coke Oven and its Coke Oven Hatch,
+  and none was dropped. The previewer fetches the GT jar the manifest's provenance names, so a
+  fresh-clone preview now downloads 5.09.54.133 and draws 2.9 art. Cables and pipes are filed under
+  their 2.9 names (`2x Tin Cable` where 2.8.4 said `cable.tin.02`), which the previewer's and the
+  exporter's lookups already accepted. A new test solves every example the manifest is cut for and
+  exports it from the committed data alone, so a block the manifest lacks fails CI rather than a
+  user's export. A local dump generated before the beta-3 one (2026-10-02T23:21Z) that shadows the
+  committed manifest now warns that it is the older one (`DatasetWarning`), where before only a dump
+  older than 2026-09-28 did; pass `--dataset-version` to pin a dump, or re-run the extractor for
+  its pack.
 - **Each tower output's hatch stands on the layer GT fills it from, and every layer gets one
   (#299).** GT fills a Distillation Tower by layer, not first fit: recipe fluid output `i` goes only
   to the output hatches on its `i`-th layer above the base, and the tower does not form while any
@@ -934,6 +973,22 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **The placer moves a node's parallel single blocks as one column, back to front.** A plan node
+  with a `machineCount` becomes `node#1` .. `node#N`, and the annealer used to move each copy on its
+  own, so siblings came out side by side or scattered, every side-by-side contact costing a usable
+  face on each machine. The copies of a node that are all single blocks of one type now move as one
+  rigid unit (`placement.groups`), laid back to front: each member's front, which carries no I/O,
+  against the previous member's back, so a contact costs one face and one straight pipe or cable
+  run along the column can serve every member, the shape the parallel-sand bank build has. Every
+  small move and the LNS ruin-and-recreate pick units, a column turning whole; the annealer's seed
+  lays each group as its column (on a line of single blocks, on a shelf of units that replaces the
+  lattice). Power sources, machines whose front faces outside, and pinned-port machines are never
+  grouped. A line with no group anneals exactly as before, draw for draw
+  (`tests/fixtures/no-group-anneals.json`), and the fast path is unchanged. Over 16 seeds at full
+  effort, iron's floor area plus route cells fell from a median of 191.5 to 150 (15 seeds better,
+  1 worse, VALID on all 16 either way); salty-root and parallel-sand came out level; and three
+  community lines that stay partial either way left fewer nets unconnected on 11 of 12 seeds,
+  solving several times faster.
 - **The pinned pack is now GTNH 2.9.0-beta-3.** `gtnh.lock.json` and the extractor pin
   GT5-Unofficial 5.09.54.133 and CropsNH 2.0.114 (StructureLib stays 1.4.42), the pack the
   maintainer plays. GT 5.09.54.133 changed enough under the extractor that a dump taken with the

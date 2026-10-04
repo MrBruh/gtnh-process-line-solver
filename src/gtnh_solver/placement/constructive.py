@@ -5,8 +5,9 @@ First-fit constructive placement on the coarse cell grid: walk machines in **flo
 the solver auto-feed them without a pipe) and drop each into the first free, in-bounds slot -
 scanning the floor layer first, then row by row, then upward - honoring reserved cells and
 never overlapping. Orientation is the machine's first listed legal option. One placement per
-machine (multi-instance groups are Phase 2 - see ``Machine`` / docs/ROADMAP.md). No search, no
-compaction; that is Phase 2 (SA/LNS) too, docs/ROADMAP.md.
+machine: a node's parallel copies are separate machines (``node#1``, ``node#2``, ...), and only the
+annealer's seed lays them out together (below). No search, no compaction; that is Phase 2 (SA/LNS),
+docs/ROADMAP.md.
 
 **The annealer's seed** (``lattice=True``) lays a line of single blocks out on a spaced lattice
 instead: rows of ceil(sqrt(n)) blocks with a one-cell channel between neighbours, and a two-cell
@@ -19,6 +20,26 @@ inside it. Each edge of it is held by a whole row or column of blocks, so the fl
 moves it and the seed's spacing is what sets the build's size; rows one cell apart instead of two
 lost two of eight iron seeds to congestion. The fast path keeps the plain row, whose neighbours
 touch and so auto-feed.
+
+**A group of parallel single blocks** (``placement.groups``) is seeded as its column, back to front,
+because the annealer moves each group as one rigid unit and has to start from one. Only the
+annealer's seed groups; the fast path and the solver's fallback keep the plain row. Each group goes
+at its first member's place in the flow order, as one column at its first legal facing, and every
+other machine is a unit of its own. On a line of single blocks the lattice becomes a **shelf** of
+units::
+
+    z=0   A . B . C . D       rows along x, a one-cell channel between units
+          . . B . . . .       B: a group of three facing north, its column along z
+          . . B . . . .       each row as deep as its deepest unit,
+          . . . . . . .         then the two-cell aisle
+          . . . . . . .
+    z=5   E . F . G           units per row chosen for the squarest floor
+
+On a line with a multiblock each unit takes the first free slot of the plain scan. A machine whose
+front faces outside goes after the shelf, by the plain scan, so it takes no unit's slot. A column
+that fits nowhere is dissolved, its members fitted one at a time (the annealer then moves them
+alone). When the grouped seed cannot place the line at all, the plain seed runs exactly as it does
+without groups: grouping must never turn a feasible line infeasible.
 
 A **power source** additionally must sit with its front face flush on the region boundary: the
 front is its reserved external-feed face (the builder runs power in from outside the structure -
@@ -35,8 +56,9 @@ reserved-cell / bad-orientation violations.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
+from itertools import chain
 
 from gtnh_solver.ir import (
     CellBox,
@@ -48,8 +70,18 @@ from gtnh_solver.ir import (
     Machine,
     Placement,
 )
-from gtnh_solver.ir.geometry import Cell, front_on_boundary, in_region, occupied_cells
+from gtnh_solver.ir.geometry import (
+    Cell,
+    Size,
+    box_cells,
+    box_within,
+    front_on_boundary,
+    in_region,
+    occupied_cells,
+)
 from gtnh_solver.ir.nets import net_sources_sinks, port_direction_map
+
+from .groups import column_offsets, column_size, parallel_groups
 
 
 @dataclass(frozen=True)
@@ -68,9 +100,21 @@ class PlacementResult:
 def place(problem: InputIR, *, lattice: bool = False) -> PlacementResult:
     """Deterministically place every machine (one each) into the region.
 
-    ``lattice`` seeds a line of single blocks on the spaced lattice (module docstring); the
-    annealer asks for it, the fast path does not. A line with any multiblock ignores it.
+    ``lattice`` asks for the annealer's seed (module docstring): each group of parallel single
+    blocks as its column, and a line of single blocks spaced out on the lattice or, with groups, the
+    shelf. The fast path does not ask. A line with a multiblock and no group ignores it.
     """
+    if lattice:
+        groups = parallel_groups(problem)
+        if groups:
+            grouped = _place_grouped(problem, groups)
+            if grouped is not None:
+                return PlacementResult(placements=grouped)
+    return _place_plain(problem, lattice=lattice)
+
+
+def _place_plain(problem: InputIR, *, lattice: bool) -> PlacementResult:
+    """:func:`place` without groups: every machine on its own, in flow order."""
     region = problem.bounding_region
     occupied: set[Cell] = {(c.x, c.y, c.z) for c in problem.reserved_cells}
     placements: list[Placement] = []
@@ -105,13 +149,155 @@ def _lattice_window(problem: InputIR) -> _Window | None:
     plain scan: its seed is a strip the annealer already folds (#254).
     """
     machines = problem.machines
-    if not machines or any(
-        (m.footprint.sx, m.footprint.sy, m.footprint.sz) != (1, 1, 1) for m in machines
-    ):
+    if not _single_blocks_only(machines):
         return None
     per_row = math.isqrt(len(machines) - 1) + 1
     rows = -(-len(machines) // per_row)  # ceiling division
     return (per_row - 1) * _LATTICE_STRIDE_X + 1, (rows - 1) * _LATTICE_STRIDE_Z + 1
+
+
+def _single_blocks_only(machines: Sequence[Machine]) -> bool:
+    """Whether there are machines and every one is a 1x1x1 single block."""
+    return bool(machines) and all(
+        (m.footprint.sx, m.footprint.sy, m.footprint.sz) == (1, 1, 1) for m in machines
+    )
+
+
+def _place_grouped(
+    problem: InputIR, groups: tuple[tuple[str, ...], ...]
+) -> tuple[Placement, ...] | None:
+    """The annealer's seed with each of ``groups`` laid as its column (module docstring), in flow
+    order; None when some machine fits nowhere, and :func:`place` then seeds plainly."""
+    region = problem.bounding_region
+    occupied: set[Cell] = {(c.x, c.y, c.z) for c in problem.reserved_cells}
+    order = _flow_order(problem)
+    units = _flow_units(order, groups)
+    slotted: list[tuple[list[Machine], Cell | None]]
+    if _single_blocks_only(problem.machines):
+        shelf = [u for u in units if not u[0].fronts_outside]
+        slots = _unit_slots([_unit_box(u) for u in shelf])
+        slotted = [(u, (x, 0, z)) for u, (x, z) in zip(shelf, slots, strict=True)]
+        slotted += [(u, None) for u in units if u[0].fronts_outside]
+    else:
+        slotted = [(u, None) for u in units]
+    placed: list[Placement] = []
+    for unit, slot in slotted:
+        laid = _lay_unit(unit, slot, region, occupied)
+        if laid is None:
+            return None
+        placed.extend(laid)
+    rank = {m.id: i for i, m in enumerate(order)}
+    return tuple(sorted(placed, key=lambda p: rank[p.machine_id]))
+
+
+def _flow_units(order: list[Machine], groups: tuple[tuple[str, ...], ...]) -> list[list[Machine]]:
+    """``order`` as units: each group, members in instance order, where its first member comes,
+    and every other machine alone."""
+    group_of = {mid: ids for ids in groups for mid in ids}
+    by_id = {m.id: m for m in order}
+    units: list[list[Machine]] = []
+    laid: set[tuple[str, ...]] = set()
+    for machine in order:
+        ids = group_of.get(machine.id)
+        if ids is None:
+            units.append([machine])
+        elif ids not in laid:
+            laid.add(ids)
+            units.append([by_id[mid] for mid in ids])
+    return units
+
+
+def _unit_box(unit: list[Machine]) -> tuple[int, int]:
+    """A shelf unit's ``(x, z)`` extent: its column at its first legal facing, or one block."""
+    sx, _, sz = column_size(len(unit), unit[0].orientation_options[0])
+    return (sx, sz) if len(unit) > 1 else (1, 1)
+
+
+def _unit_slots(boxes: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Each unit's ``(x, z)`` origin on the seed's shelf, for units of extents ``boxes`` in order.
+
+    Rows along x with a one-cell channel between units, each row as deep as its deepest unit and
+    then the two-cell aisle (module docstring); a row of single blocks is the plain lattice's
+    spacing. The units per row are the count that makes the floor squarest, then smallest, then
+    the fewest per row.
+    """
+    best: tuple[tuple[int, int, int], list[tuple[int, int]]] | None = None
+    for per_row in range(1, len(boxes) + 1):
+        slots, width, depth = _shelf(boxes, per_row)
+        key = (max(width, depth), width * depth, per_row)
+        if best is None or key < best[0]:
+            best = (key, slots)
+    return [] if best is None else best[1]
+
+
+def _shelf(boxes: list[tuple[int, int]], per_row: int) -> tuple[list[tuple[int, int]], int, int]:
+    """:func:`_unit_slots` at ``per_row`` units a row: the slots, and the floor's width and depth."""
+    channel, aisle = _LATTICE_STRIDE_X - 1, _LATTICE_STRIDE_Z - 1
+    slots: list[tuple[int, int]] = []
+    width = z = 0
+    for start in range(0, len(boxes), per_row):
+        row = boxes[start : start + per_row]
+        x = 0
+        for sx, _ in row:
+            slots.append((x, z))
+            x += sx + channel
+        width = max(width, x - channel)
+        z += max(sz for _, sz in row) + aisle
+    return slots, width, z - aisle
+
+
+def _lay_unit(
+    unit: list[Machine], slot: Cell | None, region: CellBox, occupied: set[Cell]
+) -> list[Placement] | None:
+    """Place one unit and mark its cells in ``occupied``, or None when a machine fits nowhere.
+
+    A group goes as its column at its first legal facing: at ``slot`` when it fits there, else at
+    the first origin of the plain scan where it does. A single machine goes at ``slot`` the same
+    way, else by :func:`_fit`. A column that fits nowhere is dissolved, each member by :func:`_fit`.
+    """
+    head = unit[0]
+    facing = head.orientation_options[0]
+    if len(unit) > 1:
+        size = column_size(len(unit), facing)
+        origin = _column_origin(size, slot, region, occupied)
+        if origin is not None:
+            occupied.update(box_cells(origin, size))
+            x, y, z = origin
+            return [
+                Placement(
+                    machine_id=m.id, cell=_coord((x + dx, y + dy, z + dz)), orientation=facing
+                )
+                for m, (dx, dy, dz) in zip(unit, column_offsets(len(unit), facing), strict=True)
+            ]
+    elif slot is not None and _fits(head, _coord(slot), facing, region, occupied):
+        occupied.add(slot)
+        return [Placement(machine_id=head.id, cell=_coord(slot), orientation=facing)]
+    laid: list[Placement] = []
+    for machine in unit:
+        fit = _fit(machine, region, occupied)
+        if fit is None:
+            return None
+        cell, orientation = fit
+        occupied.update(occupied_cells(cell, machine.footprint, orientation))
+        laid.append(Placement(machine_id=machine.id, cell=cell, orientation=orientation))
+    return laid
+
+
+def _column_origin(
+    size: Size, slot: Cell | None, region: CellBox, occupied: set[Cell]
+) -> Cell | None:
+    """``slot`` when a column of ``size`` fits there, else the first origin of the plain scan
+    where it does, else None."""
+    bounds = (region.sx, region.sy, region.sz)
+    scan = (origin.as_tuple() for origin in _scan_origins(region))
+    for origin in chain(() if slot is None else (slot,), scan):
+        if box_within(origin, size, bounds) and occupied.isdisjoint(box_cells(origin, size)):
+            return origin
+    return None
+
+
+def _coord(cell: Cell) -> CellCoord:
+    return CellCoord(x=cell[0], y=cell[1], z=cell[2])
 
 
 def _wont_fit(machine: Machine, region: CellBox) -> Infeasibility:

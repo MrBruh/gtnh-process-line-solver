@@ -48,7 +48,8 @@ the repo: nine multiblock nodes that `machineCount` expands to 14 machines, a Da
 comparison. It is the acceptance fixture for the 2.9 preview and export work (#205 to #208), so it
 is kept byte-identical to the export rather than trimmed. `.pre-commit-config.yaml` exempts this one
 file from the large-file check, and `tools/derive_small_manifest.py` skips it, so the committed
-texture manifest does not grow to cover its EV tier and 2.9 machines.
+texture manifest (cut from the 2.9.0-beta-3 dump) does not grow to cover its EV tier and the
+machines only it uses.
 
 On a fresh clone its multiblocks resolve from the committed `data/multiblocks/`, which carries the
 controllers of both nitrobenzene lines trimmed to the forms they use

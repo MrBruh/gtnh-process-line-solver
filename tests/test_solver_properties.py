@@ -87,6 +87,7 @@ from gtnh_solver.ir import (
 )
 from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 from gtnh_solver.ir.output import CABLE_THICKNESSES
+from gtnh_solver.placement.groups import column_offsets
 from gtnh_solver.solver import solve
 from gtnh_solver.validator import validate
 from tests._helpers import layered_tower, property_examples
@@ -499,6 +500,121 @@ def test_a_tower_that_fills_by_layer_is_valid_or_explicitly_infeasible(
     spares = sum(1 for h in layout.hatches if h.kind == "OutputHatch" and h.port_id is None)
     event(f"spares={spares}")
     _assert_valid_or_explained(problem, layout)
+
+
+@st.composite
+def _grouped_problems(draw: st.DrawFn) -> InputIR:
+    """A feed into two to five parallel copies of one single block (``g#1`` ..), sometimes on to a
+    drain, and sometimes a machine of the general kind beside them.
+
+    The shape a plan node with a ``machineCount`` takes, which the placer moves as one rigid column
+    (``placement.groups``); the general corpus never draws one, since its ids carry no ``#N``
+    suffix. The copies share their nets, as a node's machines do, and their power comes from the
+    same synthesis, so a draw too big for one cable puts siblings on different power nets.
+    """
+    size = draw(st.integers(min_value=2, max_value=5))
+    drained = draw(st.booleans())
+    ports = [Port(id="item:in", commodity=Commodity.ITEM, direction=IODirection.INPUT)]
+    if drained:
+        ports.append(Port(id="item:out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT))
+    template = draw(_machines("g#1")).model_copy(
+        update={"footprint": CellBox(), "hatch_cells": None, "faces": FaceSpec(ports=ports)}
+    )
+    copies = [template.model_copy(update={"id": f"g#{k}"}) for k in range(1, size + 1)]
+    machines = [_bare("feed", "item:out", IODirection.OUTPUT), *copies]
+    nets = [
+        Net(
+            id="feed",
+            commodity=Commodity.ITEM,
+            fluid_or_item="x",
+            throughput=draw(st.sampled_from((0.0, 1.0, 4.0))),
+            endpoints=[
+                MachineFaceRef(machine_id="feed", port_id="item:out"),
+                *(MachineFaceRef(machine_id=c.id, port_id="item:in") for c in copies),
+            ],
+        )
+    ]
+    if drained:
+        machines.append(_bare("drain", "item:in", IODirection.INPUT))
+        nets.append(
+            Net(
+                id="drain",
+                commodity=Commodity.ITEM,
+                fluid_or_item="y",
+                throughput=1.0,
+                endpoints=[
+                    *(MachineFaceRef(machine_id=c.id, port_id="item:out") for c in copies),
+                    MachineFaceRef(machine_id="drain", port_id="item:in"),
+                ],
+            )
+        )
+    if draw(st.booleans()):
+        machines.append(draw(_machines("m0")))
+    machines, nets = synthesize_power(machines, nets)
+    # As in _problems: mostly a region the line fits with room to route, sometimes a tight one.
+    floor = math.ceil(math.sqrt(sum(m.footprint.sx * m.footprint.sz for m in machines)))
+    side = (
+        st.integers(min_value=1, max_value=3)
+        if draw(st.integers(min_value=0, max_value=3)) == 0
+        else st.integers(min_value=floor, max_value=floor + 2)
+    )
+    region = CellBox(sx=draw(side), sy=draw(st.integers(min_value=1, max_value=3)), sz=draw(side))
+    cells = st.builds(
+        CellCoord,
+        x=st.integers(min_value=0, max_value=region.sx - 1),
+        y=st.integers(min_value=0, max_value=region.sy - 1),
+        z=st.integers(min_value=0, max_value=region.sz - 1),
+    )
+    return InputIR(
+        bounding_region=region,
+        machines=machines,
+        nets=nets,
+        reserved_cells=draw(st.lists(cells, max_size=2)),
+    )
+
+
+def _as_column(layout: LayoutResult) -> bool:
+    """Whether the copies ``g#1`` .. stand in ``layout`` as one column, back to front."""
+    members = sorted(
+        (p for p in layout.placements if p.machine_id.startswith("g#")),
+        key=lambda p: int(p.machine_id[2:]),
+    )
+    facing = members[0].orientation
+    x0, y0, z0 = (min(p.cell.as_tuple()[a] for p in members) for a in range(3))
+    return all(
+        p.orientation is facing and p.cell.as_tuple() == (x0 + dx, y0 + dy, z0 + dz)
+        for p, (dx, dy, dz) in zip(members, column_offsets(len(members), facing), strict=True)
+    )
+
+
+@pytest.mark.parametrize("optimize", [True, False])
+@settings(
+    max_examples=property_examples(100),
+    suppress_health_check=[HealthCheck.too_slow],
+)
+@given(problem=_grouped_problems(), seed=st.integers(min_value=0, max_value=3))
+def test_a_line_with_parallel_copies_is_valid_or_explicitly_infeasible(
+    problem: InputIR, seed: int, optimize: bool
+) -> None:
+    """The same promise on a line whose copies the annealer moves as one column. The event says
+    whether the copies came out as that column; the fast path never lays one."""
+    layout = solve(problem, seed=seed, optimize=optimize)
+    event(f"status={layout.status.value}")
+    if layout.placements:
+        event("copies=" + ("column" if _as_column(layout) else "apart"))
+    _assert_valid_or_explained(problem, layout)
+
+
+@settings(
+    max_examples=property_examples(25),
+    suppress_health_check=[HealthCheck.too_slow],
+)
+@given(problem=_grouped_problems(), seed=st.integers(min_value=0, max_value=3))
+def test_a_line_with_parallel_copies_solves_deterministically(problem: InputIR, seed: int) -> None:
+    """:func:`test_solve_is_deterministic_for_a_given_problem_and_seed` on the grouped corpus."""
+    first = solve(problem, seed=seed, effort="full")
+    second = solve(problem, seed=seed, effort="full")
+    assert first.model_dump() == second.model_dump()
 
 
 @settings(
