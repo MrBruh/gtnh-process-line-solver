@@ -85,7 +85,9 @@ gtnh-solve plan.json --fast               # skip optimization: a near-instant co
 gtnh-solve plan.json --effort minimal     # one short optimizing attempt: a quick, rougher layout
 gtnh-solve plan.json --seed 3             # pick the solver seed (deterministic per seed)
 gtnh-solve plan.json --objective volume   # what "compact" means: footprint|volume|balanced
-gtnh-solve plan.json --me items           # leave items to ME (AE2): no pipes laid; repeatable
+gtnh-solve plan.json --list-nets          # the nets you may move to ME (AE2), as JSON
+gtnh-solve plan.json --me-plan me.json    # ...then move the ones you chose; no pipes laid for them
+gtnh-solve plan.json --me items           # ...or every item net, onto your main ME network
 gtnh-solve plan.json --dataset-version 2.8.4   # pin a locally generated data/<version>/ dump
 gtnh-solve --list-dataset-versions             # ...or see which ones you have
 ```

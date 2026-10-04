@@ -21,7 +21,7 @@ WebGL last mile stays a thin static template while the mapping here is pure and 
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from typing import Any
 
 from gtnh_solver.dataset import tier_voltage
@@ -34,7 +34,6 @@ from gtnh_solver.ir import (
     IODirection,
     LayoutResult,
     Machine,
-    METoggles,
     Route,
 )
 from gtnh_solver.ir.geometry import Cell, rotated_footprint
@@ -164,6 +163,13 @@ def build_scene(
     """
     machines = {m.id: m for m in problem.machines}
     names = {**(extra_names or {}), **problem.resource_names}
+    # The ports whose net rides ME (#332), which the io panel and a storage's hover flag.
+    me_ports = {
+        (ep.machine_id, ep.port_id)
+        for net in problem.nets
+        if problem.rides_me(net)
+        for ep in net.endpoints
+    }
     types = sorted({m.type for m in problem.machines})
     color_for_type = {t: _MACHINE_PALETTE[i % len(_MACHINE_PALETTE)] for i, t in enumerate(types)}
 
@@ -239,7 +245,7 @@ def build_scene(
             # (GitHub #155). Empty for every other machine - a machine's ports are its recipe, not
             # its contents. Resource ids verbatim, exactly as the plan carries them, each with the
             # ``label`` a person reads (``system_io.resource_label``, #296).
-            "contents": _contents(machines[pl.machine_id], problem.me_toggles, names),
+            "contents": _contents(machines[pl.machine_id], me_ports, names),
             # The items an Item Filter lets through (#249), which is how its slots must be set in
             # game; the hover lists them by ``filter_labels``. Empty for every other machine.
             "filter_items": list(machines[pl.machine_id].filter_items),
@@ -366,13 +372,13 @@ def build_scene(
         tier: {"volts": tier_voltage(tier), "amps": amps}
         for tier, amps in sysio.power_amps_by_tier.items()
     }
-    me = problem.me_toggles
+    me_storages = {machine_id for machine_id, _ in me_ports}
     scene_io = {
         # ``rate`` is per-tick; ``unit`` is the stem (items/mB/EU) so the viewer can append /t or
-        # /s for its toggle. ``me`` says the commodity rides ME (``--me``): the solver routes
-        # nothing for it and no ME block is drawn yet, so the panel has to say how the flow gets
-        # there, or a chest with no pipe reads as a line that forgot one. ``label`` is the resource
-        # as the panel prints it (``system_io.resource_label``, #296).
+        # /s for its toggle. ``me`` says the flow's net rides ME (#332): the solver routes nothing
+        # for it and no ME block is drawn yet, so the panel has to say how the flow gets there, or
+        # a chest with no pipe reads as a line that forgot one. ``label`` is the resource as the
+        # panel prints it (``system_io.resource_label``, #296).
         "inputs": [
             {
                 "resource": f.resource,
@@ -380,7 +386,7 @@ def build_scene(
                 "resources": _resource_entries(f.resources, names),
                 "rate": f.rate,
                 "unit": RATE_STEM[f.commodity],
-                "me": me.toggled(f.commodity),
+                "me": f.machine_id in me_storages,
             }
             for f in sysio.inputs
         ],
@@ -391,14 +397,14 @@ def build_scene(
                 "resources": _resource_entries(f.resources, names),
                 "rate": f.rate,
                 "unit": RATE_STEM[f.commodity],
-                "me": me.toggled(f.commodity),
+                "me": f.machine_id in me_storages,
             }
             for f in sysio.outputs
         ],
         "power": {
             "total": sum(d["volts"] * d["amps"] for d in power_by_tier.values()),
             "byTier": power_by_tier,
-            "me": me.toggled(Commodity.POWER),
+            "me": problem.me.power_external,
         },
     }
 
@@ -493,10 +499,12 @@ def _content_bounds(
     return {"min": [v for v in lo if v is not None], "max": [v for v in hi if v is not None]}
 
 
-def _contents(machine: Machine, me: METoggles, names: Mapping[str, str]) -> list[dict[str, Any]]:
+def _contents(
+    machine: Machine, me_ports: Collection[tuple[str, str]], names: Mapping[str, str]
+) -> list[dict[str, Any]]:
     """What a boundary storage holds: each resource its ports carry (with the ``label`` the hover
-    prints, from ``names``), which way it flows, and ``me`` when that commodity rides ME (the io
-    panel's flag, so the hover says what the panel says).
+    prints, from ``names``), which way it flows, and ``me`` when the port's net rides ME
+    (``me_ports``; the io panel's flag, so the hover says what the panel says).
 
     A Super Chest/Tank is a buffer for one resource, and the port it exposes is the only record of
     which - ``adapter.core`` encodes it into the port id (``"input:liquid_toluene"``) and
@@ -519,7 +527,7 @@ def _contents(machine: Machine, me: METoggles, names: Mapping[str, str]) -> list
             "resource": resource,
             "label": resource_label(resource, names),
             "flow": flow,
-            "me": me.toggled(port.commodity),
+            "me": (machine.id, port.id) in me_ports,
         }
         seen.setdefault((resource, flow), entry)
     return list(seen.values())

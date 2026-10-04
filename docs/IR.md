@@ -25,7 +25,11 @@ InputIR
   nets: [Net]
   pinned: [PinnedIO]                # fixed input/output chest locations
   reserved_cells: [CellCoord]       # off-limits cells
-  me_toggles: { items: bool, fluids: bool, power: bool }   # per-commodity (default all false)
+  me: MEConfig                      # the ME (AE2) networks nets may ride, and whether power is
+                                    #  the builder's (power_external). Which net rides which is
+                                    #  Net.me_network. Default: none, everything built physically.
+                                    #  InputIR v8 (BREAKING, #332) replaced the per-commodity
+                                    #  me_toggles; see "Choosing ME per net" below.
   resource_names: { str: str }      # raw resource id -> display name ("liquid_toluene" ->
                                     #  "Toluene"), as the plan's exporter read it from the game,
                                     #  for the resources this problem moves. Display only: nothing
@@ -200,6 +204,26 @@ Net
                                     #  (BREAKING, #249)
   throughput: float                 # TYPED rate: mB/t (fluid), items/t (item), EU/t (power); >= 0
   endpoints: [MachineFaceRef]       # machine ports this net connects; >= 1
+  me_network: str | null            # the ME network (an InputIR.me.networks id) this net rides
+                                    #  instead of a pipe; null = built physically. Item and fluid
+                                    #  nets only. Read through Net.rides_me, or
+                                    #  InputIR.rides_me(net), which also counts a power net while
+                                    #  power is the builder's. InputIR v8 (BREAKING, #332)
+
+MEConfig
+  networks: [MENetworkSpec]         # unique ids; at most one attached; no two subnets one colour
+  power_external: bool              # the line's EU supply is the builder's: no source, no cable
+
+MENetworkSpec
+  id: str
+  mode: "attached" | "subnet"       # join the player's main network, or stand apart from it
+  storage: "link" | "chests"        # a subnet's storage: the main network through one storage
+                                    #  bus (default), or its own boundary chests; attached: link
+  power: "external" | "acceptor"    # the builder's, or an Energy Acceptor on the line's EU
+  hatches: "tier_aware" | "always" | "never"   # when a multiblock gets GT's own ME hatches
+  colour: AEColor | null            # attached: Fluix; a subnet: never Fluix, null = the first free
+  me_channel_budget: int            # free channels the main network has for an attached one (32)
+  super_speed: bool                 # allow Hyper-Acceleration Cards (still only from LuV)
 
 MachineFaceRef { machine_id, port_id }   # resolved to a physical face by the solver
 PinnedIO       { net_id, cell: CellCoord, kind: "input" | "output" }
@@ -210,6 +234,50 @@ PinnedIO       { net_id, cell: CellCoord, kind: "input" | "output" }
 (unique ids; every endpoint/pinned ref resolves; a net's commodity matches the ports it
 touches). It does **not** check geometry/rule validity (in-bounds, overlaps, tier caps,
 face reachability) - that is the validator's independent job (docs/TESTING.md).
+
+## Choosing ME per net - the NetList and the MEPlan
+
+Which nets ride ME is the user's choice, per net (#332), against two more versioned contracts in
+`ir.me`. Both carry `version` and are refused on parse at any other, like the IR roots.
+
+```
+NetList                             # gtnh-solve plan.json --list-nets (stdout, JSON)
+  version: int                      # NETLIST_VERSION
+  plan_digest: str                  # SHA-256 of the plan as parsed
+  dataset_version: str | null       # "<pack>@<generated_at>" of the physical dataset, or null
+  solver_version: str
+  line_tier: str                    # the highest tier a machine of the line runs at
+  nets: [NetEntry]                  # every item and fluid net; never a power net
+
+NetEntry
+  id: str                           # the adapter's PRE-MERGE net id (see below)
+  kind: "boundary_input" | "boundary_output" | "internal"
+  commodity: "item" | "fluid"
+  resource: str
+  resource_name: str | null
+  rate: float                       # what the net carries per tick
+  producers: [NetEnd]               # machine ends; a boundary Super Chest/Tank is not an end,
+  consumers: [NetEnd]               #  since riding ME replaces it (kind says there was one)
+
+NetEnd { machine_id, port_id, machine_type, multiblock: bool, rate, suggested: str }
+                                    # suggested: the ME device that end would get on a default
+                                    #  attached network, or why none keeps up
+
+MEPlan                              # gtnh-solve plan.json --me-plan FILE
+  version: int                      # ME_PLAN_VERSION
+  plan_digest: str                  # copied from the NetList; must match the plan solved
+  dataset_version: str | null       # copied from the NetList; must match the dataset solved
+  networks: [MENetworkSpec]
+  nets: { net id: network id }      # nets it does not name are built physically
+```
+
+**Net ids are the adapter's pre-merge ids**: an edge group's `+`-joined edge ids and an output
+buffer's `output-net:...`, which a plan and a dataset fix. A net on ME is never merged afterwards
+(it docks nothing and is sorted by nothing), so its id survives into the `InputIR` unchanged. A net
+a plan or dataset change could rename is why both files carry `plan_digest` and `dataset_version`,
+and a mismatch is refused (exit 2) rather than applied to nets the choice never saw.
+`--me items` / `--me fluids` is shorthand for one attached network, `main`, carrying every net of
+that commodity; `--me power` sets `power_external` and combines with either.
 
 **A net is a pipe network, not a plan edge.** The adapter maps each plan edge to a net, except that
 the edges meeting at one multiblock port become one net (their ids joined with `+`), because that
@@ -356,10 +424,11 @@ result carries no infeasibility; `infeasible`/`partial_invalid` must carry one.
   that enough EU/t actually **arrives** once cable loss has shrunk every packet
   (`POWER_SUPPLY_INSUFFICIENT`), and that a machine is not wired more connections than its
   `hatch_cells` can host (`HATCH_CELLS_EXCEEDED`).
-- `me_toggles` removes a commodity from physical routing (no `Route` for that commodity today - a
-  toggled commodity is simply skipped everywhere). Placing the ME endpoint that replaces it on a
-  machine face is Phase 2. With power toggled the adapter emits no power source and no power net
-  at all (#225); the powered machines keep their power ports, which state the draw.
+- A net that rides ME (`InputIR.rides_me`) is removed from physical routing: no `Route` and no
+  `AutoConnection` for it today, it is simply skipped everywhere. Placing the ME device that
+  replaces it is the end-to-end build (#335). With `power_external` the adapter emits no power
+  source and no power net at all (#225); the powered machines keep their power ports, which state
+  the draw.
 
 ## Versioning
 
@@ -379,7 +448,8 @@ result carries no infeasibility; `infeasible`/`partial_invalid` must carry one.
   a tower's outputs on any layer, so each product leaves through a hatch GT fills with another.
   So does `InputIR` v7: a v6 consumer that ignores `structure_blocks` draws a Chemical Plant as the
   dump's default build, a solid casing GT refuses the recipe on and machine casings below its
-  hatches, on which the plant does not form.
+  hatches, on which the plant does not form. `InputIR` v8 breaks by removal: `me_toggles` is gone
+  and ME is chosen per net (`InputIR.me`, `Net.me_network`).
 - **An older layout is not upgraded on read.** v2's one new field would be easy to fill in for a
   v1 payload (every v1 pipe was normal), but the rule below is only worth having if it has no
   exceptions, so a v1 layout is refused and regenerated by re-solving its plan. Nor does `size`

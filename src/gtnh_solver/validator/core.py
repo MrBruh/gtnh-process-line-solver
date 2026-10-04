@@ -11,7 +11,7 @@ What is checked now (needs only the IR):
   completeness/referential - every machine placed the right number of times with a legal
   orientation; every physically-routed net routed exactly once; every producer of a net reaches
   it once, by auto-output into its one consumer or as a terminal of its route (a net with several
-  producers may mix the two, #270); ME-toggled commodities not routed; route commodity matches its
+  producers may mix the two, #270); a net left to ME not routed; route commodity matches its
   net; a routed net has a consumer (>=1 INPUT endpoint, any number of same-commodity producers)
   and one commodity across its endpoints.
   geometry - machines in-bounds, non-overlapping, off reserved cells; routes in-bounds,
@@ -107,7 +107,12 @@ from gtnh_solver.ir import (
     Route,
     Segment,
 )
-from gtnh_solver.ir.nets import net_sources_sinks, placement_index, port_direction_map
+from gtnh_solver.ir.nets import (
+    machines_with_me_outputs,
+    net_sources_sinks,
+    placement_index,
+    port_direction_map,
+)
 
 from ._geometry import (
     FACE_DELTAS,
@@ -629,11 +634,11 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
                     f"but the net is {net.commodity.value}",
                 )
             )
-        if problem.me_toggles.toggled(net.commodity):
+        if problem.rides_me(net):
             out.append(
                 Violation(
                     ViolationCode.UNEXPECTED_ME_ROUTE,
-                    f"net {r.net_id!r} ({net.commodity.value}) is ME-toggled and must not be "
+                    f"net {r.net_id!r} ({net.commodity.value}) is left to ME and must not be "
                     f"physically routed",
                 )
             )
@@ -706,7 +711,7 @@ def _check_routes(problem: InputIR, layout: LayoutResult, out: list[Violation]) 
     for r in layout.routes:
         on_route[r.net_id].update((t.machine_id, t.port_id) for t in r.terminals)
     for net in problem.nets:
-        if problem.me_toggles.toggled(net.commodity):
+        if problem.rides_me(net):
             continue
         routed_here = net.id in routed
         _check_net_connected(
@@ -1282,8 +1287,8 @@ def _check_port_hatches(problem: InputIR, layout: LayoutResult, out: list[Violat
     need none, and flagging them would turn a valid layout into a false infeasibility - the worse
     of the two failures:
 
-    - **an ME-toggled commodity.** It is removed from physical routing entirely, so its ports
-      attach to nothing at all;
+    - **a net left to ME** (``InputIR.rides_me``). It is removed from physical routing entirely,
+      so its ports attach to nothing at all;
     - **a net with neither a route nor an auto-connection**, and a port no net names. Nothing was
       built there to need a block: an unrealized net is ``MISSING_CONNECTION``'s to report, and an
       unwired port is closed by a boundary storage or is a feed the plan never drew;
@@ -1320,21 +1325,21 @@ def _connected_ports(problem: InputIR, layout: LayoutResult) -> list[tuple[str, 
 
     The routed half reads the *net's* endpoints rather than the route's terminals: what needs a
     hatch is the connection the problem asks for, and a terminal that went missing is
-    ``MISSING_TERMINAL``'s to report, not a reason to stop looking for the hatch. An ME-toggled
-    commodity is not physically connected at all, so it contributes nothing.
+    ``MISSING_TERMINAL``'s to report, not a reason to stop looking for the hatch. A net left to
+    ME is not physically connected at all, so it contributes nothing.
     """
     nets = {n.id: n for n in problem.nets}
     machines = {m.id: m for m in problem.machines}
     seen: dict[tuple[str, str], str] = {}
     for route in layout.routes:
         net = nets.get(route.net_id)
-        if net is None or problem.me_toggles.toggled(net.commodity):
+        if net is None or problem.rides_me(net):
             continue
         for endpoint in net.endpoints:
             seen.setdefault((endpoint.machine_id, endpoint.port_id), net.id)
     for auto in layout.auto_connections:
         net = nets.get(auto.net_id)
-        if net is None or problem.me_toggles.toggled(net.commodity):
+        if net is None or problem.rides_me(net):
             continue
         for machine_id in (auto.source_machine_id, auto.target_machine_id):
             machine = machines.get(machine_id)
@@ -1497,15 +1502,16 @@ def _check_output_layers(problem: InputIR, layout: LayoutResult, out: list[Viola
     Independent of the router (docs/ARCHITECTURE.md #4): the cell-to-slot map is the validator's
     own rotation (``_geometry.placed_slots``), the layers come from the machine's recorded slots,
     and the layer a port needs from the problem, never from where the router docked it. The second
-    rule abstains while fluids go over ME, whose output hatches the layout does not draw. Layers
-    are numbered from 1 in the messages, as the layer a recipe's first fluid output goes to.
+    rule abstains on a tower with a fluid output on ME, whose output hatches the layout does not
+    draw yet. Layers are numbered from 1 in the messages, as the layer a recipe's first fluid
+    output goes to.
     """
     machines = {m.id: m for m in problem.machines}
     ports = {(m.id, p.id): p for m in problem.machines for p in m.faces.ports}
     hatches_by_machine: dict[str, list[PlacedHatch]] = defaultdict(list)
     for hatch in layout.hatches:
         hatches_by_machine[hatch.machine_id].append(hatch)
-    over_me = problem.me_toggles.toggled(Commodity.FLUID)
+    over_me = machines_with_me_outputs(problem, Commodity.FLUID)
     for placement in layout.placements:
         machine = machines.get(placement.machine_id)
         if machine is None:
@@ -1536,7 +1542,7 @@ def _check_output_layers(problem: InputIR, layout: LayoutResult, out: list[Viola
                     machine_id=machine.id,
                 )
             )
-        if over_me:
+        if machine.id in over_me:
             continue
         for layer in sorted(layers - filled):
             out.append(
@@ -1795,7 +1801,7 @@ def _check_auto_net(
     item/fluid commodity, and ``source``/``target`` must be the net's real OUTPUT and INPUT
     endpoint machines (resolved by port direction).
     """
-    if net.commodity is Commodity.POWER or problem.me_toggles.toggled(net.commodity):
+    if net.commodity is Commodity.POWER or problem.rides_me(net):
         reason = (
             "power is a shared-amperage net, not a face auto-output"
             if net.commodity is Commodity.POWER

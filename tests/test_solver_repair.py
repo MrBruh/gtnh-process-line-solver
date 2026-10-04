@@ -27,7 +27,6 @@ from gtnh_solver.ir import (
     LayoutStatus,
     Machine,
     MachineFaceRef,
-    METoggles,
     Net,
     PinnedIO,
     Placement,
@@ -42,7 +41,7 @@ from gtnh_solver.solver import solve
 from gtnh_solver.solver._structure import structure_quality
 from gtnh_solver.solver.repair import _wall_poses, repair_power_sources
 from gtnh_solver.validator import validate
-from tests._helpers import PLACEMENT_CODES, at, power_source
+from tests._helpers import PLACEMENT_CODES, at, on_me, power_source
 
 _POWER = Commodity.POWER
 _OBJECTIVES: tuple[Objective, ...] = ("footprint", "volume", "balanced")
@@ -83,7 +82,6 @@ def _stranded(
     *,
     reserved: list[CellCoord] | None = None,
     pinned: list[PinnedIO] | None = None,
-    me_toggles: METoggles | None = None,
 ) -> InputIR:
     """A source parked at the far wall from the one machine it feeds, in an 8x1x2 corridor.
 
@@ -97,7 +95,6 @@ def _stranded(
         nets=[_pnet("src", "k")],
         reserved_cells=reserved or [],
         pinned=pinned or [],
-        me_toggles=me_toggles or METoggles(),
     )
 
 
@@ -223,7 +220,7 @@ def test_repair_leaves_a_pinned_power_net_alone() -> None:
 def test_repair_is_a_no_op_when_power_rides_the_me_network() -> None:
     # ME-toggled power is not physically routed at all, so there is no cable to shorten and
     # nothing to move.
-    problem = _stranded(me_toggles=METoggles(power=True))
+    problem = on_me(_stranded(), power=True)
     after, cable = _repair(problem, _STRANDED_START)
 
     assert after == _STRANDED_START

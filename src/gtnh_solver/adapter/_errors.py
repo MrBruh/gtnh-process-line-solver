@@ -36,3 +36,13 @@ class InfeasiblePlanError(AdapterError):
 class AdapterWarning(UserWarning):
     """A recoverable adapter finding, e.g. a v2 export's ``resolved`` figures disagreeing with
     the recipe-derived synthesis beyond float tolerance (the resolved figures still win - #2)."""
+
+
+class MEPlanError(AdapterError):
+    """An ME plan (``gtnh-solve --me-plan``) does not fit the plan it is applied to (#332).
+
+    Made against another plan or dataset, naming a net the plan has no item or fluid net for, or
+    given alongside the ``--me items``/``--me fluids`` shorthand. Like any :class:`AdapterError`,
+    the CLI reports it as input it could not load (exit 2), since the fix is a new choice, not a
+    different layout.
+    """

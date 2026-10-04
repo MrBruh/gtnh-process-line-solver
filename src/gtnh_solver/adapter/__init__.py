@@ -14,8 +14,9 @@ cross-checking it against the recipe-derived synthesis (mismatch -> ``AdapterWar
 
 from __future__ import annotations
 
-from ._errors import AdapterError, AdapterWarning, InfeasiblePlanError
-from .core import adapt_file, load_plan, to_input_ir
+from ._errors import AdapterError, AdapterWarning, InfeasiblePlanError, MEPlanError
+from .core import adapt_file, list_nets, load_plan, to_input_ir
+from .me import SHORTHAND_NETWORK, plan_digest
 from .plan import (
     AppInfo,
     ConverterInfo,
@@ -52,12 +53,14 @@ from .shadow import SHADOW_EXTRA_HINT, load_shadow_plan
 
 __all__ = [
     "SHADOW_EXTRA_HINT",
+    "SHORTHAND_NETWORK",
     "AdapterError",
     "AdapterWarning",
     "AppInfo",
     "ConverterInfo",
     "Edge",
     "InfeasiblePlanError",
+    "MEPlanError",
     "MachineBlock",
     "MachineConfigControl",
     "MachineConfigTier",
@@ -81,8 +84,10 @@ __all__ = [
     "adapt_file",
     "describe_markers",
     "detect_producer",
+    "list_nets",
     "load_plan",
     "load_shadow_plan",
+    "plan_digest",
     "plan_pack_version",
     "resolve_producer",
     "strip_dataset_channel",

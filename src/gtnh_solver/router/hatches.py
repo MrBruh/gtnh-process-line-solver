@@ -58,7 +58,7 @@ from gtnh_solver.ir import (
     Terminal,
 )
 from gtnh_solver.ir.geometry import FACE_DELTAS, Cell, rotated_slot
-from gtnh_solver.ir.nets import placement_index
+from gtnh_solver.ir.nets import machines_with_me_outputs, placement_index
 
 from ._grid import body_cell, coord, hatch_faces, host_cells
 
@@ -323,10 +323,10 @@ def _layer_hatches(
     a one-product Distillation Tower is still two layers tall. A layer a port owns gets that port's
     hatch, so only the others need a spare, which receives nothing and serves no net, like an
     upkeep hatch. An owned layer whose hatch is missing is not given one: its port lost its
-    connection, which the validator already reports. Nothing is added while fluids go over ME,
-    whose output hatches the layout does not draw.
+    connection, which the validator already reports. Nothing is added to a tower with a fluid
+    output on ME, whose output hatches the layout does not draw yet.
     """
-    if problem.me_toggles.toggled(Commodity.FLUID):
+    if machine.id in machines_with_me_outputs(problem, Commodity.FLUID):
         return [], []
     owned = {p.output_layer for p in machine.faces.ports if p.output_layer is not None}
     slots = _slots_by_cell(placement, machine)

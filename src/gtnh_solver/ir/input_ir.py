@@ -24,9 +24,10 @@ from pydantic import Field, field_validator, model_validator
 from ._base import FrozenModel, StrictModel, check_contract_version
 from .enums import HORIZONTAL_FACINGS, Commodity, Facing, IODirection, RelativeFace
 from .geometry import CellBox, CellCoord, allowed_faces
+from .me import MEConfig
 
 #: Bump on any breaking change to the input contract; record it in ``ir/__init__.py``.
-INPUT_IR_VERSION = 7
+INPUT_IR_VERSION = 8
 
 #: What :attr:`InputIR.resource_colors` holds, once lowercased: ``#`` and six hex digits.
 _HEX_COLOR = re.compile(r"#[0-9a-f]{6}")
@@ -479,6 +480,17 @@ class Net(StrictModel):
     items: tuple[str, ...] = ()
     throughput: float = Field(ge=0.0)
     endpoints: list[MachineFaceRef] = Field(min_length=1)
+    #: The ME network this net rides instead of a pipe (InputIR v8, #332): the id of one of
+    #: ``InputIR.me.networks``, or ``None`` for a net built physically. The user chooses it per net
+    #: (``gtnh-solve --list-nets`` then ``--me-plan``). An item or fluid net only: power never rides
+    #: ME (``MEConfig.power_external`` leaves a line's EU supply to the builder instead).
+    me_network: str | None = Field(default=None, min_length=1)
+
+    @property
+    def rides_me(self) -> bool:
+        """Whether this net rides an ME network rather than a pipe: the ONE reading of the choice,
+        which every stage that would lay, dock, count or check a pipe for the net asks first."""
+        return self.me_network is not None
 
     @property
     def resources(self) -> tuple[str, ...]:
@@ -493,6 +505,8 @@ class Net(StrictModel):
         if self.commodity is Commodity.POWER:
             if self.fluid_or_item is not None or self.items:
                 raise ValueError("power nets must not name a fluid_or_item or items")
+            if self.me_network is not None:
+                raise ValueError("a power net never rides ME; leave the supply external instead")
         elif self.items:
             if self.commodity is not Commodity.ITEM:
                 raise ValueError(
@@ -509,24 +523,6 @@ class Net(StrictModel):
         return self
 
 
-class METoggles(StrictModel):
-    """Per-commodity ME (AE2) routing toggles. A toggled commodity is removed from
-    physical routing; the solver places the ME endpoint instead. Default: route all
-    three physically (docs/DOMAIN.md)."""
-
-    items: bool = False
-    fluids: bool = False
-    power: bool = False
-
-    def toggled(self, commodity: Commodity) -> bool:
-        """Whether ``commodity`` is routed via ME (and so removed from physical routing)."""
-        return {
-            Commodity.ITEM: self.items,
-            Commodity.FLUID: self.fluids,
-            Commodity.POWER: self.power,
-        }[commodity]
-
-
 class PinnedIO(StrictModel):
     """A fixed external input/output point (e.g. a feed/drain chest) at a cell, tied to
     a net. Honoring it is a hard geometric constraint, checked by the validator."""
@@ -537,7 +533,7 @@ class PinnedIO(StrictModel):
 
 
 class InputIR(StrictModel):
-    """The whole problem: machines, nets, fixed/blocked cells, ME toggles, and the
+    """The whole problem: machines, nets, fixed/blocked cells, its ME networks, and the
     bounding region the layout must fit. Referential integrity is enforced on build."""
 
     version: int = INPUT_IR_VERSION
@@ -546,7 +542,9 @@ class InputIR(StrictModel):
     nets: list[Net] = Field(default_factory=list)
     pinned: list[PinnedIO] = Field(default_factory=list)
     reserved_cells: list[CellCoord] = Field(default_factory=list)
-    me_toggles: METoggles = Field(default_factory=METoggles)
+    #: The ME (AE2) networks the problem's nets may ride, and whether its power is left to the
+    #: builder (InputIR v8, #332). Which net rides which is ``Net.me_network``.
+    me: MEConfig = Field(default_factory=MEConfig)
     #: Display names for the fluids and items this problem moves, raw id -> name ("liquid_toluene"
     #: -> "Toluene"), as the plan's exporter read them from the game (#296). Display only: every
     #: other field keys a resource by its raw id, and nothing may join on a name. A resource with
@@ -568,6 +566,15 @@ class InputIR(StrictModel):
     @classmethod
     def _check_version(cls, value: int) -> int:
         return check_contract_version(value, INPUT_IR_VERSION, "InputIR")
+
+    def rides_me(self, net: Net) -> bool:
+        """Whether ``net`` is left to ME rather than built: an item or fluid net on one of
+        :attr:`me`'s networks (``Net.rides_me``), or a power net while the problem's power is the
+        builder's (``MEConfig.power_external``). The ONE reading every stage asks before it would
+        lay, dock, count or check a connection for a net."""
+        if net.commodity is Commodity.POWER:
+            return self.me.power_external
+        return net.rides_me
 
     @field_validator("resource_colors")
     @classmethod
@@ -604,6 +611,11 @@ class InputIR(StrictModel):
                         f"net {net.id!r} ({net.commodity.value}) connects to port "
                         f"{ep.port_id!r} of a different commodity"
                     )
+
+        networks = {n.id for n in self.me.networks}
+        for net in self.nets:
+            if net.me_network is not None and net.me_network not in networks:
+                raise ValueError(f"net {net.id!r} rides unknown ME network {net.me_network!r}")
 
         net_id_set = set(net_ids)
         for pin in self.pinned:

@@ -31,7 +31,6 @@ from gtnh_solver.ir import (
     LayoutStatus,
     Machine,
     MachineFaceRef,
-    METoggles,
     Net,
     PlacedHatch,
     Port,
@@ -53,10 +52,10 @@ from tests._helpers import at, consumer, layered_tower, machine, net, producer
 _SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
 
 
-def _sand_scene(me_toggles: METoggles | None = None) -> dict[str, Any]:
+def _sand_scene(*me_commodities: Commodity, me_power: bool = False) -> dict[str, Any]:
     # The fast (constructive) solve: deterministic layout coordinates that the exact-cell
     # assertions below can rely on; scene building does not care which placer produced them.
-    ir = adapt_file(_SAND, me_toggles=me_toggles)
+    ir = adapt_file(_SAND, me_commodities=me_commodities, me_power=me_power)
     return build_scene(ir, solve(ir, optimize=False))
 
 
@@ -405,7 +404,7 @@ def test_scene_says_a_flow_left_to_me_arrives_over_me() -> None:
     boundary, and what each chest holds, is flagged ``me`` for the panel and the hover to say so.
     Power is still cabled, and says nothing of the sort.
     """
-    scene = _sand_scene(METoggles(items=True))
+    scene = _sand_scene(Commodity.ITEM)
     assert [r["commodity"] for r in scene["routes"]] == ["power"]
     assert scene["autoConnections"] == []
     io = scene["io"]
@@ -421,7 +420,7 @@ def test_scene_says_power_left_to_me_arrives_over_me() -> None:
     # The other commodity on its own: no cable is laid and no source block stands unconnected
     # (#225), the feed spec is still stated from the machines' energy ports (the ME side has to
     # deliver it), and the item flows, still auto-output, are not flagged.
-    scene = _sand_scene(METoggles(power=True))
+    scene = _sand_scene(me_power=True)
     assert scene["routes"] == []
     assert not any(m["role"] == "source" for m in scene["machines"])
     io = scene["io"]

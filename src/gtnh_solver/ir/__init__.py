@@ -12,9 +12,11 @@ validator lanes. Only the value types (``CellCoord``, ``CellBox``) surface here.
                    PipeSize
 - ``geometry``   - CellCoord, CellBox (integer cell-grid value types)
 - ``input_ir``   - Port, FaceSpec, HatchSlot, StructureBlock, Machine, MachineFaceRef, Net,
-                   METoggles, PinnedIO, InputIR  (+ INPUT_IR_VERSION)
-- ``me``         - the ME (AE2) vocabulary: AEColor, MECableKind, MEDeviceKind, MEHatchPolicy,
-                   MECards
+                   PinnedIO, InputIR  (+ INPUT_IR_VERSION)
+- ``me``         - the ME (AE2) vocabulary (AEColor, MECableKind, MEDeviceKind, MEHatchPolicy,
+                   MECards), a problem's ME networks (MEMode, MEStorage, MEPower, MENetworkSpec,
+                   MEConfig), and the two contracts that choose them per net (NetKind, NetEnd,
+                   NetEntry, NetList, MEPlan; + NETLIST_VERSION, ME_PLAN_VERSION)
 - ``nets``       - net helpers shared by the router and the system-IO summary
 - ``output``     - Placement, PlacedHatch, Segment, Terminal, Route, RouteMaterial,
                    LayoutMetrics, Infeasibility, LayoutResult  (+ LAYOUT_RESULT_VERSION)
@@ -43,13 +45,30 @@ from .input_ir import (
     InputIR,
     Machine,
     MachineFaceRef,
-    METoggles,
     Net,
     PinnedIO,
     Port,
     StructureBlock,
 )
-from .me import AEColor, MECableKind, MECards, MEDeviceKind, MEHatchPolicy
+from .me import (
+    ME_PLAN_VERSION,
+    NETLIST_VERSION,
+    AEColor,
+    MECableKind,
+    MECards,
+    MEConfig,
+    MEDeviceKind,
+    MEHatchPolicy,
+    MEMode,
+    MENetworkSpec,
+    MEPlan,
+    MEPower,
+    MEStorage,
+    NetEnd,
+    NetEntry,
+    NetKind,
+    NetList,
+)
 from .output import (
     LAYOUT_RESULT_VERSION,
     AutoConnection,
@@ -87,15 +106,26 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
     "Machine",
     "MachineFaceRef",
     "Net",
-    "METoggles",
     "PinnedIO",
     "InputIR",
-    # ME (AE2) vocabulary
+    # ME (AE2): vocabulary, a problem's networks, and the per-net choice
     "AEColor",
     "MECableKind",
     "MEDeviceKind",
     "MEHatchPolicy",
     "MECards",
+    "MEMode",
+    "MEStorage",
+    "MEPower",
+    "MENetworkSpec",
+    "MEConfig",
+    "NETLIST_VERSION",
+    "ME_PLAN_VERSION",
+    "NetKind",
+    "NetEnd",
+    "NetEntry",
+    "NetList",
+    "MEPlan",
     # output schema
     "Placement",
     "PlacedHatch",
@@ -420,5 +450,18 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   only: neither root carries one yet, so no payload changes and nothing is bumped. The contracts
 #   that use them (the ME networks a net rides, the ME devices a layout places) bump their roots
 #   when they land.
+#
+# InputIR v8 (BREAKING) - ME is chosen PER NET, not per commodity (#332). `METoggles` and
+#   `InputIR.me_toggles` are gone; in their place:
+#   - `InputIR.me: MEConfig`, the ME networks the problem's nets may ride (`MENetworkSpec`: id,
+#     attached or subnet, storage, power, hatch policy, colour, channel budget, Super Speed) and
+#     `power_external`, which is the old power toggle: the line's EU supply is the builder's;
+#   - `Net.me_network: str | None`, the network a net rides, read through `Net.rides_me`. Every
+#     stage that skipped a toggled commodity now skips a net that rides ME.
+#   A user makes the choice against two new contracts, versioned on their own: `NetList` (what
+#   `gtnh-solve --list-nets` prints) and `MEPlan` (what `--me-plan` reads), both in `ir.me`.
+#   Breaking by removal: a v7 payload names `me_toggles`, which this build refuses, and a v7
+#   consumer reading it finds nothing. Re-adapt the plan. ME nets are still only SKIPPED, as toggled
+#   commodities were: nothing places an ME device for them until the end-to-end build (#335).
 #
 # ---------------------------------------------------------------------------

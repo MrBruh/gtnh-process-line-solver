@@ -45,7 +45,9 @@ from gtnh_solver.ir import (
     IODirection,
     Machine,
     MachineFaceRef,
-    METoggles,
+    MEConfig,
+    MEMode,
+    MENetworkSpec,
     Net,
     Placement,
     Port,
@@ -124,7 +126,6 @@ def hub_line(
     connections: int,
     *,
     footprint: CellBox | None = None,
-    me_toggles: METoggles | None = None,
     region: CellBox | None = None,
 ) -> InputIR:
     """A ``hub`` whose ``connections`` fluid outputs each feed a consumer ``c<i>`` of their own.
@@ -158,7 +159,31 @@ def hub_line(
             )
             for i in range(connections)
         ],
-        me_toggles=me_toggles if me_toggles is not None else METoggles(),
+    )
+
+
+#: The network :func:`on_me` puts nets on, as ``--me items`` / ``--me fluids`` does.
+ME_NETWORK = "main"
+
+
+def on_me(problem: InputIR, *commodities: Commodity, power: bool = False) -> InputIR:
+    """``problem`` with every net of ``commodities`` on one attached ME network, and its power left
+    to the builder when ``power``: what ``--me`` gives a plan, applied to a problem already built.
+
+    Unlike the adapter's shorthand it merges nothing differently, which is what a test of one stage
+    wants; the result is re-validated, so a net it puts on ME still has to make sense there.
+    """
+    networks = [MENetworkSpec(id=ME_NETWORK, mode=MEMode.ATTACHED)] if commodities else []
+    nets = [
+        net.model_copy(update={"me_network": ME_NETWORK}) if net.commodity in commodities else net
+        for net in problem.nets
+    ]
+    return InputIR.model_validate(
+        {
+            **problem.model_dump(),
+            "nets": [n.model_dump() for n in nets],
+            "me": MEConfig(networks=networks, power_external=power).model_dump(),
+        }
     )
 
 

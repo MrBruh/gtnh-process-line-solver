@@ -21,14 +21,13 @@ from gtnh_solver.ir import (
     LayoutStatus,
     Machine,
     MachineFaceRef,
-    METoggles,
     Net,
     Port,
 )
 from gtnh_solver.router import route_power
 from gtnh_solver.router.power import _route_pass
 from gtnh_solver.validator import validate
-from tests._helpers import at, power_source
+from tests._helpers import at, on_me, power_source
 
 _POWER = Commodity.POWER
 
@@ -403,11 +402,13 @@ def test_power_net_without_a_source_is_infeasible() -> None:
 
 
 def test_power_me_toggled_is_skipped() -> None:
-    problem = InputIR(
-        bounding_region=CellBox(sx=8, sy=4, sz=8),
-        machines=[_src(), _load("m0", 32)],
-        nets=[_pnet("m0")],
-        me_toggles=METoggles(power=True),
+    problem = on_me(
+        InputIR(
+            bounding_region=CellBox(sx=8, sy=4, sz=8),
+            machines=[_src(), _load("m0", 32)],
+            nets=[_pnet("m0")],
+        ),
+        power=True,
     )
     result = route_power(problem, [at("src", 0, 0, 0), at("m0", 2, 0, 0)])
     assert result.ok

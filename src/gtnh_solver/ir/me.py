@@ -1,25 +1,43 @@
-"""The ME (AE2) vocabulary the contracts and the rule data share.
+"""The ME (AE2) vocabulary the contracts and the rule data share, and the contracts that choose ME.
 
 Applied Energistics 2 builds a line's ME side from a handful of things this module names: the
 cable kinds a network is laid in (:class:`MECableKind`), the seventeen colours that keep two
 networks apart (:class:`AEColor`), the devices that move items and fluids between a machine and the
 network (:class:`MEDeviceKind`), the upgrade cards a bus is fitted with (:class:`MECards`), and the
-policy that decides when a multiblock uses GT's own ME hatches (:class:`MEHatchPolicy`).
+policy that decides when a multiblock uses GT's own ME hatches (:class:`MEHatchPolicy`). The RULES
+about them, which colours connect, how many channels a cable carries, how fast a bus moves, are DATA
+in :mod:`gtnh_solver.dataset.me`, cited against the pack's source in ``docs/spikes/329-me-ae2.md``.
 
-Value types only, and additive: nothing in ``InputIR`` or ``LayoutResult`` carries them yet, so they
-bump neither contract (``ir/__init__.py``). The RULES about them, which colours connect, how many
-channels a cable carries, how fast a bus moves, are DATA in :mod:`gtnh_solver.dataset.me`, cited
-against the pack's source in ``docs/spikes/329-me-ae2.md``; this module only says what the words
-are.
+**Which nets ride ME is the user's choice, per net** (#332), made in two steps against two more
+versioned contracts::
+
+    gtnh-solve plan.json --list-nets      ->  NetList   every item and fluid net, with its ends,
+                                                        its rate and the device each end would get
+    (the user, or gtnh-solver-site's picker)
+    gtnh-solve plan.json --me-plan FILE   <-  MEPlan    the ME networks, and which net rides which
+
+The adapter stamps the choice onto the problem as :class:`MEConfig` (``InputIR.me``) and
+``Net.me_network``. Net ids in both files are the adapter's **pre-merge** ids, deterministic for a
+plan and a dataset, which is why both carry the plan's digest and the dataset's identity: a choice
+made against another plan or dataset is refused rather than applied to nets it never saw.
 """
 
 from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 
-from ._base import FrozenModel
+from ._base import FrozenModel, StrictModel, check_contract_version
+from .enums import Commodity
+
+#: Bump on any breaking change to the NetList contract (``gtnh-solve --list-nets``).
+NETLIST_VERSION = 1
+#: Bump on any breaking change to the MEPlan contract (``gtnh-solve --me-plan``).
+ME_PLAN_VERSION = 1
+#: The free channels an attached network may spend on the player's main network when its plan does
+#: not say: one dense cable's worth (spike 1.1).
+DEFAULT_ME_CHANNEL_BUDGET = 32
 
 
 class AEColor(str, Enum):
@@ -129,3 +147,235 @@ class MECards(FrozenModel):
     def count(self) -> int:
         """How many upgrade slots these cards take."""
         return self.acceleration + self.super_speed + self.capacity
+
+
+class MEMode(str, Enum):
+    """How an ME network relates to the player's own.
+
+    - ``attached``: its devices join the player's main network through one or more dense cable
+      stubs on the region's edge, spending that network's free channels (a budget the user states);
+    - ``subnet``: an independent network of its own colour, with a controller or ad hoc, reaching
+      the player's storage through a link (:class:`MEStorage`).
+    """
+
+    ATTACHED = "attached"
+    SUBNET = "subnet"
+
+
+class MEStorage(str, Enum):
+    """Where a subnet's items and fluids are kept.
+
+    - ``link`` (the default): in the player's main network, through a storage bus on the subnet
+      facing an ME Interface on the main network, which costs the main network one channel;
+    - ``chests``: in the line's own boundary Super Chests and Super Tanks, each read by a storage
+      bus partitioned to its resource.
+    """
+
+    LINK = "link"
+    CHESTS = "chests"
+
+
+class MEPower(str, Enum):
+    """How an ME network is powered.
+
+    - ``external`` (the default): the builder supplies it (a quartz fiber, the main network); the
+      run reports what it draws;
+    - ``acceptor``: an Energy Acceptor on the line's own EU supply.
+    """
+
+    EXTERNAL = "external"
+    ACCEPTOR = "acceptor"
+
+
+class MENetworkSpec(FrozenModel):
+    """One ME network a line's nets may ride, as the user configured it.
+
+    ``colour`` is the network's cable colour. An attached network is Fluix, the player's own; a
+    subnet must be coloured, or AE would join it to the main network wherever the two touch, and
+    one left unset gets the first colour no other subnet asked for (:meth:`MEConfig.colour`).
+    ``me_channel_budget`` is how many free channels the player's main network has for an attached
+    one; a subnet spends one (``link``) or none (``chests``), so it reads no budget.
+    ``super_speed`` allows Hyper-Acceleration Cards, which a line still gets only from LuV
+    (``dataset.me.super_speed_allowed``).
+    """
+
+    id: str = Field(min_length=1)
+    mode: MEMode
+    storage: MEStorage = MEStorage.LINK
+    power: MEPower = MEPower.EXTERNAL
+    hatches: MEHatchPolicy = MEHatchPolicy.TIER_AWARE
+    colour: AEColor | None = None
+    me_channel_budget: int = Field(default=DEFAULT_ME_CHANNEL_BUDGET, ge=1)
+    super_speed: bool = True
+
+    @model_validator(mode="after")
+    def _check(self) -> MENetworkSpec:
+        if self.mode is MEMode.ATTACHED:
+            if self.colour is not None and self.colour is not AEColor.FLUIX:
+                raise ValueError(
+                    f"ME network {self.id!r} is attached to the main network, whose cable is "
+                    f"Fluix; it cannot be {self.colour.value}"
+                )
+            if self.storage is MEStorage.CHESTS:
+                raise ValueError(
+                    f"ME network {self.id!r} is attached, so it stores in the main network; "
+                    f"'chests' is a subnet's storage"
+                )
+        elif self.colour is AEColor.FLUIX:
+            raise ValueError(
+                f"ME subnet {self.id!r} cannot be Fluix: Fluix cable joins every colour, so the "
+                f"subnet would merge with the main network wherever they touch"
+            )
+        return self
+
+
+def _check_networks(networks: list[MENetworkSpec]) -> None:
+    """The rules a set of ME networks keeps together: unique ids, at most one attached network (the
+    player has one main network), and no two subnets of one colour (they would merge)."""
+    ids = [n.id for n in networks]
+    if len(ids) != len(set(ids)):
+        raise ValueError("duplicate ME network id")
+    attached = [n.id for n in networks if n.mode is MEMode.ATTACHED]
+    if len(attached) > 1:
+        raise ValueError(
+            f"ME networks {attached} are all attached to the one main network; make them one"
+        )
+    colours = [n.colour for n in networks if n.mode is MEMode.SUBNET and n.colour is not None]
+    if len(colours) != len(set(colours)):
+        raise ValueError("two ME subnets share a colour, so they would merge where they touch")
+
+
+class MEConfig(StrictModel):
+    """The ME side of a problem (``InputIR.me``): its networks, and whether power is left to ME.
+
+    Which net rides which network is on the net (``Net.me_network``). ``power_external`` says the
+    line's EU supply is the builder's (``gtnh-solve --me power``): no power source is placed and
+    no cable is laid, whatever its ME networks are.
+    """
+
+    networks: list[MENetworkSpec] = Field(default_factory=list)
+    power_external: bool = False
+
+    @model_validator(mode="after")
+    def _check(self) -> MEConfig:
+        _check_networks(self.networks)
+        return self
+
+    def network(self, network_id: str) -> MENetworkSpec:
+        """The network named ``network_id``; raises :class:`KeyError` for one this does not hold."""
+        for net in self.networks:
+            if net.id == network_id:
+                return net
+        raise KeyError(network_id)
+
+    def colour(self, network_id: str) -> AEColor:
+        """The cable colour of ``network_id``: Fluix when attached, else its own, else the first
+        colour in AE2's order no subnet asked for, given out in network order."""
+        spec = self.network(network_id)
+        if spec.mode is MEMode.ATTACHED:
+            return AEColor.FLUIX
+        if spec.colour is not None:
+            return spec.colour
+        taken = {n.colour for n in self.networks if n.colour is not None}
+        free = iter(c for c in AEColor if c is not AEColor.FLUIX and c not in taken)
+        unset = [n.id for n in self.networks if n.mode is MEMode.SUBNET and n.colour is None]
+        return dict(zip(unset, free, strict=False))[network_id]
+
+
+class NetKind(str, Enum):
+    """Where a net sits in a line: fed from its edge, delivering to it, or between two machines."""
+
+    BOUNDARY_INPUT = "boundary_input"
+    BOUNDARY_OUTPUT = "boundary_output"
+    INTERNAL = "internal"
+
+
+class NetEnd(FrozenModel):
+    """One machine end of a listed net: a port on a machine, as a user picking ME needs to see it.
+
+    ``suggested`` names the ME device that end would get on a default attached network
+    (``dataset.me.me_devices_for``), or why none keeps up.
+    """
+
+    machine_id: str = Field(min_length=1)
+    port_id: str = Field(min_length=1)
+    machine_type: str = Field(min_length=1)
+    multiblock: bool
+    rate: float | None = Field(default=None, ge=0.0)
+    suggested: str
+
+
+class NetEntry(FrozenModel):
+    """One item or fluid net a user may move to ME.
+
+    ``producers`` and ``consumers`` are its machine ends; a boundary Super Chest or Super Tank is
+    not an end, since riding ME replaces it (``kind`` says the net had one). ``rate`` is what the
+    net carries per tick (items/t, mB/t).
+    """
+
+    id: str = Field(min_length=1)
+    kind: NetKind
+    commodity: Commodity
+    resource: str = Field(min_length=1)
+    resource_name: str | None = None
+    rate: float = Field(ge=0.0)
+    producers: tuple[NetEnd, ...] = ()
+    consumers: tuple[NetEnd, ...] = ()
+
+    @field_validator("commodity")
+    @classmethod
+    def _check_commodity(cls, value: Commodity) -> Commodity:
+        if value is Commodity.POWER:
+            raise ValueError("a power net never rides ME; only item and fluid nets are listed")
+        return value
+
+
+class NetList(StrictModel):
+    """What ``gtnh-solve --list-nets`` prints: every net of a plan a user may move to ME.
+
+    ``plan_digest`` is the SHA-256 of the plan as parsed, and ``dataset_version`` the identity of
+    the physical dataset it was adapted against (``None`` without one): the net ids depend on both,
+    so an :class:`MEPlan` must carry the same pair. ``line_tier`` is the highest voltage tier any of
+    the plan's machines runs at, which decides what a tier-aware choice allows.
+    """
+
+    version: int = NETLIST_VERSION
+    plan_digest: str = Field(min_length=1)
+    dataset_version: str | None = None
+    solver_version: str = Field(min_length=1)
+    line_tier: str = Field(min_length=1)
+    nets: list[NetEntry] = Field(default_factory=list)
+
+    @field_validator("version")
+    @classmethod
+    def _check_version(cls, value: int) -> int:
+        return check_contract_version(value, NETLIST_VERSION, "NetList")
+
+
+class MEPlan(StrictModel):
+    """What ``gtnh-solve --me-plan`` reads: the ME networks, and which listed net rides which.
+
+    ``nets`` maps a :class:`NetList` net id to one of ``networks``' ids; a net it does not name is
+    piped. ``plan_digest`` and ``dataset_version`` are copied from the :class:`NetList` the choice
+    was made against, and must still match the plan and dataset being solved.
+    """
+
+    version: int = ME_PLAN_VERSION
+    plan_digest: str = Field(min_length=1)
+    dataset_version: str | None = None
+    networks: list[MENetworkSpec] = Field(default_factory=list)
+    nets: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("version")
+    @classmethod
+    def _check_version(cls, value: int) -> int:
+        return check_contract_version(value, ME_PLAN_VERSION, "MEPlan")
+
+    @model_validator(mode="after")
+    def _check(self) -> MEPlan:
+        _check_networks(self.networks)
+        known = {n.id for n in self.networks}
+        unknown = sorted({network for network in self.nets.values() if network not in known})
+        if unknown:
+            raise ValueError(f"ME plan assigns nets to unknown ME network(s) {unknown}")
+        return self

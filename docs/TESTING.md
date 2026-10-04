@@ -61,7 +61,7 @@ correctness. The strategy works around this with three layers:
    separately-written checking *logic*, so it can catch router bugs (a shared code path
    couldn't). Present today: geometric + structural validity (no overlaps, within bounds,
    pinned I/O honored, unit-step contiguous routes, single-channel capacity, terminal /
-   required-I/O-face reachability, ME-toggled commodities excluded from routing), the
+   required-I/O-face reachability, nets on ME excluded from routing), the
    shared-amperage **power** rules (summed amperage <= cable thickness, single-source cable
    tree, voltage-drop over distance), and **item pipe throughput** (each pipe block makes the
    insertions the streams through it need, #190; its golden cases are the maintainer's

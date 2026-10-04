@@ -38,7 +38,16 @@ from gtnh_solver.router._grid import claim_key, obstacle_cells
 from gtnh_solver.solver.core import _assemble
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
-from tests._helpers import at, consumer, machine, net, power_source, producer, property_examples
+from tests._helpers import (
+    at,
+    consumer,
+    machine,
+    net,
+    on_me,
+    power_source,
+    producer,
+    property_examples,
+)
 
 _MALFORMED = {
     ViolationCode.ROUTE_CELL_COLLISION,
@@ -138,9 +147,7 @@ def test_a_pipe_leaves_the_cell_an_energy_hatch_needs() -> None:
 def test_with_power_on_me_the_pipe_takes_the_short_way() -> None:
     # The control: nothing else wants Y, so the pipe keeps its two-cell route.
     problem, placements = _hatch_and_pipe()
-    items_only = problem.model_copy(
-        update={"me_toggles": problem.me_toggles.model_copy(update={"power": True})}
-    )
+    items_only = on_me(problem, power=True)
     (pipe,) = route(items_only, placements).routes
     assert pipe.cells() == {(1, 0, 1), (1, 0, 0)}
 

@@ -23,7 +23,7 @@ doc as intent and reconcile.
    │ physical-rules data │─►│   INPUT IR   │  machines (footprint, faces, orientation
    │ footprints, faces,  │  │  (versioned) │  options), nets (commodity + typed
    │ pipe/wire tiers,    │  └──────┬───────┘  throughput), pinned I/O, bounding region,
-   │ ME toggles, cell→blk│         │          ME toggles, cell→block mapping
+   │ ME rules, cell→blk  │         │          ME networks + per-net choice, cell→block mapping
    └─────────────────────┘         ▼
             ┌──────────────────────┴───────────────────┐
             ▼          routing-aware cost (cheap)        ▼
@@ -319,6 +319,19 @@ doc as intent and reconcile.
     touched a layout. Its bill of materials is the one part nothing else replaced yet, and moves to
     the previewer (#202). The schema is not changed by this, only published, so
     `LAYOUT_RESULT_VERSION` stays where it is; see [`IR.md`](IR.md).
+
+13. **ME (AE2) is chosen per net by the user, in two steps** (maintainer decision, #329/#332,
+    2026-10-04). Which flows ride ME is not something a plan states, and a whole-commodity
+    toggle could not say "the product goes to my main network, the intermediates stay piped". So
+    `--list-nets` adapts the plan as far as its nets and prints them as a versioned `NetList`
+    (pre-merge ids, each end's suggested device), the user or gtnh-solver-site's picker chooses,
+    and `--me-plan` reads back a versioned `MEPlan` naming the ME networks (attached or a subnet,
+    storage, power, hatch policy, colour, channel budget) and the nets on each. The adapter applies
+    the choice between mapping the plan and closing it (`_map_plan`, `choose_me`, `_close`), so a
+    net on ME is never merged and keeps the id it was chosen by; both files carry the plan's digest
+    and the dataset's identity and a mismatch is refused, since an id can name another net after a
+    change. Every stage asks one question, `InputIR.rides_me(net)`. The rules the ME side is built
+    and checked against are cited in [`spikes/329-me-ae2.md`](spikes/329-me-ae2.md).
 
 ## Spatial model
 

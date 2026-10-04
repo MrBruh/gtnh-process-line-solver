@@ -44,7 +44,6 @@ from gtnh_solver.ir import (
     LayoutStatus,
     Machine,
     MachineFaceRef,
-    METoggles,
     Net,
     Port,
 )
@@ -172,7 +171,7 @@ def test_the_run_and_its_port_carry_every_items_rate() -> None:
 
 def test_the_merged_machine_is_within_its_faces() -> None:
     ir = _adapt(_mixer_plan())
-    assert connection_counts(ir.nets, ir.me_toggles)["m"] == 4
+    assert connection_counts(ir.nets)["m"] == 4
     assert not single_block_shortfalls(ir)
 
 
@@ -200,7 +199,7 @@ def test_two_feeds_of_one_input_fold_into_one_pipe() -> None:
         _ref("s3", "output:dust.a"),
         _ref("m", "input:dust.a"),
     ]
-    assert connection_counts(ir.nets, ir.me_toggles)["m"] == SINGLE_BLOCK_IO_FACES
+    assert connection_counts(ir.nets)["m"] == SINGLE_BLOCK_IO_FACES
 
 
 def test_a_fold_that_is_not_enough_joins_the_run() -> None:
@@ -209,7 +208,7 @@ def test_a_fold_that_is_not_enough_joins_the_run() -> None:
     (run,) = _runs(ir)
     assert run.id == "e0-dust.c+e1-dust.a+e4-dust.a+e2-dust.b"
     assert _ref("s4", "output:dust.a") in run.endpoints
-    assert connection_counts(ir.nets, ir.me_toggles)["m"] == 4
+    assert connection_counts(ir.nets)["m"] == 4
 
 
 # ------------------------------------------------------------------ when it applies
@@ -219,7 +218,7 @@ def test_a_machine_with_exactly_five_connections_is_untouched() -> None:
     # Two items, water, the product and power: no face to spare, but none short. Unlike the output
     # side, the input side merges only what cannot be built, so this line stays as it lays out now.
     ir = _adapt(_mixer_plan(items=("dust.a", "dust.b")))
-    assert connection_counts(ir.nets, ir.me_toggles)["m"] == SINGLE_BLOCK_IO_FACES
+    assert connection_counts(ir.nets)["m"] == SINGLE_BLOCK_IO_FACES
     assert not _runs(ir)
     assert _input_ports(ir, "m") == {"input:dust.a", "input:dust.b", "input:water"}
 
@@ -234,7 +233,7 @@ def test_an_unproven_single_block_is_left_short_of_faces() -> None:
 def test_a_machine_short_on_fluids_with_items_on_me_gets_no_run() -> None:
     # Items ride ME and dock nothing, so merging them would free no face.
     plan = _mixer_plan(items=("dust.a", "dust.b"), fluids=("f1", "f2", "f3", "f4", "f5"))
-    ir = _adapt(plan, me_toggles=METoggles(items=True))
+    ir = _adapt(plan, me_commodities={Commodity.ITEM})
     assert not _runs(ir)
     assert {"input:dust.a", "input:dust.b"} <= _input_ports(ir, "m")
 

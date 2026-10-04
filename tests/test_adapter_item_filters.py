@@ -31,6 +31,7 @@ from gtnh_solver.adapter import (
     Resource,
     Storage,
     adapt_file,
+    plan_digest,
     to_input_ir,
 )
 from gtnh_solver.adapter.core import _bounding_region, _fold_nets
@@ -51,7 +52,9 @@ from gtnh_solver.ir import (
     IODirection,
     Machine,
     MachineFaceRef,
-    METoggles,
+    MEMode,
+    MENetworkSpec,
+    MEPlan,
     Net,
     Port,
     RelativeFace,
@@ -417,12 +420,12 @@ def test_a_machine_with_no_face_to_spare_merges() -> None:
     # but every face would need a route, top and bottom included, which is what kept iron.json's
     # first Macerator from routing on every seed; merged, it has two faces free.
     unmerged = _adapt(_washer_plan(items=("gt.dust.a", "gt.dust.b"), handler=None))
-    assert connection_counts(unmerged.nets, unmerged.me_toggles)["w#1"] == SINGLE_BLOCK_IO_FACES
+    assert connection_counts(unmerged.nets)["w#1"] == SINGLE_BLOCK_IO_FACES
     assert not single_block_shortfalls(unmerged)
     ir = _adapt(_washer_plan(items=("gt.dust.a", "gt.dust.b")))
     assert len(_filters(ir)) == 2
     assert [t.items for t in _trunks(ir)] == [("gt.dust.a", "gt.dust.b")]
-    assert connection_counts(ir.nets, ir.me_toggles)["w#1"] == SINGLE_BLOCK_IO_FACES - 1
+    assert connection_counts(ir.nets)["w#1"] == SINGLE_BLOCK_IO_FACES - 1
 
 
 def test_a_machine_with_a_face_to_spare_merges_too() -> None:
@@ -431,10 +434,10 @@ def test_a_machine_with_a_face_to_spare_merges_too() -> None:
     # would need a cover pulling it out.
     unmerged = _adapt(
         _washer_plan(items=("gt.dust.a", "gt.dust.b"), handler=None),
-        me_toggles=METoggles(fluids=True),
+        me_commodities={Commodity.FLUID},
     )
-    assert connection_counts(unmerged.nets, unmerged.me_toggles)["w#1"] == SINGLE_BLOCK_IO_FACES - 1
-    ir = _adapt(_washer_plan(items=("gt.dust.a", "gt.dust.b")), me_toggles=METoggles(fluids=True))
+    assert connection_counts(unmerged.nets)["w#1"] == SINGLE_BLOCK_IO_FACES - 1
+    ir = _adapt(_washer_plan(items=("gt.dust.a", "gt.dust.b")), me_commodities={Commodity.FLUID})
     assert [m.id for m in _filters(ir)] == ["item-filter:w:gt.dust.a", "item-filter:w:gt.dust.b"]
     assert [t.items for t in _trunks(ir)] == [("gt.dust.a", "gt.dust.b")]
     assert _net(ir, "e-gt.dust.a").endpoints[0] == _ref(
@@ -443,8 +446,30 @@ def test_a_machine_with_a_face_to_spare_merges_too() -> None:
 
 
 def test_items_on_me_need_no_faces_and_no_merge() -> None:
-    ir = _adapt(_washer_plan(), me_toggles=METoggles(items=True))
+    ir = _adapt(_washer_plan(), me_commodities={Commodity.ITEM})
     _assert_unmerged(ir)
+
+
+def test_an_output_on_me_is_left_out_of_the_merge() -> None:
+    # ME is chosen per net (#332): one product rides ME, so the trunk and its filters sort the
+    # other two, and the net on ME keeps its id and its machines' own ports. The washers still eject
+    # every item through one face; a GT pipe takes from it only what a filter accepts.
+    plan = _washer_plan()
+    me_plan = MEPlan(
+        plan_digest=plan_digest(plan),
+        networks=[MENetworkSpec(id="main", mode=MEMode.ATTACHED)],
+        nets={"e-gt.dust.c": "main"},
+    )
+    ir = _adapt(plan, me_plan=me_plan)
+    assert [m.id for m in _filters(ir)] == ["item-filter:w:gt.dust.a", "item-filter:w:gt.dust.b"]
+    assert [t.items for t in _trunks(ir)] == [("gt.dust.a", "gt.dust.b")]
+    on_me = _net(ir, "e-gt.dust.c")
+    assert on_me.me_network == "main"
+    assert on_me.endpoints[:3] == [_ref(f"w#{i}", "output:gt.dust.c") for i in (1, 2, 3)]
+    for machine_id in ("w#1", "w#2", "w#3"):
+        outputs = {p.id for p in _machine(ir, machine_id).faces.ports}
+        assert {"output:gt.dust.c", "output:items"} <= outputs
+        assert "output:gt.dust.a" not in outputs
 
 
 def test_one_item_output_has_nothing_to_sort() -> None:

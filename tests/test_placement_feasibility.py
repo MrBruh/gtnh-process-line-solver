@@ -19,14 +19,13 @@ from gtnh_solver.ir import (
     InputIR,
     IODirection,
     MachineFaceRef,
-    METoggles,
     Net,
     Placement,
     Port,
 )
 from gtnh_solver.placement import SINGLE_BLOCK_IO_FACES, crowded_machines, single_block_shortfalls
 from gtnh_solver.router import route
-from tests._helpers import at, consumer, hub_line, machine, net, power_source, producer
+from tests._helpers import at, consumer, hub_line, machine, net, on_me, power_source, producer
 
 
 def _power_net(nid: str, source: str, *sinks: str) -> Net:
@@ -178,14 +177,14 @@ def test_an_auto_output_pair_needs_no_dock_cells() -> None:
 
 
 def test_an_me_net_needs_no_dock_cell_either() -> None:
-    # Same reasoning as auto-output: an ME-toggled commodity is not piped, so its ports cost
-    # nothing. Without this the toggle would make layouts look MORE crowded, not less.
+    # Same reasoning as auto-output: a net on ME is not piped, so its ports cost nothing.
+    # Without this, choosing ME would make layouts look MORE crowded, not less.
     problem = InputIR(
         bounding_region=CellBox(sx=4, sy=1, sz=1),
         machines=[producer("m0"), consumer("m1"), consumer("m2")],
         nets=[net("n0", "m0", "m1"), net("n1", "m0", "m2")],
-        me_toggles=METoggles(items=True),
     )
+    problem = on_me(problem, Commodity.ITEM)
     placements = [at("m0", 0, 0, 0), at("m1", 1, 0, 0), at("m2", 2, 0, 0)]
     assert crowded_machines(problem, placements) == ()
 
@@ -339,8 +338,8 @@ def test_power_on_the_me_network_needs_no_dock_cell() -> None:
         bounding_region=CellBox(sx=2, sy=1, sz=1),
         machines=[power_source("src"), _powered("a")],
         nets=[_power_net("p", "src", "a")],
-        me_toggles=METoggles(power=True),
     )
+    problem = on_me(problem, power=True)
     # Face to face with no free cell anywhere in the region.
     assert crowded_machines(problem, [at("src", 0, 0, 0), at("a", 1, 0, 0)]) == ()
 
@@ -373,4 +372,4 @@ def test_a_structure_is_not_held_to_a_single_blocks_faces() -> None:
 
 
 def test_a_commodity_on_the_me_network_takes_no_face() -> None:
-    assert single_block_shortfalls(hub_line(7, me_toggles=METoggles(fluids=True))) == {}
+    assert single_block_shortfalls(on_me(hub_line(7), Commodity.FLUID)) == {}
