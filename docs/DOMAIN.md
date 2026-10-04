@@ -581,10 +581,18 @@ the only-*sink* ones as its outputs.
 item and fluid net (its ends, its rate, and the ME device each end would get); the user (or
 gtnh-solver-site's picker) chooses which nets ride which ME network, attached to their main
 network or a subnet of its own colour, and `--me-plan FILE` reads that back. `--me items` /
-`--me fluids` is shorthand for every net of that kind on one attached network. A net on ME is
-removed from physical routing: today it is simply **skipped everywhere** (no route, no terminal,
-no placement/cost term). Placing the ME devices, cable and infrastructure in its stead is the
-end-to-end build (#335). Default is to build everything physically.
+`--me fluids` is shorthand for every net of that kind on one attached network. Default is to build
+everything physically.
+
+A net on ME is built as AE2 instead of a pipe (#335). The adapter (`adapter/me_build.py`) gives
+each machine port on it an ME device and each network the blocks it needs of its own (dense attach
+stubs, links, a controller over 8 devices), and drops the boundary chests an attached or link
+network's storage replaces. Placement charges each device a face and a cell beside it, like a
+pipe's terminal, and pulls each network's machines together, stub included. The solver lays each
+network's cable after the pipes and before power (the router below); the CLI then says, per
+network, what its storage must supply, what lands there, and how many of the main network's
+channels it spends (`system_io`). The preview draws no ME block yet (#338), and the schematic
+export leaves them out with a warning that counts them (#339).
 
 A single block's outputs can be split: one product on ME and the rest piped. Its auto-output face
 still ejects every item, so the piped ones are merged and sorted by Item Filters as before (#249)
@@ -681,9 +689,16 @@ leaf that finds only full cable is retried with the cell that ran full kept bare
 fix is refused before any is laid: an ad-hoc subnet over 8 devices (`me_adhoc`), an attached
 network over its budget (`me_channel_budget`) or over 32 a stub (`me_channels`), and infrastructure
 that contradicts its mode, touches another network's, or puts controllers where AE would not run
-them as one cluster (`me_infrastructure`). The router is pure and not yet wired into the solve
-(#335), which also has to pin a single block's interface to its auto-output face (rule 3); the
-router takes that pin per endpoint (`endpoint_faces`).
+them as one cluster (`me_infrastructure`).
+
+The solve lays every network after the pipes and before power (`solver/core.py`, #335), and the
+hatch pass turns each multiblock endpoint's terminal into the hatch of the slot kind its endpoint
+names, a GT ME hatch or the normal hatch an AE2 part faces. Those are kept apart by casing cell,
+not by port, since a port too fast for one device has two. Rule 3 needs no pin in the solve: the
+adapter gives a single block an interface only when every output of the block rides that one
+network, so no pipe or auto-output competes for the face, and `output_faces` reads the face the
+interface works on as the block's auto-output face. The router still takes a pin per endpoint
+(`endpoint_faces`) for a caller that needs one.
 
 ## Multiblocks
 
