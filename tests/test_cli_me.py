@@ -14,6 +14,7 @@ tests solve for real, the way ``test_cli.py`` splits the two.
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 
 import pytest
@@ -39,11 +40,11 @@ from gtnh_solver.ir import (
 from gtnh_solver.placement import Objective
 from gtnh_solver.previewer.textures import TextureManifest
 from gtnh_solver.schematic import read_schematic
-from gtnh_solver.schematic.core import POWER_SOURCE_STAND_IN
+from gtnh_solver.schematic.core import POWER_SOURCE_STAND_IN, SchematicWarning, _warn_about_me
 from gtnh_solver.solver import Effort, solve
 from gtnh_solver.validator import validate
 from tests._helpers import on_me
-from tests._me_fixtures import SUB, comb
+from tests._me_fixtures import SUB, comb, gt_hatch_line
 from tests._me_fixtures import endpoint as me_endpoint
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -522,3 +523,37 @@ def test_a_subnet_says_whose_channels_it_spends(capsys: pytest.CaptureFixture[st
     _note_me_networks(linked, layout)
     (line,) = capsys.readouterr().err.splitlines()
     assert "3 device(s) on 1 channel(s) of your main network, one per link" in line
+
+
+def test_sand_with_items_on_me_exports_its_machines_and_counts_what_it_leaves_out(
+    real_solves: list[tuple[InputIR, LayoutResult]], tmp_path: Path
+) -> None:
+    # The export writes no AE2 block until #339, and must not choke on the stub: every machine of
+    # the line is still written, and one warning counts the ME blocks a builder places by hand.
+    schematic = tmp_path / "x.schematic"
+    with pytest.warns(SchematicWarning, match=r"writes no ME block yet") as caught:
+        assert main([_SAND, "--me", "items", "--schematic", str(schematic)]) == 0
+    ((problem, layout),) = real_solves
+    (network,) = layout.me_networks
+    (message,) = [str(w.message) for w in caught if "ME block" in str(w.message)]
+    assert f"{len(network.cables)} AE2 cable(s), {len(network.devices)} part(s) and 1 network " in (
+        message
+    )
+    machines = [m for m in problem.machines if m.me_role is None]  # the hammers and the source
+    written = [t for t in read_schematic(schematic).tile_entities if t.id == "BaseMetaTileEntity"]
+    assert len(written) == len(machines)
+
+
+def test_a_gt_me_hatch_is_counted_as_written_in_its_normal_slot() -> None:
+    _, layout = gt_hatch_line()
+    with pytest.warns(SchematicWarning, match=r"1 GT ME hatch\(es\) are written as the normal"):
+        _warn_about_me(layout, 1)
+
+
+def test_a_layout_with_no_me_network_says_nothing_of_it(
+    solved_sand: tuple[InputIR, LayoutResult],
+) -> None:
+    _, layout = solved_sand
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _warn_about_me(layout, 0)
