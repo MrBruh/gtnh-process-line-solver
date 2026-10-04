@@ -15,6 +15,7 @@ question: what a file Schematica accepts actually contains.
 | `nitrobenzene-reference.schematic` | reference only | A hand-built example of one way to arrange the blocks. **Not solver output**, and not the layout the solver produces. Kept because it is the only sample containing multiblock casings, a controller and hatches. Never assert our output against it cell for cell. |
 | `sand-parallel-reference.schematic` | reference only | The maintainer's own build of `examples/gtnh-parallel-sand.json`, saved from the instance: the same 9 Forge Hammers, 2 Super Chests and power source the solver places, in a 3x3x4 box. **Not solver output**, and well beyond what the solver can currently express. It is the quality target for that line, and the evidence behind the routing limits it is filed under. Never assert our output against it cell for cell. |
 | `sand-parallel-exported.schematic` | **proven in game, in part** | The same build as `sand-parallel-reference.schematic`, written by **our own exporter** rather than by Schematica, and built in game by the maintainer. It carries the pipe wiring the Schematica copy loses. Proven for geometry, wiring, facings and power; **not** for item throughput, which it gets wrong (see below). |
+| `sand-parallel-29-gui.schematic` | **golden, wiring** | The maintainer's later rebuild of the same line (9 hammers, 2 chests, the power source, 12 huge brass pipes and 3 `cable.tin.12` in a 3x3x4 box), saved from the Schematica GUI in a 2.9.0-beta-3 instance on 2026-10-04. The only save here made on GT 5.09.54, so the only one whose pipes carry their real `mConnections`: the exporter's bit order is checked against it (see below). |
 | `28-sfb.schematic`, `29-sfb.schematic` | **golden, format only** | The maintainer's saves from a 2.8.4 and a 2.9 instance of three frame boxes in a row along +X: a plain Steel frame, a plain Black Steel frame, and a Steel frame with a cover. They settle how Schematica stores a frame, whose world metadata is a material id rather than a nibble (see below). |
 
 None of these is a byte-for-byte expectation for our exporter. All were built by hand in
@@ -54,9 +55,12 @@ never synced and so 0, over them. GT 5.09.54 syncs that copy too
 Measured on 2026-10-04 in the 2.9.0-beta-3 instance (GT 5.09.54.133): a GUI save and a
 `/schematicaSave` of the same 3x3x4 parallel sand build have all 15 pipe and cable blocks wired,
 with identical connection masks, facings and auto-output settings. (The build has since been
-rebuilt with huge brass pipes, so those saves are not this file, and they are not committed.) The
-two differ only in live state, which the GUI save lacks or has stale: items in transit, stored
-energy, progress.
+rebuilt with huge brass pipes, so those saves are not this file; the GUI one is committed as
+`sand-parallel-29-gui.schematic`.) The two differ only in live state, which the GUI save lacks or
+has stale: items in transit, stored energy, progress. Read with the bit order our exporter writes,
+every connection bit in the GUI save lands on a block in the box and every link between two pipes
+is set at both ends, which confirms that bit order against real GT wiring
+(`tests/test_schematic_read.py`).
 
 Our own exporter writes the wiring, on 63 of 63 pipes for the same line. So the box size, the block
 counts and the run shapes above can be trusted, while which net each run carries cannot be read off
@@ -150,11 +154,11 @@ metadata (`BlockFrameBox.MATERIAL_MASK`, 0xFFF; Steel is 305, Black Steel 334), 
 | x=2 | Steel frame with a cover | 1 | `BaseMetaPipeEntity`, `mID` 4401 = 4096 + 305, with the cover |
 
 So Schematica keeps the **low nibble** of the material and nothing else, and the material survives
-only in a frame that has a tile entity. It cannot survive a paste either: GT creates a frame's tile
+only in a frame that has a tile entity. The ghost cannot show it either: GT creates a frame's tile
 entity only when `MTE_BIT` is in the metadata (`BlockFrameBox.hasTileEntity`), and the nibble cannot
-carry it, so a pasted frame becomes material 1 or 14 (Hydrogen, Fluorine). The exporter therefore
-writes every frame in the covered-frame shape, so the file at least records each frame's material,
-and warns that a paste will get it wrong (`schematic.core._frame_cell`, `SchematicWarning`).
+carry it, so a frame in the ghost shows material 1 or 14 (Hydrogen, Fluorine). The exporter
+therefore writes every frame in the covered-frame shape, so the file at least records each frame's
+material, and warns that the ghost shows it wrong (`schematic.core._frame_cell`, `SchematicWarning`).
 
 The two saves differ only in what each instance assigns: the block's numeric id (2433 against 3027 in
 `SchematicaMapping`), GT's `nbtVersion` stamp (5.09.51.476 against 5.09.54.133), the cover's encoded

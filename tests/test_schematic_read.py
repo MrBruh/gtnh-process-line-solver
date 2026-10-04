@@ -20,6 +20,8 @@ import pytest
 
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.dataset import roots
+from gtnh_solver.ir import Facing
+from gtnh_solver.ir.geometry import FACE_DELTAS, OPPOSITE_FACE
 from gtnh_solver.previewer.textures import TextureManifest
 from gtnh_solver.schematic import (
     SchematicError,
@@ -28,6 +30,7 @@ from gtnh_solver.schematic import (
     read_schematic,
     write_schematic,
 )
+from gtnh_solver.schematic.core import FORGE_DIRECTION
 from gtnh_solver.solver import solve
 
 _GOLDEN = Path(__file__).resolve().parents[1] / "tests" / "golden" / "schematic"
@@ -116,6 +119,41 @@ def test_the_sand_golden_reads_its_machines_and_facings() -> None:
     assert chest.mid == 135
     assert chest.facing == 3
     assert schematic.block_at(0, 0, 0) == (_GT_BLOCK, 1)  # Data is the TE class, not the machine
+
+
+def test_a_29_save_wires_its_pipes_by_the_bit_order_the_exporter_writes() -> None:
+    """The real wiring the exporter's ``mConnections`` bit order is checked against (#96).
+
+    Every other golden was saved on GT 5.09.51, whose client copy of a pipe never received its
+    connections, so a GUI save read every pipe as 0 and left the bit order unconfirmed. GT 5.09.54
+    syncs them, and this is the maintainer's parallel sand build saved from the Schematica GUI in a
+    2.9 instance: 15 pipe and cable blocks, every one wired. Decoded by the convention ``core``
+    writes (bit ``FORGE_DIRECTION[face]`` means connected toward ``FACE_DELTAS[face]``), every set
+    bit lands on a block in the box and every link between two pipes is set at both ends. Swapping
+    either face of any axis for the other fails the first: this build's end pipes would point out
+    of the box.
+    """
+    schematic = read_schematic(_GOLDEN / "sand-parallel-29-gui.schematic")
+    tiles = {tile.pos: tile for tile in schematic.tile_entities}
+    routes = [tile for tile in schematic.tile_entities if tile.connections is not None]
+
+    assert {int(tile.raw["nbtVersion"]) for tile in schematic.tile_entities} == {509054133}
+    assert len(routes) == 15
+    assert all(tile.connections for tile in routes), "a 2.9 GUI save keeps the wiring"
+    used: set[Facing] = set()
+    for tile in routes:
+        x, y, z = tile.pos
+        for face, ordinal in FORGE_DIRECTION.items():
+            if not (tile.connections or 0) & (1 << ordinal):
+                continue
+            used.add(face)
+            dx, dy, dz = FACE_DELTAS[face]
+            there = tiles.get((x + dx, y + dy, z + dz))
+            assert there is not None, f"{tile.pos} is wired {face.value} into nothing"
+            if there.connections is not None:
+                back = 1 << FORGE_DIRECTION[OPPOSITE_FACE[face]]
+                assert there.connections & back, f"{tile.pos} -> {there.pos} is wired one way"
+    assert used == set(FORGE_DIRECTION), "every bit position is exercised"
 
 
 # ------------------------------------------------------------------------- round trip vs. core

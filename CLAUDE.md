@@ -67,7 +67,8 @@ disagree, the doc is the intent - fix one of them and say which.
   was placed, never `facing` alone (an export before #249 wrote only `mFacing`, as the front).
 - **Litematica does NOT run on 1.7.10.** GT:NH is Minecraft 1.7.10. The in-game schematic
   consumer is **Schematica (GT:NH's fork)** (classic `.schematic`, numeric block IDs). Don't target
-  Litematica/`litemapy`. (Export is a post-v1 milestone anyway.)
+  Litematica/`litemapy`. Its printer applies no tile-entity NBT, so the GT state an export
+  records (facings, wiring, auto-output) shows only in the hologram; see `docs/DOMAIN.md`.
 - **Power is a shared-amperage net**, not a per-pipe flow: voltage tier follows the machine
   voltage; amperage *sums* on shared cable segments and sets thickness (1x/2x/4x/8x/12x/16x,
   16x max → parallel runs or higher voltage). See [`docs/DOMAIN.md`](docs/DOMAIN.md).

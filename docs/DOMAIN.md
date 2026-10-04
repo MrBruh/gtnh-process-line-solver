@@ -20,14 +20,21 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
     pick-block reads the hologram's `mID`) but fronts the player, and a pipe connects only to the
     block it was clicked against. So the facings, pipe wiring and auto-output an export records
     show in the hologram only; the player sets them in game.
-  - A **GUI save reads the client world.** On GT 2.9 that keeps the pipe wiring, facings and
-    covers, the same as a server-side save. On GT 2.8 (5.09.51) every pipe in it reads unwired:
-    GT synced a pipe's connections to the client only on its base tile entity, and an item pipe or
-    cable then saves its own unsynced copy over them. What a GUI save lacks on any version is live
-    state (what is in a pipe, stored energy, progress). `tests/golden/schematic/README.md` has the
+  - A **GUI save reads the client world.** On GT 2.9 that keeps the pipe wiring, the facings and
+    which cover sits on which side, the same as a server-side save. On GT 2.8 (5.09.51) every pipe
+    in it reads unwired: GT synced a pipe's connections to the client only on its base tile entity,
+    and an item pipe or cable then saves its own unsynced copy over them. What a GUI save lacks on
+    any version is live state (what is in a pipe, stored energy, progress) and a cover's
+    **settings** (a conveyor's import or export mode, its tick rate): GT sends the client only each
+    cover's id, so they save as defaults unless the client happened to receive them, by opening the
+    cover's GUI or looking at the block with WAILA. `tests/golden/schematic/README.md` has the
     measurements. `/schematicaSave x1 y1 z1 x2 y2 z2 name` reads the server world instead. In
     single-player it writes to the same `schematics/` folder as the GUI; on a dedicated server, to
     that player's own folder on the server.
+  - Only **block ids** are remapped on load (through `SchematicaMapping`). Tile-entity NBT loads
+    as written, so anything in it that names an item by number, a cover's `id` or an inventory
+    slot, is right only in a world with the same item ids. A wrong cover id loses the cover, swaps
+    in another, or can crash the client drawing it.
   - Block metadata is kept to **4 bits**, which loses a GT 2.9 frame's material (#212).
 - There is **no headless GT simulator**, so true correctness is only verifiable in-game.
 
@@ -126,7 +133,8 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
   previewer draws the auto-output arrow on that face on **every** single block, piped or not, so a
   builder never reads a conveyor where none is meant, and an amber marker on each cover face; the
   `.schematic` export writes that face as the block's output facing and warns about each cover,
-  since a `.schematic` carries no covers. A machine can still pipe outputs out of two faces where
+  since it writes no covers (a cover names its item by the world's numeric item id, which
+  Schematica does not remap; see Platform above). A machine can still pipe outputs out of two faces where
   they are not merged (an item output beside a fluid one, or a 1x1x1 machine not proven a single
   block): that build needs one cover, and says so.
 - **Required-I/O-face reachability is a HARD constraint** - a blocked required output face

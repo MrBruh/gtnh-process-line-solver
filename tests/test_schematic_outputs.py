@@ -2,9 +2,10 @@
 
 A GT basic machine records two facings: ``mMainFacing``, its working face, and ``mFacing``, the
 OUTPUT face it auto-outputs items and fluids through. The export used to write only ``mFacing``, as
-the solver's front, so a 2.9 paste worked on its bottom face and output out of its front. Which face
+the solver's front, so the 2.9 ghost drew it working on its bottom face and outputting out of its
+front. Which face
 is the output face comes from ``output_faces``, the reading the previewer's arrows use too; every
-other output face needs a cover, which a ``.schematic`` does not carry, so it is warned about. A
+other output face needs a cover, which the export does not write, so it is warned about. A
 Super Tank auto-outputs out of its front, and an Item Filter pushes out of its back.
 """
 
@@ -489,7 +490,7 @@ def test_an_item_filter_exports_as_mid_9240_facing_its_front_with_its_items_name
     assert root["Data"][(y * length + z) * width + x] == 0  # te_base_type 0 for the ULV filter
     items = [str(w.message) for w in caught if "Item Filter(s)" in str(w.message)]
     assert items == [
-        "1 Item Filter(s): a .schematic carries no inventory, so set each filter's slots to the "
+        "1 Item Filter(s): the export writes no inventory, so set each filter's slots to the "
         "item it lets through. Ultra Low Voltage Item Filter at (0, 0, 1): "
         "gregtech:gt.metaitem.01@2034"
     ]

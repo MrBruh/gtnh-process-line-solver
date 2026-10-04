@@ -151,7 +151,7 @@ def test_the_schematic_holds_the_controllers_the_plan_names(
 
     The Coke Ovens and the Fluid Extractor are built partly of frame boxes, whose 2.9 metadata is a
     material id a ``.schematic`` cannot hold; the export writes each as Schematica writes a covered
-    frame, and warns that a paste will get the material wrong.
+    frame, and warns that the ghost shows the material wrong.
     """
     with pytest.warns(SchematicWarning, match="^44 GT frame box"):
         root = build_schematic(*solved, manifest=manifest, docs=docs)
