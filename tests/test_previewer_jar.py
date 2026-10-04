@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import struct
 import zipfile
 from pathlib import Path
 from urllib.error import URLError
@@ -191,22 +192,49 @@ _AE2_ICON = {
 _FC_ICON = {"ae2fc:fluid_import_face": "assets/ae2fc/textures/blocks/fluid_import_face.png"}
 
 
+def _jar_with_a_corrupt_member(path: Path, entries: dict[str, bytes]) -> None:
+    """A zip that opens and lists its members, but none of them inflates.
+
+    Each member is deflated, then the first byte of its deflate stream is set to a block of the
+    reserved type 3, which zlib refuses outright (``zlib.error``), before any CRC is compared.
+    """
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, data in entries.items():
+            archive.writestr(name, data)
+    raw = bytearray(path.read_bytes())
+    with zipfile.ZipFile(path) as archive:
+        offsets = [info.header_offset for info in archive.infolist()]
+    for offset in offsets:
+        name_length, extra_length = struct.unpack_from("<HH", raw, offset + 26)
+        raw[offset + 30 + name_length + extra_length] = 0b111  # BFINAL = 1, BTYPE = 11 (reserved)
+    path.write_bytes(bytes(raw))
+
+
 class _Nexus:
-    """A fake downloader serving :data:`_JARS` by URL; ``failing`` URLs raise as an outage would."""
+    """A fake downloader serving :data:`_JARS` by URL; ``failing`` URLs raise as an outage would,
+    ``garbage`` ones save a page that is not a zip, and ``corrupt`` ones a zip that will not inflate.
+    """
 
     def __init__(
-        self, failing: frozenset[str] = frozenset(), garbage: frozenset[str] = frozenset()
+        self,
+        failing: frozenset[str] = frozenset(),
+        garbage: frozenset[str] = frozenset(),
+        corrupt: frozenset[str] = frozenset(),
     ):
         self.calls: list[str] = []
         self.failing = failing
         self.garbage = garbage
+        self.corrupt = corrupt
 
     def __call__(self, url: str, filename: str) -> None:
         self.calls.append(url)
         if url in self.failing:
             raise URLError("nexus unreachable")
         if url in self.garbage:
-            Path(filename).write_bytes(b"this is not a zip")
+            Path(filename).write_bytes(b"<html>Sign in to the cafe wifi</html>")
+            return
+        if url in self.corrupt:
+            _jar_with_a_corrupt_member(Path(filename), _JARS[url])
             return
         _fake_jar(Path(filename), _JARS[url])
 
@@ -277,18 +305,64 @@ def test_a_failed_me_download_costs_only_its_own_icons(
     assert nexus.calls.count(AE2.url) == 1
 
 
-def test_an_me_jar_that_is_not_a_zip_is_logged_not_raised(
+def test_an_me_jar_that_is_not_a_zip_is_logged_and_deleted_not_raised(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
+    # A captive portal's sign-in page saved under the jar's name: cached, it would fail every
+    # preview from now on, so it is deleted and the next preview downloads the jar again.
     nexus = _Nexus(garbage=frozenset({AE2FC.url}))
     provider = multi_jar_png_provider(_GT, (AE2, AE2FC), cache_dir=tmp_path, download=nexus)
+    cached = tmp_path / AE2FC.jar_name
 
     with caplog.at_level(logging.WARNING, logger="gtnh_solver.previewer.jar"):
         out = provider({**_FC_ICON, **_AE2_ICON})
 
     assert out == {"appliedenergistics2:MECable_Grey": b"ae2-grey"}
     assert "ae2fc" in caplog.text
-    assert provider(_FC_ICON) == {}  # remembered as unusable, never re-read
+    assert f"deleted the corrupt cached copy {cached}" in caplog.text
+    assert not cached.exists()
+    assert provider(_FC_ICON) == {}  # remembered as unusable for this page, never re-fetched
+    assert nexus.calls.count(AE2FC.url) == 1
+
+    next_page = multi_jar_png_provider(_GT, (AE2, AE2FC), cache_dir=tmp_path, download=_Nexus())
+    assert next_page(_FC_ICON) == {"ae2fc:fluid_import_face": b"fc-import"}
+
+
+def test_an_me_jar_whose_members_will_not_inflate_costs_only_its_own_icons(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # The zip opens, so the failure surfaces only on reading a member, as zlib.error rather than
+    # BadZipFile; it must not escape to write_preview, whose fallback would drop GT's textures too.
+    nexus = _Nexus(corrupt=frozenset({AE2.url}))
+    provider = multi_jar_png_provider(_GT, (AE2, AE2FC), cache_dir=tmp_path, download=nexus)
+    cached = tmp_path / AE2.jar_name
+
+    with caplog.at_level(logging.WARNING, logger="gtnh_solver.previewer.jar"):
+        out = provider({**_GT_ICON, **_AE2_ICON})
+
+    assert out == {"gregtech:OVERLAY_FRONT": b"gt-overlay"}
+    assert "appliedenergistics2" in caplog.text
+    assert f"deleted the corrupt cached copy {cached}" in caplog.text
+    assert not cached.exists()
+
+
+def test_a_corrupt_me_jar_that_cannot_be_deleted_is_still_only_logged(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def locked(self: Path, missing_ok: bool = False) -> None:
+        raise PermissionError("in use by another process")
+
+    monkeypatch.setattr(Path, "unlink", locked)
+    nexus = _Nexus(garbage=frozenset({AE2.url}))
+    provider = multi_jar_png_provider(_GT, (AE2,), cache_dir=tmp_path, download=nexus)
+
+    with caplog.at_level(logging.WARNING, logger="gtnh_solver.previewer.jar"):
+        assert provider({**_GT_ICON, **_AE2_ICON}) == {"gregtech:OVERLAY_FRONT": b"gt-overlay"}
+
+    cached = tmp_path / AE2.jar_name
+    assert f"the corrupt cached copy {cached} could not be deleted" in caplog.text
+    assert "delete it by hand" in caplog.text
+    assert cached.exists()
 
 
 def test_an_icon_its_jar_lacks_is_simply_missing(tmp_path: Path) -> None:

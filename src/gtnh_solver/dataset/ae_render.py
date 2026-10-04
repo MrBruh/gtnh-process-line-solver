@@ -77,6 +77,15 @@ ME_BLOCKS: tuple[MEBlock, ...] = ("controller", "interface", "drive", "energy_ac
 #: A side, as the scene names facings.
 Side = Literal["down", "up", "north", "south", "west", "east"]
 SIDES: tuple[Side, ...] = ("down", "up", "north", "south", "west", "east")
+#: The world axis each side lies on: two directions on one line (or one repeated) are not a frame.
+_LINE: dict[Side, str] = {
+    "down": "y",
+    "up": "y",
+    "north": "z",
+    "south": "z",
+    "west": "x",
+    "east": "x",
+}
 
 #: A cable connection's key: what the neighbour reports. ``dense`` covers a dense or dense covered
 #: neighbour, ``smart`` a smart one, ``other`` anything else (spike 8.1).
@@ -140,8 +149,8 @@ class CableBox(BaseModel):
 
 
 class PartArm(BaseModel):
-    """The arm a cable draws out to a part on its own bus, which ends where the part's arm length
-    says (:attr:`PartRender.arm_length`), and only for a length below ``drawn_below_length``."""
+    """The arm a cable draws out to a part on its own bus, from the part's arm length
+    (:attr:`PartRender.arm_length`) up to ``top``, the cable's own face toward that part."""
 
     model_config = _FROZEN
 
@@ -154,8 +163,14 @@ class PartArm(BaseModel):
     lights: bool
     source: str
 
-    def box(self, length: int) -> tuple[int, int, int, int, int, int]:
-        """The arm toward DOWN for a part whose arm length is ``length``."""
+    def box(self, length: int) -> tuple[int, int, int, int, int, int] | None:
+        """The arm toward DOWN for a part whose arm length is ``length``, or ``None`` where nothing
+        of it shows: at ``drawn_below_length`` or beyond, which AE2's guard skips, and wherever the
+        part already reaches the cable's face (``length >= top``). There AE2 still sets the box,
+        but it has no height, and its two faces lie flat on that face, which is drawn anyway. A bus
+        (arm length 5) on a covered or smart cable (top 5) is that case."""
+        if length >= self.drawn_below_length or length >= self.top:
+            return None
         return (self.x[0], length, self.z[0], self.x[1], self.top, self.z[1])
 
 
@@ -240,9 +255,10 @@ class ChannelLights(BaseModel):
 
     by_count: dict[int, tuple[Icon, Icon]]
     count_when_unpowered: int
-    dense_cap: int
-    dense_per_count: int
-    max_count: int
+    # Each divides or caps a count in shown_count, so zero would load and then fail there.
+    dense_cap: int = Field(gt=0)
+    dense_per_count: int = Field(gt=0)
+    max_count: int = Field(gt=0)
     pass_tints: tuple[str, str]
     counts_source: str
     source: str
@@ -277,8 +293,17 @@ class PartFrame(BaseModel):
 
     @model_validator(mode="after")
     def _every_side(self) -> Self:
-        if set(self.axes) != set(SIDES) or any(a["z"] != s for s, a in self.axes.items()):
-            raise ValueError("a part frame per side, its z axis at that side")
+        if set(self.axes) != set(SIDES):
+            raise ValueError(f"a part frame per side, not {sorted(self.axes)}")
+        for side, frame in self.axes.items():
+            if set(frame) != {"x", "y", "z"}:
+                raise ValueError(f"the {side} frame names axes {sorted(frame)}, not x, y and z")
+            if frame["z"] != side:
+                raise ValueError(f"the {side} frame's z axis points {frame['z']}, not {side}")
+            if len({_LINE[direction] for direction in frame.values()}) != 3:
+                raise ValueError(
+                    f"the {side} frame's axes {frame} are not three perpendicular ones"
+                )
         return self
 
 

@@ -10,7 +10,7 @@ or an incomplete file must not half-load into a previewer that would then draw n
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +23,7 @@ from gtnh_solver.dataset.ae_render import (
     ME_BLOCKS,
     PART_DEVICES,
     AERender,
+    PartArm,
     asset_path,
     load_ae_render,
 )
@@ -99,7 +100,7 @@ def test_every_icon_is_an_me_jar_icon(render: AERender) -> None:
     assert len(names) > 100
     assert {name.split(":")[0] for name in names} == {AE2.modid, AE2FC.modid}
     for name in names:
-        assert asset_path(name).startswith((AE2.asset_prefix, AE2FC.asset_prefix))
+        assert asset_path(name).startswith((f"assets/{AE2.modid}/", f"assets/{AE2FC.modid}/"))
 
 
 # --- the spike's figures (section 8), read by hand ----------------------------------------------------
@@ -164,6 +165,27 @@ def test_a_part_arm_ends_at_the_parts_length(render: AERender) -> None:
     assert glass_arm.box(5) == (6, 5, 6, 10, 6, 10)
     assert covered_arm.box(4) == (6, 4, 6, 10, 5, 10)
     assert glass_arm.drawn_below_length == 8
+
+
+def test_a_part_arm_is_none_where_nothing_of_it_shows(render: AERender) -> None:
+    # A bus's arm length is 5, a covered or smart cable's face toward it is at 5 too: AE2 sets a box
+    # with no height there, flat on a face already drawn. A storage bus or interface (4) gets one.
+    for kind in (MECableKind.COVERED, MECableKind.SMART):
+        arm = render.cables[kind].part_arm
+        assert arm is not None
+        assert arm.top == 5
+        for device in (MEDeviceKind.IMPORT_BUS, MEDeviceKind.EXPORT_BUS):
+            assert arm.box(render.parts[device].arm_length) is None
+        for device in (MEDeviceKind.STORAGE_BUS, MEDeviceKind.INTERFACE):
+            assert arm.box(render.parts[device].arm_length) == (6, 4, 6, 10, 5, 10)
+    glass_arm = render.cables[MECableKind.GLASS].part_arm
+    assert glass_arm is not None
+    assert glass_arm.box(6) is None  # glass's face is at 6
+
+    # AE2's guard (len < 8) skips the arm by itself, whatever the top: shown on a taller arm.
+    tall = PartArm.model_validate({**_RAW["cables"]["glass"]["part_arm"], "top": 16})
+    assert tall.box(7) == (6, 7, 6, 10, 16, 10)
+    assert tall.box(8) is None
 
 
 @pytest.mark.parametrize(
@@ -397,3 +419,81 @@ def test_lights_must_cover_every_count(tmp_path: Path) -> None:
     del lights["by_count"]["3"]
     with pytest.raises(ValidationError, match="every count"):
         load_ae_render(_write(tmp_path, {**_RAW, "channel_lights": lights}))
+
+
+def _edited(edit: Callable[[dict[str, Any]], object]) -> dict[str, Any]:
+    """A deep copy of the committed document with ``edit`` applied to it."""
+    doc: dict[str, Any] = json.loads(json.dumps(_RAW))
+    edit(doc)
+    return doc
+
+
+def _east_frame(doc: dict[str, Any]) -> dict[str, str]:
+    frame: dict[str, str] = doc["part_frame"]["axes"]["east"]  # x south, y up, z east
+    return frame
+
+
+@pytest.mark.parametrize(
+    ("edit", "message"),
+    [
+        pytest.param(
+            lambda d: d["cables"]["glass"]["part_arm"].update(x=[10, 6]),
+            "increasing span",
+            id="span-reversed",
+        ),
+        pytest.param(
+            lambda d: d["cables"]["glass"]["part_arm"].update(z=[6, 17]),
+            "increasing span",
+            id="span-outside",
+        ),
+        pytest.param(
+            lambda d: d["colours"]["white"].update(black_variant=[256, 0, 0]),
+            "RGB triple",
+            id="rgb",
+        ),
+        pytest.param(
+            lambda d: d["cables"]["glass"]["connections"].pop("other"),
+            "'other' connection",
+            id="no-other-connection",
+        ),
+        pytest.param(
+            lambda d: d["blocks"]["drive"]["faces"].pop("up"),
+            "every face",
+            id="block-face",
+        ),
+        pytest.param(
+            lambda d: d["part_frame"]["axes"].pop("east"),
+            "a part frame per side",
+            id="frame-side",
+        ),
+        pytest.param(lambda d: _east_frame(d).pop("z"), "names axes", id="frame-no-z"),
+        pytest.param(lambda d: _east_frame(d).pop("x"), "names axes", id="frame-no-x"),
+        pytest.param(
+            lambda d: _east_frame(d).update(z="west"), "z axis points west", id="frame-z-elsewhere"
+        ),
+        pytest.param(
+            lambda d: _east_frame(d).update(x="up"), "perpendicular", id="frame-axis-repeated"
+        ),
+        pytest.param(
+            lambda d: _east_frame(d).update(x="down"), "perpendicular", id="frame-axis-opposite"
+        ),
+        pytest.param(
+            lambda d: d["channel_lights"].update(dense_per_count=0),
+            "greater than 0",
+            id="dense-per-count",
+        ),
+        pytest.param(
+            lambda d: d["channel_lights"].update(dense_cap=0), "greater than 0", id="dense-cap"
+        ),
+        pytest.param(
+            lambda d: d["channel_lights"].update(max_count=0), "greater than 0", id="max-count"
+        ),
+    ],
+)
+def test_a_malformed_file_is_a_validation_error_not_a_crash(
+    tmp_path: Path, edit: Callable[[dict[str, Any]], object], message: str
+) -> None:
+    # Each is refused at load, as a ValidationError naming it: a KeyError out of a validator, or a
+    # zero that loads and then divides, would surface far from the file that caused it.
+    with pytest.raises(ValidationError, match=message):
+        load_ae_render(_write(tmp_path, _edited(edit)))

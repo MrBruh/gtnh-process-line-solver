@@ -26,10 +26,11 @@ extractor never touches either mod; they move with the pack by hand, as the refe
 against. The derived ME render data (``data/ae2/<AE2 version>/render.json``) is namespaced by
 :data:`AE2`'s version for the same reason: a new pin is a new folder, never a silent edit.
 
-**Licences differ, and that is a property of the jar, not of this code.** GT's and FC's art is
-LGPL-3.0 like their code; AE2's code is LGPL-3.0 but its textures and models are CC BY-NC-SA 3.0
-(spike 9.2). A preview that embeds AE2 art therefore credits it and links that licence, and
-``NOTICE`` says such a preview may be shared non-commercially.
+**Licences differ, and that is a property of the jar, not of this code.** GT's art is LGPL-3.0
+like its code; AE2's code is LGPL-3.0 but its textures and models are CC BY-NC-SA 3.0 (spike 9.2).
+FC declares LGPL-3.0 throughout, but whether any of its sprites derive from AE2's art was never
+checked, so FC art is treated as AE2's. A preview that embeds either therefore credits AE2 and
+links that licence, and ``NOTICE`` says such a preview may be shared only non-commercially.
 """
 
 from __future__ import annotations
@@ -74,11 +75,6 @@ class JarSpec:
     def url(self) -> str:
         """The jar's GTNH Nexus URL."""
         return f"{NEXUS_URL}/{self.maven_path}"
-
-    @property
-    def asset_prefix(self) -> str:
-        """The asset path prefix this jar serves: ``assets/<modid>/``."""
-        return f"assets/{self.modid}/"
 
     @property
     def source_repo(self) -> str:

@@ -39,7 +39,9 @@ Third-party components:
   draws; no PNG is ever committed. A preview HTML that embeds AE2 textures redistributes CC
   BY-NC-SA 3.0 art: it may be shared for non-commercial purposes only, with this attribution
   and the licence link above, and an adaptation of that art must be shared under the same
-  licence. AE2FluidCraft's textures are LGPL-3.0 like its code.
+  licence. AE2FluidCraft declares LGPL-3.0 for all of its files, but whether any of its
+  textures derive from AE2's art has not been checked, so a preview that embeds AE2FluidCraft
+  textures is shared on the same CC BY-NC-SA 3.0 terms.
 
 - NESQL Exporter (https://github.com/ShadowTheAge/nesql-exporter, a fork of
   https://github.com/D-Cysteine/nesql-exporter), LGPL-3.0. tools/derive_icons.py reads the

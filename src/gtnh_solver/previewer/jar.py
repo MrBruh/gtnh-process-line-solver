@@ -24,14 +24,17 @@ Two providers, one per need::
 **The primary jar fails loudly, an extra one quietly.** A failed primary fetch raises exactly as
 :func:`jar_png_provider` does, so the caller's existing degrade path keeps owning it
 (``write_preview`` logs and falls back to placeholder boxes). A failed extra fetch, or an extra jar
-that will not open, is logged once and only that jar's icons go missing: an AE2 download failing
-must not cost a page the GT textures that did arrive.
+that will not open or inflate, is logged once and only that jar's icons go missing: an AE2 download
+failing must not cost a page the GT textures that did arrive. A cached extra that is not a usable
+zip is deleted as well, so one bad download does not fail every later preview.
 
 PNGs are read from the cached jar at preview time and embedded only in the emitted HTML, never
 committed. **Their licence is the jar's, not this project's**: GT's art is LGPL like its code, but
 AE2's textures are CC BY-NC-SA 3.0 although its code is LGPL (``docs/spikes/329-me-ae2.md``
 section 9.2), so a preview that embeds AE2 art must carry AE2's credit and a link to that licence.
-``NOTICE`` credits each mod whose jar is read.
+AE2FluidCraft declares LGPL-3.0 throughout, but nobody has checked whether its sprites derive from
+AE2's art, so a preview with FC art is shared on AE2's terms too. ``NOTICE`` credits each mod whose
+jar is read.
 """
 
 from __future__ import annotations
@@ -40,6 +43,7 @@ import json
 import logging
 import os
 import zipfile
+import zlib
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from urllib.request import urlretrieve
@@ -183,8 +187,13 @@ def asset_modid(asset_path: str) -> str | None:
 
 
 #: What a failed optional jar raises: a download or disk error (``urlretrieve``'s ``URLError`` is
-#: an ``OSError``), or a cached file that is not a zip.
-_JAR_FAILURES = (OSError, zipfile.BadZipFile)
+#: an ``OSError``), a cached file that is not a zip, or a member that will not inflate.
+_JAR_FAILURES = (OSError, zipfile.BadZipFile, zlib.error)
+
+#: The failures that mean the cached file itself is bad: a captive portal's HTML page saved under
+#: the jar's name, a truncated or bit-rotted copy. Cached, it would fail every preview from now on,
+#: so it is deleted and the next preview downloads it again.
+_CORRUPT_JAR = (zipfile.BadZipFile, zlib.error)
 
 
 def multi_jar_png_provider(
@@ -235,12 +244,18 @@ def multi_jar_png_provider(
             try:
                 out.update(read(spec, wanted))
             except _JAR_FAILURES as exc:
+                cached = located.get(spec)
+                discarded = (
+                    _discard(cached) if isinstance(exc, _CORRUPT_JAR) and cached is not None else ""
+                )
                 _log.warning(
-                    "textures: the %s jar (%s) is unavailable, so its %d icon(s) stay unskinned: %s",
+                    "textures: the %s jar (%s) is unavailable, so its %d icon(s) stay unskinned: "
+                    "%s%s",
                     spec.modid,
                     spec.url,
                     len(wanted),
                     exc,
+                    discarded,
                 )
                 located[spec] = None
         return out
@@ -251,3 +266,16 @@ def multi_jar_png_provider(
 def _fetch_spec(spec: JarSpec, cache_dir: str | Path | None, download: Downloader) -> Path:
     """:func:`fetch_jar` for one pinned :class:`JarSpec`, cached under its own file name."""
     return fetch_jar(cache_dir, url=spec.url, jar_name=spec.jar_name, download=download)
+
+
+def _discard(jar: Path) -> str:
+    """Delete a corrupt cached jar, and say so for the warning that reports it.
+
+    Never raises: it runs while an optional jar's failure is being absorbed, and an error escaping
+    here would reach ``write_preview`` and cost the page its GT textures too.
+    """
+    try:
+        jar.unlink(missing_ok=True)
+    except OSError as exc:
+        return f"; the corrupt cached copy {jar} could not be deleted ({exc}): delete it by hand"
+    return f"; deleted the corrupt cached copy {jar}, so the next preview downloads it again"

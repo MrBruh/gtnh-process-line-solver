@@ -55,8 +55,11 @@ out/
 /data/textures/*
 !/data/textures/manifest.json
 # The ME render data: numbers and icon names tools/derive_ae_render.py reads out of AE2's source, never
-# a PNG. Keyed by AE2's version, one render.json per pin.
+# a PNG. Keyed by AE2's version, one render.json per pin, and nothing else: a loose file in data/ae2/
+# or beside a render.json stays ignored.
 !/data/ae2/
+/data/ae2/*
+!/data/ae2/*/
 /data/ae2/*/*
 !/data/ae2/*/render.json
 

@@ -34,7 +34,6 @@ def test_the_me_jar_urls_are_the_ones_the_spike_checked() -> None:
 
 def test_each_pin_names_its_namespace_its_source_and_its_pack() -> None:
     assert (AE2.modid, AE2FC.modid) == ("appliedenergistics2", "ae2fc")
-    assert AE2.asset_prefix == "assets/appliedenergistics2/"
     assert AE2.source_repo == "https://github.com/GTNewHorizons/Applied-Energistics-2-Unofficial"
     assert AE2FC.source_repo == "https://github.com/GTNewHorizons/AE2FluidCraft-Rework"
     assert ME_JARS == (AE2, AE2FC)
