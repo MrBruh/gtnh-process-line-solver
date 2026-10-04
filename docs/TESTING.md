@@ -98,7 +98,11 @@ during the Assignment - v1's only contact with actual GT behavior.
   determinism, won't-fit infeasibility.
 - **router** - A* per net, throughput/tier caps, one-fluid-per-line, EU-loss cost + amperage
   cap, channels-per-edge invariant, cell→block realizability, rip-up-and-reroute, ME-toggle
-  skip + endpoint placement, unroutable → infeasibility.
+  skip + endpoint placement, unroutable → infeasibility. The ME router (`tests/test_router_me.py`)
+  is checked twice on every layout it lays: against its own promises re-derived from the blocks
+  (each piece a tree with one root, the halo, each cable's channels its subtree's devices), and by
+  the validator's ME gate; a property test holds every network it lays on random lines to both,
+  and every other network to an explicit failure.
 - **solver** - the place→route→retry loop converges or gives up with a report; anytime budget
   returns best-valid-so-far.
 - **validator** - geometric + rule checks; partial-invalid layouts reported, never passed. The

@@ -661,6 +661,30 @@ its front. The validator builds that graph from the blocks, and:
    (spike 2.4); where blocks form a cycle, the validator counts every device AE could route through
    a block, which is sound for any order AE picks (spike 2.5).
 
+### How the router lays an ME network (#334)
+
+`router/me.py` builds to those rules by laying each network as a **forest of trees**, one root per
+place its channels enter: each attach stub of an attached network, each free cell beside a
+subnet's controller, or, ad hoc, one tree seeded at the first device's dock (at its link, when it
+has none). Each device is then grown on as a leaf, the way the power trunk grows: a **tap** puts
+its part on a cable already laid beside the machine (two machines facing one cell share it, a part
+on either side), else a shortest **leg** runs to a free dock cell from any cable with a channel to
+spare. A GT ME hatch takes its casing cell with its front on a cable; a link joins as a leaf with
+its storage bus on its front; an acceptor is touched by exactly one cable (or the controller). A
+GT pipe connects only where the player wires it, but an AE cable joins every neighbour it can, so
+every new cable keeps a **halo**: it touches no AE block of another network, and of its own only
+the cell it grows from, so the graph AE builds is exactly the tree laid and rule 8 is exact. The
+halo is kept between every two networks, whatever their colours. Channels are counted on the tree
+as AE does: a cable holding a part carries at most 8 and is smart, any other carries up to 32 and
+is dense when it carries more than 8, and growth refuses a tap or a leg that would overfill one; a
+leaf that finds only full cable is retried with the cell that ran full kept bare. What no cable can
+fix is refused before any is laid: an ad-hoc subnet over 8 devices (`me_adhoc`), an attached
+network over its budget (`me_channel_budget`) or over 32 a stub (`me_channels`), and infrastructure
+that contradicts its mode, touches another network's, or puts controllers where AE would not run
+them as one cluster (`me_infrastructure`). The router is pure and not yet wired into the solve
+(#335), which also has to pin a single block's interface to its auto-output face (rule 3); the
+router takes that pin per endpoint (`endpoint_faces`).
+
 ## Multiblocks
 
 Represented as a **bounding box + controller-face and hatch/bus-face metadata** (multiblocks

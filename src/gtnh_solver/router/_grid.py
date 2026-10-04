@@ -1,17 +1,18 @@
-"""Shared cell-grid primitives for the routers (generic + power).
+"""Shared cell-grid primitives for the routers (generic, power and ME).
 
 Obstacle building, terminal docking on a face the port may use, and the multi-goal A* the power
-router grows its trunk with all live here, so ``router.core`` (with ``router.steiner``) and
-``router.power`` route over the *same* grid model and docking rules. The conventions (a port docks
-only on a face ``Machine.allowed_faces`` grants it, which for an unpinned port is any face but the
-front; machine + reserved cells are obstacles, and so is a muffler's only vent; the validator
-independently re-checks every terminal) are unchanged from the original crude router.
+and ME routers grow their trees with all live here, so ``router.core`` (with ``router.steiner``),
+``router.power`` and ``router.me`` route over the *same* grid model and docking rules. The
+conventions (a port docks only on a face ``Machine.allowed_faces`` grants it, which for an unpinned
+port is any face but the front; machine + reserved cells are obstacles, and so is a muffler's only
+vent; the validator independently re-checks every terminal) are unchanged from the original crude
+router.
 """
 
 from __future__ import annotations
 
 import heapq
-from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 
 from gtnh_solver.ir import (
     CellBox,
@@ -304,7 +305,12 @@ def dock_candidates(
 
 
 def astar_multi(
-    starts: Collection[Cell], goals: set[Cell], obstacles: set[Cell], region: CellBox
+    starts: Collection[Cell],
+    goals: set[Cell],
+    obstacles: set[Cell],
+    region: CellBox,
+    *,
+    step: Callable[[Cell, Cell], bool] | None = None,
 ) -> list[Cell] | None:
     """Shortest obstacle-free path from any cell in ``starts`` to any cell in ``goals``.
 
@@ -317,6 +323,10 @@ def astar_multi(
     Returns the path (``path[0] in starts``, ``path[-1] in goals``), or ``None`` if none is
     reachable. ``goals`` must be non-empty and disjoint from ``starts`` (a zero-length trunk is not
     a valid cable); the caller guarantees this.
+
+    ``step(cur, nxt)``, when given, may refuse the move from ``cur`` into ``nxt`` on top of the
+    obstacles: the ME router's halo, where a cell is free but its NEIGHBOURS make it unusable
+    (``router.me``). It must not make a cell's cost depend on the path taken to it beyond that.
     """
     if not goals:
         return None
@@ -338,6 +348,8 @@ def astar_multi(
         for dx, dy, dz in NEIGHBORS:
             nxt = x, y, z = (cur[0] + dx, cur[1] + dy, cur[2] + dz)
             if not (0 <= x < rx and 0 <= y < ry and 0 <= z < rz) or nxt in obstacles:
+                continue
+            if step is not None and not step(cur, nxt):
                 continue
             ng = g + 1
             if ng < best.get(nxt, _UNREACHABLE):

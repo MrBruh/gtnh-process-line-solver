@@ -17,9 +17,14 @@ docs/ARCHITECTURE.md #8), in the space the negotiated pipes left for it. The sol
 item/fluid cells as ``extra_obstacles`` so cables route around pipes. Both routers share the
 ``_grid`` primitives.
 
-Still ahead (docs/ROADMAP.md): the per-edge multi-channel cap, cell->block realizability, ME
-endpoint placement, and shared-amperage power *optimization* (multi-source / split / upgrade)
-beyond size-or-reject. The validator independently certifies routes either way.
+The ME router (:func:`route_me`, in ``me``, #334) lays each AE2 network a line's nets ride as a
+forest of cable from where its channels enter (an attach stub, a controller, or ad hoc), with the
+ME devices on it, keeping a halo of free cells between networks because an AE cable joins every
+neighbour it touches. It is pure and not wired into the solve yet (#335).
+
+Still ahead (docs/ROADMAP.md): the per-edge multi-channel cap, cell->block realizability, wiring
+the ME router into the solve (#335), and shared-amperage power *optimization* (multi-source /
+split / upgrade) beyond size-or-reject. The validator independently certifies routes either way.
 """
 
 from __future__ import annotations
@@ -28,11 +33,13 @@ from ._grid import claims_by_machine, vent_cells
 from .auto import AutoAssignment, assign_auto_outputs, auto_output_possible
 from .core import RouteResult, route
 from .hatches import HatchPlan, place_hatches
+from .me import MERouteResult, route_me
 from .power import PowerRouteResult, route_power
 
 __all__ = [
     "AutoAssignment",
     "HatchPlan",
+    "MERouteResult",
     "PowerRouteResult",
     "RouteResult",
     "assign_auto_outputs",
@@ -40,6 +47,7 @@ __all__ = [
     "claims_by_machine",
     "place_hatches",
     "route",
+    "route_me",
     "route_power",
     "vent_cells",
 ]

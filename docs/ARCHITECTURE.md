@@ -110,7 +110,15 @@ doc as intent and reconcile.
   maintainer's proven parallel-sand build. Each item pipe it lays is **sized** from what the run carries, in GT's
   own unit: insertions per window, one per endpoint on the run's crowded side
   (`dataset/pipe_capacity.py`, docs/DOMAIN.md; #165), and never below its busiest block's charge
-  (`router/item_pipes.py`, #200). *(Phase 2, lane D: the
+  (`router/item_pipes.py`, #200). Each **ME network** is laid by `router/me.py` (#334) as a
+  forest of AE2 cable, one tree per place its channels enter (an attach stub, a cell beside a
+  controller, or one ad-hoc tree), its devices grown on as leaves like the power trunk's sinks
+  (taps, then multi-goal A* legs, failed-first rip-up), under a **halo**: no new cable touches
+  another network's AE block, or its own but the cell it grows from, since an AE cable joins every
+  neighbour on its own and an unlaid cycle would make AE's channel assignment order-dependent.
+  Channels are counted per cell on the tree as AE counts them, so the validator's ME gate, which
+  rebuilds AE's graph from the blocks alone, finds the same counts; not wired into the solve until
+  #335. *(Phase 2, lane D: the
   margin→channels-per-edge cap + cell→block realizability, and power optimization beyond
   size-or-reject.)*
 - **solver/** - orchestrates a multi-start of independent place↔route attempts (built: a
