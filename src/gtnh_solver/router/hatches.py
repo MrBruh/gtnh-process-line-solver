@@ -108,8 +108,15 @@ def place_hatches(
     routes: Iterable[Route],
     autos: Iterable[AutoConnection],
     occupied: Collection[Cell] = (),
+    *,
+    me_terminals: Iterable[Terminal] = (),
 ) -> HatchPlan:
     """Emit a :class:`PlacedHatch` for every connection and upkeep hatch the layout needs.
+
+    ``me_terminals`` are the ME router's (``MERouteResult.terminals``, #335): a GT ME hatch, or the
+    normal hatch an AE2 part stands in front of, of the kind the endpoint names
+    (``MEEndpoint.hatch_kind``). One port split across two ME devices takes two hatches, so these
+    are kept apart by casing cell only, not by port like a route's.
 
     ``occupied`` are the cells already spoken for by machines and routes; the muffler is the only
     hatch that cares, because GT refuses to vent through anything but literal air
@@ -139,6 +146,10 @@ def place_hatches(
 
     for terminal in _terminals(routes):
         placed = _routed_hatch(terminal, machines, by_machine, claimed)
+        if placed is not None:
+            hatches.append(placed)
+    for terminal in me_terminals:
+        placed = _routed_hatch(terminal, machines, by_machine, claimed, me=True)
         if placed is not None:
             hatches.append(placed)
 
@@ -183,8 +194,11 @@ def _routed_hatch(
     machines: Mapping[str, Machine],
     by_machine: Mapping[str, Placement],
     claimed: dict[str, set[Cell]],
+    *,
+    me: bool = False,
 ) -> PlacedHatch | None:
-    """The hatch a routed terminal implies: the casing cell behind it, facing the way it docked."""
+    """The hatch a routed terminal implies: the casing cell behind it, facing the way it docked.
+    An ``me`` terminal's hatch is the kind its ME endpoint names (:func:`_me_hatch_kind`)."""
     machine = machines.get(terminal.machine_id)
     placement = by_machine.get(terminal.machine_id)
     if machine is None or placement is None or not machine.hatch_slots:
@@ -193,12 +207,23 @@ def _routed_hatch(
     if cell in claimed.setdefault(terminal.machine_id, set()):
         return None  # already emitted for another port; the validator reports the contention
     claimed[terminal.machine_id].add(cell)
+    kind = _me_hatch_kind(machine, terminal.port_id) if me else None
     return PlacedHatch(
         machine_id=terminal.machine_id,
-        kind=_kind_at(machine, placement, terminal.port_id, cell),
+        kind=kind or _kind_at(machine, placement, terminal.port_id, cell),
         cell=coord(cell),
         facing=terminal.face,
         port_id=terminal.port_id,
+    )
+
+
+def _me_hatch_kind(machine: Machine, port_id: str) -> str | None:
+    """The hatch slot kind of the ME endpoint serving ``port_id``: GT's ME hatch takes the slot of
+    the normal hatch it stands in for (``dataset.me.GT_ME_HATCHES``), and an AE2 part faces a
+    normal hatch. None where no endpoint names one, which the validator then reports."""
+    return next(
+        (e.hatch_kind for e in machine.me_endpoints if port_id in e.ports and e.hatch_kind),
+        None,
     )
 
 

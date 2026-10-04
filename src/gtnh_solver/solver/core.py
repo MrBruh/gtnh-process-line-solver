@@ -21,8 +21,11 @@ One attempt, as ``_assemble`` runs it::
     placements
       |  route          auto-output, then every other net negotiated together - pipes, plus a
       |                 reserved tree per power net so the pipes leave its cable room (#164)
-      |  power          repair_power_sources (optimize) or route_power (fast): the real cable
-      |  place_hatches  a hatch per connection, plus maintenance and muffler
+      |  route_me       each ME network's AE2 cable and devices, around the pipes (#335)
+      |  power          repair_power_sources (optimize) or route_power (fast): the real cable,
+      |                 around the pipes and the AE2 cable; where either fails, power is laid
+      |                 first and ME around it, and the order leaving fewer nets unmoved is kept
+      |  place_hatches  a hatch per connection (an ME device's too), plus maintenance and muffler
       |  validate       VALID, or downgraded to partial_invalid
       v
     the layout, and the nets it names as failed (how a partial layout is ranked)
@@ -102,6 +105,7 @@ from __future__ import annotations
 
 import math
 import time
+from collections.abc import Collection, Mapping
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -117,6 +121,7 @@ from gtnh_solver.ir import (
     Placement,
     Route,
 )
+from gtnh_solver.ir.geometry import Cell
 from gtnh_solver.placement import (
     SINGLE_BLOCK_IO_FACES,
     Objective,
@@ -127,14 +132,18 @@ from gtnh_solver.placement import (
     single_block_shortfalls,
 )
 from gtnh_solver.router import (
+    MERouteResult,
+    PowerRouteResult,
+    RouteResult,
     claims_by_machine,
     place_hatches,
     route,
+    route_me,
     route_power,
 )
 from gtnh_solver.validator import ValidationReport, ViolationCode, validate
 
-from ._structure import footprint_and_layers, structure_cells, structure_quality
+from ._structure import footprint_and_layers, me_cable_cells, structure_cells, structure_quality
 from .repair import repair_power_sources
 
 #: How hard the optimized path works (module docstring): ``full`` searches for the best layout,
@@ -506,14 +515,17 @@ class _Rounds:
 
 
 def _layout_metrics(
-    problem: InputIR, placements: list[Placement], routes: list[Route]
+    problem: InputIR,
+    placements: list[Placement],
+    routes: list[Route],
+    me_cells: Collection[Cell] = (),
 ) -> LayoutMetrics:
     """Advisory compactness metrics for an assembled layout: floor-area ``footprint`` and
     ``layers`` (vertical extent), the two the previewer surfaces (previewer/scene.py). An empty
     layout (nothing placed, e.g. an infeasible result) leaves them ``None``. ``buildability`` /
     ``congestion`` stay ``None`` too - they need a defined scoring model (docs/ROADMAP.md), so
     they are left deferred rather than faked."""
-    cells = structure_cells(problem, placements, routes)
+    cells = structure_cells(problem, placements, routes, me_cells)
     if not cells:
         return LayoutMetrics()
     footprint, layers = footprint_and_layers(cells)
@@ -524,7 +536,9 @@ def _quality(problem: InputIR, layout: LayoutResult, objective: Objective) -> tu
     """Rank a VALID layout for the multi-start; smaller-lexicographic is better
     (``_structure.structure_quality`` - the same key the power-source repair pass ranks its own
     candidates on, so the two cannot pull against each other)."""
-    return structure_quality(problem, layout.placements, layout.routes, objective)
+    return structure_quality(
+        problem, layout.placements, layout.routes, objective, me_cable_cells(layout.me_networks)
+    )
 
 
 def _solve_fast(problem: InputIR, seed: int, objective: Objective) -> LayoutResult:
@@ -583,7 +597,8 @@ def _assemble(
     # around the CASING cells those pipes' hatches occupy, which is a different resource: a
     # machine's hatch cells are one shared pool an input bus and an energy hatch compete for, and
     # a single casing cell has up to five free faces, so the pipe cells cannot stand in for it.
-    claims = claims_by_machine(routing.routes, {m.id: m for m in problem.machines})
+    machines = {m.id: m for m in problem.machines}
+    claims = claims_by_machine(routing.routes, machines)
     # The free connections spent casing cells too, and they own no Route to read that off. Without
     # this the power router is the one pass that never hears about them: an energy hatch lands on
     # the cell an auto-output reserved, `place_hatches` then finds no unclaimed touching pair, and
@@ -591,37 +606,36 @@ def _assemble(
     # form correctly and move nothing (#131).
     for machine_id, cells in routing.claimed.items():
         claims.setdefault(machine_id, set()).update(cells)
-    if repair:
-        # The power router runs inside the repair pass, which relocates each source to the cell
-        # its really-routed cable likes best (solver.repair, #123) and hands back that routing.
-        placement_list, power = repair_power_sources(
-            problem,
-            placements,
-            item_routes=routing.routes,
-            claimed_cells=claims,
-            objective=objective,
+    # The ME networks (#335) and power, each around the pipes and the casing cells their hatches
+    # took, and the second around the first: see _lay_cable for the order.
+    laid = _lay_cable(problem, placements, routing, claims, objective, repair=repair, me_first=True)
+    if problem.me.networks and laid.failures(problem):
+        other = _lay_cable(
+            problem, placements, routing, claims, objective, repair=repair, me_first=False
         )
-    else:
-        # The fast path is a single constructive placement by definition, so it routes power
-        # where the placer put the sources and relocates nothing.
-        placement_list = list(placements)
-        power = route_power(
-            problem,
-            placement_list,
-            extra_obstacles={cell for r in routing.routes for cell in r.cells()},
-            claimed_cells=claims,
-        )
+        if other.failures(problem) < laid.failures(problem):
+            laid = other
+    placement_list, power, me = laid.placements, laid.power, laid.me
+    me_cells = me_cable_cells(me.networks)
     routes = [*routing.routes, *power.routes]
-    metrics = _layout_metrics(problem, placement_list, routes)  # footprint/layers for every result
+    # footprint/layers for every result
+    metrics = _layout_metrics(problem, placement_list, routes, me_cells)
 
     # Which casing cell each connection turns into a hatch, plus the maintenance hatch and muffler
     # that belong to no net. Last, because a muffler needs empty air in front of it and only a
     # finished routing knows which cells are still empty.
     plan = place_hatches(
-        problem, placement_list, routes, autos, structure_cells(problem, placement_list, routes)
+        problem,
+        placement_list,
+        routes,
+        autos,
+        structure_cells(problem, placement_list, routes, me_cells),
+        me_terminals=me.terminals,
     )
 
-    infeasibility = routing.infeasibility or power.infeasibility or plan.infeasibility
+    infeasibility = (
+        routing.infeasibility or me.infeasibility or power.infeasibility or plan.infeasibility
+    )
     if infeasibility is not None:
         layout = LayoutResult(
             status=LayoutStatus.PARTIAL_INVALID,
@@ -631,9 +645,10 @@ def _assemble(
             routes=routes,
             auto_connections=autos,
             hatches=list(plan.hatches),
+            me_networks=list(me.networks),
             metrics=metrics,
         )
-        return layout, (*routing.failed_nets, *power.failed_nets)
+        return layout, (*routing.failed_nets, *laid.failed_nets(problem))
 
     layout = LayoutResult(
         status=LayoutStatus.VALID,
@@ -642,6 +657,7 @@ def _assemble(
         routes=routes,
         auto_connections=autos,
         hatches=list(plan.hatches),
+        me_networks=list(me.networks),
         metrics=metrics,
     )
     # The placer and router each report success on their own terms; the validator is the only
@@ -660,6 +676,7 @@ def _assemble(
             routes=routes,
             auto_connections=autos,
             hatches=list(plan.hatches),
+            me_networks=list(me.networks),
             metrics=metrics,
         )
         # A starved machine is a placement defect: hand back the power nets it sits on, so this
@@ -671,6 +688,99 @@ def _assemble(
             and not {e.machine_id for e in n.endpoints}.isdisjoint(starved)
         )
     return layout, ()
+
+
+@dataclass(frozen=True)
+class _Laid:
+    """The cable an attempt lays after its pipes: power, and each ME network's AE2 cable (#335),
+    with the placements the power repair pass handed back."""
+
+    placements: list[Placement]
+    power: PowerRouteResult
+    me: MERouteResult
+
+    def failed_nets(self, problem: InputIR) -> tuple[str, ...]:
+        """The nets left unmoved: power's failed nets, and every net riding a network the ME
+        router could not lay."""
+        failed = set(self.me.failed_networks)
+        riding = tuple(n.id for n in problem.nets if n.me_network in failed)
+        return (*riding, *self.power.failed_nets)
+
+    def failures(self, problem: InputIR) -> int:
+        """How badly it failed: its failed nets, or one for a stall that names none."""
+        stalled = self.power.infeasibility is not None or self.me.infeasibility is not None
+        return len(self.failed_nets(problem)) or int(stalled)
+
+
+def _lay_cable(
+    problem: InputIR,
+    placements: tuple[Placement, ...],
+    routing: RouteResult,
+    claims: Mapping[str, set[Cell]],
+    objective: Objective,
+    *,
+    repair: bool,
+    me_first: bool,
+) -> _Laid:
+    """Lay power and the ME networks over the pipes ``routing`` laid, in one order or the other.
+
+    Whichever goes second routes around the first's cable, and power's energy hatches keep off the
+    casing cells an ME hatch took, and the other way round. Neither order always fits. An AE2 tree
+    is the stricter to lay (it must stay a tree, keep a cell clear of every other network, and dock
+    each device on a face of its own), so ``_assemble`` lays it first; but its cable can then take
+    the last free cell beside a machine's power face, where power first would have left that cell
+    and found the ME devices another way. Each order fits lines the other does not, so a failed
+    attempt tries both.
+    """
+    machines = {m.id: m for m in problem.machines}
+    held = {machine_id: set(cells) for machine_id, cells in claims.items()}
+    pipe_cells = {cell for r in routing.routes for cell in r.cells()}
+    if me_first:
+        me = route_me(problem, placements, extra_obstacles=pipe_cells, claimed_cells=held)
+        for machine_id, cells in claims_by_machine((), machines, me.terminals).items():
+            held.setdefault(machine_id, set()).update(cells)
+        placement_list, power = _lay_power(
+            problem, placements, routing, held, objective, repair, me_cable_cells(me.networks)
+        )
+        return _Laid(placement_list, power, me)
+    placement_list, power = _lay_power(problem, placements, routing, held, objective, repair, set())
+    for machine_id, cells in claims_by_machine(power.routes, machines).items():
+        held.setdefault(machine_id, set()).update(cells)
+    power_cells = {cell for r in power.routes for cell in r.cells()}
+    me = route_me(
+        problem, placement_list, extra_obstacles=pipe_cells | power_cells, claimed_cells=held
+    )
+    return _Laid(placement_list, power, me)
+
+
+def _lay_power(
+    problem: InputIR,
+    placements: tuple[Placement, ...],
+    routing: RouteResult,
+    claims: Mapping[str, set[Cell]],
+    objective: Objective,
+    repair: bool,
+    me_cells: set[Cell],
+) -> tuple[list[Placement], PowerRouteResult]:
+    """Power's cable, around the pipes and ``me_cells``, and the placements it was laid over."""
+    if repair:
+        # The power router runs inside the repair pass, which relocates each source to the cell
+        # its really-routed cable likes best (solver.repair, #123) and hands back that routing.
+        return repair_power_sources(
+            problem,
+            placements,
+            item_routes=routing.routes,
+            claimed_cells=claims,
+            objective=objective,
+            me_cells=me_cells,
+        )
+    # The fast path is a single constructive placement by definition, so it routes power where
+    # the placer put the sources and relocates nothing.
+    pipe_cells = {cell for r in routing.routes for cell in r.cells()}
+    power = route_power(
+        problem, list(placements), extra_obstacles=pipe_cells | me_cells, claimed_cells=claims
+    )
+    return list(placements), power
 
 
 def _starved_machines(report: ValidationReport) -> tuple[str, ...]:

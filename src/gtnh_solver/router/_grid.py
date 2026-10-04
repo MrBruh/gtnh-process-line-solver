@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import heapq
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
+from itertools import chain
 
 from gtnh_solver.ir import (
     CellBox,
@@ -186,20 +187,20 @@ def claim_key(terminal: Terminal, machine: Machine) -> Cell:
 
 
 def claims_by_machine(
-    routes: Iterable[Route], machines: Mapping[str, Machine]
+    routes: Iterable[Route], machines: Mapping[str, Machine], terminals: Iterable[Terminal] = ()
 ) -> dict[str, set[Cell]]:
     """What each machine's already-routed connections hold, per :func:`claim_key`.
 
-    Read straight off the terminals, so it needs no new bookkeeping. The solver hands it to the
+    Read straight off the terminals, so it needs no new bookkeeping: the routes', plus any
+    ``terminals`` no route carries (the ME router's hatches, #335). The solver hands it to the
     power router: a multiblock's hatch cells are one shared pool, and a cell an input bus stands
     on cannot also hold an energy hatch.
     """
     claimed: dict[str, set[Cell]] = {}
-    for route in routes:
-        for terminal in route.terminals:
-            machine = machines.get(terminal.machine_id)
-            if machine is not None:
-                claimed.setdefault(terminal.machine_id, set()).add(claim_key(terminal, machine))
+    for terminal in chain((t for route in routes for t in route.terminals), terminals):
+        machine = machines.get(terminal.machine_id)
+        if machine is not None:
+            claimed.setdefault(terminal.machine_id, set()).add(claim_key(terminal, machine))
     return claimed
 
 
