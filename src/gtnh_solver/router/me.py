@@ -133,8 +133,10 @@ class MERouteResult:
     ``failed_networks`` (problem order), and ``infeasibility`` carries the first one's reason, the
     shape ``PowerRouteResult`` has. ``terminals`` hold one per multiblock endpoint of a laid
     network: the dock cell and face of its hatch (a GT ME hatch, or the normal hatch an AE2 part
-    stands in front of), on the endpoint's first port, which ``router.hatches.place_hatches`` turns
-    into the hatch block like any route's terminal.
+    stands in front of), on the endpoint's first port. Each is one hatch at the casing cell behind
+    it (``_grid.body_cell``), so the hatch placer must take them keyed by that cell (#335's
+    ``place_hatches(..., me_terminals=...)``), never as a route's terminals: those are deduped by
+    machine and port, and a port split across two endpoints has two terminals with one port id.
     """
 
     networks: tuple[MENetworkLayout, ...] = ()
@@ -164,8 +166,15 @@ def route_me(
     inputs ``route_power`` takes. ``endpoint_faces`` narrows where a device may dock, by
     ``(machine id, endpoint id)``, to the machine faces given, on top of what its ports allow: how
     the caller pins a single block's interface to the face its other auto-outputs leave by, since
-    a single block auto-outputs through one face (docs/DOMAIN.md). Deterministic for a given input.
+    a single block auto-outputs through one face (docs/DOMAIN.md); a key that names no device
+    endpoint of the problem is a caller's mistake and raises :class:`ValueError`. The result's
+    ``terminals`` go to the hatch placer keyed by casing cell (:class:`MERouteResult`).
+    Deterministic for a given input.
     """
+    devices = {(m.id, e.id) for m in problem.machines for e in m.me_endpoints if e.ports}
+    unknown = sorted(set(endpoint_faces) - devices)
+    if unknown:
+        raise ValueError(f"endpoint_faces pins {unknown}, which name no ME device of the problem")
     machines = {m.id: m for m in problem.machines}
     by_machine = placement_index(placements)
     infrastructure = _infrastructure_cells(problem, by_machine)
@@ -188,12 +197,13 @@ def route_me(
         | _front_guards(problem, by_machine)
     )
     ids = list(prepared)
-    order = ids
+    order = tuple(ids)
     seen: set[frozenset[str]] = set()
+    tried: dict[tuple[str, ...], tuple[dict[str, _Built], dict[str, Infeasibility]]] = {}
     built: dict[str, _Built] = {}
     failures: dict[str, Infeasibility] = {}
     for _ in range(_MAX_PASSES):
-        built, failures = _route_pass(
+        built, failures = tried[order] = _route_pass(
             order,
             prepared,
             infrastructure,
@@ -205,7 +215,10 @@ def route_me(
         if not failures or frozenset(failures) in seen:
             break
         seen.add(frozenset(failures))
-        order = [i for i in ids if i in failures] + [i for i in ids if i not in failures]
+        order = (*[i for i in ids if i in failures], *[i for i in ids if i not in failures])
+        if order in tried:  # run already, and deterministic: it would end the same way again
+            built, failures = tried[order]
+            break
 
     failed = tuple(i for i in ids if i in failures)
     return MERouteResult(
@@ -579,21 +592,28 @@ def _route_pass(
 def _route_network(network: _Network, context: _Context) -> _Built | Infeasibility:
     """Grow one network's forest, with a failed-first rip-up/reroute over its leaves.
 
-    A pass that leaves a leaf unreached is retried with the unreached leaves first, and with every
-    cell that ran out of channels only because it held a part (8 channels, where bare cable carries
-    32) barred from holding one: the part that took it docks elsewhere and the cell stays trunk.
-    A repeated failure set and bar set means retrying is cycling, so the first leaf still failing,
-    in leaf order, is the network's reason.
+    What no cable this network lays can change is asked first (``_Grower.doomed``), and a network
+    failing that is refused with no growing at all. Otherwise a pass that leaves a leaf unreached
+    is retried with the unreached leaves first, and with every cell that ran out of channels only
+    because it held a part (8 channels, where bare cable carries 32) barred from holding one: the
+    part that took it docks elsewhere and the cell stays trunk. A retry that would run a pass already
+    run (the same order and bars), or a repeated failure set and bar set, means retrying is done,
+    so the first leaf still failing, in leaf order, is the network's reason.
     """
+    doomed = _Grower(network, context, frozenset()).doomed()
+    if doomed is not None:
+        return doomed
     leaves = list(network.leaves)
     order = leaves
     no_part: frozenset[Cell] = frozenset()
     seen: set[tuple[frozenset[str], frozenset[Cell]]] = set()
+    tried: dict[tuple[tuple[str, ...], frozenset[Cell]], _Grower] = {}
     while True:
         grower = _Grower(network, context, no_part)
         grower.run(order)
         if not grower.failures:
             return grower.built()
+        tried[(tuple(x.key for x in order), no_part)] = grower
         state = (frozenset(grower.failures), no_part)
         if state in seen or len(seen) + 1 >= _MAX_PASSES:
             break
@@ -602,6 +622,10 @@ def _route_network(network: _Network, context: _Context) -> _Built | Infeasibili
         order = [x for x in leaves if x.key in grower.failures] + [
             x for x in leaves if x.key not in grower.failures
         ]
+        again = tried.get((tuple(x.key for x in order), no_part))
+        if again is not None:  # run already, and deterministic: it would end the same way again
+            grower = again
+            break
     first = next(x for x in (*leaves, *network.acceptors) if x.key in grower.failures)
     return grower.failures[first.key]
 
@@ -617,7 +641,6 @@ class _Forest:
     parts: set[Cell] = field(default_factory=set)
     sides: dict[Cell, set[Facing]] = field(default_factory=dict)  # sides holding a part or a hatch
     stubs: set[Cell] = field(default_factory=set)
-    links: set[Cell] = field(default_factory=set)  # take no part but their own storage bus
 
     def lay(self, cells: Sequence[Cell], parent: Cell | None) -> None:
         for cell in cells:
@@ -649,6 +672,16 @@ class _Forest:
             self.parts.add(cell)
         for node in self.chain(cell):
             self.load[node] += 1
+
+    def headroom(self) -> list[Cell]:
+        """Every laid cell with room for one more device beyond it, in laid order: ``room(cell,
+        part=False)`` for all of them in one pass, since a cell is always laid after its parent."""
+        fits: dict[Cell, bool] = {}
+        for cell in self.order:
+            parent = self.parent[cell]
+            cap = _PART_CAPACITY if cell in self.parts else _TRUNK_CAPACITY
+            fits[cell] = self.load[cell] < cap and (parent is None or fits[parent])
+        return [c for c in self.order if fits[c]]
 
     def saturated(self, cell: Cell) -> set[Cell]:
         """The cells from ``cell`` up that hold a part and so are full at 8: the ones that would
@@ -686,6 +719,31 @@ class _Grower:
         for acceptor in self.network.acceptors:
             self._acceptor(acceptor)
 
+    def doomed(self) -> Infeasibility | None:
+        """The first failure, in leaf order, that no cable this network lays can change, or None.
+
+        Other networks' cable and claims are fixed while this network grows, so a device whose
+        machine is unplaced, whose pin leaves it no face, or that finds no cell to dock on before
+        this network claims any (``_docks``) fails whatever is laid. So does an acceptor that the
+        network's stubs and controller already touch twice: a leg touches no acceptor but the one
+        it is laid to reach, so nothing grown later changes that count.
+        """
+        for leaf in self.network.leaves:
+            if leaf.role is not MERole.LINK:
+                self._docks(leaf)
+        for acceptor in self.network.acceptors:
+            _, _, touches = self._around(acceptor)
+            if touches > 1:
+                self._fail(
+                    acceptor,
+                    "me_infrastructure",
+                    f"touches the network {touches} times, which closes a loop through it",
+                    "move the acceptor so one cable or the controller touches it",
+                )
+        every = (*self.network.leaves, *self.network.acceptors)
+        first = next((x for x in every if x.key in self.failures), None)
+        return None if first is None else self.failures[first.key]
+
     def built(self) -> _Built:
         cables = [
             MECableCell(
@@ -705,20 +763,40 @@ class _Grower:
 
     # --- the leaves ---
 
-    def _device(self, leaf: _Leaf, aim: Cell | None) -> None:
-        """A machine's device: a part on a cable cell facing the machine, or a GT ME hatch on the
-        machine's casing facing a cable cell. Taps a cell already laid where one can take it."""
+    def _docks(self, leaf: _Leaf) -> list[Terminal] | None:
+        """Where ``leaf``'s device may dock as this pass's claims leave it: a free cell outside a
+        hatch slot of its kind, on a face every port it serves may use (a Dual Interface takes an
+        item and a fluid port through one face) and the caller's pin allows (``route_me``'s
+        ``endpoint_faces``). None, with the leaf failed, when there is none."""
         endpoint, placement, machine = leaf.endpoint, leaf.placement, leaf.machine
         assert endpoint is not None  # a device leaf always has one
         if placement is None:
             self._fail(leaf, "face_reachability", "is not placed", "place the machine")
-            return
-        # A Dual Interface serving an item and a fluid port docks on a face both may use, and the
-        # caller may pin a device to fewer (``route_me``'s ``endpoint_faces``).
-        faces = frozenset(self.context.faces.get((machine.id, endpoint.id), Facing))
+            return None
+        faces = frozenset(Facing)
         for port in endpoint.ports:
             faces &= machine.allowed_faces(port, placement.orientation)
-        part = not leaf.gt_hatch
+        pin = self.context.faces.get((machine.id, endpoint.id))
+        if pin is not None:
+            if not faces.intersection(pin):
+                pinned = sorted(f.value for f in pin)
+                self._fail(
+                    leaf,
+                    "face_reachability",
+                    f"is pinned to faces {pinned} (endpoint_faces), which leaves it none its ports "
+                    f"may use",
+                    "pin the device to a face its ports may use",
+                )
+                return None
+            faces = faces.intersection(pin)
+        if not faces:
+            self._fail(
+                leaf,
+                "face_reachability",
+                "serves ports that share no face it may dock on",
+                "give the ports a face in common, or a device each",
+            )
+            return None
         found = [
             t
             for t in dock_candidates(
@@ -732,23 +810,32 @@ class _Grower:
             )
             if t.face in faces
         ]
+        if not found:
+            self._fail(
+                leaf,
+                "face_reachability",
+                "has no free cell on a face its port may use",
+                "free up cells next to the machine",
+            )
+            return None
+        return found
+
+    def _device(self, leaf: _Leaf, aim: Cell | None) -> None:
+        """A machine's device: a part on a cable cell facing the machine, or a GT ME hatch on the
+        machine's casing facing a cable cell. Taps a cell already laid where one can take it."""
+        found = self._docks(leaf)
+        if found is None:
+            return
+        part = not leaf.gt_hatch
         usable = [t for t in found if not part or _cell(t) not in self.no_part]
-        if not usable:
-            if found:  # only cells that have to carry the trunk, which takes no part
-                self._fail(
-                    leaf,
-                    "me_channels",
-                    "can dock only on cells that must carry more channels than a cable holding a "
-                    "part does",
-                    "move the machine off the network's trunk, or give the network another root",
-                )
-            else:
-                self._fail(
-                    leaf,
-                    "face_reachability",
-                    "has no free cell on a face its port may use",
-                    "free up cells next to the machine",
-                )
+        if not usable:  # only cells that have to carry the trunk, which takes no part
+            self._fail(
+                leaf,
+                "me_channels",
+                "can dock only on cells that must carry more channels than a cable holding a "
+                "part does",
+                "move the machine off the network's trunk, or give the network another root",
+            )
             return
         taps = [t for t in usable if self._can_tap(t, part=part)]
         if taps:
@@ -771,10 +858,11 @@ class _Grower:
             self._lay([_cell(seed)], None)
             self._place(leaf, seed, part=part)
             return
-        path = self._search(self._starts(channel=True), goals)
+        starts = self._starts(channel=True)
+        path = self._search(starts, goals)
         if path is None:
             full = [_cell(t) for t in usable if _cell(t) in self.forest.parent]
-            self._unreached(leaf, full, goals)
+            self._unreached(leaf, full, goals, tried=starts)
             return
         self._lay_path(path)
         self._place(leaf, next(t for t in usable if _cell(t) == path[-1]), part=part)
@@ -792,12 +880,12 @@ class _Grower:
             self._lay([cell], None)
         else:
             mine = frozenset({cell})
-            path = self._search(self._starts(channel=True), {cell}, exempt=mine, own_goal=True)
+            starts = self._starts(channel=True)
+            path = self._search(starts, {cell}, exempt=mine, own_goal=True)
             if path is None:
-                self._unreached(leaf, [], {cell}, exempt=mine)
+                self._unreached(leaf, [], {cell}, tried=starts, exempt=mine)
                 return
             self._lay_path(path)
-        self.forest.links.add(cell)
         self.forest.add(cell, front, part=True)
         device = endpoint.device
         self.devices.append(
@@ -812,9 +900,8 @@ class _Grower:
             )
         )
 
-    def _acceptor(self, leaf: _Leaf) -> None:
-        """An Energy Acceptor: a block the forest touches exactly once (it joins on every side), and
-        which carries no channel. Touching it twice would close a loop through it."""
+    def _around(self, leaf: _Leaf) -> tuple[set[Cell], list[Cell], int]:
+        """An acceptor's body, the cells around it, and how often the network touches it now."""
         placement = leaf.placement
         assert placement is not None  # checked by _prepare
         body = set(_body(leaf.machine, placement))
@@ -822,16 +909,15 @@ class _Grower:
         touches = sum(1 for n in around if n in self.forest.parent) + any(
             n in self.network.controllers for n in around
         )
-        if touches > 1:
-            self._fail(
-                leaf,
-                "me_infrastructure",
-                f"touches the network {touches} times, which closes a loop through it",
-                "move the acceptor so one cable or the controller touches it",
-            )
-            return
+        return body, around, touches
+
+    def _acceptor(self, leaf: _Leaf) -> None:
+        """An Energy Acceptor: a block the forest touches exactly once (it joins on every side), and
+        which carries no channel. One touched twice already is refused before growing (``doomed``),
+        and no leg touches it but the one laid here."""
+        body, around, touches = self._around(leaf)
         starts = self._starts(channel=False)
-        if touches == 1 or not starts:
+        if touches or not starts:
             return  # joined already, or an ad-hoc network with no cable for it to join
         goals = {n for n in around if in_region(n, self.context.region) and n not in self.blocked}
         path = self._search(starts, goals, exempt=frozenset(body))
@@ -853,7 +939,7 @@ class _Grower:
 
         A link is a cable like any other here: an ad-hoc subnet with no device before it is seeded
         at its link, and the rest of the tree has nowhere else to grow from."""
-        starts = [c for c in self.forest.order if not channel or self.forest.room(c, part=False)]
+        starts = self.forest.headroom() if channel else list(self.forest.order)
         return starts + sorted(self.network.controllers)
 
     def _search(
@@ -913,11 +999,11 @@ class _Grower:
     def _can_tap(self, terminal: Terminal, *, part: bool) -> bool:
         """Whether the laid cable at a dock candidate can take the device: the side facing the
         machine is free, and one more channel there stays within capacity (8, once it holds a part,
-        so a part never taps dense cable)."""
+        so a part never taps dense cable). A stub or a link is never a candidate: it is a machine's
+        body, which ``dock_candidates`` keeps out."""
         cell = _cell(terminal)
         return (
             cell in self.forest.parent
-            and cell not in self.forest.links
             and OPPOSITE_FACE[terminal.face] not in self.forest.sides.get(cell, ())
             and self.forest.room(cell, part=part)
         )
@@ -953,14 +1039,18 @@ class _Grower:
         full_taps: Sequence[Cell],
         goals: set[Cell],
         *,
+        tried: Collection[Cell],
         exempt: frozenset[Cell] = frozenset(),
     ) -> None:
-        """Why no tap or leg reached ``leaf``: asked again with every laid cable a start, a leg (or
-        one of ``full_taps``, laid cells it docks on that had no room) found then means the way is
-        there but full (``me_channels``), and the cells full only for holding a part are noted for
-        the next pass. Otherwise there is no way at all (``routing``)."""
+        """Why no tap or leg from ``tried`` reached ``leaf``: asked again from the laid cables left
+        out of it for having no channel to spare, a leg (or one of ``full_taps``, laid cells it
+        docks on that had no room) found then means the way is there but full (``me_channels``), and
+        the cells full only for holding a part are noted for the next pass. Otherwise there is no
+        way at all (``routing``); with every cable in ``tried``, that needs no second search."""
         own_goal = leaf.role is MERole.LINK
-        path = self._search(self._starts(channel=False), goals, exempt=exempt, own_goal=own_goal)
+        searched = set(tried)
+        full = [c for c in self.forest.order if c not in searched]
+        path = self._search(full, goals, exempt=exempt, own_goal=own_goal)
         via = list(full_taps) + ([path[0]] if path is not None else [])
         if not via:
             self._fail(
@@ -970,9 +1060,10 @@ class _Grower:
                 "enlarge the bounding region, or move the machine nearer the network",
             )
             return
-        for cell in via:
-            if cell in self.forest.parent:
-                self.bottlenecks |= self.forest.saturated(cell)
+        for (
+            cell
+        ) in via:  # laid cells, all of them: a controller start has no capacity to run out of
+            self.bottlenecks |= self.forest.saturated(cell)
         self._fail(
             leaf,
             "me_channels",

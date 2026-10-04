@@ -43,13 +43,13 @@ from gtnh_solver.ir import (
     MENetworkSpec,
     MERole,
     Net,
+    PlacedHatch,
     Placement,
     Port,
     RelativeFace,
-    Route,
 )
-from gtnh_solver.ir.geometry import FACE_DELTAS, Cell, in_region, occupied_cells
-from gtnh_solver.router import MERouteResult, place_hatches, route_me
+from gtnh_solver.ir.geometry import FACE_DELTAS, OPPOSITE_FACE, Cell, in_region, occupied_cells
+from gtnh_solver.router import MERouteResult, route_me
 from gtnh_solver.router import me as router_me
 from gtnh_solver.validator import validate
 from tests._helpers import property_examples
@@ -61,6 +61,8 @@ _HORIZONTAL = (Facing.NORTH, Facing.SOUTH, Facing.EAST, Facing.WEST)
 #: Every slot kind the test multiblocks take a hatch of: what an ME endpoint may need on them.
 _IO_KINDS = ("OutputBus", "InputBus", "OutputHatch", "InputHatch")
 
+#: A second subnet's id, for the property's lines with two.
+SUB2 = "sub2"
 ATTACHED = MENetworkSpec(id=MAIN, mode=MEMode.ATTACHED)
 #: A subnet: ad hoc, unless the problem gives it a controller.
 SUBNET = MENetworkSpec(id=SUB, mode=MEMode.SUBNET)
@@ -178,22 +180,23 @@ def _problem(
     networks: Sequence[MENetworkSpec],
     reserved: Iterable[Cell] = (),
 ) -> InputIR:
-    """The problem, with one net per ME endpoint port, riding that endpoint's network."""
+    """The problem, with one net per machine port an ME endpoint serves, riding its network (a
+    port split across two endpoints has one net)."""
     nets: list[Net] = []
     for machine in machines:
         ports = {p.id: p for p in machine.faces.ports}
-        for e in machine.me_endpoints:
-            for port in e.ports:
-                nets.append(
-                    Net(
-                        id=f"{machine.id}.{port}",
-                        commodity=ports[port].commodity,
-                        fluid_or_item=f"{machine.id}.{port}",
-                        throughput=1.0,
-                        endpoints=[MachineFaceRef(machine_id=machine.id, port_id=port)],
-                        me_network=e.network,
-                    )
+        served = {port: e.network for e in machine.me_endpoints for port in e.ports}
+        for port, network in served.items():
+            nets.append(
+                Net(
+                    id=f"{machine.id}.{port}",
+                    commodity=ports[port].commodity,
+                    fluid_or_item=f"{machine.id}.{port}",
+                    throughput=1.0,
+                    endpoints=[MachineFaceRef(machine_id=machine.id, port_id=port)],
+                    me_network=network,
                 )
+            )
     return InputIR(
         bounding_region=region,
         machines=list(machines),
@@ -372,25 +375,51 @@ def _check_layout(
         assert set(laid) == set(with_work)
 
 
+def _hatches(problem: InputIR, result: MERouteResult) -> list[PlacedHatch]:
+    """The hatch each ME terminal stands for, keyed by the casing cell behind it, the way the end-
+    to-end build hands them to the hatch placer (#335). Never as a route's terminals: those are
+    deduped by machine and port, which would drop one hatch of a port split across two endpoints.
+    """
+    machines = {m.id: m for m in problem.machines}
+    hatches: dict[tuple[str, Cell], PlacedHatch] = {}
+    for terminal in result.terminals:
+        (kind,) = {
+            e.hatch_kind
+            for e in machines[terminal.machine_id].me_endpoints
+            if terminal.port_id in e.ports and e.hatch_kind is not None
+        }
+        casing = _step(terminal.cell.as_tuple(), OPPOSITE_FACE[terminal.face])
+        key = (terminal.machine_id, casing)
+        assert key not in hatches, f"two ME hatches on one casing cell {key}"
+        hatches[key] = PlacedHatch(
+            machine_id=terminal.machine_id,
+            kind=kind,
+            cell=coord(*casing),
+            facing=terminal.face,
+            port_id=terminal.port_id,
+        )
+    return list(hatches.values())
+
+
 def _layout(
     problem: InputIR, placements: Sequence[Placement], result: MERouteResult
 ) -> LayoutResult:
     """The layout a build of ``result`` is: its placements, its ME networks, and the hatches its
-    terminals imply, as ``place_hatches`` emits them for any route's terminals."""
-    routes = [Route(net_id="me", commodity=_ITEM, terminals=list(result.terminals))]
-    hatches = place_hatches(problem, placements, routes, ()).hatches
+    terminals imply (:func:`_hatches`)."""
     return LayoutResult(
         status=LayoutStatus.VALID,
         seed=0,
         placements=list(placements),
-        hatches=list(hatches),
+        hatches=_hatches(problem, result),
         me_networks=list(result.networks),
     )
 
 
 def _without(problem: InputIR, failed: Collection[str]) -> InputIR:
     """``problem`` with the ``failed`` networks gone: their endpoints and nets dropped, and their
-    infrastructure kept as plain blocks, so the validator judges only what was laid."""
+    infrastructure kept as plain blocks, so the validator judges only what was laid. Each network
+    left keeps the colour it was laid in: a subnet left unset is dealt the first colour no other
+    asks for, which dropping one before it would otherwise change."""
     if not failed:
         return problem
     machines = []
@@ -407,7 +436,13 @@ def _without(problem: InputIR, failed: Collection[str]) -> InputIR:
             "machines": [m.model_dump() for m in machines],
             "nets": [n.model_dump() for n in problem.nets if n.me_network not in failed],
             "me": MEConfig(
-                networks=[n for n in problem.me.networks if n.id not in failed]
+                networks=[
+                    n.model_copy(update={"colour": problem.me.colour(n.id)})
+                    if n.mode is MEMode.SUBNET
+                    else n
+                    for n in problem.me.networks
+                    if n.id not in failed
+                ]
             ).model_dump(),
         }
     )
@@ -424,10 +459,17 @@ def _assert_validates(
 def _route(
     problem: InputIR,
     placements: Sequence[Placement],
+    *,
+    claimed_cells: Mapping[str, Collection[Cell]] | None = None,
     endpoint_faces: Mapping[tuple[str, str], Collection[Facing]] | None = None,
 ) -> MERouteResult:
     """``route_me``, with both checks run on whatever it lays."""
-    result = route_me(problem, placements, endpoint_faces=endpoint_faces or {})
+    result = route_me(
+        problem,
+        placements,
+        claimed_cells=claimed_cells or {},
+        endpoint_faces=endpoint_faces or {},
+    )
     _check_layout(problem, placements, result)
     _assert_validates(problem, placements, result)
     return result
@@ -789,9 +831,76 @@ def test_an_endpoint_face_pin_narrows_where_it_docks() -> None:
     (device,) = _network(pinned).devices
     assert (device.cell.as_tuple(), device.side) == ((3, 0, 1), Facing.WEST)
 
-    nowhere = route_me(problem, placements, endpoint_faces={("a", "out"): [Facing.NORTH]})
-    assert nowhere.infeasibility is not None
-    assert nowhere.infeasibility.constraint == "face_reachability"
+    for pin in ([Facing.NORTH], []):  # its front, which carries no I/O; and no face at all
+        nowhere = route_me(problem, placements, endpoint_faces={("a", "out"): pin})
+        assert nowhere.infeasibility is not None
+        assert nowhere.infeasibility.constraint == "face_reachability"
+        assert "pinned to faces" in nowhere.infeasibility.detail
+
+
+def test_a_face_pin_on_no_device_is_a_programming_error() -> None:
+    machines = [_single("a", [_take()]), stub(), _link("items", network=MAIN)]
+    placements = [at("a", 2, 0, 1, Facing.NORTH), at("stub", 0, 0, 1, Facing.WEST)]
+    problem = _problem(CellBox(sx=5, sy=1, sz=4), machines, [ATTACHED])
+    for key in (("a", "nope"), ("b", "out"), ("items", "bus")):  # a link's bus is no device
+        with pytest.raises(ValueError, match="endpoint_faces"):
+            route_me(problem, placements, endpoint_faces={key: [Facing.EAST]})
+
+
+def test_a_dual_interface_whose_ports_share_no_face_is_refused() -> None:
+    dual = endpoint("out", ("items", "fluid"), MEDeviceKind.DUAL_INTERFACE)
+    ports = [
+        _port("items", _OUT, faces=(RelativeFace.LEFT,)),
+        _port("fluid", _OUT, _FLUID, faces=(RelativeFace.RIGHT,)),
+    ]
+    machines = [_single("a", [dual], ports), stub()]
+    placements = [at("a", 2, 0, 1, Facing.NORTH), at("stub", 0, 0, 1, Facing.WEST)]
+    problem = _problem(CellBox(sx=5, sy=1, sz=4), machines, [ATTACHED])
+    result = route_me(problem, placements)
+    assert result.infeasibility is not None
+    assert "share no face" in result.infeasibility.detail
+
+
+def test_claimed_cells_are_not_docked_on_again() -> None:
+    """What a machine's other connections hold: a single block's dock cell, a multiblock's casing
+    cell. The device docks elsewhere."""
+    machines = [_single("a", [_take()]), stub()]
+    placements = [at("a", 2, 0, 1, Facing.NORTH), at("stub", 0, 0, 1, Facing.WEST)]
+    problem = _problem(CellBox(sx=5, sy=1, sz=4), machines, [ATTACHED])
+    dock = _network(_route(problem, placements)).devices[0].cell.as_tuple()
+    held = _route(problem, placements, claimed_cells={"a": [dock]})
+    assert _network(held).devices[0].cell.as_tuple() != dock
+
+    gt = _gt_hatch("out", MEDeviceKind.GT_OUTPUT_BUS_ME, 2710, "OutputBus")
+    mb = _multiblock("mb", [gt], [_port("out", _OUT)])
+    placements = [at("mb", 1, 0, 1, Facing.NORTH), at("stub", 0, 0, 3, Facing.WEST)]
+    problem = _problem(CellBox(sx=4, sy=2, sz=4), [mb, stub()], [ATTACHED])
+    casing = _network(_route(problem, placements)).devices[0].cell.as_tuple()
+    held = _route(problem, placements, claimed_cells={"mb": [casing]})
+    assert _network(held).devices[0].cell.as_tuple() != casing
+
+
+def test_a_port_split_across_two_hatches_gets_both() -> None:
+    """A port too fast for one device has two endpoints (``share`` 0.5 each): two GT ME hatches on
+    two casing cells, each with its own terminal, though the two terminals name one port."""
+    ends = [
+        endpoint(
+            f"out{i}",
+            ("out",),
+            MEDeviceKind.GT_OUTPUT_BUS_ME,
+            gt_mid=2710,
+            hatch_kind="OutputBus",
+            share=0.5,
+        )
+        for i in (1, 2)
+    ]
+    mb = _multiblock("mb", ends, [_port("out", _OUT)])
+    placements = [at("mb", 1, 0, 1, Facing.NORTH), at("stub", 0, 0, 3, Facing.WEST)]
+    problem = _problem(CellBox(sx=4, sy=2, sz=4), [mb, stub()], [ATTACHED])
+    result = _route(problem, placements)
+    assert len(result.terminals) == 2
+    assert {t.port_id for t in result.terminals} == {"out"}
+    assert len({d.cell for d in _network(result).devices}) == 2
 
 
 # ------------------------------------------------------------------ refusals and failures
@@ -1000,6 +1109,21 @@ def test_an_unplaced_machine_is_a_face_reachability_failure() -> None:
     assert result.networks == ()
 
 
+def test_two_devices_of_one_machine_on_its_one_free_cell_are_refused() -> None:
+    """The machine's export bus and interface both want its one free cell from the same side: the
+    first to dock claims it, so whichever comes second has nowhere left, in either order."""
+    machines = [_single("a", [_feed(), _take()]), stub()]
+    placed = [at("a", 1, 0, 0, Facing.NORTH), at("stub", 0, 0, 1, Facing.WEST)]
+    problem = _problem(
+        CellBox(sx=3, sy=1, sz=2), machines, [ATTACHED], reserved=[(0, 0, 0), (2, 0, 0)]
+    )
+    result = route_me(problem, placed)
+    _check_layout(problem, placed, result)
+    assert result.infeasibility is not None
+    assert result.infeasibility.constraint == "face_reachability"
+    assert "no free cell" in result.infeasibility.detail
+
+
 def test_a_machine_walled_off_from_the_stub_is_a_routing_failure() -> None:
     """Reserved cells cut the region in two: the machine has free faces, but no way to them."""
     machines = [_single("a", [_feed()]), stub()]
@@ -1081,16 +1205,19 @@ def _me_problems(draw: st.DrawFn) -> tuple[InputIR, list[Placement], list[Cell]]
             if cell is not None:
                 facing = draw(st.sampled_from(_outward(cell, region)))
                 place(stub(f"stub{i}", facing=facing), cell, facing)
-    if not networks or draw(st.booleans()):
-        networks.append(MENetworkSpec(id=SUB, mode=MEMode.SUBNET))
+    for sid in (SUB, SUB2):  # up to two subnets, each a controller or ad hoc
+        wanted: bool = not networks or draw(st.booleans())
+        if not wanted:
+            continue
+        networks.append(MENetworkSpec(id=sid, mode=MEMode.SUBNET))
         if draw(st.booleans()) and (cell := pick(cells)) is not None:
-            place(controller(), cell, Facing.NORTH)
+            place(controller(f"{sid}-ctrl", network=sid), cell, Facing.NORTH)
         if draw(st.booleans()) and (cell := pick(edge)) is not None:
             facing = draw(st.sampled_from(_outward(cell, region)))
             kind = draw(st.sampled_from([MEDeviceKind.STORAGE_BUS, MEDeviceKind.FLUID_STORAGE_BUS]))
-            place(_link("link", kind, facing=facing), cell, facing)
+            place(_link(f"{sid}-link", kind, network=sid, facing=facing), cell, facing)
         if draw(st.booleans()) and (cell := pick(cells)) is not None:
-            place(_acceptor(), cell, Facing.NORTH)
+            place(_acceptor(f"{sid}-acc", network=sid), cell, Facing.NORTH)
     ids = [n.id for n in networks]
 
     def on() -> str:
@@ -1113,11 +1240,25 @@ def _me_problems(draw: st.DrawFn) -> tuple[InputIR, list[Placement], list[Cell]]
             # export bus before an input bus, and a fluid output through GT's ME hatch.
             ends: list[MEEndpoint] = []
             ports: list[Port] = []
-            out = draw(st.sampled_from([None, "gt", "interface"]))
+            out = draw(st.sampled_from([None, "gt", "split", "interface"]))
             if out == "gt":
                 ends.append(
                     _gt_hatch("out", MEDeviceKind.GT_OUTPUT_BUS_ME, 2710, "OutputBus", on())
                 )
+            elif out == "split":  # a port too fast for one hatch: two, half its rate each
+                network = on()
+                ends += [
+                    endpoint(
+                        f"out{i}",
+                        ("out",),
+                        MEDeviceKind.GT_OUTPUT_BUS_ME,
+                        network=network,
+                        gt_mid=2710,
+                        hatch_kind="OutputBus",
+                        share=0.5,
+                    )
+                    for i in (1, 2)
+                ]
             elif out == "interface":
                 ends.append(
                     endpoint(
@@ -1181,11 +1322,51 @@ def _me_problems(draw: st.DrawFn) -> tuple[InputIR, list[Placement], list[Cell]]
     return _problem(region, machines, networks, reserved), placements, extra
 
 
+@st.composite
+def _combs(draw: st.DrawFn) -> tuple[InputIR, list[Placement], list[Cell]]:
+    """9 to 20 machines along both sides of one corridor, fed from a stub at its end (or one at
+    each end), or from a controller there: more devices than a cable holding a part carries, so
+    the trunk near the root has to stay bare and dense, and too many for a flat region to fit."""
+    n = draw(st.integers(9, 20))
+    half = (n + 1) // 2
+    region = CellBox(sx=half + 2 + draw(st.integers(0, 2)), sy=draw(st.integers(1, 2)), sz=3)
+    root = draw(st.sampled_from(["stub", "stubs", "controller"]))
+    network = SUB if root == "controller" else MAIN
+    machines: list[Machine] = []
+    placements: list[Placement] = []
+    if root == "controller":
+        machines.append(controller(network=SUB))
+        placements.append(at("ctrl", 0, 0, 1, Facing.NORTH))
+        spec = MENetworkSpec(id=SUB, mode=MEMode.SUBNET)
+    else:
+        machines.append(stub("stub0"))
+        placements.append(at("stub0", 0, 0, 1, Facing.WEST))
+        if root == "stubs":
+            machines.append(stub("stub1", facing=Facing.EAST))
+            placements.append(at("stub1", region.sx - 1, 0, 1, Facing.EAST))
+        spec = MENetworkSpec(id=MAIN, mode=MEMode.ATTACHED, me_channel_budget=64)
+    slots = [(x, z) for x in range(1, half + 1) for z in (0, 2)][:n]
+    for i, (x, z) in enumerate(slots):
+        facing = Facing.NORTH if z == 0 else Facing.SOUTH
+        machines.append(_single(f"m{i}", [_feed(network=network)], facing=facing))
+        placements.append(at(f"m{i}", x, 0, z, facing))
+    taken = {p.cell.as_tuple() for p in placements}
+    free = sorted(
+        (x, y, z)
+        for x in range(region.sx)
+        for y in range(region.sy)
+        for z in range(region.sz)
+        if (x, y, z) not in taken
+    )
+    reserved = draw(st.lists(st.sampled_from(free), max_size=2, unique=True))
+    return _problem(region, machines, [spec], reserved), placements, []
+
+
 @settings(
     max_examples=property_examples(200),
     suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much],
 )
-@given(_me_problems())
+@given(st.one_of(_me_problems(), _combs()))
 def test_whatever_is_laid_is_a_forest_ae_runs(
     case: tuple[InputIR, list[Placement], list[Cell]],
 ) -> None:
