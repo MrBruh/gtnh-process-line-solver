@@ -44,13 +44,24 @@ layer dump without checking connectivity and is wrong. The router forbids the sh
 do, in three places, and #164 tracks them.
 
 **Its pipe wiring is not evidence; everything else in it is.** All 15 of its pipe and cable
-blocks carry `mConnections = 0`. The cause is how the file was saved, not the build: Schematica's
-GUI save reads the *client* world, and GT never syncs a pipe's `mConnections` to the client
-(`MetaPipeEntity.java:873`), so a GUI save of any GT build reads every pipe unwired. Our own
-exporter writes the wiring, on 63 of 63 pipes for the same line. So the box size, the block counts
-and the run shapes above can be trusted, while which net each run carries cannot be read off this
-file at all. `sand-parallel-exported.schematic` is this build written by our own exporter and built
-in game, and it is the file to read for topology.
+blocks carry `mConnections = 0`. The cause is the GT version it was saved on, not the build and
+not Schematica. The file is stamped GT 5.09.51.476 (the 2.8 pack), and Schematica's GUI save reads
+the *client* world. That GT synced a pipe's connections to the client only on its
+`BaseMetaPipeEntity`, and an item pipe's or cable's own `saveNBTData` then writes its own copy,
+never synced and so 0, over them. GT 5.09.54 syncs that copy too
+(`MetaPipeEntity.receiveClientEvent`).
+
+Measured on 2026-10-04 in the 2.9.0-beta-3 instance (GT 5.09.54.133): a GUI save and a
+`/schematicaSave` of the same 3x3x4 parallel sand build have all 15 pipe and cable blocks wired,
+with identical connection masks, facings and auto-output settings. (The build has since been
+rebuilt with huge brass pipes, so those saves are not this file, and they are not committed.) The
+two differ only in live state, which the GUI save lacks or has stale: items in transit, stored
+energy, progress.
+
+Our own exporter writes the wiring, on 63 of 63 pipes for the same line. So the box size, the block
+counts and the run shapes above can be trusted, while which net each run carries cannot be read off
+this file at all. `sand-parallel-exported.schematic` is this build written by our own exporter and
+built in game, and it is the file to read for topology; a fresh 2.9 save of a build would serve too.
 
 **Its facings are faithful**, because GT does sync those. An earlier version of this section
 called them unreliable too. That came from reading `mFacing` as the front, before #249 settled that

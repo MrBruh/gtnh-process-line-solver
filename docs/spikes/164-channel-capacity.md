@@ -504,8 +504,8 @@ correct value is 1.
 **R4. I could not determine whether the reference build actually runs.** It is a saved snapshot;
 every pipe in it has `mConnections = 0`, which is player state rather than a block property
 (`docs/DOMAIN.md:261-265`), so the snapshot carries no wiring to read. (Later found: the save
-reads 0 because a Schematica GUI save reads the client world, where GT never syncs
-`mConnections`; see `tests/golden/schematic/README.md`.) The topology I reconstructed is from geometry, facings, covers and inventory
+reads 0 because it was made on GT 5.09.51, whose client copy of a pipe never received its
+connections; a GUI save on GT 5.09.54 (2.9) keeps them. See `tests/golden/schematic/README.md`.) The topology I reconstructed is from geometry, facings, covers and inventory
 contents, and it is self-consistent (stone in the input chest with a NORTH cover, 39 sand in a
 stage-3 output slot), but I have not seen it run and there is no headless simulator
 (`docs/TESTING.md:5-9`).
