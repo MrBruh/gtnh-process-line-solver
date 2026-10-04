@@ -196,7 +196,8 @@ from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 from gtnh_solver.ir.nets import SINGLE_BLOCK_IO_FACES, connection_counts
 
 from ._errors import AdapterError, AdapterWarning, InfeasiblePlanError
-from .me import choose_me, dataset_identity, net_list, plan_digest
+from .me import choose_me, dataset_identity, line_tier, net_list, plan_digest
+from .me_build import build_me
 from .plan import (
     Edge,
     MachineHandler,
@@ -511,6 +512,9 @@ class _MappedPlan:
     proven_single_ids: frozenset[str]
     planned: Mapping[str, PlannedStructure]
     group_of: Mapping[str, str]
+    #: Each machine's shortest recipe, in ticks, as it runs: what bounds a single block's fluid push
+    #: into an ME interface (``me_build``).
+    recipe_ticks: Mapping[str, float]
 
 
 def _map_plan(
@@ -550,6 +554,7 @@ def _map_plan(
     # What each machine's tiered parts are built from (#312), keyed by machine id and stamped on
     # after the power synthesis, which settles the tier the machine casing follows.
     planned: dict[str, PlannedStructure] = {}
+    recipe_ticks: dict[str, float] = {}
     for node in plan.nodes:
         # Every recipe the node's machines run. The first is the node's own, and it alone says what
         # machine this is (handler, controller, footprint); the rest are recipes it time-shares.
@@ -603,6 +608,12 @@ def _map_plan(
         )
         if structure is not None:
             planned.update(dict.fromkeys(_instance_ids(node), structure))
+        recipe_ticks.update(
+            dict.fromkeys(
+                _instance_ids(node),
+                min(_effective_duration(r, n) for r, n in sections),
+            )
+        )
         # Every machine of a parallel node is the same build with the same ports and draw; they
         # differ only in id and, later, in where the placer puts them.
         machines.extend(
@@ -672,6 +683,7 @@ def _map_plan(
         multiblock_ids=frozenset(multiblock_ids),
         proven_single_ids=frozenset(proven_single_ids),
         planned=planned,
+        recipe_ticks=recipe_ticks,
         group_of=group_of,
     )
 
@@ -685,6 +697,17 @@ def _close(mapped: _MappedPlan, me: MEConfig, chosen: Mapping[str, str]) -> Inpu
         for net in mapped.nets
     ]
     plan = mapped.plan
+    # What the choice needs built (#335): before the power synthesis, so an ME device's face counts
+    # beside a machine's cable, and before the merges, which leave a net on ME alone.
+    machines, nets = build_me(
+        machines,
+        nets,
+        me,
+        storage_ids=mapped.storage_ids,
+        multiblock_ids=mapped.multiblock_ids,
+        line_tier=line_tier(mapped.machines, mapped.storage_ids),
+        recipe_ticks=mapped.recipe_ticks,
+    )
     # The export has no power source; invent it. ``single_block_ids`` is what lets the synthesis
     # state a basic machine's own intake ceiling without guessing at a multiblock's.
     # _supply_tier absorbs an implausible draw from the MrBruh fork's recipe model. An arodoid
