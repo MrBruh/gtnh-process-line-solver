@@ -13,6 +13,8 @@ validator lanes. Only the value types (``CellCoord``, ``CellBox``) surface here.
 - ``geometry``   - CellCoord, CellBox (integer cell-grid value types)
 - ``input_ir``   - Port, FaceSpec, HatchSlot, StructureBlock, Machine, MachineFaceRef, Net,
                    METoggles, PinnedIO, InputIR  (+ INPUT_IR_VERSION)
+- ``me``         - the ME (AE2) vocabulary: AEColor, MECableKind, MEDeviceKind, MEHatchPolicy,
+                   MECards
 - ``nets``       - net helpers shared by the router and the system-IO summary
 - ``output``     - Placement, PlacedHatch, Segment, Terminal, Route, RouteMaterial,
                    LayoutMetrics, Infeasibility, LayoutResult  (+ LAYOUT_RESULT_VERSION)
@@ -47,6 +49,7 @@ from .input_ir import (
     Port,
     StructureBlock,
 )
+from .me import AEColor, MECableKind, MECards, MEDeviceKind, MEHatchPolicy
 from .output import (
     LAYOUT_RESULT_VERSION,
     AutoConnection,
@@ -87,6 +90,12 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
     "METoggles",
     "PinnedIO",
     "InputIR",
+    # ME (AE2) vocabulary
+    "AEColor",
+    "MECableKind",
+    "MEDeviceKind",
+    "MEHatchPolicy",
+    "MECards",
     # output schema
     "Placement",
     "PlacedHatch",
@@ -405,5 +414,11 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   exports the dump's default build, Bronze solid casing on LV machine casings, where GT refuses
 #   the nitrobenzene recipe and HV hatches keep the plant from forming at all. A v6 payload is
 #   refused on parse; re-adapt the plan.
+#
+# Both roots (additive, no version bump) - added the `ir.me` module, the ME (AE2) vocabulary:
+#   `AEColor`, `MECableKind`, `MEDeviceKind`, `MEHatchPolicy` and `MECards` (#331). Value types
+#   only: neither root carries one yet, so no payload changes and nothing is bumped. The contracts
+#   that use them (the ME networks a net rides, the ME devices a layout places) bump their roots
+#   when they land.
 #
 # ---------------------------------------------------------------------------

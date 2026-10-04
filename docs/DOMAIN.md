@@ -568,6 +568,23 @@ nets, since a source no cable reaches would be placed and exported connected to 
 Each powered machine keeps its energy ports, so the preview still states the draw per tier for
 whatever delivers it.
 
+Building the ME side for real is epic #329. Its rules are read from the pack's own AE2,
+AE2FluidCraft and GT source and cited, file and line, in
+[`spikes/329-me-ae2.md`](spikes/329-me-ae2.md); `dataset/me.py` holds them as data (#331): what
+each cable carries (8 channels, 32 on dense cable), what each bus moves with its cards, GT's own ME
+hatches by mID, AE2's power figures, and which device serves a machine's port. In short:
+
+- **A port's ME device** is the first that keeps up, one and then two: on a multiblock, GT's ME
+  hatch where the hatch policy and the line's tier allow it (an ME output bus flushes 39 items/t),
+  else a normal hatch with an AE2 part on the cable in front of it (a normal output bus pushes
+  `8 x (tier + 1)^2` items/t into an interface); on a single block, an export bus on an input face,
+  an interface on its auto-output face, or an import bus.
+- **An interface takes a GT push straight into the network**, so its rate is the pusher's. A single
+  block pushes fluid 1000 mB at a time, on each completion and every 20 ticks; a faster fluid output
+  is drained by a fluid import bus instead.
+- **Cards**: the fewest Acceleration Cards that keep up, and Hyper-Acceleration Cards only on a line
+  that has reached LuV, which their recipe needs.
+
 ## Multiblocks
 
 Represented as a **bounding box + controller-face and hatch/bus-face metadata** (multiblocks
