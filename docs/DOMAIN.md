@@ -14,15 +14,17 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
 - **Litematica does NOT support 1.7.10.** The in-game schematic consumer is
   **Schematica (GT:NH's fork)**. Target classic `.schematic`, not `.litematic`. What the fork
   does with one, read from its source:
-  - It is client-only, and a loaded file is a **hologram**. Its printer places each block by a
-    simulated right-click with the block's pick-block item and **applies no tile-entity NBT**, and
-    it has no paste command. So the facings, pipe wiring and auto-output an export records show in
-    the hologram only; the player sets them in game.
+  - A loaded file is a client-side **hologram**. Its printer places each block by a simulated
+    right-click with the block's pick-block item and **applies no tile-entity NBT**, and it has no
+    paste command. GT then places the block as if by hand: a machine is the right machine (the
+    pick-block reads the hologram's `mID`) but fronts the player, and a pipe connects only to the
+    block it was clicked against. So the facings, pipe wiring and auto-output an export records
+    show in the hologram only; the player sets them in game.
   - A **GUI save reads the client world**, and GT never syncs a pipe's `mConnections` to the
     client, so every pipe in such a save reads unwired. Facings and covers are synced, and they
     save faithfully (`tests/golden/schematic/README.md`). `/schematicaSave x1 y1 z1 x2 y2 z2 name`
-    reads the server world instead (single-player), and writes to a per-player folder rather than
-    `schematics/` itself.
+    reads the server world instead. In single-player it writes to the same `schematics/` folder
+    as the GUI; on a dedicated server, to that player's own folder on the server.
   - Block metadata is kept to **4 bits**, which loses a GT 2.9 frame's material (#212).
 - There is **no headless GT simulator**, so true correctness is only verifiable in-game.
 
