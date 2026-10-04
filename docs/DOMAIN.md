@@ -34,7 +34,9 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
   - Only **block ids** are remapped on load (through `SchematicaMapping`). Tile-entity NBT loads
     as written, so anything in it that names an item by number, a cover's `id` or an inventory
     slot, is right only in a world with the same item ids. A wrong cover id loses the cover, swaps
-    in another, or can crash the client drawing it.
+    in another, or can crash the client drawing it. FML assigns item ids per world (two worlds of
+    one 2.9 instance put `gt.metaitem.01` at 7639 and 7436), and each world's `level.dat` lists
+    its own.
   - Block metadata is kept to **4 bits**, which loses a GT 2.9 frame's material (#212).
 - There is **no headless GT simulator**, so true correctness is only verifiable in-game.
 
@@ -133,8 +135,10 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
   previewer draws the auto-output arrow on that face on **every** single block, piped or not, so a
   builder never reads a conveyor where none is meant, and an amber marker on each cover face; the
   `.schematic` export writes that face as the block's output facing and warns about each cover,
-  since it writes no covers (a cover names its item by the world's numeric item id, which
-  Schematica does not remap; see Platform above). A machine can still pipe outputs out of two faces where
+  naming the tier that keeps up with what leaves through it (`dataset/covers.py`). It writes the
+  covers themselves only with `--world`: a cover names its item by the world's numeric item id,
+  which Schematica does not remap (see Platform above), so the export reads the target world's own
+  table from its `level.dat`, and the file is then right for that world only. A machine can still pipe outputs out of two faces where
   they are not merged (an item output beside a fluid one, or a 1x1x1 machine not proven a single
   block): that build needs one cover, and says so.
 - **Required-I/O-face reachability is a HARD constraint** - a blocked required output face

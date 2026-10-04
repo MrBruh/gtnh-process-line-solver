@@ -20,6 +20,7 @@ import pytest
 
 from gtnh_solver import cli
 from gtnh_solver.adapter import adapt_file
+from gtnh_solver.dataset import cover_for
 from gtnh_solver.ir import (
     AutoConnection,
     CellBox,
@@ -96,8 +97,13 @@ def _storage(mid: str, type_: str, ports: list[Port]) -> Machine:
     )
 
 
-def _port(pid: str, direction: IODirection, commodity: Commodity = Commodity.ITEM) -> Port:
-    return Port(id=pid, commodity=commodity, direction=direction)
+def _port(
+    pid: str,
+    direction: IODirection,
+    commodity: Commodity = Commodity.ITEM,
+    rate: float | None = None,
+) -> Port:
+    return Port(id=pid, commodity=commodity, direction=direction, rate=rate)
 
 
 def _net(nid: str, src: tuple[str, str], dst: tuple[str, str], commodity: Commodity) -> Net:
@@ -128,10 +134,13 @@ def _at(mid: str, x: int, y: int, z: int, facing: Facing = Facing.NORTH) -> Plac
 
 
 def _tiles(
-    problem: InputIR, layout: LayoutResult, manifest: TextureManifest
+    problem: InputIR,
+    layout: LayoutResult,
+    manifest: TextureManifest,
+    item_ids: dict[str, int] | None = None,
 ) -> dict[str, nbt.Compound]:
     """``machine_id -> its tile entity`` in the export of ``layout``."""
-    root = build_schematic(problem, layout, manifest=manifest)
+    root = build_schematic(problem, layout, manifest=manifest, item_ids=item_ids)
     lo = build_scene(problem, layout)["bounds"]["min"]
     at = {
         (int(t["x"]) + int(lo[0]), int(t["y"]) + int(lo[1]), int(t["z"]) + int(lo[2])): t
@@ -142,12 +151,16 @@ def _tiles(
     }
 
 
-def _two_face_hammer() -> tuple[InputIR, LayoutResult]:
+def _two_face_hammer(rate_b: float | None = None) -> tuple[InputIR, LayoutResult]:
     """A hammer at (1,0,1) facing north that auto-outputs one item east into a chest and pipes the
-    other out of its south face into a second chest, one pipe block between them."""
+    other out of its south face into a second chest, one pipe block between them. ``rate_b`` is
+    what leaves through the south face, which takes the cover."""
     hammer = _hammer(
         "h",
-        [_port("output:a", IODirection.OUTPUT), _port("output:b", IODirection.OUTPUT)],
+        [
+            _port("output:a", IODirection.OUTPUT),
+            _port("output:b", IODirection.OUTPUT, rate=rate_b),
+        ],
     )
     chest_a = _storage("a", "Super Chest", [_port("in", IODirection.INPUT)])
     chest_b = _storage("b", "Super Chest", [_port("in", IODirection.INPUT)])
@@ -336,24 +349,85 @@ def test_a_second_output_face_is_named_for_a_conveyor() -> None:
 
 
 def test_covers_are_grouped_by_cover_and_ordered_by_position() -> None:
+    """By kind, then tier, then where they stand: the order a builder fetches and fits them."""
+    lv_conveyor, hv_conveyor = cover_for("conveyor", None, "LV"), cover_for("conveyor", 1.0, "LV")
     covers = [
-        ("B", (2, 0, 0), CoverFace(Facing.UP, "pump", ("n1",))),
-        ("A", (1, 0, 0), CoverFace(Facing.EAST, "conveyor", ("n2",))),
-        ("A", (0, 0, 0), CoverFace(Facing.SOUTH, "conveyor", ("n3",))),
+        ("B", (2, 0, 0), CoverFace(Facing.UP, "pump", ("n1",)), cover_for("pump", None, "LV")),
+        ("A", (1, 0, 0), CoverFace(Facing.EAST, "conveyor", ("n2",)), lv_conveyor),
+        ("A", (0, 0, 0), CoverFace(Facing.SOUTH, "conveyor", ("n3",)), lv_conveyor),
+        ("C", (3, 0, 0), CoverFace(Facing.WEST, "conveyor", ("n4",)), hv_conveyor),
     ]
     with pytest.warns(schematic_core.SchematicWarning) as caught:
-        schematic_core._warn_about_covers(covers)
+        schematic_core._warn_about_covers(covers, written=False)
     message = str(caught[0].message)
     assert message.endswith(
-        "conveyor x2: south face of A at (0, 0, 0), east face of A at (1, 0, 0); "
-        "pump x1: up face of B at (2, 0, 0)"
+        "LV conveyor x2: south face of A at (0, 0, 0), east face of A at (1, 0, 0); "
+        "HV conveyor x1: west face of C at (3, 0, 0); "
+        "LV pump x1: up face of B at (2, 0, 0)"
     )
+
+
+#: ``gregtech:gt.metaitem.01``'s id in the maintainer's 2.9 "New World", read from its level.dat.
+_WORLD = {"gregtech:gt.metaitem.01": 7639}
+
+
+def test_without_a_world_no_cover_is_written_and_the_warning_says_how() -> None:
+    problem, layout = _two_face_hammer()
+    with pytest.warns(schematic_core.SchematicWarning, match=r"only for a named world \(--world\)"):
+        tiles = _tiles(problem, layout, _manifest())
+    assert "gt.covers" not in tiles["h"]
+
+
+def test_with_a_worlds_item_ids_the_cover_is_written_on_its_face() -> None:
+    """GT's own shape: the side, the world's item id with the meta above it, export, default rate."""
+    problem, layout = _two_face_hammer()
+    with pytest.warns(schematic_core.SchematicWarning, match="The ghost shows each one"):
+        tiles = _tiles(problem, layout, _manifest(), item_ids=_WORLD)
+    (cover,) = tiles["h"]["gt.covers"]
+    assert cover == {"s": _FORGE[Facing.SOUTH], "id": 7639 | 32630 << 16, "d": 0, "tra": 0}
+    assert "gt.covers" not in tiles["a"], "a chest that only receives needs no cover"
+
+
+def test_a_written_cover_matches_a_saved_one_tag_for_tag() -> None:
+    """Against the HV conveyor on the Super Chest of the maintainer's 2.9 save, from the same world.
+
+    Same tags, same tag types, and for the same world and cover the same encoded id: the save is
+    what GT itself wrote, so this is the check that GT reads ours back as that conveyor.
+    """
+    save = read_schematic(_ROOT / "tests/golden/schematic/sand-parallel-29-gui.schematic")
+    chest = save.tile_at(2, 0, 0)
+    assert chest is not None
+    (saved,) = chest.raw["gt.covers"]
+    problem, layout = _two_face_hammer(rate_b=1.0)  # 0.64 < 1.0 <= 3.2 items/t: an HV conveyor
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", schematic_core.SchematicWarning)
+        tiles = _tiles(problem, layout, _manifest(), item_ids=_WORLD)
+    (written,) = tiles["h"]["gt.covers"]
+    assert {k: type(v) for k, v in written.items()} == {k: type(v) for k, v in saved.items()}
+    assert tiles["h"]["gt.covers"].element_type == chest.raw["gt.covers"].element_type
+    assert written["id"] == saved["id"]
+
+
+@pytest.mark.parametrize(
+    ("rate", "tier"),
+    [(None, "LV"), (0.16, "LV"), (0.5, "MV"), (1.0, "HV"), (10.0, "EV"), (100.0, "IV")],
+)
+def test_the_cover_tier_keeps_up_with_what_leaves_the_face(rate: float | None, tier: str) -> None:
+    problem, layout = _two_face_hammer(rate_b=rate)
+    with pytest.warns(schematic_core.SchematicWarning, match=f"{tier} conveyor x1: south face"):
+        _tiles(problem, layout, _manifest())
+
+
+def test_a_world_with_no_gt_item_is_refused_rather_than_exported_without_covers() -> None:
+    problem, layout = _two_face_hammer()
+    with pytest.raises(SchematicError, match=r"no gregtech:gt\.metaitem\.01"):
+        build_schematic(problem, layout, manifest=_manifest(), item_ids={"minecraft:stick": 280})
 
 
 def test_no_covers_and_no_filters_warn_nothing() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("error", schematic_core.SchematicWarning)
-        schematic_core._warn_about_covers([])
+        schematic_core._warn_about_covers([], written=False)
         schematic_core._warn_about_filters([])
         schematic_core._warn_about_output_side([])
 
