@@ -18,8 +18,13 @@ from gtnh_solver.ir import (
     CellBox,
     Commodity,
     InputIR,
+    LayoutResult,
+    Machine,
     MEConfig,
+    MEDeviceKind,
+    MEDeviceSpec,
     MEMode,
+    MENetworkLayout,
     MENetworkSpec,
     MEPlan,
     MEStorage,
@@ -31,6 +36,7 @@ from gtnh_solver.ir import (
 )
 from gtnh_solver.ir.nets import connection_counts
 from tests._helpers import consumer, net, on_me, power_source, producer
+from tests._me_fixtures import attached_line, endpoint, stub
 
 
 def _attached(network_id: str = "main") -> MENetworkSpec:
@@ -193,3 +199,76 @@ def test_an_me_plan_round_trips_and_checks_what_it_names() -> None:
         )
     with pytest.raises(ValidationError, match="MEPlan payload declares contract version 0"):
         MEPlan.model_validate(me_plan.model_dump() | {"version": 0})
+
+
+# ------------------------------------------------------------------ InputIR v9 and LayoutResult v5
+
+
+def test_a_gt_me_hatch_names_its_mid_and_nothing_else_does() -> None:
+    MEDeviceSpec(kind=MEDeviceKind.GT_OUTPUT_BUS_ME, gt_mid=2710)
+    with pytest.raises(ValidationError, match="names its mID"):
+        MEDeviceSpec(kind=MEDeviceKind.GT_OUTPUT_BUS_ME)
+    with pytest.raises(ValidationError, match="names its mID"):
+        MEDeviceSpec(kind=MEDeviceKind.EXPORT_BUS, gt_mid=2710)
+
+
+def test_an_endpoint_serves_its_machines_ports_on_its_network() -> None:
+    problem, _ = attached_line()
+    a = problem.machines[0]
+    with pytest.raises(ValidationError, match="unknown port"):
+        Machine.model_validate(
+            a.model_dump()
+            | {"me_endpoints": [endpoint("x", ("nope",), MEDeviceKind.EXPORT_BUS).model_dump()]}
+        )
+    with pytest.raises(ValidationError, match="two ME endpoints with one id"):
+        Machine.model_validate(
+            a.model_dump() | {"me_endpoints": [a.me_endpoints[0].model_dump()] * 2}
+        )
+    with pytest.raises(ValidationError, match="only an infrastructure block"):
+        Machine.model_validate(
+            a.model_dump()
+            | {"me_endpoints": [endpoint("x", (), MEDeviceKind.EXPORT_BUS).model_dump()]}
+        )
+    payload = problem.model_dump()
+    payload["me"] = {"networks": [], "power_external": False}
+    payload["nets"] = [n | {"me_network": None} for n in payload["nets"]]
+    with pytest.raises(ValidationError, match="unknown ME network 'main'"):
+        InputIR.model_validate(payload)  # the endpoints still name 'main'
+    payload = problem.model_dump()
+    payload["nets"] = [n | {"me_network": None} for n in payload["nets"]]
+    with pytest.raises(ValidationError, match="not ME network 'main' alone"):
+        InputIR.model_validate(payload)  # an endpoint on a port whose net is piped
+
+
+def test_infrastructure_names_its_network_and_faces_out() -> None:
+    attach = stub()
+    with pytest.raises(ValidationError, match="names its network"):
+        Machine.model_validate(attach.model_dump() | {"me_network": None})
+    with pytest.raises(ValidationError, match="must be outside_front"):
+        Machine.model_validate(attach.model_dump() | {"outside_front": False})
+    with pytest.raises(ValidationError, match="names its network"):
+        Machine.model_validate(attach.model_dump() | {"me_role": None})
+
+
+def test_a_layout_lists_each_network_and_cable_once() -> None:
+    _, layout = attached_line()
+    network = layout.me_networks[0]
+    with pytest.raises(ValidationError, match="lists a cable cell twice"):
+        MENetworkLayout.model_validate(
+            network.model_dump() | {"cables": [c.model_dump() for c in network.cables] * 2}
+        )
+    with pytest.raises(ValidationError, match="lists an ME network twice"):
+        LayoutResult.model_validate(
+            layout.model_dump() | {"me_networks": [network.model_dump()] * 2}
+        )
+    assert network.cells() == {c.cell.as_tuple() for c in network.cables}
+
+
+def test_the_contracts_round_trip_and_refuse_older_versions() -> None:
+    problem, layout = attached_line()
+    assert InputIR.model_validate_json(problem.model_dump_json()) == problem
+    assert LayoutResult.model_validate_json(layout.model_dump_json()) == layout
+    with pytest.raises(ValidationError, match="contract version 8"):
+        InputIR.model_validate(problem.model_dump() | {"version": 8})
+    with pytest.raises(ValidationError, match="contract version 4"):
+        LayoutResult.model_validate(layout.model_dump() | {"version": 4})

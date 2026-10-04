@@ -510,6 +510,11 @@ class MENetworkLayout(StrictModel):
     cables: list[MECableCell] = Field(default_factory=list)
     devices: list[MEPlacedDevice] = Field(default_factory=list)
 
+    def cells(self) -> set[tuple[int, int, int]]:
+        """Every block this network's cables take: what any check of the ground a block stands on
+        counts, beside each route's ``Route.cells``."""
+        return {c.cell.as_tuple() for c in self.cables}
+
     @model_validator(mode="after")
     def _check(self) -> MENetworkLayout:
         cells = [c.cell for c in self.cables]

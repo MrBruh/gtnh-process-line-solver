@@ -105,6 +105,26 @@ Machine
                                     #  does not name is built as the dump draws it; empty for a
                                     #  single block or a plan adapted without the dataset.
                                     #  InputIR v7 (BREAKING, #312)
+  me_endpoints: [MEEndpoint]        # the ME devices this machine needs built: one per AE2 part
+                                    #  or GT ME hatch serving its ports on nets riding ME, and a
+                                    #  link's one storage bus. InputIR v9 (BREAKING, #333)
+  me_role: "attach" | "link" | "controller" | "acceptor" | null
+                                    # an ME infrastructure block, not a machine of the line; an
+                                    #  attach stub and a link are outside_front. InputIR v9
+  me_network: str | null            # the ME network an infrastructure block belongs to, set
+                                    #  exactly when me_role is. InputIR v9
+
+MEEndpoint
+  id: str                           # unique on its machine
+  network: str                      # an InputIR.me network; every port it serves rides it
+  ports: [str]                      # the machine's ports it serves: >= 1, or none for an
+                                    #  infrastructure block's (a link's storage bus)
+  device: MEDeviceSpec              # { kind: MEDeviceKind, gt_mid: int | null (a GT ME hatch's,
+                                    #  and only one's), cards: MECards, config: [str] }
+  hatch_kind: str | null            # a multiblock's: the hatch slot kind it takes, the GT ME
+                                    #  hatch itself or the normal hatch its part faces
+  share: float                      # its share of each port's rate, (0, 1]; a port too fast for
+                                    #  one device gets two endpoints
 
   Machine.allowed_faces(port_id, orientation) -> set[Facing] is the ONE reading of the face
   rule, shared by the router, placement, the crowding gate and the validator: an unpinned port
@@ -350,6 +370,7 @@ LayoutResult
   routes: [Route]                        # nets connected by a pipe
   auto_connections: [AutoConnection]     # nets connected by adjacency (no pipe)
   hatches: [PlacedHatch]                 # every hatch/bus the build needs (v1)
+  me_networks: [MENetworkLayout]         # the ME blocks the build needs, per network (v5, #333)
   metrics: { footprint, layers, buildability, congestion, rounds?, ... }
                                          # rounds: how many rounds of the multi-start ran, only on
                                          #  a solve given a time budget or a round count (absent,
@@ -379,6 +400,20 @@ RouteMaterial
   stand_in: bool                         # always true - the MATERIAL is representative, NOT a build
                                          #  spec; the size and thickness are real
 Terminal    { machine_id, port_id, face: Facing, cell: CellCoord }  # non-front face; cell just outside
+MENetworkLayout { id, colour: AEColor, cables: [MECableCell], devices: [MEPlacedDevice] }
+              # one InputIR.me network as built; a cell listed once. Its controller, acceptor,
+              # stub and link are placements (Machine.me_role); the stub and the link are cables
+              # too, so their cells are listed here. Which blocks join which network in game is
+              # the validator's to rebuild from these blocks: AE joins whatever compatible blocks
+              # touch. MENetworkLayout.cells() is every cable block.
+MECableCell { cell: CellCoord, kind: MECableKind, me_channels: int }
+              # me_channels: the solver's own count of channel devices routed through it, which
+              # the previewer lights; the validator never trusts it
+MEPlacedDevice { machine_id, endpoint_id, kind: MEDeviceKind, cell: CellCoord, side: Facing,
+                 gt_mid: int | null, cards: MECards, config: [str] }
+              # builds the named MEEndpoint. A part: the cable it sits on and the side it takes,
+              # facing the block it works on. A GT ME hatch: the casing cell it takes and the way
+              # its front faces, where AE reaches it
 PlacedHatch { machine_id, kind: str, cell: CellCoord, facing: Facing, port_id: str | null }
               # cell is the BODY cell the hatch replaces, inside the footprint - not the dock
               # cell outside it. port_id is null for a hatch that serves no port: an upkeep
@@ -449,7 +484,9 @@ result carries no infeasibility; `infeasible`/`partial_invalid` must carry one.
   So does `InputIR` v7: a v6 consumer that ignores `structure_blocks` draws a Chemical Plant as the
   dump's default build, a solid casing GT refuses the recipe on and machine casings below its
   hatches, on which the plant does not form. `InputIR` v8 breaks by removal: `me_toggles` is gone
-  and ME is chosen per net (`InputIR.me`, `Net.me_network`).
+  and ME is chosen per net (`InputIR.me`, `Net.me_network`). `InputIR` v9 and `LayoutResult` v5
+  break by omission: a consumer that ignores `Machine.me_endpoints` or `LayoutResult.me_networks`
+  builds a line whose nets on ME have no device and no cable.
 - **An older layout is not upgraded on read.** v2's one new field would be easy to fill in for a
   v1 payload (every v1 pipe was normal), but the rule below is only worth having if it has no
   exceptions, so a v1 layout is refused and regenerated by re-solving its plan. Nor does `size`
