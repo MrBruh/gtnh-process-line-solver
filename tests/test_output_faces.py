@@ -23,6 +23,8 @@ from gtnh_solver.ir import (
     LayoutStatus,
     Machine,
     MachineFaceRef,
+    MEDeviceKind,
+    MEEndpoint,
     Net,
     Placement,
     Port,
@@ -38,6 +40,8 @@ from gtnh_solver.output_faces import (
     output_side_takes_input,
 )
 from gtnh_solver.router._grid import FACE_ORDER
+from tests._me_fixtures import attached_line, gt_hatch_line, me_net
+from tests._me_fixtures import endpoint as me_endpoint
 
 _SOUTH_OF_ORIGIN = (0, 0, 1)
 
@@ -542,3 +546,74 @@ def test_a_machine_ejecting_straight_into_its_consumer_is_not_on_the_pipe() -> N
     assert got["a"].auto_face is Facing.SOUTH
     assert not got["a"].forbid_input_from_output
     assert not got["b"].forbid_input_from_output
+
+
+# ------------------------------------------------------------------ an ME interface (#335)
+
+
+def _attached_with(out: MEEndpoint, *extra_ports: Port) -> tuple[InputIR, LayoutResult]:
+    """The ME fixtures' attached line, with machine ``a``'s product built as ``out`` instead of an
+    interface, on the same cable cell, and ``extra_ports`` added to ``a``, each on a net on ME."""
+    problem, layout = attached_line()
+    a = problem.machines[0]
+    machine = a.model_copy(
+        update={
+            "faces": a.faces.model_copy(update={"ports": [*a.faces.ports, *extra_ports]}),
+            "me_endpoints": (a.me_endpoints[0], out),
+        }
+    )
+    nets = [
+        *problem.nets,
+        *(
+            me_net(p.id, ("a", p.id)).model_copy(update={"commodity": p.commodity})
+            for p in extra_ports
+        ),
+    ]
+    problem = InputIR.model_validate(
+        {
+            **problem.model_dump(),
+            "machines": [machine.model_dump(), *(m.model_dump() for m in problem.machines[1:])],
+            "nets": [n.model_dump() for n in nets],
+        }
+    )
+    network = layout.me_networks[0]
+    devices = [
+        d.model_copy(update={"endpoint_id": out.id, "kind": out.device.kind})
+        if d.endpoint_id == "out"
+        else d
+        for d in network.devices
+    ]
+    layout = layout.model_copy(
+        update={"me_networks": [network.model_copy(update={"devices": devices})]}
+    )
+    return problem, layout
+
+
+def test_an_me_interface_takes_the_blocks_push_through_its_face() -> None:
+    # The interface part sits east of its cable cell, against ``a``'s west face.
+    problem, layout = attached_line()
+    got = output_faces(problem, layout)
+    assert got["a"] == BlockOutputs(
+        machine_id="a", auto_face=Facing.WEST, auto_items=True, auto_fluids=False, covers=()
+    )
+    assert "b" not in got  # nothing leaves b on a face: its only port is an input
+
+
+def test_a_dual_interface_takes_items_and_fluids_through_one_face() -> None:
+    dual = me_endpoint("out", ("out", "fout"), MEDeviceKind.DUAL_INTERFACE)
+    problem, layout = _attached_with(dual, _out("fout", Commodity.FLUID))
+    got = output_faces(problem, layout)["a"]
+    assert got.auto_face is Facing.WEST
+    assert got.auto_items
+    assert got.auto_fluids
+
+
+def test_an_output_an_import_bus_pulls_leaves_through_no_face() -> None:
+    pulled = me_endpoint("out", ("out",), MEDeviceKind.IMPORT_BUS)
+    problem, layout = _attached_with(pulled)
+    assert "a" not in output_faces(problem, layout)
+
+
+def test_a_multiblocks_interface_faces_a_hatch_not_a_face_of_the_block() -> None:
+    problem, layout = gt_hatch_line(normal=True)
+    assert output_faces(problem, layout) == {}

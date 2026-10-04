@@ -375,31 +375,36 @@ def build_scene(
     me_storages = {machine_id for machine_id, _ in me_ports}
     scene_io = {
         # ``rate`` is per-tick; ``unit`` is the stem (items/mB/EU) so the viewer can append /t or
-        # /s for its toggle. ``me`` says the flow's net rides ME (#332): the solver routes nothing
-        # for it and no ME block is drawn yet, so the panel has to say how the flow gets there, or
-        # a chest with no pipe reads as a line that forgot one. ``label`` is the resource as the
-        # panel prints it (``system_io.resource_label``, #296).
+        # /s for its toggle. ``me`` says the flow rides ME (#332): no ME block is drawn yet (#338),
+        # so the panel has to say how the flow gets there, or a chest with no pipe reads as a line
+        # that forgot one. What an ME network's storage supplies or takes in (#335) has no chest
+        # in the build at all, so it is listed here too, always ``me``. ``label`` is the resource
+        # as the panel prints it (``system_io.resource_label``, #296).
         "inputs": [
-            {
-                "resource": f.resource,
-                "label": ", ".join(resource_label(r, names) for r in f.resources),
-                "resources": _resource_entries(f.resources, names),
-                "rate": f.rate,
-                "unit": RATE_STEM[f.commodity],
-                "me": f.machine_id in me_storages,
-            }
-            for f in sysio.inputs
+            *(
+                _flow_entry(
+                    f.resource, f.resources, f.commodity, f.rate, f.machine_id in me_storages, names
+                )
+                for f in sysio.inputs
+            ),
+            *(
+                _flow_entry(f.resource, f.resources, f.commodity, f.rate, True, names)
+                for network in sysio.me
+                for f in network.supplies
+            ),
         ],
         "outputs": [
-            {
-                "resource": f.resource,
-                "label": ", ".join(resource_label(r, names) for r in f.resources),
-                "resources": _resource_entries(f.resources, names),
-                "rate": f.rate,
-                "unit": RATE_STEM[f.commodity],
-                "me": f.machine_id in me_storages,
-            }
-            for f in sysio.outputs
+            *(
+                _flow_entry(
+                    f.resource, f.resources, f.commodity, f.rate, f.machine_id in me_storages, names
+                )
+                for f in sysio.outputs
+            ),
+            *(
+                _flow_entry(f.resource, f.resources, f.commodity, f.rate, True, names)
+                for network in sysio.me
+                for f in network.absorbs
+            ),
         ],
         "power": {
             "total": sum(d["volts"] * d["amps"] for d in power_by_tier.values()),
@@ -437,6 +442,25 @@ def build_scene(
             "congestion": metrics.congestion,
             "buildability": metrics.buildability,
         },
+    }
+
+
+def _flow_entry(
+    resource: str,
+    resources: tuple[str, ...],
+    commodity: Commodity,
+    rate: float | None,
+    me: bool,
+    names: Mapping[str, str],
+) -> dict[str, Any]:
+    """One row of the scene's I/O panel (``scene_io`` in :func:`build_scene`)."""
+    return {
+        "resource": resource,
+        "label": ", ".join(resource_label(r, names) for r in resources),
+        "resources": _resource_entries(resources, names),
+        "rate": rate,
+        "unit": RATE_STEM[commodity],
+        "me": me,
     }
 
 

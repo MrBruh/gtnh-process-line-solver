@@ -11,14 +11,15 @@ GT empties a single block in one of two ways, and a build has to say which, per 
   out of one leaves through a conveyor cover.
 
 The layout says which faces each output leaves a block through (an ``AutoConnection``'s source face,
-an output route's terminal face). This module turns that into one reading::
+an output route's terminal face, the face an ME interface part works on, #335). This module turns
+that into one reading::
 
     output faces of a placed single block
       |  a Super Chest: none auto-outputs, every one is a conveyor
       v
-    the auto face: the face an AutoConnection ejects through if there is one (GT ejects there or the
-      |            connection is not free), else the face carrying the most outputs, ties broken in
-      |            the routers' FACE_ORDER
+    the auto face: the face an AutoConnection or an ME interface takes its push through if there is
+      |            one (GT ejects there or the connection is not free), else the face carrying the
+      |            most outputs, ties broken in the routers' FACE_ORDER
       v
     every other output face: a cover, conveyor for an item, pump for a fluid, carrying the summed
       |                      rate of the ports leaving through it (what picks the cover's tier)
@@ -41,11 +42,23 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass
 
-from gtnh_solver.ir import Commodity, Facing, InputIR, IODirection, LayoutResult, Machine
+from gtnh_solver.ir import (
+    Commodity,
+    Facing,
+    InputIR,
+    IODirection,
+    LayoutResult,
+    Machine,
+    MEDeviceKind,
+)
+from gtnh_solver.ir.geometry import OPPOSITE_FACE
 from gtnh_solver.system_io import is_boundary_storage
 
 #: What a cover on an output face is, by what leaves through it.
 COVER_FOR = {Commodity.ITEM: "conveyor", Commodity.FLUID: "pump"}
+
+#: The ME parts a single block pushes its products into, so the face they work on is its auto face.
+_ME_RECEIVERS = frozenset({MEDeviceKind.INTERFACE, MEDeviceKind.DUAL_INTERFACE})
 
 #: The block types that never auto-output, so every output face of one takes a cover.
 NO_AUTO_OUTPUT_TYPES = frozenset({"Super Chest"})
@@ -113,9 +126,11 @@ class BlockOutputs:
 def output_faces(problem: InputIR, layout: LayoutResult) -> dict[str, BlockOutputs]:
     """``machine_id -> BlockOutputs`` for every placed single block with an output on a face.
 
-    Power is not an output here (a cable is not emptied by a cover or an auto-output), and neither is
-    a commodity riding ME, which leaves through no face. A block whose every output rides ME, or
-    that has none, is absent.
+    Power is not an output here (a cable is not emptied by a cover or an auto-output). An output on
+    ME leaves through a face only when the block pushes it into an ME interface there (#335): that
+    face is then its auto face, items and fluids alike for a Dual Interface. An output an ME import
+    bus pulls leaves through no face (the bus takes it from the slots and needs no cover), so a
+    block whose every output an import bus pulls, or that has none, is absent.
     """
     machines = {m.id: m for m in problem.machines}
     placed = {p.machine_id for p in layout.placements}
@@ -150,6 +165,23 @@ def output_faces(problem: InputIR, layout: LayoutResult) -> dict[str, BlockOutpu
             piped_at[(terminal.machine_id, terminal.face)].add(route.net_id)
             feeding[route.net_id].add(terminal.machine_id)
             rates[(terminal.machine_id, terminal.face)][port.id] = port.rate
+    # An ME interface on a single block takes the block's push (#335): the face its part works on,
+    # the one behind the side it faces from its cable, is the auto face, for every port it serves.
+    endpoints = {(m.id, e.id): e for m in problem.machines for e in m.me_endpoints}
+    nets_on: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for net in problem.nets:
+        for end in net.endpoints:
+            nets_on[(end.machine_id, end.port_id)].append(net.id)
+    for network in layout.me_networks:
+        for device in network.devices:
+            endpoint = endpoints.get((device.machine_id, device.endpoint_id))
+            if device.kind not in _ME_RECEIVERS or endpoint is None or endpoint.hatch_kind:
+                continue  # a bus pulls through no face; a multiblock's part faces a hatch
+            face = OPPOSITE_FACE[device.side]
+            auto_at.setdefault(device.machine_id, face)
+            for port_id in endpoint.ports:
+                for net_id in nets_on[(device.machine_id, port_id)]:
+                    leaving[device.machine_id][face].append((nets[net_id].commodity, net_id))
 
     takes_input = output_side_takes_input(problem.pack_version)
     result: dict[str, BlockOutputs] = {}

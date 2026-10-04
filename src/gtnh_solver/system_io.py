@@ -16,6 +16,12 @@ formats it.
   (docs/DOMAIN.md - a shared-amperage net's aggregate draw is what the source must supply; machines
   buffer packets, so per-machine whole amps would overstate it). Reported per source *and* per
   tier, which differ once a tier needs more than one source.
+- **me**: per ME network (#335), what its storage must supply and takes in (a net on ME no machine
+  of the line produces is drawn from storage, one no machine consumes is stored there), how many
+  channel devices it has, and how many channels of the player's main network it spends: an
+  attached network one per device, a link subnet one per link, a chests subnet none. For an
+  attached or link network that storage is the player's main network, which is outside the build,
+  so its stock is reported, never checked.
 """
 
 from __future__ import annotations
@@ -25,7 +31,18 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from gtnh_solver.dataset import UnknownTierError, UnpowerableError, amp_load, whole_amps
-from gtnh_solver.ir import Commodity, InputIR, IODirection, LayoutResult, Net, Port, Route, Segment
+from gtnh_solver.ir import (
+    Commodity,
+    InputIR,
+    IODirection,
+    LayoutResult,
+    MEMode,
+    MERole,
+    Net,
+    Port,
+    Route,
+    Segment,
+)
 from gtnh_solver.ir.nets import port_direction_map
 
 #: Per-commodity rate unit stem, no time suffix. The previewer appends ``/t`` or ``/s`` for its
@@ -53,6 +70,34 @@ class BoundaryFlow:
 
 
 @dataclass(frozen=True)
+class MEFlow:
+    """One resource an ME network's storage supplies or takes in: what it is, as one label and id
+    by id (as :class:`BoundaryFlow` has them), its kind, and the net's typed rate."""
+
+    resource: str
+    resources: tuple[str, ...]
+    commodity: Commodity
+    rate: float
+
+
+@dataclass(frozen=True)
+class MENetworkIO:
+    """What one ME network asks of the player (module docstring).
+
+    ``supplies`` must be in the network's storage for the line to run, and ``absorbs`` lands there;
+    for an attached or link network that storage is the player's main network. ``devices`` are its
+    channel devices, ``main_channels`` the main network's channels it spends.
+    """
+
+    network: str
+    mode: MEMode
+    supplies: tuple[MEFlow, ...]
+    absorbs: tuple[MEFlow, ...]
+    devices: int
+    main_channels: int
+
+
+@dataclass(frozen=True)
 class SystemIO:
     """The whole boundary: inputs to load, outputs to collect, the total EU/t draw, and the summed
     **amperage** to feed (what an external source must supply, docs/DOMAIN.md - a tier already
@@ -77,6 +122,8 @@ class SystemIO:
     power_total: float
     power_amps_by_tier: dict[str, int]
     power_amps_by_source: dict[str, int]
+    #: One entry per ME network the problem uses, in problem order (module docstring).
+    me: tuple[MENetworkIO, ...] = ()
 
 
 def is_boundary_storage(machine_type: str) -> bool:
@@ -247,7 +294,43 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
         power_total=power_total,
         power_amps_by_tier=power_amps_by_tier,
         power_amps_by_source=power_amps_by_source,
+        me=_me_io(problem, port_dir),
     )
+
+
+def _me_io(
+    problem: InputIR, port_dir: Mapping[tuple[str, str], IODirection]
+) -> tuple[MENetworkIO, ...]:
+    """Each ME network's ask of the player (module docstring)."""
+    out: list[MENetworkIO] = []
+    for spec in problem.me.networks:
+        supplies: list[MEFlow] = []
+        absorbs: list[MEFlow] = []
+        for net in problem.nets:
+            if net.me_network != spec.id:
+                continue
+            directions = {port_dir.get((e.machine_id, e.port_id)) for e in net.endpoints}
+            resource = net_resource(net) or net.id
+            flow = MEFlow(resource, net.resources or (resource,), net.commodity, net.throughput)
+            if IODirection.OUTPUT not in directions:
+                supplies.append(flow)  # nothing in the line makes it: the network's storage does
+            elif IODirection.INPUT not in directions:
+                absorbs.append(flow)  # nothing in the line takes it: the network's storage does
+        devices = sum(1 for m in problem.machines for e in m.me_endpoints if e.network == spec.id)
+        links = sum(
+            1 for m in problem.machines if m.me_role is MERole.LINK and m.me_network == spec.id
+        )
+        out.append(
+            MENetworkIO(
+                network=spec.id,
+                mode=spec.mode,
+                supplies=tuple(supplies),
+                absorbs=tuple(absorbs),
+                devices=devices,
+                main_channels=devices if spec.mode is MEMode.ATTACHED else links,
+            )
+        )
+    return tuple(out)
 
 
 def _carried(net: Net | None, port: Port) -> tuple[str, ...]:
