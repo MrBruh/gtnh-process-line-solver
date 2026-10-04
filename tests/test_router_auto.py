@@ -16,11 +16,10 @@ from gtnh_solver.ir import (
     Facing,
     InputIR,
     IODirection,
-    METoggles,
     Port,
 )
 from gtnh_solver.router import assign_auto_outputs
-from tests._helpers import at, consumer, machine, net, producer
+from tests._helpers import at, consumer, machine, net, on_me, producer
 
 _REGION = CellBox(sx=8, sy=4, sz=8)
 
@@ -110,19 +109,21 @@ def test_fan_out_net_is_not_eligible() -> None:
 def test_power_and_me_toggled_nets_never_auto_feed() -> None:
     # power is a shared-amperage net and ME-toggled commodities are not physically connected,
     # so neither is eligible even with the machines touching.
-    problem = InputIR(
-        bounding_region=_REGION,
-        machines=[
-            producer("pa", commodity=Commodity.POWER),
-            consumer("pb", commodity=Commodity.POWER),
-            producer("ia"),
-            consumer("ib"),
-        ],
-        nets=[
-            net("np", "pa", "pb", commodity=Commodity.POWER),
-            net("ni", "ia", "ib"),
-        ],
-        me_toggles=METoggles(items=True),
+    problem = on_me(
+        InputIR(
+            bounding_region=_REGION,
+            machines=[
+                producer("pa", commodity=Commodity.POWER),
+                consumer("pb", commodity=Commodity.POWER),
+                producer("ia"),
+                consumer("ib"),
+            ],
+            nets=[
+                net("np", "pa", "pb", commodity=Commodity.POWER),
+                net("ni", "ia", "ib"),
+            ],
+        ),
+        Commodity.ITEM,
     )
     placements = [
         at("pa", 1, 0, 1),

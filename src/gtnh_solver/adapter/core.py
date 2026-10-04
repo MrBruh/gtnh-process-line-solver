@@ -107,8 +107,8 @@ the power synthesis and before the region is sized::
 
 It merges what is safe to merge:
 
-- the machine has **two or more item outputs** (items only: fluids are never merged, and a line
-  whose items ride ME has no pipe to sort), and all of them merge. This used to wait until the
+- the machine has **two or more piped item outputs** (items only: fluids are never merged, and an
+  output on ME has no pipe to sort, #332), and all of them merge. This used to wait until the
   machine had no face to spare, leaving the rest a face per output, which GT builds only with a
   cover pulling each extra output out. With the filters shared per node (below), merging every
   such machine costs nothing: on iron.json it took the filters from 6 to 10 and the median floor
@@ -170,7 +170,8 @@ import json
 import math
 import re
 import warnings
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from gtnh_solver.dataset import VOLTAGE_BY_TIER, MachinePhysical, PhysicalDataset
@@ -184,8 +185,10 @@ from gtnh_solver.ir import (
     IODirection,
     Machine,
     MachineFaceRef,
-    METoggles,
+    MEConfig,
+    MEPlan,
     Net,
+    NetList,
     Port,
     RelativeFace,
 )
@@ -193,6 +196,7 @@ from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 from gtnh_solver.ir.nets import SINGLE_BLOCK_IO_FACES, connection_counts
 
 from ._errors import AdapterError, AdapterWarning, InfeasiblePlanError
+from .me import choose_me, dataset_identity, net_list, plan_digest
 from .plan import (
     Edge,
     MachineHandler,
@@ -280,17 +284,26 @@ def adapt_file(
     *,
     physical: PhysicalDataset | None = None,
     producer: PlanProducer | None = None,
-    me_toggles: METoggles | None = None,
+    me_plan: MEPlan | None = None,
+    me_commodities: Collection[Commodity] = (),
+    me_power: bool = False,
 ) -> InputIR:
     """Load an exported plan file and map it to the solver's ``InputIR``.
 
     ``physical`` is an optional multiblock dataset (``dataset.load_physical_dataset``); when given,
     a node whose machine type it knows gets that machine's real footprint (see :func:`to_input_ir`).
     ``producer`` pins which gtnh-factory-flow fork exported the plan; ``None`` detects it.
-    ``me_toggles`` says which commodities ride ME instead of pipes and cables (see
+    ``me_plan``, ``me_commodities`` and ``me_power`` say which nets ride ME (see
     :func:`to_input_ir`).
     """
-    return to_input_ir(load_plan(path), physical=physical, producer=producer, me_toggles=me_toggles)
+    return to_input_ir(
+        load_plan(path),
+        physical=physical,
+        producer=producer,
+        me_plan=me_plan,
+        me_commodities=me_commodities,
+        me_power=me_power,
+    )
 
 
 def _block_key_for(recipe: Recipe, resolved: ResolvedMachine | None) -> str | None:
@@ -405,7 +418,9 @@ def to_input_ir(
     *,
     physical: PhysicalDataset | None = None,
     producer: PlanProducer | None = None,
-    me_toggles: METoggles | None = None,
+    me_plan: MEPlan | None = None,
+    me_commodities: Collection[Commodity] = (),
+    me_power: bool = False,
 ) -> InputIR:
     """Map a typed :class:`Plan` to an ``InputIR`` (referential integrity enforced on build).
 
@@ -420,20 +435,88 @@ def to_input_ir(
     come back undetermined - the two meanings never collide, because a *parameter* of ``None`` asks
     for detection while a *detected* ``None`` disables producer-specific handling.
 
-    ``me_toggles`` names the commodities the line moves over ME (AE2) rather than over pipes and
-    cables. It is not something a plan states, so it comes from the caller (the CLI's ``--me``) and
-    is stamped on the ``InputIR`` unchanged; ``None`` keeps the default, every commodity routed
-    physically. Most of the mapping ignores it, since each downstream stage skips a toggled
-    commodity itself (docs/DOMAIN.md). It reaches the mapping in two places: the item merges, which
-    count only the connections a toggle leaves physical, and power, whose synthesized sources and
-    nets a power toggle drops (#225), since a source would stand in the build connected to nothing.
-    The powered machines keep their energy ports either way.
+    **Which nets ride ME (AE2) is the caller's choice, per net** (#332, ``adapter.me``): an
+    ``me_plan`` made against :func:`list_nets`, or the ``me_commodities`` shorthand, one attached
+    network carrying every net of those commodities. ``me_power`` leaves the line's EU supply to the
+    builder. None of it is something a plan states, so it comes from the caller (the CLI's
+    ``--me-plan`` and ``--me``). It is applied between the two halves of the mapping::
+
+        _map_plan   nodes, storages, edge groups, output buffers     (the nets list_nets shows)
+        choose_me   which of those nets ride which ME network        (MEPlanError if it does not fit)
+        _close      power, tiered parts, the merges, the region      (an ME net is never merged)
+
+    Most of the mapping ignores the choice, since each downstream stage skips a net left to ME
+    itself (``InputIR.rides_me``). It reaches the mapping in two places: the item merges, which
+    leave a net on ME alone so its id survives, and power, whose synthesized sources and nets
+    ``me_power`` drops (#225), since a source would stand in the build connected to nothing. The
+    powered machines keep their energy ports either way.
 
     Raises :class:`~gtnh_solver.adapter.AdapterError` for a plan that does not map (a dangling
-    reference, an unsupported kind), and :class:`~gtnh_solver.adapter.InfeasiblePlanError` for one
-    that maps but states a line no layout can satisfy - the CLI keeps those apart, reporting the
-    first as an unloadable export and the second as an infeasibility (#112).
+    reference, an unsupported kind) or an ME choice that does not fit it, and
+    :class:`~gtnh_solver.adapter.InfeasiblePlanError` for one that maps but states a line no layout
+    can satisfy - the CLI keeps those apart, reporting the first as an unloadable export and the
+    second as an infeasibility (#112).
     """
+    mapped = _map_plan(plan, physical, producer)
+    config, chosen = choose_me(
+        mapped.nets,
+        digest=plan_digest(plan),
+        dataset_version=dataset_identity(physical),
+        me_plan=me_plan,
+        me_commodities=me_commodities,
+        me_power=me_power,
+    )
+    return _close(mapped, config, chosen)
+
+
+def list_nets(
+    plan: Plan, *, physical: PhysicalDataset | None = None, producer: PlanProducer | None = None
+) -> NetList:
+    """Every item and fluid net of ``plan`` a user may move to ME (``gtnh-solve --list-nets``).
+
+    The nets :func:`to_input_ir` maps before anything is merged, under the ids an
+    :class:`~gtnh_solver.ir.MEPlan` names them by, each with its machine ends and the device each
+    would get (``adapter.me.net_list``). Raises what :func:`to_input_ir` raises for a plan that does
+    not map.
+    """
+    mapped = _map_plan(plan, physical, producer)
+    return net_list(
+        mapped.machines,
+        mapped.nets,
+        storage_ids=mapped.storage_ids,
+        multiblock_ids=mapped.multiblock_ids,
+        names=_resource_names(mapped.plan, mapped.machines, mapped.nets),
+        digest=plan_digest(plan),
+        dataset_version=dataset_identity(physical),
+    )
+
+
+#: The prefix of the output buffers :func:`_add_output_buffers` closes a line with.
+_BUFFER = "output-buffer:"
+
+
+@dataclass(frozen=True)
+class _MappedPlan:
+    """A plan mapped up to the point ME is chosen: what :func:`list_nets` reads and :func:`_close`
+    finishes. ``nets`` carry their pre-merge ids; ``storage_ids`` are the boundary storages and the
+    output buffers, the line's edge."""
+
+    plan: Plan
+    producer: PlanProducer | None
+    machines: list[Machine]
+    nets: list[Net]
+    storage_ids: frozenset[str]
+    single_block_ids: frozenset[str]
+    multiblock_ids: frozenset[str]
+    proven_single_ids: frozenset[str]
+    planned: Mapping[str, PlannedStructure]
+    group_of: Mapping[str, str]
+
+
+def _map_plan(
+    plan: Plan, physical: PhysicalDataset | None, producer: PlanProducer | None
+) -> _MappedPlan:
+    """The first half of :func:`to_input_ir`: every node, storage, edge group and output buffer."""
     plan = _without_generated_power(plan)
     plan, crop_managers = _crop_cards_as_managers(plan)
     resolved_producer = resolve_producer(plan, producer)
@@ -579,6 +662,29 @@ def to_input_ir(
         for instance_id in instance_ids
     }
     machines, nets = _add_output_buffers(machines, nets, storage_ids, group_of)
+    return _MappedPlan(
+        plan=plan,
+        producer=resolved_producer,
+        machines=machines,
+        nets=nets,
+        storage_ids=frozenset(storage_ids | {m.id for m in machines if m.id.startswith(_BUFFER)}),
+        single_block_ids=frozenset(single_block_ids),
+        multiblock_ids=frozenset(multiblock_ids),
+        proven_single_ids=frozenset(proven_single_ids),
+        planned=planned,
+        group_of=group_of,
+    )
+
+
+def _close(mapped: _MappedPlan, me: MEConfig, chosen: Mapping[str, str]) -> InputIR:
+    """The second half of :func:`to_input_ir`: stamp the ME choice on its nets, then power, the
+    tiered parts, the merges and the region."""
+    machines = list(mapped.machines)
+    nets = [
+        net.model_copy(update={"me_network": chosen[net.id]}) if net.id in chosen else net
+        for net in mapped.nets
+    ]
+    plan = mapped.plan
     # The export has no power source; invent it. ``single_block_ids`` is what lets the synthesis
     # state a basic machine's own intake ceiling without guessing at a multiblock's.
     # _supply_tier absorbs an implausible draw from the MrBruh fork's recipe model. An arodoid
@@ -591,38 +697,35 @@ def to_input_ir(
     machines, nets = synthesize_power(
         machines,
         nets,
-        single_block_ids=frozenset(single_block_ids),
-        allow_retier=resolved_producer not in (PlanProducer.ARODOID_V1, PlanProducer.SHADOW_V1),
+        single_block_ids=mapped.single_block_ids,
+        allow_retier=mapped.producer not in (PlanProducer.ARODOID_V1, PlanProducer.SHADOW_V1),
     )
-    _check_resolved_power(plan, nets)
+    _check_resolved_power(mapped.plan, nets)
     # The tier a machine is supplied at is final only now (_supply_tier can raise it), and the
     # hatches the export places follow it, so the machine casing a Chemical Plant needs to form, and
     # the heat an EBF's hatches add to its coil's, are read from it here rather than from the plan's
     # tier.
     machines = [
-        m.model_copy(update={"structure_blocks": planned[m.id].blocks(m.voltage_tier)})
-        if m.id in planned
+        m.model_copy(update={"structure_blocks": mapped.planned[m.id].blocks(m.voltage_tier)})
+        if m.id in mapped.planned
         else m
         for m in machines
     ]
-    toggles = me_toggles if me_toggles is not None else METoggles()
-    if toggles.toggled(Commodity.POWER):
+    if me.power_external:
         # After the cross-check above, which reads the synthesized nets' draw.
         machines, nets = _without_power_sources(machines, nets)
     # After the power synthesis, so a machine's power connection counts toward its faces, and before
     # the region is sized, so the filters it places are inside it.
-    machines, nets = _merge_item_outputs(
-        machines, nets, frozenset(proven_single_ids), toggles, group_of
-    )
+    machines, nets = _merge_item_outputs(machines, nets, mapped.proven_single_ids, mapped.group_of)
     # After the output merge, which settles most machines it touches, so the input side merges only
     # what is still short of faces.
-    machines, nets = _merge_item_inputs(machines, nets, frozenset(proven_single_ids), toggles)
+    machines, nets = _merge_item_inputs(machines, nets, mapped.proven_single_ids)
     region = _bounding_region([m.footprint for m in machines])
     return InputIR(
         bounding_region=region,
         machines=machines,
         nets=nets,
-        me_toggles=toggles,
+        me=me,
         resource_names=_resource_names(plan, machines, nets),
         resource_colors=_resource_colors(plan, machines, nets),
         pack_version=plan_pack_version(plan),
@@ -1645,7 +1748,6 @@ def _merge_item_outputs(
     machines: list[Machine],
     nets: list[Net],
     proven_single: frozenset[str],
-    me_toggles: METoggles,
     group_of: Mapping[str, str] | None = None,
 ) -> tuple[list[Machine], list[Net]]:
     """Send a full single block's item outputs out of one face, sorted by Item Filters (#249).
@@ -1667,11 +1769,14 @@ def _merge_item_outputs(
     A single-machine node is a cluster of one under its bare id, so its ids are the machine's own.
     A cluster's filters follow its last machine in the returned list, and the trunks follow the
     other nets, so a line that merges nothing comes back exactly as it went in.
+
+    **An output on ME is left alone** (#332): no pipe carries it, so there is nothing to sort, and
+    its net keeps its id. A port merges only while none of its nets rides ME, and a machine merges
+    the ports that do while two or more of them remain.
     """
-    if me_toggles.toggled(Commodity.ITEM):
-        return machines, nets  # items ride ME: no pipe, so nothing to sort
     cluster_of = dict(group_of or {})
-    mergeable = {m.id: _mergeable_outputs(m, proven_single) for m in machines}
+    on_me = {(ref.machine_id, ref.port_id) for net in nets if net.rides_me for ref in net.endpoints}
+    mergeable = {m.id: _mergeable_outputs(m, proven_single, on_me) for m in machines}
     #: cluster -> its merging machines, in list order. A cluster is the node a machine was expanded
     #: from, so the machines of one parallel node share one trunk and one filter per item.
     clusters: dict[str, list[Machine]] = {}
@@ -1754,19 +1859,25 @@ def _merge_item_outputs(
     return out_machines, [*_fold_nets(resourced, set(moved.values()), out_machines), *trunks]
 
 
-def _mergeable_outputs(machine: Machine, proven_single: frozenset[str]) -> list[Port]:
+def _mergeable_outputs(
+    machine: Machine, proven_single: frozenset[str], on_me: Collection[tuple[str, str]] = ()
+) -> list[Port]:
     """The item output ports :func:`_merge_item_outputs` merges on ``machine``, or none.
 
-    A machine merges when it is proven a single block and has two or more item outputs (one needs
-    no sorting), whether or not it has a face to spare. All of them merge: a basic machine with
-    item auto-output on ejects every item slot through its output face, so there is no merging some.
+    A machine merges when it is proven a single block and has two or more piped item outputs (one
+    needs no sorting), whether or not it has a face to spare. All of them merge: a basic machine
+    with item auto-output on ejects every item slot through its output face, so there is no
+    merging some. A port with a net on ME (``on_me``) is not piped; a GT pipe takes from that face
+    only the items a filter on it accepts, so the rest stay for the ME device to take.
     """
     if machine.id not in proven_single or machine.footprint.volume != 1:
         return []
     outputs = [
         port
         for port in machine.faces.ports
-        if port.commodity is Commodity.ITEM and port.direction is IODirection.OUTPUT
+        if port.commodity is Commodity.ITEM
+        and port.direction is IODirection.OUTPUT
+        and (machine.id, port.id) not in on_me
     ]
     if len(outputs) < 2:
         return []
@@ -1841,6 +1952,7 @@ def _fold_nets(nets: list[Net], shared: set[MachineFaceRef], machines: list[Mach
       fold is counted whole, which can only over-state the flow.
 
     A net sharing nothing is returned unchanged, in place; a folded net takes its first member's.
+    A net on ME never folds (#332): it is no pipe, and it keeps the id a user chose it by.
     """
     parent = list(range(len(nets)))
 
@@ -1852,6 +1964,8 @@ def _fold_nets(nets: list[Net], shared: set[MachineFaceRef], machines: list[Mach
 
     first_net_at: dict[MachineFaceRef, int] = {}
     for index, net in enumerate(nets):
+        if net.rides_me:
+            continue
         for ref in net.endpoints:
             if ref not in shared:
                 continue
@@ -1898,7 +2012,6 @@ def _merge_item_inputs(
     machines: list[Machine],
     nets: list[Net],
     proven_single: frozenset[str],
-    me_toggles: METoggles,
 ) -> tuple[list[Machine], list[Net]]:
     """Bring a single block that is short of faces within them, on its input side (#277).
 
@@ -1910,23 +2023,24 @@ def _merge_item_inputs(
     2. **Every item input, one pipe.** A machine still short takes its item inputs through one face,
        on one **feed run** (:func:`_feed_item_inputs`).
 
-    A line with no machine short of faces comes back exactly as it went in.
+    A line with no machine short of faces comes back exactly as it went in, and a net on ME is
+    never merged (#332): it docks nothing, so it costs no face, and it keeps its id.
     """
-    short = _short_of_faces(machines, nets, proven_single, me_toggles)
+    short = _short_of_faces(machines, nets, proven_single)
     if not short:
         return machines, nets
     directions = {(m.id, p.id): p.direction for m in machines for p in m.faces.ports}
     inputs = {
         ref
         for net in nets
-        if net.commodity is not Commodity.POWER and not me_toggles.toggled(net.commodity)
+        if net.commodity is not Commodity.POWER and not net.rides_me
         for ref in net.endpoints
         if ref.machine_id in short
         and directions[(ref.machine_id, ref.port_id)] is IODirection.INPUT
     }
     nets = _fold_nets(nets, inputs, machines)
-    short = _short_of_faces(machines, nets, proven_single, me_toggles)
-    if not short or me_toggles.toggled(Commodity.ITEM):
+    short = _short_of_faces(machines, nets, proven_single)
+    if not short:
         return machines, nets
     return _feed_item_inputs(machines, nets, short)
 
@@ -1935,7 +2049,6 @@ def _short_of_faces(
     machines: list[Machine],
     nets: list[Net],
     proven_single: frozenset[str],
-    me_toggles: METoggles,
 ) -> set[str]:
     """The proven single blocks carrying more connections than they have usable faces.
 
@@ -1945,7 +2058,7 @@ def _short_of_faces(
     that cannot be built as drawn, so every line that lays out today is left exactly as it is, and a
     feed run, which changes what a builder pipes, is never built where a face per input would do.
     """
-    counts = connection_counts(nets, me_toggles)
+    counts = connection_counts(nets)
     return {
         machine.id
         for machine in machines
@@ -1988,7 +2101,7 @@ def _feed_item_inputs(
 
     candidates: list[int] = []
     for index, net in enumerate(nets):
-        if net.commodity is not Commodity.ITEM or net.items:
+        if net.commodity is not Commodity.ITEM or net.items or net.rides_me:
             continue
         sinks = [ref for ref in net.endpoints if is_input(ref)]
         sources = [ref for ref in net.endpoints if not is_input(ref)]

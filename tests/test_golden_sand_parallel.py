@@ -52,7 +52,6 @@ from gtnh_solver.ir import (
     InputIR,
     LayoutResult,
     LayoutStatus,
-    METoggles,
     PipeSize,
     Placement,
     Route,
@@ -70,6 +69,7 @@ from gtnh_solver.solver._structure import structure_quality
 from gtnh_solver.solver.core import _assemble
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
+from tests._helpers import on_me
 
 _ROOT = Path(__file__).resolve().parents[1]
 _PLAN = _ROOT / "examples" / "gtnh-parallel-sand.json"
@@ -352,7 +352,7 @@ def test_the_gate_does_not_demand_the_size_the_router_would_lay(
     insertion a block on cobblestone, a normal pipe; the run-wide bound, kept as the router's
     margin, is what lays it huge."""
     problem, layout = working_build
-    items_only = problem.model_copy(update={"me_toggles": METoggles(power=True)})
+    items_only = on_me(problem, power=True)
     routed = route(items_only, layout.placements)
     assert routed.ok, routed.infeasibility
     assert _item_sizes(routed.routes) == {
@@ -401,7 +401,7 @@ def test_the_router_can_route_the_proven_placement(
     # net, and the result passes the same gate. This pins the item router alone, power on ME: with
     # nothing else in the way each item net takes one 3-block run, the build's own 12 blocks.
     problem, layout = proven_build
-    items_only = problem.model_copy(update={"me_toggles": METoggles(power=True)})
+    items_only = on_me(problem, power=True)
     result = route(items_only, layout.placements)
 
     assert result.ok, result.infeasibility

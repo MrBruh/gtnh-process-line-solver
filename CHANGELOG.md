@@ -7,6 +7,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Choose ME per net (#332).** `gtnh-solve plan.json --list-nets` prints the plan's item and
+  fluid nets as JSON (the new `NetList` contract): each net's ends, its rate, and the ME device
+  each end would get. Choose which nets ride which ME network, attached to your main network or a
+  subnet of its own colour, in an `MEPlan` file and pass it with `--me-plan`. A plan made against
+  another plan or dataset is refused (exit 2), since a net id can then name another net. A net on
+  ME is still only skipped, as before: nothing is placed for it yet (#329). Splitting a single
+  block's outputs between ME and pipes works too: the piped ones are still sorted by Item Filters,
+  and the one on ME is left out of the trunk.
 - **A blast furnace is built with a coil hot enough for its recipes (#318).** GT refuses a recipe
   whose special value, its heat in kelvin, is above what the furnace reaches: its coil's heat
   (1801 K for Cupronickel, then 900 K a tier), plus, for the Electric Blast Furnace, the Mega
@@ -973,6 +981,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **`--me items` / `--me fluids` put every net of that kind on one attached ME network, `main`**
+  (#332), the shorthand for the `MEPlan` saying so; they cannot be given with `--me-plan`.
+  `--me power` still leaves power to you and combines with either. `InputIR` v8 replaces the
+  per-commodity `me_toggles` with `InputIR.me` and `Net.me_network`; a v7 problem is refused on
+  parse.
 - **The `.schematic` export's warnings say what the export leaves out, and stop promising a
   paste.** The cover and Item Filter warnings said a `.schematic` cannot carry covers or inventory.
   It can, but GT names a cover's item, and an inventory's items, by the world's numeric item id,

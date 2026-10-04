@@ -173,7 +173,7 @@ def single_block_shortfalls(problem: InputIR) -> dict[str, int]:
     pin may name the front, or refuse two, both pinned to one face. The count path is untouched, so
     every machine the adapter may still merge, all unpinned, is judged exactly as before.
     """
-    connections = connection_counts(problem.nets, problem.me_toggles)
+    connections = connection_counts(problem.nets, problem.rides_me)
     pinned = {
         machine.id: machine
         for machine in problem.machines
@@ -181,7 +181,7 @@ def single_block_shortfalls(problem: InputIR) -> dict[str, int]:
     }
     ports_on: dict[str, list[str]] = {}  # a pinned block's connections, one port id per endpoint
     for net in problem.nets:
-        if problem.me_toggles.toggled(net.commodity):
+        if problem.rides_me(net):
             continue
         for endpoint in net.endpoints:
             if endpoint.machine_id in pinned:
@@ -226,7 +226,7 @@ def _docked_connections(problem: InputIR, placements: Sequence[Placement]) -> li
     assignment = assign_auto_outputs(problem, placements)
     connections: list[_Connection] = []
     for net in problem.nets:
-        if net.id in assignment.covered or problem.me_toggles.toggled(net.commodity):
+        if net.id in assignment.covered or problem.rides_me(net):
             continue  # an auto-output or the ME network carries it: nothing to dock
         for endpoint in assignment.piped(net).endpoints:
             placement = placement_by_machine.get(endpoint.machine_id)

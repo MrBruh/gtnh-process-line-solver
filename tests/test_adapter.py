@@ -42,7 +42,7 @@ from gtnh_solver.ir import (
     IODirection,
     LayoutResult,
     LayoutStatus,
-    METoggles,
+    MEConfig,
     Net,
     Port,
 )
@@ -177,28 +177,41 @@ def test_adapt_sand_end_to_end_places_and_validates() -> None:
     assert PLACEMENT_CODES.isdisjoint(validate(ir, layout).codes())
 
 
-def test_adapting_leaves_every_commodity_routed_physically_by_default() -> None:
+def test_adapting_leaves_every_net_built_physically_by_default() -> None:
     # The contract's default, so a caller that never mentions ME gets the line it always got.
-    assert adapt_file(_SAND).me_toggles == METoggles()
-    assert to_input_ir(load_plan(_SAND), me_toggles=None).me_toggles == METoggles()
+    for ir in (adapt_file(_SAND), to_input_ir(load_plan(_SAND))):
+        assert ir.me == MEConfig()
+        assert not any(net.rides_me for net in ir.nets)
 
 
-def test_me_toggles_pass_through_to_the_input_ir() -> None:
+def test_the_me_choice_reaches_the_input_ir() -> None:
     # The field every downstream stage honours was unreachable: the adapter built InputIR without
-    # it, so nothing could turn ME on (#222). Both entry points hand it over unchanged.
-    toggles = METoggles(items=True, power=True)
-    assert to_input_ir(load_plan(_SAND), me_toggles=toggles).me_toggles == toggles
-    assert adapt_file(_SAND, me_toggles=toggles).me_toggles == toggles
+    # it, so nothing could turn ME on (#222). Both entry points hand the choice over.
+    for ir in (
+        to_input_ir(load_plan(_SAND), me_commodities={Commodity.ITEM}, me_power=True),
+        adapt_file(_SAND, me_commodities={Commodity.ITEM}, me_power=True),
+    ):
+        assert ir.me.power_external
+        assert [n.id for n in ir.me.networks] == ["main"]
+        assert all(net.me_network == "main" for net in ir.nets if net.commodity is Commodity.ITEM)
 
 
-def test_item_and_fluid_toggles_change_nothing_else_the_mapping_produces() -> None:
+def test_items_and_fluids_on_me_change_nothing_else_the_mapping_produces() -> None:
     # Leaving items or fluids to ME is a routing decision, not a different line: the machines, the
-    # storages and the synthesized power are the same, and only the toggles differ. The stages
-    # downstream skip a toggled net themselves. Power is the exception: on ME it has no source at
-    # all (#225, pinned in test_cli_me).
+    # storages and the synthesized power are the same, and only the choice differs. The stages
+    # downstream skip a net on ME themselves. Power is the exception: left to the builder it has no
+    # source at all (#225, pinned in test_cli_me).
     plain = adapt_file(_SAND)
-    on_me = adapt_file(_SAND, me_toggles=METoggles(items=True, fluids=True))
-    assert on_me.model_copy(update={"me_toggles": METoggles()}) == plain
+    on_me = adapt_file(_SAND, me_commodities={Commodity.ITEM, Commodity.FLUID})
+    assert (
+        on_me.model_copy(
+            update={
+                "me": MEConfig(),
+                "nets": [n.model_copy(update={"me_network": None}) for n in on_me.nets],
+            }
+        )
+        == plain
+    )
 
 
 def test_throughput_is_positive_for_sand_material_nets() -> None:

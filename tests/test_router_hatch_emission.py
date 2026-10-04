@@ -25,7 +25,6 @@ from gtnh_solver.ir import (
     LayoutStatus,
     Machine,
     MachineFaceRef,
-    METoggles,
     Net,
     PlacedHatch,
     Placement,
@@ -38,7 +37,7 @@ from gtnh_solver.router.hatches import _layer_hatches
 from gtnh_solver.solver import solve
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
-from tests._helpers import at, layered_tower
+from tests._helpers import at, consumer, layered_tower, on_me
 
 _REGION = CellBox(sx=14, sy=6, sz=14)
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
@@ -466,11 +465,27 @@ def test_the_shipped_lines_place_a_hatch_for_every_multiblock_port() -> None:
 # ------------------------------------------------------------- spare output hatches (#299)
 
 
-def _one_product_tower(**kwargs: object) -> tuple[InputIR, list[Placement]]:
-    """A two-layer tower making one fluid: GT still wants an output hatch on its second layer."""
+def _one_product_tower(*, me: bool = False) -> tuple[InputIR, list[Placement]]:
+    """A two-layer tower making one fluid: GT still wants an output hatch on its second layer.
+
+    With ``me`` its water rides ME to a tank, which is left unplaced: the tower is what is tested.
+    """
     tower = layered_tower(outputs=["water"], layers=2)
-    problem = InputIR(bounding_region=_REGION, machines=[tower], nets=[], **kwargs)
-    return problem, [at(tower.id, 2, 0, 2)]
+    if not me:
+        return InputIR(bounding_region=_REGION, machines=[tower], nets=[]), [at(tower.id, 2, 0, 2)]
+    tank = consumer("tank", commodity=Commodity.FLUID)
+    water = Net(
+        id="water",
+        commodity=Commodity.FLUID,
+        fluid_or_item="water",
+        throughput=1.0,
+        endpoints=[
+            MachineFaceRef(machine_id=tower.id, port_id="output:water"),
+            MachineFaceRef(machine_id="tank", port_id="in"),
+        ],
+    )
+    problem = InputIR(bounding_region=_REGION, machines=[tower, tank], nets=[water])
+    return on_me(problem, Commodity.FLUID), [at(tower.id, 2, 0, 2)]
 
 
 def test_a_tower_layer_no_product_uses_gets_a_spare_output_hatch() -> None:
@@ -520,9 +535,9 @@ def test_spares_are_placed_before_the_upkeep_hatches() -> None:
     assert by_kind["Maintenance"][1] == 0
 
 
-def test_no_spare_while_fluids_go_over_me() -> None:
-    # The layout draws no ME output hatches, so it cannot say which layers they cover.
-    problem, placements = _one_product_tower(me_toggles=METoggles(fluids=True))
+def test_no_spare_on_a_tower_whose_fluid_rides_me() -> None:
+    # The layout draws no ME output hatches yet, so it cannot say which layers they cover.
+    problem, placements = _one_product_tower(me=True)
     plan = place_hatches(problem, placements, [], [])
     assert not [h for h in plan.hatches if h.kind == "OutputHatch"]
 

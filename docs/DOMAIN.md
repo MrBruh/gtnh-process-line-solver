@@ -557,16 +557,24 @@ the only-*sink* ones as its outputs.
 
 ## ME networks (AE2)
 
-Each commodity (items, fluids, power) can be **toggled to ME** individually. A toggled
-commodity is removed from physical routing: today it is simply **skipped everywhere** (no route,
-no terminal, no placement/cost term). Placing the appropriate ME endpoint (interface / bus / P2P)
-on a machine face in its stead is **planned** (Phase 2); v1 does not model ME channel limits.
-Default is to route all three physically.
+**ME is chosen per net, by the user** (#332). `gtnh-solve plan.json --list-nets` prints every
+item and fluid net (its ends, its rate, and the ME device each end would get); the user (or
+gtnh-solver-site's picker) chooses which nets ride which ME network, attached to their main
+network or a subnet of its own colour, and `--me-plan FILE` reads that back. `--me items` /
+`--me fluids` is shorthand for every net of that kind on one attached network. A net on ME is
+removed from physical routing: today it is simply **skipped everywhere** (no route, no terminal,
+no placement/cost term). Placing the ME devices, cable and infrastructure in its stead is the
+end-to-end build (#335). Default is to build everything physically.
 
-Power left to ME also has **no power source**: the adapter drops the per-tier sources and their
-nets, since a source no cable reaches would be placed and exported connected to nothing (#225).
-Each powered machine keeps its energy ports, so the preview still states the draw per tier for
-whatever delivers it.
+A single block's outputs can be split: one product on ME and the rest piped. Its auto-output face
+still ejects every item, so the piped ones are merged and sorted by Item Filters as before (#249)
+and the one on ME stays out of the trunk: a GT pipe takes from a face only the items some filter on
+it accepts, which leaves the rest in the machine for its ME device.
+
+Power is not an ME network, but `--me power` leaves it to the builder: there is **no power
+source**, since the adapter drops the per-tier sources and their nets, and a source no cable
+reaches would be placed and exported connected to nothing (#225). Each powered machine keeps its
+energy ports, so the preview still states the draw per tier for whatever delivers it.
 
 Building the ME side for real is epic #329. Its rules are read from the pack's own AE2,
 AE2FluidCraft and GT source and cited, file and line, in

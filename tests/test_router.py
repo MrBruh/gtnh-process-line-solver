@@ -24,7 +24,6 @@ from gtnh_solver.ir import (
     LayoutStatus,
     Machine,
     MachineFaceRef,
-    METoggles,
     Net,
     PipeSize,
     Placement,
@@ -37,7 +36,7 @@ from gtnh_solver.router import route, route_power
 from gtnh_solver.router.core import _Laid, _pipe_size
 from gtnh_solver.validator import validate
 from gtnh_solver.validator.report import ViolationCode
-from tests._helpers import at, machine, net
+from tests._helpers import at, machine, net, on_me
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 _SAND = _EXAMPLES / "gtnh-sand.json"
@@ -730,13 +729,11 @@ def test_a_net_moves_its_manifold_so_another_net_can_dock() -> None:
     assert validate(problem, layout).ok, str(validate(problem, layout))
 
 
-def test_route_skips_me_toggled_commodity() -> None:
-    problem = _item_pair(CellBox(sx=8, sy=4, sz=8)).model_copy(
-        update={"me_toggles": METoggles(items=True)}
-    )
+def test_route_skips_a_net_on_me() -> None:
+    problem = on_me(_item_pair(CellBox(sx=8, sy=4, sz=8)), Commodity.ITEM)
     result = route(problem, [at("a", 1, 0, 1), at("b", 3, 0, 1)])
     assert result.ok
-    assert result.routes == ()  # the item net is ME-toggled, not physically routed
+    assert result.routes == ()  # the item net rides ME, so it is not physically routed
 
 
 def test_route_infeasible_when_a_machine_cannot_dock() -> None:
