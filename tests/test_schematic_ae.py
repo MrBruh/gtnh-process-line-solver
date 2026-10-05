@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import warnings
+from collections.abc import Iterable
 from pathlib import Path
 
 import pytest
@@ -74,6 +75,7 @@ from gtnh_solver.schematic.ae import _orientation, _settings, _WorldItems, gt_co
 from gtnh_solver.schematic.core import FORGE_DIRECTION
 from gtnh_solver.schematic.read import AEPart, AETile, ItemRef, Schematic
 from gtnh_solver.solver import solve
+from tests._helpers import world_save
 from tests._me_fixtures import MAIN, at, cable, controller, coord
 
 _GOLDEN = Path(__file__).resolve().parents[1] / "tests" / "golden" / "schematic"
@@ -603,6 +605,7 @@ def test_an_item_filter_keeps_its_meta() -> None:
     """A resource ``registry@meta`` is that item at that damage: ``gt.metaitem.01@2299`` is the
     dust in the golden's drive cell."""
     stack = _WorldItems(_ITEMS).filter_stack("gregtech:gt.metaitem.01@2299", fluid=False)
+    assert stack is not None
     assert (stack["id"], stack["Damage"]) == (_ITEMS["gregtech:gt.metaitem.01"], 2299)
 
 
@@ -863,7 +866,7 @@ def test_a_file_without_ae2_prints_no_ae2_section(capsys: pytest.CaptureFixture[
 
 
 def test_an_item_is_named_as_far_as_what_is_known_allows() -> None:
-    from gtnh_solver.schematic.ae import describe_item, describe_tile, part_item_id
+    from gtnh_solver.schematic.ae import describe_item, describe_tile, table_part_item_id
 
     assert describe_item(ItemRef(7639, 2299, 1), part_item=_PART, names=_NAMES) == (
         "gregtech:gt.metaitem.01@2299"
@@ -871,10 +874,9 @@ def test_an_item_is_named_as_far_as_what_is_known_allows() -> None:
     assert describe_item(ItemRef(9999, 0, 1), part_item=_PART, names=_NAMES) == "item 9999:0"
     assert describe_item(ItemRef(_CARD, 30, 1), part_item=_PART) == f"item {_CARD}:30"
     assert describe_item(ItemRef(_PART, 999, 1), part_item=_PART) == f"item {_PART}:999"
-    # The table names ItemMultiPart even with no cable to read it off, and without either nothing
-    # is ItemMultiPart.
-    assert part_item_id([], _NAMES) == _PART
-    assert part_item_id([], {}) is None
+    # A world's table names ItemMultiPart with no cable to read it off; a table without AE2 cannot.
+    assert table_part_item_id(_NAMES) == _PART
+    assert table_part_item_id({}) is None
     bare = AETile(cable=None, parts={}, forward=None, up=None, painted=None, has_redstone=None)
     assert describe_tile(bare, part_item=None) == "no AE2 tags"
     cableless = AETile(
@@ -891,26 +893,12 @@ def test_an_item_is_named_as_far_as_what_is_known_allows() -> None:
 # ------------------------------------------------------------------------ --world on the CLI (#339)
 
 
-def _world(root: Path, items: dict[str, int]) -> Path:
-    """A save folder whose level.dat lists ``items`` the way FML does (``\x02`` before an item),
-    as ``tests/test_cli.py`` builds one."""
-    world = root / "MyWorld"
-    world.mkdir()
-    table = nbt.List(
-        nbt.TAG_COMPOUND,
-        [nbt.Compound({"K": nbt.String(f"\x02{k}"), "V": nbt.Int(v)}) for k, v in items.items()],
-    )
-    level = nbt.Compound({"FML": nbt.Compound({"ItemData": table})})
-    (world / "level.dat").write_bytes(nbt.dumps("", level))
-    return world
-
-
 def test_cli_inspect_with_the_saving_world_names_every_ae2_item(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from gtnh_solver.cli import main
 
-    world = _world(tmp_path, _ITEMS)
+    world = world_save(tmp_path, _ITEMS)
     assert (
         main(
             [
@@ -938,3 +926,208 @@ def test_cli_inspect_with_an_unreadable_world_exits_2(
     golden = str(_GOLDEN / "ae2-golden-gui.schematic")
     assert main(["--inspect-schematic", golden, "--world", str(tmp_path / "nope")]) == 2
     assert "cannot read --world: no level.dat" in capsys.readouterr().err
+
+
+# ------------------------------------------------------------------- review follow-ups (#339)
+
+
+def _with_devices(
+    layout: LayoutResult, network: int, devices: list[MEPlacedDevice]
+) -> LayoutResult:
+    """``layout`` with network ``network``'s devices replaced by ``devices``."""
+    networks = list(layout.me_networks)
+    networks[network] = networks[network].model_copy(update={"devices": devices})
+    return layout.model_copy(update={"me_networks": networks})
+
+
+def _me_message(caught: Iterable[warnings.WarningMessage]) -> str:
+    (message,) = [str(w.message) for w in caught if "ME networks" in str(w.message)]
+    return message
+
+
+def test_a_wildcard_filter_slot_is_left_unset_and_listed() -> None:
+    """``minecraft:log@32767`` means any log, which AE2 matches only through a Fuzzy Card, so the
+    slot is left empty (the slots after it keep their numbers) and the warning names it."""
+    problem, layout = _golden_layout()
+    export, imported = layout.me_networks[1].devices
+    wild = export.model_copy(update={"config": ("minecraft:log@32767", "minecraft:cobblestone")})
+    layout = _with_devices(layout, 1, [wild, imported])
+    with pytest.warns(SchematicWarning) as caught:
+        exported = _export(problem, layout)
+    part = _ae(exported, 3, 0, 2).parts[_UP]
+    assert set(part.extra["config"]) == {"#1"}
+    assert [_item(s) for s in part.config] == [(_ITEMS["minecraft:cobblestone"], 0)]
+    message = _me_message(caught)
+    assert "1 filter slot(s) are left unset" in message
+    assert "Fuzzy Card" in message
+    assert "ME Export Bus on the up side of the cable at (3, 0, 2): minecraft:log@32767" in message
+
+
+def test_a_bus_set_only_to_a_wildcard_writes_no_config() -> None:
+    problem, layout = _golden_layout()
+    export, imported = layout.me_networks[1].devices
+    wild = export.model_copy(update={"config": ("minecraft:log@32767",)})
+    with pytest.warns(SchematicWarning, match=r"1 filter slot\(s\) are left unset"):
+        exported = _export(problem, _with_devices(layout, 1, [wild, imported]))
+    assert "config" not in _ae(exported, 3, 0, 2).parts[_UP].extra
+
+
+def test_a_part_where_no_cable_is_laid_is_counted_rather_than_dropped() -> None:
+    """The validator refuses such a layout; the export still says so rather than lose the part."""
+    problem, layout = _golden_layout()
+    stray = _part(MEDeviceKind.IMPORT_BUS, (6, 0, 3), Facing.EAST)
+    layout = _with_devices(layout, 0, [*layout.me_networks[0].devices, stray])
+    for item_ids in (_ITEMS, None):
+        with pytest.warns(SchematicWarning) as caught:
+            exported = _export(problem, layout, item_ids=item_ids)
+        message = _me_message(caught)
+        assert "1 part(s) stand where the layout lays no cable" in message
+        assert "ME Import Bus x1: east side of the cell at (6, 0, 3)" in message
+        assert exported.tile_at(6, 0, 3) is None
+
+
+def test_capacity_cards_take_the_slots_after_the_speed_cards() -> None:
+    """One card a slot, in ``CARD_DAMAGE`` order: Acceleration, Hyper-Acceleration, Capacity."""
+    problem, layout = _golden_layout()
+    export, imported = layout.me_networks[1].devices
+    carded = export.model_copy(update={"cards": MECards(acceleration=1, super_speed=1, capacity=2)})
+    with pytest.warns(SchematicWarning):
+        exported = _export(problem, _with_devices(layout, 1, [carded, imported]))
+    part = _ae(exported, 3, 0, 2).parts[_UP]
+    assert list(part.extra["upgrades"]) == ["#0", "#1", "#2", "#3"]
+    assert part.upgrades == (
+        ItemRef(_CARD, 30, 1),
+        ItemRef(_CARD, 56, 1),
+        ItemRef(_CARD, 27, 1),
+        ItemRef(_CARD, 27, 1),
+    )
+
+
+def test_a_controller_facing_up_exports_up_with_south_as_its_up() -> None:
+    problem, layout = _golden_layout()
+    placements = [
+        at("ctrl", 4, 0, 0, Facing.UP) if p.machine_id == "ctrl" else p for p in layout.placements
+    ]
+    layout = layout.model_copy(update={"placements": placements})
+    with pytest.warns(SchematicWarning):
+        exported = _export(problem, layout)
+    ae = _ae(exported, 4, 0, 0)
+    assert (ae.forward, ae.up) == ("UP", "SOUTH")
+
+
+def test_inspect_with_another_worlds_table_says_so_and_keeps_the_numbers(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The golden's sibling world puts ItemMultiPart at 4356 and a Tinkers' item at 4631; read
+    through it, every cable would print as that item. One line says the file was saved elsewhere,
+    and the section falls back to what the file itself names."""
+    from gtnh_solver.cli import main
+
+    sibling = {"appliedenergistics2:item.ItemMultiPart": 4356, "TConstruct:potionLauncher": _PART}
+    world = world_save(tmp_path, sibling)
+    golden = str(_GOLDEN / "ae2-golden-gui.schematic")
+    assert main(["--inspect-schematic", golden, "--world", str(world)]) == 0
+    captured = capsys.readouterr()
+    assert (
+        "warning: --world's item table puts ItemMultiPart at 4356, but this file's cables use "
+        f"{_PART}: it was saved in another world, so its items stay numbers"
+    ) in captured.err
+    assert f"AE2 (item ids are the saving world's; its cables say ItemMultiPart is {_PART})" in (
+        captured.out
+    )
+    assert "BlockCableBus        at (0, 0, 0): ME Dense Smart Cable (Fluix)" in captured.out
+    assert "TConstruct" not in captured.out
+
+
+def test_inspect_with_a_table_without_ae2_says_so(capsys: pytest.CaptureFixture[str]) -> None:
+    from gtnh_solver.cli import _print_ae
+
+    _print_ae(_golden("ae2-golden-gui"), {1: "minecraft:stone"})
+    captured = capsys.readouterr()
+    assert "puts ItemMultiPart nowhere" in captured.err
+    assert "ME Dense Smart Cable (Fluix)" in captured.out
+
+
+def test_a_table_names_the_parts_of_a_file_with_no_cable(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """With no cable to read ItemMultiPart's id off, the world's table supplies it."""
+    from gtnh_solver.cli import _print_ae
+
+    root = nbt.Compound(_golden("ae2-golden-gui").root)
+    kept = [t for t in root["TileEntities"] if t["id"] != "BlockCableBus"]
+    lone = nbt.Compound(
+        {
+            "id": nbt.String("BlockCableBus"),
+            "x": nbt.Int(1),
+            "y": nbt.Int(0),
+            "z": nbt.Int(0),
+            "def:1": nbt.Compound(
+                {"id": nbt.Short(_PART), "Count": nbt.Byte(1), "Damage": nbt.Short(240)}
+            ),
+            "extra:1": nbt.Compound(),
+        }
+    )
+    root["TileEntities"] = nbt.List(nbt.TAG_COMPOUND, [*kept, lone])
+    _print_ae(read_schematic(nbt.dumps("Schematic", root)), _NAMES)
+    out = capsys.readouterr().out
+    assert "AE2 (items named by --world's item table)" in out
+    assert "BlockCableBus        at (1, 0, 0): no cable; up: ME Import Bus" in out
+
+
+def test_an_odd_tile_reads_as_what_it_says() -> None:
+    """Colours out of AE2's range print as their number; a missing ``up`` is not printed."""
+    from gtnh_solver.schematic.ae import describe_tile
+
+    def block(painted: int | None, forward: str | None = None, up: str | None = None) -> AETile:
+        return AETile(
+            cable=None, parts={}, forward=forward, up=up, painted=painted, has_redstone=None
+        )
+
+    assert describe_tile(block(16), part_item=None) == "painted fluix"
+    assert describe_tile(block(0), part_item=None) == "painted white"
+    assert describe_tile(block(17), part_item=None) == "painted 17"
+    assert describe_tile(block(-1), part_item=None) == "painted -1"
+    assert describe_tile(block(None, "NORTH"), part_item=None) == "forward north"
+
+
+def test_a_mistyped_item_number_reads_as_0_as_minecraft_reads_it() -> None:
+    """``NBTTagCompound.getShort`` on a missing or mistyped tag gives 0; so do the reader and the
+    inspect line, rather than throwing on a String ``id``."""
+    from gtnh_solver.schematic.ae import describe_tile
+    from gtnh_solver.schematic.read import _tile_entity
+
+    as_string = nbt.Compound({"id": nbt.String("appliedenergistics2:item.ItemMultiPart")})
+    assert ItemRef.from_nbt(as_string) == ItemRef(0, 0, 0)
+    raw = nbt.Compound(
+        {
+            "id": nbt.String("BlockCableBus"),
+            "def:6": nbt.Compound({"id": nbt.Short(_PART), "Damage": nbt.Short(16)}),
+            "def:1": nbt.Compound({"id": nbt.Short(_PART), "Damage": nbt.Short(260)}),
+            "extra:1": nbt.Compound(
+                {"config": nbt.Compound({"#0": nbt.Compound({"id": nbt.String("x")})})}
+            ),
+        }
+    )
+    ae = _tile_entity(raw).ae
+    assert ae is not None
+    assert describe_tile(ae, part_item=_PART) == (
+        "ME Glass Cable (Fluix); up: ME Export Bus, set to item 0:0"
+    )
+
+
+def test_only_ascii_numbered_keys_are_inventory_slots() -> None:
+    """``str.isdigit`` passes a superscript two, which ``int`` then refuses; a key not led by ``#``
+    is no slot either."""
+    from gtnh_solver.schematic.read import AEPart, _slot
+
+    assert _slot("#0") == 0
+    assert _slot("#12") == 12
+    assert _slot("#²") is None
+    assert _slot("x1") is None
+    assert _slot("#") is None
+    card = nbt.Compound({"id": nbt.Short(_CARD), "Damage": nbt.Short(30)})
+    extra = nbt.Compound(
+        {"upgrades": nbt.Compound({"#²": card, "x1": card, "#1": card, "#0": nbt.Int(5)})}
+    )
+    assert AEPart(1, ItemRef(_PART, 260, 1), extra).upgrades == (ItemRef(_CARD, 30, 0),)

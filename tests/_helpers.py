@@ -52,6 +52,7 @@ from gtnh_solver.ir import (
     Placement,
     Port,
 )
+from gtnh_solver.schematic import nbt
 from gtnh_solver.validator.report import ViolationCode
 
 #: The placement/geometry violation codes a clean placement must be free of. The full set; a
@@ -385,3 +386,17 @@ def write_icon_index(
         for name, data in (images or {}).items():
             archive.writestr(name, data)
     return index
+
+
+def world_save(root: Path, items: dict[str, int]) -> Path:
+    """A world save folder ``root/MyWorld`` whose ``level.dat`` lists ``items`` (registry name to
+    numeric id) the way FML does, ``\x02`` before an item's name: what ``--world`` reads."""
+    world = root / "MyWorld"
+    world.mkdir()
+    table = nbt.List(
+        nbt.TAG_COMPOUND,
+        [nbt.Compound({"K": nbt.String(f"\x02{k}"), "V": nbt.Int(v)}) for k, v in items.items()],
+    )
+    level = nbt.Compound({"FML": nbt.Compound({"ItemData": table})})
+    (world / "level.dat").write_bytes(nbt.dumps("", level))
+    return world

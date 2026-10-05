@@ -31,7 +31,9 @@ player, like any block.
 
 **Two parts are not written yet.** The golden has no ME Interface part and no AE2FluidCraft Dual
 Interface part (it outputs into an Interface block instead), so their NBT is unverified and the
-export leaves them off their cable, listing each for the builder (:data:`UNVERIFIED_PARTS`).
+export leaves them off their cable, listing each for the builder (:data:`UNVERIFIED_PARTS`). Nor
+is a filter slot for an item at any damage (``@32767``), which AE2 reads as that only with a Fuzzy
+Card fitted (:meth:`_WorldItems.filter_stack`): it is left unset and listed.
 
 What is left out, and what is only in the ghost, is said in one :class:`SchematicWarning`.
 """
@@ -43,6 +45,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Final
 
+from gtnh_solver.dataset.icons import WILDCARD_DAMAGE
 from gtnh_solver.dataset.me import (
     CABLE_DAMAGE,
     CABLE_NAMES,
@@ -68,7 +71,7 @@ from gtnh_solver.previewer.textures import TextureManifest
 
 from . import nbt
 from .core import FORGE_DIRECTION, Cell, SchematicError, SchematicWarning
-from .read import CABLE_SIDE, AETile, ItemRef
+from .read import CABLE_SIDE, AETile, ItemRef, number
 
 Key = tuple[int, int, int]
 
@@ -137,6 +140,24 @@ def _settings(kind: MEDeviceKind) -> nbt.Compound:
     raise SchematicError(f"no golden shows what an AE2 {kind.value} writes, so it is not exported")
 
 
+@dataclass
+class MELowering:
+    """What :func:`lower_me` wrote into the grid, and what it left out or only shows in the ghost."""
+
+    cables: int = 0  # cable cells written
+    parts: int = 0  # parts written on them
+    blocks: int = 0  # controllers and acceptors written
+    hatches: int = 0  # GT ME hatches (written by core, painted here)
+    left_out_cables: int = 0  # cable cells not written: no world named
+    left_out_parts: int = 0  # the parts on them
+    #: Parts not written on a cable that was (:data:`UNVERIFIED_PARTS`): kind, cell, side.
+    unverified: list[tuple[MEDeviceKind, Key, Facing]] = field(default_factory=list)
+    #: Parts on a cell the layout lays no cable on, which a valid layout never has: kind, cell, side.
+    cableless: list[tuple[MEDeviceKind, Key, Facing]] = field(default_factory=list)
+    #: Config slots left unset for an item at the wildcard meta: kind, cell, side, resource.
+    wildcards: list[tuple[MEDeviceKind, Key, Facing, str]] = field(default_factory=list)
+
+
 class _WorldItems:
     """The target world's item table, as the stacks a cable bus is made of.
 
@@ -166,9 +187,16 @@ class _WorldItems:
             }
         )
 
-    def filter_stack(self, resource: str, *, fluid: bool) -> nbt.Compound:
+    def filter_stack(self, resource: str, *, fluid: bool) -> nbt.Compound | None:
         """One ``config`` slot: the AE stack a bus is set to, ``resource`` a fluid's name or an item's
-        ``registry[@meta]`` (the adapter's resource ids). ``Cnt`` 1 for either: no bus reads it."""
+        ``registry[@meta]`` (the adapter's resource ids). ``Cnt`` 1 for either: no bus reads it.
+
+        ``None`` for an item at the wildcard meta (``@32767``, "any damage"), which no slot can hold
+        as meant: AE2 matches 32767 as a wildcard only in its fuzzy lookup (``ItemList.findFuzzy``),
+        which an export bus takes only with a Fuzzy Card (``PartBaseExportBus.java:120``), so written
+        as is the bus moves nothing. The slot is left unset and the warning names it
+        (:func:`warn_about_me`).
+        """
         counts = {
             "Count": nbt.Byte(0),
             "Cnt": nbt.Long(1),
@@ -180,23 +208,32 @@ class _WorldItems:
                 {"StackType": nbt.String("fluid"), "FluidName": nbt.String(resource), **counts}
             )
         name, _, meta = resource.partition("@")
+        damage = int(meta) if meta else 0
+        if damage == WILDCARD_DAMAGE:
+            return None
         return nbt.Compound(
             {
                 "StackType": nbt.String("item"),
                 "id": nbt.Short(self.id(name, f"the filter item {resource}")),
-                "Damage": nbt.Short(int(meta) if meta else 0),
+                "Damage": nbt.Short(damage),
                 **counts,
             }
         )
 
 
-def _inventory(stacks: Sequence[nbt.Compound]) -> nbt.Compound:
-    """An AE2 inventory, one stack a slot from ``#0``."""
-    return nbt.Compound({f"#{slot}": stack for slot, stack in enumerate(stacks)})
+def _inventory(stacks: Sequence[nbt.Compound | None]) -> nbt.Compound:
+    """An AE2 inventory, one stack a slot from ``#0``; a ``None`` slot is left empty, as AE2 writes
+    an empty slot (no ``#N`` tag), and the slots after it keep their numbers."""
+    return nbt.Compound(
+        {f"#{slot}": stack for slot, stack in enumerate(stacks) if stack is not None}
+    )
 
 
-def _part(device: MEPlacedDevice, items: _WorldItems) -> tuple[nbt.Compound, nbt.Compound]:
-    """``(def, extra)`` for one part: its item, and its settings, cards and filter or partition.
+def _part(
+    device: MEPlacedDevice, items: _WorldItems
+) -> tuple[nbt.Compound, nbt.Compound, list[str]]:
+    """``(def, extra, unset)`` for one part: its item, its settings, cards and filter or partition,
+    and the resources of the config slots left unset (:meth:`_WorldItems.filter_stack`).
 
     An empty inventory is left out, as AE2 drops its tag (``AppEngInternalInventory.writeToNBT``).
     The cards go one a slot, Acceleration first, as the golden's export bus holds them.
@@ -214,10 +251,12 @@ def _part(device: MEPlacedDevice, items: _WorldItems) -> tuple[nbt.Compound, nbt
     ]
     if cards:
         extra["upgrades"] = _inventory(cards)
-    if device.config:
-        fluid = device.kind in _FLUID_PARTS
-        extra["config"] = _inventory([items.filter_stack(r, fluid=fluid) for r in device.config])
-    return stack, extra
+    fluid = device.kind in _FLUID_PARTS
+    config = [items.filter_stack(r, fluid=fluid) for r in device.config]
+    if any(slot is not None for slot in config):
+        extra["config"] = _inventory(config)
+    unset = [r for r, slot in zip(device.config, config, strict=True) if slot is None]
+    return stack, extra, unset
 
 
 def _cable_bus(
@@ -226,8 +265,10 @@ def _cable_bus(
     colour: AEColor,
     parts: Mapping[Facing, MEPlacedDevice],
     items: _WorldItems,
+    report: MELowering,
 ) -> nbt.Compound:
-    """One cable cell's ``BlockCableBus`` tile entity, in the order AE2 visits its sides."""
+    """One cable cell's ``BlockCableBus`` tile entity, in the order AE2 visits its sides; a config
+    slot left unset goes on ``report``."""
     tile = nbt.Compound(
         {
             "id": nbt.String("BlockCableBus"),
@@ -238,7 +279,8 @@ def _cable_bus(
         }
     )
     for side, device in sorted(parts.items(), key=lambda kv: FORGE_DIRECTION[kv[0]]):
-        stack, extra = _part(device, items)
+        stack, extra, unset = _part(device, items)
+        report.wildcards.extend((device.kind, key, side, resource) for resource in unset)
         tile[f"def:{FORGE_DIRECTION[side]}"] = stack
         tile[f"extra:{FORGE_DIRECTION[side]}"] = extra
     damage = CABLE_DAMAGE[kind] + colour.ordinal
@@ -250,9 +292,11 @@ def _cable_bus(
 def _orientation(front: Facing) -> tuple[str, str]:
     """``(orientation_forward, orientation_up)`` for a block whose front faces ``front``.
 
-    AE2's placement rule (``AEBaseItemBlock.java:104-121``): ``up`` is ``UP`` and ``forward`` the
-    front, as the golden's controller, acceptor and drive carry it; a front up or down takes
-    ``SOUTH`` as its up, as AE2 gives a vertical block (``:97-101``).
+    AE2's placement rule for a block placed by hand (``AEBaseItemBlock.java:104-113``): ``up`` is
+    ``UP`` and ``forward`` the horizontal front, as the golden's controller, acceptor and drive
+    carry it. A front up or down comes from a player looking steeply down or up, and AE2 then sets
+    ``up`` to the opposite of the way the player faced (``:115-121``), so any horizontal ``up`` is
+    one a placement gives; ``SOUTH`` is the one written, as a player facing north would.
     """
     vertical = front in (Facing.UP, Facing.DOWN)
     return front.value.upper(), "SOUTH" if vertical else "UP"
@@ -288,20 +332,6 @@ def gt_colour(colour: AEColor) -> int:
     plus one, and AE reads dye ``d`` as ``AEColor`` ``15 - d`` (spike 5.2 and 7.5: ``mColor`` 1 is
     black in the golden)."""
     return 0 if colour is AEColor.FLUIX else 16 - colour.ordinal
-
-
-@dataclass
-class MELowering:
-    """What :func:`lower_me` wrote into the grid, and what it left out or only shows in the ghost."""
-
-    cables: int = 0  # cable cells written
-    parts: int = 0  # parts written on them
-    blocks: int = 0  # controllers and acceptors written
-    hatches: int = 0  # GT ME hatches (written by core, painted here)
-    left_out_cables: int = 0  # cable cells not written: no world named
-    left_out_parts: int = 0  # the parts on them
-    #: Parts not written on a cable that was (:data:`UNVERIFIED_PARTS`): kind, cell, side.
-    unverified: list[tuple[MEDeviceKind, Key, Facing]] = field(default_factory=list)
 
 
 def lower_me(
@@ -353,11 +383,18 @@ def lower_me(
             report.unverified.extend(
                 (d.kind, key, side) for side, d in on.items() if d.kind in UNVERIFIED_PARTS
             )
-            grid[key] = Cell(
-                CABLE_BUS, _DATA, _cable_bus(key, cable.kind, network.colour, kept, items)
-            )
+            tile = _cable_bus(key, cable.kind, network.colour, kept, items, report)
+            grid[key] = Cell(CABLE_BUS, _DATA, tile)
             report.cables += 1
             report.parts += len(kept)
+    # A part sits on a cable; one whose cell the layout lays none on has nothing to be written on.
+    # The validator refuses such a layout, but a file must never drop a block without saying so.
+    report.cableless.extend(
+        (device.kind, key, side)
+        for key, on in sorted(parts.items())
+        if key not in written
+        for side, device in on.items()
+    )
 
     placements = {p.machine_id: p for p in layout.placements}
     for machine in problem.machines:
@@ -422,24 +459,42 @@ def warn_about_me(report: MELowering) -> None:
             "shows each, and you build them by hand from it"
         )
     if report.unverified:
-        by_kind: dict[MEDeviceKind, list[str]] = {}
-        for kind, (x, y, z), side in sorted(
-            report.unverified, key=lambda u: (u[0].value, u[1], u[2].value)
-        ):
-            by_kind.setdefault(kind, []).append(
-                f"{side.value} side of the cable at ({x}, {y}, {z})"
-            )
-        listed = "; ".join(
-            f"{DEVICE_NAMES[kind]} x{len(where)}: {', '.join(where)}"
-            for kind, where in by_kind.items()
-        )
         said.append(
             f"{len(report.unverified)} part(s) are not written, since no in-game save pins what "
-            f"they write yet (GitHub #339), so fit them by hand: {listed}"
+            f"they write yet (GitHub #339), so fit them by hand: {_by_kind(report.unverified)}"
+        )
+    if report.cableless:
+        said.append(
+            f"{len(report.cableless)} part(s) stand where the layout lays no cable, so there is "
+            f"nothing to write them on; the layout is broken, check it with the validator: "
+            f"{_by_kind(report.cableless, on='the cell')}"
+        )
+    if report.wildcards:
+        listed = "; ".join(
+            f"{DEVICE_NAMES[kind]} on the {side.value} side of the cable at ({x}, {y}, {z}): "
+            f"{resource}"
+            for kind, (x, y, z), side, resource in sorted(
+                report.wildcards, key=lambda w: (w[1], w[2].value, w[3])
+            )
+        )
+        said.append(
+            f"{len(report.wildcards)} filter slot(s) are left unset, since each names an item at "
+            "any damage (@32767), which AE2 matches only through a Fuzzy Card: fit one, or set the "
+            f"slot to the item by hand: {listed}"
         )
     if not said:
         return
     warnings.warn("ME networks: " + ". ".join(said) + ".", SchematicWarning, stacklevel=3)
+
+
+def _by_kind(parts: Sequence[tuple[MEDeviceKind, Key, Facing]], *, on: str = "the cable") -> str:
+    """``parts`` grouped by device, each by the side and cell it goes on."""
+    by_kind: dict[MEDeviceKind, list[str]] = {}
+    for kind, (x, y, z), side in sorted(parts, key=lambda u: (u[0].value, u[1], u[2].value)):
+        by_kind.setdefault(kind, []).append(f"{side.value} side of {on} at ({x}, {y}, {z})")
+    return "; ".join(
+        f"{DEVICE_NAMES[kind]} x{len(where)}: {', '.join(where)}" for kind, where in by_kind.items()
+    )
 
 
 # --- naming what a file holds (--inspect-schematic) -----------------------------------------------
@@ -456,14 +511,15 @@ _CARD_NAMES: Final = {
 }
 
 
-def part_item_id(tiles: Sequence[AETile], names: Mapping[int, str] | None = None) -> int | None:
-    """``ItemMultiPart``'s id in the world that saved ``tiles``: from ``names`` when given, else read
-    off a cable. ``None`` with neither."""
-    if names is not None:
-        found = next((item for item, name in names.items() if name == PART_ITEM), None)
-        if found is not None:
-            return found
+def part_item_id(tiles: Sequence[AETile]) -> int | None:
+    """``ItemMultiPart``'s id in the world that saved ``tiles``, read off a cable; ``None`` with no
+    cable to read it from."""
     return next((t.cable.id for t in tiles if t.cable is not None), None)
+
+
+def table_part_item_id(names: Mapping[int, str]) -> int | None:
+    """``ItemMultiPart``'s id in a world's item table (id to registry name), ``None`` without AE2."""
+    return next((item for item, name in names.items() if name == PART_ITEM), None)
 
 
 def describe_item(
@@ -496,9 +552,15 @@ def describe_tile(
     """One line for an AE2 tile: a block's orientation and colour, or a cable bus's cable and each
     part by side with its cards and filter or partition."""
     if tile.cable is None and not tile.parts:
-        said = [f"forward {tile.forward}, up {tile.up}".lower()] if tile.forward else []
+        said = [
+            f"{label} {value.lower()}"
+            for label, value in (("forward", tile.forward), ("up", tile.up))
+            if value is not None
+        ]
         if tile.painted is not None:
-            said.append(f"painted {list(AEColor)[tile.painted].value}")
+            colours = list(AEColor)
+            known = 0 <= tile.painted < len(colours)
+            said.append(f"painted {colours[tile.painted].value if known else tile.painted}")
         return ", ".join(said) or "no AE2 tags"
 
     def name(item: ItemRef) -> str:
@@ -516,7 +578,7 @@ def describe_tile(
                 + " + ".join(
                     str(s["FluidName"])
                     if "FluidName" in s
-                    else name(ItemRef(int(s.get("id", 0)), int(s.get("Damage", 0)), 1))
+                    else name(ItemRef(number(s, "id"), number(s, "Damage"), 1))
                     for s in part.config
                 )
             )

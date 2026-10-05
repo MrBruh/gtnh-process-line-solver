@@ -86,11 +86,23 @@ class ItemRef:
 
     @classmethod
     def from_nbt(cls, tag: nbt.Compound) -> ItemRef:
-        return cls(
-            id=int(tag.get("id", 0)),
-            damage=int(tag.get("Damage", 0)),
-            count=int(tag.get("Count", 0)),
-        )
+        return cls(id=number(tag, "id"), damage=number(tag, "Damage"), count=number(tag, "Count"))
+
+
+def number(tag: nbt.Compound, key: str) -> int:
+    """``tag[key]`` as an int, and 0 when it is absent or not a number: what Minecraft's own
+    ``NBTTagCompound.getShort`` and its siblings read from a missing or mistyped tag."""
+    value: Any = tag.get(key)
+    return int(value) if isinstance(value, int) else 0
+
+
+def _slot(key: str) -> int | None:
+    """The slot number of an inventory key ``#N``, or ``None`` for any other key. ASCII digits
+    only: ``str.isdigit`` also passes a superscript two, which ``int`` then refuses."""
+    digits = key[1:]
+    if key.startswith("#") and digits.isascii() and digits.isdecimal():
+        return int(digits)
+    return None
 
 
 def _slots(inventory: object) -> list[nbt.Compound]:
@@ -98,8 +110,12 @@ def _slots(inventory: object) -> list[nbt.Compound]:
     is an empty one, since AE2 drops the tag rather than write an empty compound."""
     if not isinstance(inventory, nbt.Compound):
         return []
-    filled = [(int(key[1:]), value) for key, value in inventory.items() if key[1:].isdigit()]
-    return [value for _, value in sorted(filled) if isinstance(value, nbt.Compound)]
+    filled = [
+        (slot, value)
+        for key, value in inventory.items()
+        if (slot := _slot(key)) is not None and isinstance(value, nbt.Compound)
+    ]
+    return [value for _, value in sorted(filled, key=lambda pair: pair[0])]
 
 
 @dataclass(frozen=True)

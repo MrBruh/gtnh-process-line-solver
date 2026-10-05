@@ -105,7 +105,7 @@ from gtnh_solver.previewer import write_preview
 from gtnh_solver.previewer.jar import cached_jar
 from gtnh_solver.previewer.textures import TextureManifest
 from gtnh_solver.schematic import SchematicError, item_ids, read_schematic, write_schematic
-from gtnh_solver.schematic.ae import describe_tile, part_item_id
+from gtnh_solver.schematic.ae import describe_tile, part_item_id, table_part_item_id
 from gtnh_solver.schematic.read import Schematic
 from gtnh_solver.solver import Effort, solve
 from gtnh_solver.system_io import RATE_STEM, MENetworkIO, resource_label, system_io
@@ -845,12 +845,29 @@ def _print_ae(schematic: Schematic, names: Mapping[int, str] | None = None) -> N
     (``names``, id to registry name, from ``--world``) names them all. Without it the AE2 cables and
     parts still resolve, since every cable is ``ItemMultiPart`` and a cable bus's centre is always a
     cable, which gives that item's id in the file; anything else prints as its raw ``id:damage``.
+
+    **The table must be the saving world's.** When it puts ``ItemMultiPart`` at another id than the
+    file's cables use, the file was saved elsewhere and the table would name every item wrongly (in
+    the AE2 golden's sibling world, 4631 is a Tinkers' item); that is said once, on stderr, and the
+    table is set aside.
     """
     tiles = [(t, t.ae) for t in schematic.tile_entities]
     found = sorted(((t, ae) for t, ae in tiles if ae is not None), key=lambda pair: pair[0].pos)
     if not found:
         return
-    part_item = part_item_id([ae for _, ae in found], names)
+    part_item = part_item_id([ae for _, ae in found])
+    if names is not None:
+        listed = table_part_item_id(names)
+        if part_item is None:
+            part_item = listed
+        elif listed != part_item:
+            where = f"at {listed}" if listed is not None else "nowhere"
+            print(
+                f"warning: --world's item table puts ItemMultiPart {where}, but this file's cables "
+                f"use {part_item}: it was saved in another world, so its items stay numbers",
+                file=sys.stderr,
+            )
+            names = None
     whose = (
         "items named by --world's item table"
         if names is not None

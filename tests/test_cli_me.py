@@ -39,12 +39,12 @@ from gtnh_solver.ir import (
 )
 from gtnh_solver.placement import Objective
 from gtnh_solver.previewer.textures import TextureManifest
-from gtnh_solver.schematic import nbt, read_schematic
+from gtnh_solver.schematic import read_schematic
 from gtnh_solver.schematic.ae import MELowering, warn_about_me
 from gtnh_solver.schematic.core import POWER_SOURCE_STAND_IN, SchematicWarning
 from gtnh_solver.solver import Effort, solve
 from gtnh_solver.validator import validate
-from tests._helpers import on_me
+from tests._helpers import on_me, world_save
 from tests._me_fixtures import SUB, acceptor_comb, comb, gt_hatch_line
 from tests._me_fixtures import endpoint as me_endpoint
 
@@ -617,15 +617,7 @@ def test_sand_with_items_on_me_and_a_world_writes_every_cable_bus(
     # item ids let the export write every cable cell as a cable bus (#339), its cable named by
     # that world's ItemMultiPart id, and the warning says the printer places none of it.
     items = json.loads((_GOLDEN_ITEMS).read_text(encoding="utf-8"))["items"]
-    world = tmp_path / "MyWorld"
-    world.mkdir()
-    table = nbt.List(
-        nbt.TAG_COMPOUND,
-        [nbt.Compound({"K": nbt.String(f"{k}"), "V": nbt.Int(v)}) for k, v in items.items()],
-    )
-    (world / "level.dat").write_bytes(
-        nbt.dumps("", nbt.Compound({"FML": nbt.Compound({"ItemData": table})}))
-    )
+    world = world_save(tmp_path, items)
     schematic = tmp_path / "x.schematic"
     with pytest.warns(SchematicWarning, match=r"printer applies no tile-entity NBT") as caught:
         assert (

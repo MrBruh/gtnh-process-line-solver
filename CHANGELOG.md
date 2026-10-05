@@ -18,11 +18,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   places no cable or bus (it applies no tile data, and a cable block is nothing else), so the ghost
   shows the network for you to build by hand, as the warning says. ME Interface and Dual Interface
   parts are not written yet, since the in-game build has neither; the warning lists where each goes.
+  A filter for an item at any damage (`@32767`, a coke oven's logs) is left unset and listed too:
+  AE2 matches it only through a Fuzzy Card, so the bus would otherwise move nothing.
   `read_schematic` reads AE2 tiles back (`TileEntity.ae`: a cable block's cable and its parts by
   side, a block's orientation), and `--inspect-schematic` lists them: each cable block's cable and
   buses by side with their cards and filters, and each AE2 block's facing. `--world` now works with
-  it too, naming every item by the world the file was saved in; without it AE2's own cables and
-  buses are still named from the file, and other items print as the world's numeric ids.
+  it too, naming every item by the world the file was saved in (a world whose ids do not match the
+  file's is set aside with a warning); without it AE2's own cables and buses are still named from
+  the file, and other items print as the world's numeric ids.
 - **The preview draws ME networks (#338).** Every AE2 block a line on ME is built with is drawn as
   AE2 draws it: each cable block (smart, dense, ...) with an arm toward each side it joins, a plug
   where it meets a controller or a GT ME hatch, and a straight bar where AE2 draws one; each bus,

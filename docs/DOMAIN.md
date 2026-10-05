@@ -860,8 +860,17 @@ golden (`tests/golden/schematic/ae2-golden-*.schematic`, spike 7.5) and held to 
   cable buses by that world's table; without it only AE2's own cables and buses are named.
 - **The ME Interface part and FC's Dual Interface part are left off their cable**, and listed by
   cell and side: the golden has neither, so their NBT is unverified (spike 11).
+- **A filter slot for an item at any damage is left unset** (a resource `registry@32767`, such as a
+  coke oven's `minecraft:log@32767`), and listed with its bus. AE2 matches 32767 as "any damage"
+  only in its fuzzy lookup (`ItemList.findFuzzy`), which an export bus takes only with a Fuzzy Card
+  (`PartBaseExportBus.java:120`); written as is, the bus would move nothing. The builder fits a
+  Fuzzy Card or sets the slot to the one item they feed.
+- A part on a cell the layout lays no cable on (the validator refuses that) is counted and listed
+  rather than dropped.
 
-One `SchematicWarning` says what was left out and why.
+One `SchematicWarning` says what was left out and why. `--inspect-schematic --world` checks the
+world first: a table that puts `ItemMultiPart` at another id than the file's cables use is from
+another world, so it is set aside with a warning and the items stay numbers.
 
 ## Multiblocks
 
