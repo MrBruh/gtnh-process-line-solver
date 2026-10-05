@@ -465,6 +465,10 @@ result carries no infeasibility; `infeasible`/`partial_invalid` must carry one.
   multiblock, a `PlacedHatch` of the slot kind the endpoint names, #335). With `power_external`
   the adapter emits no power source and no power net at all (#225); the powered machines keep
   their power ports, which state the draw.
+- A network whose `MENetworkSpec.power` is `acceptor` has an Energy Acceptor machine
+  (`Machine.me_role` `acceptor`, #336) whose `eut` is what it is rated to draw. The validator holds
+  it to what the laid network draws, and its store to one GT ME output flush
+  (`ME_POWER_INSUFFICIENT`); a power cable to it is held to its source's whole output.
 
 ## Versioning
 

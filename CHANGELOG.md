@@ -16,6 +16,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   acceptor takes every amp its source offers until its network is full, so the cable from the
   source to it is sized for the source's whole output rather than the acceptor's steady draw, and
   no cable for more than its source puts out; feed that source no more than the run says.
+  The validator holds every layout to it: a new `me_power_insufficient` violation for an acceptor
+  network with no acceptor, none on a power cable, or one rated under what the laid network
+  draws, and for a network that cannot store one flush of its GT ME output buses (16,000 AE for an
+  Output Bus (ME), against the 1,000 AE a network with no acceptor or controller holds). An
+  externally powered network's flush is taken as stored by the network powering it, and said.
 - **Nets on ME are built (#335).** A solve with nets on ME now lays each ME network: the ME
   device each port needs (an export or import bus, an interface or Dual Interface, or one of GT's
   ME hatches on a multiblock), the AE2 cable joining them as a tree, and the blocks the network

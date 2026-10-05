@@ -22,6 +22,7 @@ from hypothesis import strategies as st
 from gtnh_solver.adapter import Node, Plan, Recipe, adapt_file, to_input_ir
 from gtnh_solver.dataset import load_physical_dataset, machine_amps_in
 from gtnh_solver.ir import (
+    AEColor,
     AutoConnection,
     CellBox,
     CellCoord,
@@ -35,6 +36,11 @@ from gtnh_solver.ir import (
     LayoutStatus,
     Machine,
     MachineFaceRef,
+    MEConfig,
+    MEMode,
+    MENetworkSpec,
+    MEPower,
+    MERole,
     Net,
     PinnedIO,
     PipeFamily,
@@ -1119,6 +1125,114 @@ def test_power_load_over_16x_has_no_sufficient_cable() -> None:
     maxed = layout.routes[0].model_copy(update={"thickness_per_segment": [16, 16]})
     layout = layout.model_copy(update={"routes": [maxed]})
     assert ViolationCode.POWER_THICKNESS_INSUFFICIENT in validate(problem, layout).codes()
+
+
+def _acceptor_trunk(thickness: list[int]) -> tuple[InputIR, LayoutResult]:
+    """A source feeding ``m0`` and then an Energy Acceptor ``acc`` along one LV cable (#336).
+
+    ``src`` docks at (0, 0, 1) and the cable runs east to (4, 0, 1); ``m0`` taps it 2 blocks out
+    (30 V: 48/30 = 1.6 A) and ``acc`` at its end, 4 blocks out (28 V: 28/28 = 1.0 A). The source
+    puts out the whole amps both sum to, 3 A, and the acceptor takes all of it until its network is
+    full (spike 6.3): so every segment carries 3 A (4x), where steady loads would size the two past
+    ``m0`` at 1 A.
+    """
+    power_in = [Port(id="pi", commodity=Commodity.POWER, direction=IODirection.INPUT)]
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=4, sz=8),
+        machines=[
+            Machine(
+                id="src",
+                type="Power Source (LV)",
+                voltage_tier="LV",
+                orientation_options=[Facing.NORTH],
+                faces=FaceSpec(
+                    ports=[Port(id="po", commodity=Commodity.POWER, direction=IODirection.OUTPUT)]
+                ),
+            ),
+            Machine(
+                id="m0",
+                type="M",
+                voltage_tier="LV",
+                eut=48.0,
+                orientation_options=[Facing.NORTH],
+                faces=FaceSpec(ports=power_in),
+            ),
+            Machine(
+                id="acc",
+                type="ME Energy Acceptor",
+                voltage_tier="LV",
+                eut=28.0,
+                orientation_options=[Facing.NORTH],
+                faces=FaceSpec(ports=power_in),
+                me_role=MERole.ACCEPTOR,
+                me_network="sub",
+            ),
+        ],
+        nets=[
+            Net(
+                id="pw",
+                commodity=Commodity.POWER,
+                throughput=76.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="src", port_id="po"),
+                    MachineFaceRef(machine_id="m0", port_id="pi"),
+                    MachineFaceRef(machine_id="acc", port_id="pi"),
+                ],
+            )
+        ],
+        me=MEConfig(
+            networks=[
+                MENetworkSpec(
+                    id="sub", mode=MEMode.SUBNET, colour=AEColor.ORANGE, power=MEPower.ACCEPTOR
+                )
+            ]
+        ),
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id="src", cell=_coord(0, 0, 0), orientation=Facing.NORTH),
+            Placement(machine_id="m0", cell=_coord(2, 0, 0), orientation=Facing.NORTH),
+            Placement(machine_id="acc", cell=_coord(4, 0, 0), orientation=Facing.NORTH),
+        ],
+        routes=[
+            Route(
+                net_id="pw",
+                commodity=Commodity.POWER,
+                terminals=[
+                    Terminal(machine_id=m, port_id=p, face=Facing.SOUTH, cell=_coord(x, 0, 1))
+                    for m, p, x in (("src", "po", 0), ("m0", "pi", 2), ("acc", "pi", 4))
+                ],
+                segments=[
+                    Segment(start=_coord(x, 0, 1), end=_coord(x + 1, 0, 1), channel=0)
+                    for x in range(4)
+                ],
+                thickness_per_segment=thickness,
+            )
+        ],
+    )
+    return problem, layout
+
+
+def test_an_acceptors_cable_is_held_to_its_sources_full_output() -> None:
+    report = validate(*_acceptor_trunk([4, 4, 4, 4]))
+    assert report.ok, str(report)
+    # No amp ceiling starves an acceptor, so its intake is measured, unlike m0's unstated one.
+    assert report.unverified_power_intake == ("m0",)
+    # Sized for the acceptor's own draw, the two segments past m0 would burn on its inrush.
+    steady = validate(*_acceptor_trunk([4, 4, 1, 1]))
+    assert steady.codes() == (ViolationCode.POWER_THICKNESS_INSUFFICIENT,) * 2
+    assert "carries 3 amps" in steady.violations[0].message
+
+
+def test_no_segment_is_held_to_more_than_its_source_puts_out() -> None:
+    # The two segments m0 shares with the acceptor would sum 1.6 A and the acceptor's 3 to 5 A (8x),
+    # but a cable carries no more than its source's 3 A: 4x is enough.
+    assert validate(*_acceptor_trunk([4, 4, 4, 4])).ok
+    assert validate(*_acceptor_trunk([2, 4, 4, 4])).codes() == (
+        ViolationCode.POWER_THICKNESS_INSUFFICIENT,
+    )
 
 
 def test_power_unknown_tier_cannot_be_amperage_verified() -> None:

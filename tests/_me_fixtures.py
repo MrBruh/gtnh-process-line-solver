@@ -18,6 +18,13 @@ both sides agree. A test breaks one rule at a time on top of them and expects it
 - :func:`gt_hatch_line`: a multiblock whose product leaves through GT's Output Bus (ME), front
   facing a cable from the stub; or, with ``normal=True``, a normal output bus with an interface part
   in front of it.
+- :func:`acceptor_comb`: a two-machine :func:`comb` powered by an Energy Acceptor on the row's east
+  end, fed by a power source through two blocks of cable (#336)::
+
+      z=0    .   m0    .    .    .    .    .
+      z=1    s  c(2)  c(0) c(0) c(0) c(0)  ACC      s: the stub (attached) or a smart cable (ad hoc)
+      z=2    .   m1    .    .    .    .    #        #: LV cable, from the source's east face to the
+      z=3    .    .    .    .   SRC   #    #           acceptor's south face; SRC's front faces south
 """
 
 from __future__ import annotations
@@ -47,11 +54,15 @@ from gtnh_solver.ir import (
     MENetworkLayout,
     MENetworkSpec,
     MEPlacedDevice,
+    MEPower,
     MERole,
     Net,
     PlacedHatch,
     Placement,
     Port,
+    Route,
+    Segment,
+    Terminal,
 )
 
 MAIN = "main"
@@ -327,5 +338,86 @@ def gt_hatch_line(*, normal: bool = False) -> tuple[InputIR, LayoutResult]:
                 devices=[built],
             )
         ],
+    )
+    return problem, layout
+
+
+def acceptor_comb(
+    *, mode: MEMode = MEMode.ATTACHED, eut: float = 12.0
+) -> tuple[InputIR, LayoutResult]:
+    """:func:`comb` of two machines with its network powered by an Energy Acceptor rated ``eut``
+    EU/t (module docstring), its cables carrying the channels AE routes through them.
+
+    What the network draws, by hand (spike 6): two export buses idle at 1 AE/t each and extract
+    0.1 items/t each. Attached, the channel term is twice the channels through every node, the stub
+    and the cable holding both buses 2 each, the buses 1 each: 2 x 6 = 12, so (2 + 12/128 + 0.2) x
+    10 = 22.9375 AE/t, 11.46875 EU/t. Ad hoc, every node (six cables, two buses, the acceptor)
+    pays for both channels: 9 x 2 = 18, so (2 + 18/128 + 0.2) x 10 = 23.40625 AE/t, 11.703125 EU/t.
+    """
+    problem, layout = comb(2, mode=mode)
+    (network,) = layout.me_networks
+    spec = problem.me.networks[0].model_copy(update={"power": MEPower.ACCEPTOR})
+    power_in = Port(id="power:in", commodity=Commodity.POWER, direction=IODirection.INPUT)
+    acceptor = Machine(
+        id="acc",
+        type="ME Energy Acceptor",
+        voltage_tier="LV",
+        eut=eut,
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(ports=[power_in]),
+        me_role=MERole.ACCEPTOR,
+        me_network=network.id,
+    )
+    source = Machine(
+        id="src",
+        type="Power Source (LV)",
+        voltage_tier="LV",
+        orientation_options=[Facing.SOUTH],
+        faces=FaceSpec(
+            ports=[Port(id="power:out", commodity=Commodity.POWER, direction=IODirection.OUTPUT)]
+        ),
+    )
+    power = Net(
+        id="power:LV",
+        commodity=Commodity.POWER,
+        throughput=eut,
+        endpoints=[
+            MachineFaceRef(machine_id="src", port_id="power:out"),
+            MachineFaceRef(machine_id="acc", port_id="power:in"),
+        ],
+    )
+    problem = InputIR(
+        bounding_region=CellBox(sx=7, sy=1, sz=4),
+        machines=[*problem.machines, acceptor, source],
+        nets=[*problem.nets, power],
+        me=MEConfig(networks=[spec]),
+    )
+    # Both buses sit on the cable at x = 1, so the cells from the root to there carry both.
+    cables = [
+        c.model_copy(update={"me_channels": 2 if c.cell.x <= 1 else 0}) for c in network.cables
+    ]
+    route = Route(
+        net_id="power:LV",
+        commodity=Commodity.POWER,
+        terminals=[
+            Terminal(machine_id="src", port_id="power:out", face=Facing.EAST, cell=coord(5, 0, 3)),
+            Terminal(machine_id="acc", port_id="power:in", face=Facing.SOUTH, cell=coord(6, 0, 2)),
+        ],
+        segments=[
+            Segment(start=coord(5, 0, 3), end=coord(6, 0, 3), channel=0),
+            Segment(start=coord(6, 0, 3), end=coord(6, 0, 2), channel=0),
+        ],
+        thickness_per_segment=[1, 1],
+    )
+    layout = layout.model_copy(
+        update={
+            "placements": [
+                *layout.placements,
+                at("acc", 6, 0, 1, Facing.NORTH),
+                at("src", 4, 0, 3, Facing.SOUTH),
+            ],
+            "routes": [route],
+            "me_networks": [network.model_copy(update={"cables": cables})],
+        }
     )
     return problem, layout

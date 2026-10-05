@@ -686,6 +686,21 @@ its front. The validator builds that graph from the blocks, and:
    (spike 2.4); where blocks form a cycle, the validator counts every device AE could route through
    a block, which is sound for any order AE picks (spike 2.5).
 
+**Power**, by what the laid network draws (spike 6; "What an ME network draws" below):
+
+9. **A network on an Energy Acceptor gets what it draws.** Its acceptor is placed, reached by a
+   power cable (unless `--me power` leaves every machine's power to the builder), and rated (its
+   `eut`) for at least the network's EU/t, which the validator computes on its own from the
+   blocks: the devices it places, and the channel term from its own pathing, never the router's
+   `me_channels`. And whatever powers it must store one flush of each GT ME output bus or hatch at
+   once, 16,000 AE for an Output Bus (ME), where a grid with no acceptor, controller or cell holds
+   only 1,000 (spike 5.3, 6.3); an acceptor or a controller holds 80,000. An externally powered
+   network draws on the main network or through a quartz fiber, whose store the layout cannot see,
+   so its flush is taken as stored and named (`ValidationReport.me_external_buffers`), not
+   refused. A rating under the laid figure names the acceptor: another placement, laying less
+   cable, can meet it, so the solver ranks that layout as one that left the acceptor's power net
+   unrouted rather than as a bug.
+
 ### How the router lays an ME network (#334)
 
 `router/me.py` builds to those rules by laying each network as a **forest of trees**, one root per

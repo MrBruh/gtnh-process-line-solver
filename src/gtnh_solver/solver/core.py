@@ -789,13 +789,17 @@ def _starved_machines(report: ValidationReport) -> tuple[str, ...]:
     A starve is distance-driven: the cable loss over the run this placement implied leaves the
     machine's hatches unable to take in its ``eut``, though every segment is correctly thick. So
     a placement with the machine nearer its source is the fix, and the attempt ranks as having left
-    its power net unrouted. Any *other* violation alongside it is a genuine placer/router bug,
-    which no placement fixes - so a mixed report names no net, as before.
+    its power net unrouted. An Energy Acceptor rated under what its ME network's cable costs
+    (``ME_POWER_INSUFFICIENT`` naming it, #336) is the same kind of defect: its rating is an
+    estimate made before any cable was laid, and a placement laying less cable meets it. Any
+    *other* violation alongside it is a genuine placer/router bug, which no placement fixes - so a
+    mixed report names no net, as before.
     """
     starved = tuple(
         v.machine_id
         for v in report.violations
-        if v.code is ViolationCode.POWER_SUPPLY_INSUFFICIENT and v.machine_id is not None
+        if v.code in (ViolationCode.POWER_SUPPLY_INSUFFICIENT, ViolationCode.ME_POWER_INSUFFICIENT)
+        and v.machine_id is not None
     )
     return starved if len(starved) == len(report.violations) else ()
 
@@ -811,7 +815,8 @@ def _validation_infeasibility(report: ValidationReport, starved: tuple[str, ...]
             detail="; ".join(v.message for v in report.violations),
             suggested_relaxation=(
                 "shorten the power run - a smaller bounding region, or a power source nearer the "
-                "load; no attempt could place these machines close enough"
+                "load; no attempt could place these machines close enough (for an Energy "
+                "Acceptor, no attempt laid its ME network's cable as short as it was rated for)"
             ),
         )
     codes = ", ".join(v.code.value for v in report.violations)
