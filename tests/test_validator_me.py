@@ -318,6 +318,7 @@ def test_a_fuzzy_card_takes_one_of_four_slots() -> None:
         (MEDeviceKind.STORAGE_BUS, (_ANY_LOG,), True),  # a partition: it would store no log
         (MEDeviceKind.EXPORT_BUS, ("minecraft:log@1", "minecraft:log"), False),
         (MEDeviceKind.EXPORT_BUS, ("minecraft:log@327670", "minecraft:log@any"), False),
+        (MEDeviceKind.EXPORT_BUS, ("minecraft:log@032767",), True),  # the same number
         (MEDeviceKind.FLUID_EXPORT_BUS, ("water",), False),  # a fluid has no damage
         (MEDeviceKind.INTERFACE, (), False),
     ],
@@ -361,6 +362,27 @@ def test_a_stocking_input_bus_never_serves_an_item_at_any_damage(
     if refused:
         assert out[0].machine_id == "mb"
         assert port_id in out[0].message
+
+
+@pytest.mark.parametrize(
+    "resource",
+    ["minecraft:log@32767", "minecraft:log@032767", "minecraft:log@327670", "minecraft:log@1"],
+)
+def test_the_gate_reads_a_wildcard_as_the_adapter_and_the_export_do(resource: str) -> None:
+    """One reading of a wildcard (``dataset.me.wildcard_item``): what the gate refuses without a
+    card is exactly what the adapter gives one, and what the export leaves unset without one."""
+    from gtnh_solver.dataset.me import needs_fuzzy_card, wildcard_item
+    from gtnh_solver.ir import Port
+    from gtnh_solver.schematic.ae import _WorldItems
+
+    built_for = endpoint("e", ("p",), MEDeviceKind.EXPORT_BUS, config=(resource,))
+    out: list[Violation] = []
+    built = device("m", built_for, (0, 0, 0), Facing.NORTH)
+    vme._check_wildcards({}, {("m", "e"): (built, built_for, MAIN)}, out)
+    refused = bool(out)
+    port = Port(id=f"input:{resource}", commodity=Commodity.ITEM, direction=IODirection.INPUT)
+    unset = _WorldItems({"minecraft:log": 17}).filter_stack(resource, fluid=False) is None
+    assert refused == needs_fuzzy_card(port) == unset == wildcard_item(resource)
 
 
 def test_a_gt_me_output_bus_flushes_39_items_a_tick() -> None:

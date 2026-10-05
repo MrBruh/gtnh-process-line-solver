@@ -1018,6 +1018,27 @@ def test_a_fuzzy_card_is_written_after_the_speed_cards_with_its_wildcard_filter(
     assert describe_item(ItemRef(_CARD, 29, 1), part_item=_PART, names=_NAMES) == "Fuzzy Card"
 
 
+def test_a_carded_storage_bus_exports_its_card_and_whole_partition() -> None:
+    """A chests subnet's storage bus partitioned to any log and to sand carries a Fuzzy Card
+    (#353): written in its first upgrade slot, with both partition slots set, the wildcard at
+    32767, and the fuzzy mode every storage bus writes."""
+    problem, layout = _golden_layout()
+    storage, fluid_storage = layout.me_networks[2].devices
+    carded = storage.model_copy(
+        update={"cards": MECards(fuzzy=1), "config": ("minecraft:log@32767", "minecraft:sand")}
+    )
+    with pytest.warns(SchematicWarning) as caught:
+        exported = _export(
+            problem, _with_devices(layout, 2, [carded, fluid_storage]), item_ids=_ITEMS_WITH_LOG
+        )
+    part = _ae(exported, 2, 0, 2).parts[_WEST]
+    assert part.item == ItemRef(_PART, PART_DAMAGE[MEDeviceKind.STORAGE_BUS], 1)
+    assert part.upgrades == (ItemRef(_CARD, 29, 1),)
+    assert [_item(s) for s in part.config] == [(17, 32767), (_ITEMS["minecraft:sand"], 0)]
+    assert part.extra["FUZZY_MODE"] == "IGNORE_ALL"
+    assert "left unset" not in _me_message(caught)
+
+
 def test_nitrobenzenes_coke_oven_bus_exports_with_its_fuzzy_card_and_any_log() -> None:
     """``gtnh-nitrobenzene.json --me items`` for a named world (the golden's, with vanilla's log):
     the Coke Oven's export bus is written with its Fuzzy Card and set to any log, so it is no longer

@@ -1,8 +1,8 @@
 """Net-topology helpers shared across the solver lanes.
 
 Small, pure lookups over the input IR that were hand-rolled identically in the placement, router,
-solver, and system_io lanes: the port-direction map, a net's source/sink split, and the
-one-placement-per-machine index. Kept here (not re-exported from ``ir``) so the lanes
+solver, and system_io lanes: the port-direction map, the resource a port's id names, a net's
+source/sink split, and the one-placement-per-machine index. Kept here (not re-exported from ``ir``) so the lanes
 deep-import them the way they deep-import ``ir.geometry`` - helpers stay off the contract's public
 surface (see ``ir/__init__``).
 
@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Sequence
 
 from .enums import Commodity, Facing, IODirection
-from .input_ir import InputIR, Machine, MachineFaceRef, Net
+from .input_ir import InputIR, Machine, MachineFaceRef, Net, Port
 from .output import Placement
 
 #: The faces of a single block that can carry a connection: every face but the front, which carries
@@ -88,6 +88,12 @@ def me_network_machines(problem: InputIR) -> dict[str, list[str]]:
         for network in dict.fromkeys(networks):
             members.setdefault(network, []).append(machine.id)
     return members
+
+
+def port_resource(port: Port) -> str:
+    """The resource a non-power port carries, recovered from its ``{direction}:{resource}`` id."""
+    prefix = f"{port.direction.value}:"
+    return port.id[len(prefix) :] if port.id.startswith(prefix) else port.id
 
 
 def port_direction_map(problem: InputIR) -> dict[tuple[str, str], IODirection]:

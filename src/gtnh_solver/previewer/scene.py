@@ -49,6 +49,7 @@ from gtnh_solver.ir import (
     Route,
 )
 from gtnh_solver.ir.geometry import Cell, rotated_footprint
+from gtnh_solver.ir.nets import port_resource
 from gtnh_solver.output_faces import BlockOutputs, output_faces
 from gtnh_solver.route_blocks import route_cells
 from gtnh_solver.system_io import (
@@ -57,7 +58,6 @@ from gtnh_solver.system_io import (
     is_boundary_storage,
     net_label,
     net_resource,
-    port_resource,
     resource_label,
     system_io,
 )

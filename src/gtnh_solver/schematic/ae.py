@@ -35,10 +35,12 @@ export leaves them off their cable, listing each for the builder (:data:`UNVERIF
 
 **A bus set to an item at any damage** (``@32767``) carries a Fuzzy Card (#353), written in the
 upgrade slot after its speed cards, with its filter written as that stack and the bus's fuzzy mode
-left at the ``IGNORE_ALL`` every bus writes (:func:`_settings`); the card makes AE2 read the
-wildcard as any damage. No golden holds a Fuzzy Card or a wildcard filter, so both are AE2's
-source alone (spike 7.5). A wildcard slot on a bus with no card, which the validator refuses, is
-left unset and listed rather than written to move nothing (:meth:`_WorldItems.filter_stack`).
+left at the ``IGNORE_ALL`` every bus writes (:func:`_settings`). The card makes AE2 match the
+wildcard through the ore dictionary, every item of the stack's ore names registered at 32767 (the
+vanilla logs, as ``logWood``), or a damageable item at any durability; any other item it still
+matches only at 32767 (spike 4.2). No golden holds a Fuzzy Card or a wildcard filter, so both are
+AE2's source alone (spike 7.5). A wildcard slot on a bus with no card, which the validator refuses,
+is left unset and listed rather than written to move nothing (:meth:`_WorldItems.filter_stack`).
 
 What is left out, and what is only in the ghost, is said in one :class:`SchematicWarning`.
 """
@@ -50,7 +52,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Final
 
-from gtnh_solver.dataset.icons import WILDCARD_DAMAGE
 from gtnh_solver.dataset.me import (
     CABLE_DAMAGE,
     CABLE_NAMES,
@@ -60,6 +61,7 @@ from gtnh_solver.dataset.me import (
     MATERIAL_ITEM,
     PART_DAMAGE,
     PART_ITEM,
+    wildcard_item,
 )
 from gtnh_solver.ir import (
     AEColor,
@@ -205,11 +207,13 @@ class _WorldItems:
         """One ``config`` slot: the AE stack a bus is set to, ``resource`` a fluid's name or an item's
         ``registry[@meta]`` (the adapter's resource ids). ``Cnt`` 1 for either: no bus reads it.
 
-        An item at the wildcard meta (``@32767``, "any damage") is written as that stack on a bus
-        with a Fuzzy Card (``fuzzy``), which makes AE2 match it at any damage
-        (``ItemList.findFuzzy``, spike 4.2), as a player's filter is saved whatever its damage.
-        ``None`` on a bus without one: AE2 then matches 32767 exactly and the bus moves nothing,
-        so the slot is left unset and the warning names it (:func:`warn_about_me`).
+        An item at the wildcard meta (``@32767``, :func:`~gtnh_solver.dataset.me.wildcard_item`)
+        is written as that stack on a bus with a Fuzzy Card (``fuzzy``), as a player's filter is
+        saved whatever its damage. The card makes AE2 match it through the ore dictionary or, for a
+        damageable item, at any durability (``ItemList.findFuzzy``, spike 4.2); an item with
+        neither still matches only at 32767. ``None`` on a bus without a card: AE2 then matches
+        32767 exactly and the bus moves nothing, so the slot is left unset and the warning names it
+        (:func:`warn_about_me`).
         """
         counts = {
             "Count": nbt.Byte(0),
@@ -221,10 +225,10 @@ class _WorldItems:
             return nbt.Compound(
                 {"StackType": nbt.String("fluid"), "FluidName": nbt.String(resource), **counts}
             )
+        if wildcard_item(resource) and not fuzzy:
+            return None
         name, _, meta = resource.partition("@")
         damage = int(meta) if meta else 0
-        if damage == WILDCARD_DAMAGE and not fuzzy:
-            return None
         return nbt.Compound(
             {
                 "StackType": nbt.String("item"),

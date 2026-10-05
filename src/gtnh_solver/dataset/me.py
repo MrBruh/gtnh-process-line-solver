@@ -70,6 +70,7 @@ from gtnh_solver.ir.me import (
     MEEndpoint,
     MEHatchPolicy,
 )
+from gtnh_solver.ir.nets import port_resource
 
 from .icons import WILDCARD_DAMAGE
 from .voltage import VOLTAGE_BY_TIER
@@ -170,17 +171,28 @@ FUZZY_BUSES: frozenset[MEDeviceKind] = frozenset(
 
 
 def wildcard_item(resource: str) -> bool:
-    """Whether ``resource``, an item's ``registry@meta``, is that item at any damage: the meta is
-    Forge's wildcard, 32767 (``minecraft:log@32767``, any log). A fluid's name has no meta."""
+    """Whether ``resource``, an item's ``registry@meta``, names it at Forge's wildcard damage, 32767
+    (``minecraft:log@32767``, any log). The meta is read as the number a filter's ``Damage`` holds,
+    so ``@032767`` is the wildcard too; a fluid's name has no meta. The one reading of a wildcard:
+    the adapter's choice, the validator's check and the export's filter all ask this.
+
+    It names a stack, not a guarantee: AE2 matches it at any damage only through the ore dictionary
+    or for a damageable item, even with a Fuzzy Card (spike 4.2)."""
     _, at, meta = resource.rpartition("@")
-    return bool(at) and meta == str(WILDCARD_DAMAGE)
+    return bool(at) and meta.isdigit() and int(meta) == WILDCARD_DAMAGE
+
+
+def wildcard_label(resource: str) -> str | None:
+    """How a person reads an item at any damage, ``"minecraft:log (any meta)"``, or ``None`` for
+    any other resource. A plan names a wildcard after one variant ("Oak Log"), which reads as if
+    only that one would do, so every label of one says this instead (#353)."""
+    return f"{resource.rpartition('@')[0]} (any meta)" if wildcard_item(resource) else None
 
 
 def needs_fuzzy_card(port: Port) -> bool:
     """Whether a bus set to what ``port`` moves needs a Fuzzy Card: an item at any damage
     (:func:`wildcard_item`), read off the port's ``{direction}:{resource}`` id."""
-    _, _, resource = port.id.partition(":")
-    return port.commodity is Commodity.ITEM and wildcard_item(resource)
+    return port.commodity is Commodity.ITEM and wildcard_item(port_resource(port))
 
 
 # --- GT pushers (spike 4.7, 4.8) -----------------------------------------------------------------

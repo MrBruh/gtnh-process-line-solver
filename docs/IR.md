@@ -127,8 +127,9 @@ MEEndpoint
                                     #  one device gets two endpoints
 
 MECards { acceleration: 0-4, super_speed: 0-4, capacity: 0-4, fuzzy: 0-1 }
-                                    # one bus's upgrade cards; count is all four summed, and a bus
-                                    #  has four slots. fuzzy is the Fuzzy Card, set to ignore
+                                    # one bus's upgrade cards; count is all four summed, and an
+                                    #  item or fluid bus has four upgrade slots (a storage bus
+                                    #  five). fuzzy is the Fuzzy Card, set to ignore
                                     #  damage: an item bus whose config names an item at any damage
                                     #  (registry@32767) moves nothing without it, since AE2 reads
                                     #  32767 as "any" only on its fuzzy path (the validator's

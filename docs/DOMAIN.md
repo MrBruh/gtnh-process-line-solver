@@ -668,17 +668,23 @@ hatches by mID, AE2's power figures, and which device serves a machine's port. I
   Forge's wildcard meta, `registry@32767` (a coke oven's `minecraft:log@32767`). AE2 matches a
   bus's filter or partition exactly unless a Fuzzy Card is fitted, and no real stack is at damage
   32767, so without the card the bus moves nothing. With it, set to ignore damage (`IGNORE_ALL`, a
-  fresh bus's own setting), AE2 matches through the ore dictionary: every log the network holds,
-  other mods' included, as a recipe taking any log does (spike 4.2). Every item import, export and
-  storage bus whose config names such an item gets one, and keeps the wildcard as its filter. The
-  card takes one of the bus's four slots, so its speed cards get three, and a port faster than
-  three move is split across two buses, each with its own card. Fluid buses take none: a fluid has
-  no damage. A multiblock's input of such an item never gets GT's Stocking Input Bus (ME), whatever
+  fresh bus's own setting), AE2 matches the wildcard through the ore dictionary, every item of the
+  stack's ore names registered at 32767: every log the network holds, other mods' included, as a
+  recipe taking any log does (spike 4.2). A damageable item matches at any durability. Every item
+  import, export and storage bus whose config names such an item gets one, and keeps the wildcard
+  as its filter. The card takes one of the bus's four slots, so its speed cards get three, and a
+  port faster than three move is split across two buses, each with its own card. Fluid buses take
+  none: a fluid has no damage. Two limits the solver cannot see, having no ore dictionary: **a
+  wildcard item in no ore name that is not damageable still moves nothing with the card** (AE2
+  keeps 32767 exact for it), which is why the run's ME note names each wildcard for the builder to
+  check; and **the card widens every slot of its bus**, so a chests subnet's storage bus
+  partitioned to `minecraft:log@32767` and `minecraft:sand` also takes in anything sharing an ore
+  name with sand. A multiblock's input of such an item never gets GT's Stocking Input Bus (ME), whatever
   the hatch policy: it pulls exactly the stacks set in it and takes no card, so it would move
   nothing; a normal input bus fed by a carded export bus takes its place. The output side needs
-  nothing: an interface or a GT ME output bus takes whatever the machine makes. Wherever a run or
-  the preview names such an item it reads `minecraft:log (any meta)`, not the plan's name for one
-  variant of it.
+  nothing: an interface or a GT ME output bus takes whatever the machine makes. Wherever a run,
+  `--list-nets` or the preview names such an item it reads `minecraft:log (any meta)`, not the
+  plan's name for one variant of it (the resource id itself is unchanged).
 
 ### What a valid ME build is (#333)
 

@@ -61,7 +61,6 @@ from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from gtnh_solver.dataset.icons import WILDCARD_DAMAGE
 from gtnh_solver.dataset.me import (
     ADHOC_MAX_DEVICES,
     AE_PER_EU,
@@ -89,6 +88,7 @@ from gtnh_solver.dataset.me import (
     UNCHARGED_FLUID_DEVICES,
     UPGRADE_SLOTS,
     USAGE_MULTIPLIER,
+    wildcard_item,
 )
 from gtnh_solver.dataset.voltage import VOLTAGE_BY_TIER
 from gtnh_solver.ir import (
@@ -110,7 +110,7 @@ from gtnh_solver.ir import (
     Placement,
     Port,
 )
-from gtnh_solver.ir.nets import placement_index
+from gtnh_solver.ir.nets import placement_index, port_resource
 
 from ._geometry import FACE_DELTAS, OPPOSITE_FACE, Cell, body_cells, in_region, usable_faces
 from .report import Violation, ViolationCode
@@ -583,7 +583,9 @@ def _check_wildcards(
     out: list[Violation],
 ) -> None:
     """Rule 4, the filter's half: an item at any damage reaches the network only through a device
-    that can match it (spike 4.2, 5.4, #353). No stack is ever at damage 32767, so:
+    that can match it (spike 4.2, 5.4, #353). No stack is ever at damage 32767, so (reading the
+    wildcard and a port's resource the way the rest of the line does, ``dataset.me.wildcard_item``
+    and ``ir.nets.port_resource``, data plumbing rather than a rule):
 
     - a bus set to one carries a Fuzzy Card, read off the bus as built, its own config and cards:
       AE2 matches a bus's filter or partition exactly without it, so such a bus moves nothing, or a
@@ -596,7 +598,7 @@ def _check_wildcards(
             wild = [
                 p.id
                 for p in _ports(machines.get(device.machine_id), endpoint)
-                if p.commodity is Commodity.ITEM and _any_damage(p.id.partition(":")[2])
+                if p.commodity is Commodity.ITEM and wildcard_item(port_resource(p))
             ]
             if wild:
                 out.append(
@@ -612,7 +614,7 @@ def _check_wildcards(
             continue
         if device.kind not in FUZZY_BUSES or device.cards.fuzzy:
             continue
-        wild = [r for r in device.config if _any_damage(r)]
+        wild = [r for r in device.config if wildcard_item(r)]
         if wild:
             out.append(
                 Violation(
@@ -623,12 +625,6 @@ def _check_wildcards(
                     machine_id=device.machine_id,
                 )
             )
-
-
-def _any_damage(resource: str) -> bool:
-    """Whether ``resource`` (``registry@meta``) names an item at Forge's wildcard damage."""
-    _, at, meta = resource.rpartition("@")
-    return bool(at) and meta.isdigit() and int(meta) == WILDCARD_DAMAGE
 
 
 def _capacity(

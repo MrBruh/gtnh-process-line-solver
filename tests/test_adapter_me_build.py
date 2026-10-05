@@ -402,6 +402,11 @@ def test_nitrobenzenes_coke_oven_takes_its_logs_through_a_fuzzy_card() -> None:
         listed = list_nets(_NITROBENZENE, physical=physical)
     (logs,) = [n for n in listed.nets if n.resource == _LOG]
     assert [e.suggested for e in logs.consumers] == ["Input Bus + ME Export Bus (1 x Fuzzy Card)"]
+    # Named as any log, as the run and the preview name it, not by the plan's "Oak Log".
+    assert ir.resource_names[_LOG] == "Oak Log"
+    assert logs.resource_name == "minecraft:log (any meta)"
+    (dust,) = [n for n in listed.nets if n.resource == "gregtech:gt.metaitem.01@2022"]
+    assert dust.resource_name == "Sulfur Dust"  # any other keeps the plan's name
 
 
 # ------------------------------------------------------------------ an acceptor network's power (#336)

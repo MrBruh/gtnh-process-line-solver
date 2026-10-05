@@ -93,6 +93,7 @@ from gtnh_solver.ir import (
     Port,
 )
 from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
+from gtnh_solver.ir.nets import port_resource
 
 from ._errors import InfeasiblePlanError, MEPlanError
 
@@ -276,7 +277,7 @@ def _storage_endpoints(
             by_network[network].append(port)
     for network, ports in sorted(by_network.items()):
         commodity = ports[0].commodity
-        resources = tuple(sorted({_resource(p) for p in ports}))
+        resources = tuple(sorted({port_resource(p) for p in ports}))
         fuzzy = any(needs_fuzzy_card(p) for p in ports)
         out.append(
             MEEndpoint(
@@ -289,11 +290,6 @@ def _storage_endpoints(
             )
         )
     return out
-
-
-def _resource(port: Port) -> str:
-    """The resource a port moves, from its id (``input:minecraft:log@32767``)."""
-    return port.id.split(":", 1)[1] if ":" in port.id else port.id
 
 
 # --- a machine's own ports ----------------------------------------------------------------------------
@@ -371,7 +367,7 @@ def _machine_endpoints(
 
 def _endpoints(port: Port, network: str, chosen: tuple[MEDeviceChoice, ...]) -> list[MEEndpoint]:
     """The endpoint(s) ``chosen`` devices make for ``port``: one, or two each carrying half."""
-    resource = _resource(port)
+    resource = port_resource(port)
     buses = {
         MEDeviceKind.IMPORT_BUS,
         MEDeviceKind.EXPORT_BUS,

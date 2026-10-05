@@ -550,7 +550,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   input bus fed by a carded export bus, and the validator refuses a stocking bus on such a port
   (`me_stocking_wildcard`). The run's notes and the preview name such an item
   `minecraft:log (any meta)` instead of the plan's name for one variant ("Oak Log"), which read
-  as though only oak would do; the resource ids in the layout are unchanged.
+  as though only oak would do, and so does `--list-nets` (its `resource_name`); the resource ids
+  in the layout are unchanged. The card matches the wildcard through the ore dictionary (or a
+  damageable item at any durability), which the solver cannot see, so an item at any damage in no
+  ore name still moves nothing: the run's ME note names each one for you to check.
 - **The exported power source produces.** The `.schematic` export stands a Debug Power Generator in
   for the adapter's synthesized power source, but wrote it with no settings, and TecTech loads a
   generator with no settings as a consumer of 0 V x 0 A. Pasted into a world, it drew power instead

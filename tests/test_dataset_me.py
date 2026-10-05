@@ -39,6 +39,7 @@ from gtnh_solver.dataset.me import (
     single_block_fluid_push_rate,
     super_speed_allowed,
     wildcard_item,
+    wildcard_label,
 )
 from gtnh_solver.ir import Commodity, IODirection, Port
 from gtnh_solver.ir.me import (
@@ -203,11 +204,18 @@ def test_the_item_buses_take_a_fuzzy_card() -> None:
         ("minecraft:log", False),  # no meta is meta 0
         ("gregtech:gt.metaitem.01@2022", False),
         ("minecraft:log@327670", False),
+        ("minecraft:log@032767", True),  # the number a filter's Damage holds, however spelled
+        ("minecraft:log@any", False),
         ("water", False),  # a fluid has no meta
     ],
 )
 def test_a_wildcard_item_is_one_at_meta_32767(resource: str, expected: bool) -> None:
     assert wildcard_item(resource) is expected
+    # Its label says any meta, by the registry name alone, and nothing else gets one.
+    label = wildcard_label(resource)
+    assert (label is not None) is expected
+    if label is not None:
+        assert label == f"{resource.rpartition('@')[0]} (any meta)"
 
 
 def test_a_port_moving_an_item_at_any_damage_needs_a_fuzzy_card() -> None:

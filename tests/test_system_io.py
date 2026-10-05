@@ -37,6 +37,7 @@ from gtnh_solver.ir import (
     Segment,
     Terminal,
 )
+from gtnh_solver.ir.nets import port_resource
 from gtnh_solver.solver import solve
 from gtnh_solver.system_io import (
     BoundaryFlow,
@@ -47,7 +48,6 @@ from gtnh_solver.system_io import (
     me_network_metrics,
     net_label,
     net_resource,
-    port_resource,
     resource_label,
     system_io,
 )
