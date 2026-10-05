@@ -36,14 +36,14 @@ Third-party components:
   src/gtnh_solver/dataset/mod_jars.py; no source, texture or model of either mod is vendored
   here. The previewer fetches both pinned jars from the GTNH Nexus at preview time when a
   page needs their art (an ME network, or a GT block that wears AE2 art), as it does
-  GT5-Unofficial's, caches them outside the repository and reads the PNGs a preview draws;
-  no PNG is ever committed. A preview HTML that embeds AE2 textures redistributes CC
-  BY-NC-SA 3.0 art: it may be shared for non-commercial purposes only, with this attribution
-  and the licence link above, and an adaptation of that art must be shared under the same
-  licence. Every such preview shows that attribution, the licence link and the
-  non-commercial terms on the page itself. AE2FluidCraft declares LGPL-3.0 for all of its files, but whether any of its
-  textures derive from AE2's art has not been checked, so a preview that embeds AE2FluidCraft
-  textures is shared on the same CC BY-NC-SA 3.0 terms.
+  GT5-Unofficial's, caches them outside the repository and reads the PNGs a preview draws; no
+  PNG is ever committed. A preview HTML that embeds AE2 textures redistributes
+  CC BY-NC-SA 3.0 art: it may be shared for non-commercial purposes only, with this
+  attribution and the licence link above, and an adaptation of that art must be shared under
+  the same licence. Every such preview shows that attribution, the licence link and the
+  non-commercial terms on the page itself. AE2FluidCraft declares LGPL-3.0 for all of its
+  files, but whether any of its textures derive from AE2's art has not been checked, so a
+  preview that embeds AE2FluidCraft textures is shared on the same CC BY-NC-SA 3.0 terms.
 
 - NESQL Exporter (https://github.com/ShadowTheAge/nesql-exporter, a fork of
   https://github.com/D-Cysteine/nesql-exporter), LGPL-3.0. tools/derive_icons.py reads the

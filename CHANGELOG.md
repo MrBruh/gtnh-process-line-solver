@@ -15,12 +15,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   time like GT's (a jar that fails costs only its icons, which fall back to flat colours), glass
   cable shows through where its sprite is clear, and smart and dense cable light up with the
   channels each side carries. Hovering a cable says its load against its capacity, a part what it
-  is, its cards and which machine it feeds or takes from, and a stub where your main network
-  enters. The legend lists each ME network: attached or a subnet, its colour, the channels it
-  spends against its budget, and what its storage must hold and takes in. AE2's textures are
-  CC BY-NC-SA 3.0, so a preview that embeds them shows AE2's credit and the licence link, and may
-  be shared only for non-commercial purposes (NOTICE). The machine legend and the texture log no
-  longer list an ME block as a machine.
+  is, its cards and which machine it feeds, receives from or pulls from, and a stub where your main
+  network enters. The legend lists each ME network: attached or a subnet, its colour, the channels
+  it spends against its budget, and what its storage must hold and takes in. AE2's textures are
+  CC BY-NC-SA 3.0, so a preview that embeds AE2 or AE2FluidCraft art (on an ME network, a GT block
+  or an item icon) credits it with the licence link, and may be shared only for non-commercial
+  purposes (NOTICE). The machine legend and the texture log no longer list an ME block as a
+  machine. The `.schematic` export's size and origin now take in the ME cables, so the ghost keeps
+  room for the network you place by hand.
 - **The preview draws GT's own ME hatches (#338).** A multiblock's Output Bus (ME), Output Hatch
   (ME) or Stocking Input Bus or Hatch (ME) is drawn as that block, in its multiblock's casing like
   any formed hatch, with its name on the hover. It is found by its mID, the only thing that tells
@@ -59,8 +61,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   controller). Every layout is held to AE2's rules by the validator. The run says, per network,
   what its storage must hold, what lands there, and how many of your main network's channels it
   spends; the preview's I/O panel lists the same. Not yet: the schematic export leaves the ME
-  blocks out, with a warning that counts what to place by hand (#339). `--fast` cannot lay a line on ME (its touching row leaves no face for the devices), so
-  it returns an explicit partial layout; use the default solve.
+  blocks out, with a warning that counts what to place by hand (#339). `--fast` cannot lay a line
+  on ME (its touching row leaves no face for the devices), so it returns an explicit partial
+  layout; use the default solve.
 - **The `.schematic` export can write each conveyor and pump cover, so the ghost shows where it
   goes.** Pass `--world` with the save folder (or `level.dat`) of the world the build goes in. GT
   names a cover's item by the world's numeric item id, which FML assigns per world (two worlds of

@@ -802,15 +802,22 @@ there, plus an attach stub's front, where the main network enters), what each si
 the boxes. A cable with exactly two opposite connections is one straight bar when AE2's rule for
 its kind allows it (no part on a smart cable, dense on both sides of a dense one); any other is a
 core with an arm per connection, a plug where the arm meets a device block (a controller, an
-acceptor, a GT ME hatch's front), and per part the arm out to it and the part's own boxes. AE2
-itself overlaps a plug with its arm and runs a dense arm into the core; those are cut back where
-AE2 hides them anyway, so no two boxes of a cell share a volume (a property test).
+acceptor, a GT ME hatch's front, which reports a smart cable), and per part the arm out to it and
+the part's own boxes. AE2 itself overlaps a plug with its arm and runs a dense arm into the core;
+those are cut back where AE2 hides them anyway, so no two boxes of a cell share a volume (a property
+test). Nor is there a hole: a face AE2 leaves open (an arm's ends, a glass bar's) always meets a box
+at least as wide beyond it, and a covered, smart or dense bar, wider than the arm it meets, draws
+its ends, as AE2 does.
 
 **A side's lights show what that connection carries.** A layout states one channel count per cable
 (`MECableCell.me_channels`, the router's tree count); a connection between two cables carries the
 count of the one farther from the root, the smaller on a tree, and a part or a GT ME hatch takes
-one. AE2 shows at most 8 a side, and in fours between two dense cables. The network is drawn
-powered: what powers it is reported, not built (`--me power`, an acceptor).
+one. AE2 shows at most 8 a side, and in fours where both nodes have its dense capacity: dense
+cables, and a dense cable meeting a controller (`TileController.java:55`). The network is drawn
+powered: what powers it is reported, not built (`--me power`, an acceptor). Render data that will
+not load costs only the look: each ME block is drawn as a plain cube in a flat colour, with a
+warning naming `render.json`, so the schematic export, which builds the same scene, never fails on
+it.
 
 **GT's ME hatches are GT blocks**, drawn by the texture pass like any hatch but found by mID
 (`TextureManifest.me_hatch`), since two pairs share a class; an ME hatch the manifest lacks keeps
@@ -818,9 +825,10 @@ its casing rather than drawing as a normal hatch of its kind.
 
 **AE2's art is CC BY-NC-SA 3.0** (spike 9.2), unlike GT's LGPL sprites, and AE2FluidCraft's is
 treated the same. Both are read from the pinned jars at preview time and embedded only in the page,
-and a page that embeds any of it, from an ME network or from a GT block that wears AE2 art, shows
-AE2's credit and the licence link on its HUD: it may be shared only for non-commercial purposes
-(`NOTICE`).
+and a page that embeds any of it, on an ME network, a GT block that wears AE2 art or an AE2 or FC
+item's icon, credits what it embeds with the licence link on its HUD: it may be shared only for
+non-commercial purposes (`NOTICE`). A failing AE2 or FC jar, or one whose members do not decode,
+costs only the ME art, never the GT textures.
 
 ## Multiblocks
 
