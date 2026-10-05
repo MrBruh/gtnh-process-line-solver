@@ -484,6 +484,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **The exported power source produces.** The `.schematic` export stands a Debug Power Generator in
+  for the adapter's synthesized power source, but wrote it with no settings, and TecTech loads a
+  generator with no settings as a consumer of 0 V x 0 A. Pasted into a world, it drew power instead
+  of supplying it. It is now written producing, at its tier's voltage and at the amps the line needs
+  from that source (`system_io`'s per-source figure, so the file and the preview agree; LV 32 V x
+  2 A for the sand line), with GT 2.9's keys in the tag types a 2.9 save writes and 2.8's `eEUT`
+  and `eAMP` alongside.
 - **Every shipped example exports on a fresh clone, the converted ShadowTheAge line included
   (#319).** `gtnh-solve examples/shadow-nitrobenzene.json --schematic` was refused on a fresh
   clone: the committed `data/textures/manifest.json` was cut from a 2.8.4 dump, which has no 2.9
