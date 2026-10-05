@@ -20,6 +20,13 @@ ASCII (one tier; the trunk is a TREE rooted at the source's dock cell)::
     while the root carries 3A summed BEFORE rounding (the old path-trunk's suffix sum would have
     overcharged a branch); m2 draws straight from the shared cell [C], loading no segment.
 
+**The source's own cable block is the one cell with no parent segment** (#347). Every other cell
+has a parent segment carrying its whole subtree, and a cell is built at its thickest touching
+segment (``route_blocks``), so it is at least as thick as what passes through it. The root carries
+the source's whole output, so when two legs leave it or a sink taps it, no one segment's subtree
+reaches that output: every segment leaving the root is sized for the whole output instead
+(``_size_trunk``).
+
 **Cable loss:** GT cables lose voltage over distance, so a machine whose terminal sits ``d``
 cable-blocks from the source (its cell's depth in the tree) receives ``tier_voltage - d`` volts
 (docs/DOMAIN.md). The source stays at its tier and the cable is thickened to compensate: a
@@ -312,7 +319,9 @@ def _route_trunk(
     share of the draw.
 
     Every trunk cell's **depth** is its cable-block distance from the source; each sink's load is
-    then sized at its *delivered* voltage, so cable loss thickens the run (``_size_trunk``).
+    then sized at its *delivered* voltage, so cable loss thickens the run (``_size_trunk``). Any
+    sink may tap the source's own cable block, and several legs may leave it: that block carries
+    the source's whole output either way, and ``_size_trunk`` builds it for that (#347).
     Laid cells stay blocked for the legs that follow (a leg may *attach* at a trunk cell but never
     cross one), so the trunk is always a single tree the validator can root at the source. A
     machine with no free non-front dock face is a ``face_reachability`` infeasibility; one no leg
@@ -368,17 +377,7 @@ def _route_trunk(
         # A tap lays no cable and a zero-segment cable route fails validation (ROUTE_DISCONTINUOUS:
         # its gauge lives on its segments), so the last sink must extend a trunk with none yet.
         may_tap = bool(legs) or i < len(sinks) - 1
-        # An Energy Acceptor never taps the source's own cable block: a root tap loads no segment,
-        # and that block is built at its thickest segment, so nothing would be sized for the whole
-        # output the acceptor draws through it. It lays a leg instead, whose first segment carries
-        # that output (``_size_trunk``); a deeper trunk cell it may tap, since the segments above
-        # that cell carry its draw.
-        acceptor = machines[sinks[i].machine_id].me_role is MERole.ACCEPTOR
-        taps = (
-            [t for t in cand if _cell(t) in depth and not (acceptor and _cell(t) == root)]
-            if may_tap
-            else []
-        )
+        taps = [t for t in cand if _cell(t) in depth] if may_tap else []
         if taps:
             tapped = min(taps, key=lambda t: depth[_cell(t)])  # shallowest; min() keeps cand order
             terminals.append(tapped)
@@ -461,15 +460,28 @@ def _size_trunk(
     independently. A run whose delivered voltage reaches 0 (:class:`UnpowerableError`) or a
     segment whose summed load exceeds 16x is rejected, not silently certified.
 
+    **The source's own cable block carries its whole output** (#347). That output is the whole amps
+    the steady loads of this trunk's sinks sum to, and all of it passes through the root, whichever
+    leg it then takes. It is the root's own figure, per route: ``system_io.power_amps_by_source``
+    gives the same number for a source on one net (every source the adapter synthesizes), but sums
+    a hand-built source's several nets, and each of their roots carries only its own. Every other
+    cell has a parent segment carrying its whole subtree, but the root has
+    none: it is built at the thickest segment touching it (``route_blocks``), and with two legs
+    leaving it, or a sink tapping it, no subtree sum reaches the whole output. So every segment
+    leaving the root is sized for the whole output (a leg's second block comes out thicker than its
+    own load, which never burns), and an output over 16x is rejected there::
+
+        two 30 EU/t LV sinks, one block out each way: 30/31 + 30/31 = 1.94 A, so 2 A
+
+        m0 ==2x== [root] ==2x== m1      (each leg alone would be 1x, and so would the root)
+
     **An Energy Acceptor takes its source's full output** (``inrush[i]`` names sink ``m_i`` when it
     is one, spike 6.3): it accepts every whole amp offered until its network's storage is full, so
-    the cable to it must carry everything the source puts out, not the network's steady draw. The
-    source's output is the whole amps its sinks' steady loads sum to, the figure the builder is told
-    to feed it (``system_io.power_amps_by_source``). An acceptor then loads its branch with that
-    output in place of its own draw, and no segment carries more than the source puts out, so
-    every segment from the source to an acceptor is sized for the source's whole output and every
-    other segment as before. An acceptor on the root cell would load no segment at all, so that is
-    refused (``_route_trunk`` never lays one), and a cable to an acceptor over the 16x cap names it.
+    the cable to it must carry everything the source puts out, not the network's steady draw. An
+    acceptor loads its branch with that output in place of its own draw, and no segment carries
+    more than the source puts out, so every segment from the source to an acceptor is sized for
+    the source's whole output and every other segment as before. One tapping the root needs nothing
+    more than the root rule above, and a cable to an acceptor over the 16x cap names it.
     """
     amp_at: dict[Cell, float] = {}
     steady: list[float] = []  # each sink's own load, the source's output summed from them
@@ -492,22 +504,15 @@ def _size_trunk(
         steady.append(load)
         amp_at[cell] = amp_at.get(cell, 0.0) + load
 
-    cap: int | None = None  # the source's full output, once an acceptor makes it a segment's load
+    output = whole_amps(sum(steady))  # the source's whole output, all of it through the root
+    cap: int | None = None  # that output, once an acceptor makes it a segment's load
     behind: dict[Cell, str] = {}  # cell -> an acceptor at or beyond it, to name over the cap
     if any(inrush):
-        cap = whole_amps(sum(steady))
+        cap = output
         amp_at = {}
         for load, cell, acceptor in zip(steady, sink_cells, inrush, strict=True):
             amp_at[cell] = amp_at.get(cell, 0.0) + (cap if acceptor else load)
             if acceptor:
-                if depth[cell] == 0:
-                    return Infeasibility(
-                        constraint="amperage",
-                        detail=f"power net {net_id!r}: Energy Acceptor {acceptor!r} taps the "
-                        f"source's own cable block, which no segment sizes for the {cap} amps it "
-                        "draws",
-                        suggested_relaxation="dock the acceptor on a cable of its own",
-                    )
                 behind.setdefault(cell, acceptor)
 
     # Subtree sums, leaves first: every leg is laid parent-before-child and only attaches to
@@ -529,6 +534,9 @@ def _size_trunk(
             amps = whole_amps(subtree.get(child, 0.0))
             if cap is not None:
                 amps = min(amps, cap)  # a cable never carries more than its source puts out
+            at_root = depth[parent] == 0
+            if at_root:
+                amps = output  # it builds the source's own block, which carries everything
             if amps > MAX_CABLE_THICKNESS and child in behind:
                 return Infeasibility(
                     constraint="amperage",
@@ -538,10 +546,11 @@ def _size_trunk(
                     "source's group) or power its ME network from outside the build",
                 )
             if amps > MAX_CABLE_THICKNESS:
+                where = "the source's own cable block" if at_root else "a cable segment"
                 return Infeasibility(
                     constraint="amperage",
-                    detail=f"power net {net_id!r}: a cable segment must carry {amps} amps, over "
-                    "the 16x cable cap",
+                    detail=f"power net {net_id!r}: {where} must carry {amps} amps, over the 16x "
+                    "cable cap",
                     suggested_relaxation="split into parallel runs or use a higher voltage tier "
                     "(more power per amp) - Phase 2 multi-source optimization",
                 )

@@ -16,7 +16,8 @@ handed the build's placement, lays those same 12 pipe blocks and 3 cable blocks:
                                          '---> LayoutResult <--------'
                                                    |
             validate() refuses its plain pipes  <--'--> every run belongs to exactly one net
-            and accepts the gauges that worked
+            and its 4x source block, and accepts
+            the gauges that worked
 
 **What is chosen rather than read.** An exported GT machine records only its ``mID`` and facing,
 so which recipe each Forge Hammer runs is not in the file. The build's author put stage 1 on the
@@ -32,6 +33,14 @@ its designed rate. The validator refuses it (#190). The gauges that then worked 
 identities are trustworthy (only its wiring is not; see the README), and its twelve
 pipes sit on exactly the export's twelve cells. It has huge on the two runs to and from a chest and
 large on the two between hammer stages, and the validator must accept that.
+
+**So is the cable gauge.** The export's cable column is 4x at the source, 4x, then 2x, and it ran
+the hammers. It ran them at a third of their designed rate, though, so it likely never carried the
+full load; that is inferred, not observed. At full rate all nine hammers draw through the block the
+source feeds: 9 x 15/32 = 4.22 A at nominal voltage (4.36 A after cable loss, so 5 A), over its
+4 A. Since #347 the validator refuses that block, and the test pins the refusal **pending the
+maintainer's in-game check at full rate** (#347). The Schematica copy has 12x at the source and 8x
+beyond on the same three cells, and the working build takes its cable gauges from there too.
 """
 
 from __future__ import annotations
@@ -87,8 +96,9 @@ _PIPE_SIZE = {
     5592: PipeSize.LARGE,
     5593: PipeSize.HUGE,
 }
-#: Tin cable ids and their gauge in amps: ``cable.tin.02`` and ``cable.tin.04``.
-_CABLE_GAUGE = {1247: 2, 1248: 4}
+#: Tin cable ids and their gauge in amps, ``cable.tin.02`` up to ``cable.tin.12``. The export has
+#: 1247 and 1248; the working build has 1249 and 1250.
+_CABLE_GAUGE = {1247: 2, 1248: 4, 1249: 8, 1250: 12}
 
 #: The item each run carries, by net: the two runs that meet a chest and the two between stages.
 _STONE = "edge-3ba1a1b2-bb5c-496e-bbf7-159d937312eb"
@@ -230,19 +240,26 @@ def _run_material(tiles: dict[Cell, TileEntity], cells: Iterable[Cell]) -> Route
 
 
 def _working_build() -> tuple[InputIR, LayoutResult]:
-    """The same build at the gauges that made it work: huge to and from the chests, large between.
+    """The same build at the gauges that made it work: huge to and from the chests, large between,
+    and the cable column the Schematica copy has, 12x at the source and 8x beyond.
 
-    Geometry and wiring are the export's; only the pipe sizes change, each run taking the size the
-    Schematica copy of the working build records on its cells (module docstring).
+    Geometry and wiring are the export's; only the gauges change, each pipe run taking the size the
+    Schematica copy of the working build records on its cells, and each cable link the thinner of
+    its two blocks there, as ``_proven_build`` reads the export's (module docstring).
     """
     problem, layout = _proven_build()
     tiles = {tile.pos: tile for tile in read_schematic(_WORKING).tile_entities}
-    routes = [
-        r.model_copy(update={"material": _run_material(tiles, r.cells())})
-        if r.commodity is Commodity.ITEM
-        else r
-        for r in layout.routes
-    ]
+    gauge = {pos: _CABLE_GAUGE[t.mid] for pos, t in tiles.items() if t.mid in _CABLE_GAUGE}
+
+    def regauged(r: Route) -> Route:
+        if r.commodity is Commodity.ITEM:
+            return r.model_copy(update={"material": _run_material(tiles, r.cells())})
+        links = [(s.start.as_tuple(), s.end.as_tuple()) for s in r.segments]
+        return r.model_copy(
+            update={"thickness_per_segment": [min(gauge[a], gauge[b]) for a, b in links]}
+        )
+
+    routes = [regauged(r) for r in layout.routes]
     return problem, layout.model_copy(update={"routes": routes})
 
 
@@ -272,7 +289,7 @@ def working_build() -> tuple[InputIR, LayoutResult]:
     return _working_build()
 
 
-def test_the_export_built_in_game_is_refused_for_its_plain_pipes(
+def test_the_export_built_in_game_is_refused_for_its_plain_pipes_and_its_source_block(
     proven_build: tuple[InputIR, LayoutResult],
 ) -> None:
     """The case #190 was filed for: this layout ran at a third of its rate and ``validate()`` passed
@@ -281,16 +298,30 @@ def test_the_export_built_in_game_is_refused_for_its_plain_pipes(
     the mirror image. The cobblestone and gravel runs pair each producer with the consumer above
     it, one stream a block, and a normal pipe carries that.
 
-    Everything else about the build was proven in game (geometry, wiring, facings, power), so the
-    pipe size must be the ONLY thing refused: that part of the old guard stands.
+    Geometry, wiring and facings were proven in game, so beside the pipe size the only thing
+    refused is the cable block the source feeds. That refusal is inferred, not observed: the
+    starved run likely never put the full load through it, and at full rate it would carry all nine
+    hammers, 4.22 A at nominal voltage (4.36 A after cable loss, so 5 A), over its 4 A. It is
+    pinned pending the maintainer's in-game check at full rate (#347).
     """
     problem, layout = proven_build
     assert set(_item_sizes(layout.routes).values()) == {PipeSize.NORMAL}  # 5591, as built
 
     report = validate(problem, layout)
     assert not report.ok
-    assert set(report.codes()) == {ViolationCode.ITEM_PIPE_SIZE_INSUFFICIENT}, str(report)
-    refused = {_refused_block(v.message) for v in report.violations}
+    assert set(report.codes()) == {
+        ViolationCode.ITEM_PIPE_SIZE_INSUFFICIENT,
+        ViolationCode.POWER_THICKNESS_INSUFFICIENT,
+    }, str(report)
+    (root,) = (
+        v.message for v in report.violations if v.code is ViolationCode.POWER_THICKNESS_INSUFFICIENT
+    )
+    assert "source's own cable block carries its whole output, 5 amps, but is built 4x" in root
+    refused = {
+        _refused_block(v.message)
+        for v in report.violations
+        if v.code is ViolationCode.ITEM_PIPE_SIZE_INSUFFICIENT
+    }
     # The block at the stone chest carries 3 streams and the next one 2; the far end carries 1,
     # which a normal pipe does carry. On the sand run the far end also pays for the middle hammer's
     # deliveries, being as near that sender as the chest's block is (GT's scan, see the validator).
@@ -318,6 +349,8 @@ def test_the_working_build_passes_the_validator(
         _COBBLESTONE: PipeSize.LARGE,
         _GRAVEL: PipeSize.LARGE,
     }
+    (cable,) = (r for r in layout.routes if r.commodity is Commodity.POWER)
+    assert cable.thickness_per_segment == [8, 8]  # 12x and 8x blocks: each link is the thinner
     report = validate(problem, layout)
     assert report.ok, str(report)
 

@@ -1260,7 +1260,7 @@ def test_an_acceptor_tapping_the_sources_own_cable_block_needs_it_built_for_the_
     thin = layout.model_copy(update={"routes": [tapped], "placements": placed})
     report = validate(problem, thin)
     assert report.codes() == (ViolationCode.POWER_THICKNESS_INSUFFICIENT,), str(report)
-    assert "taps the source's own cable block, built 2x, short of the 3 amps" in (
+    assert "own cable block carries its whole output, 3 amps, but is built 2x" in (
         report.violations[0].message
     )
     # Built for the whole output, the block carries it.
@@ -1270,11 +1270,158 @@ def test_an_acceptor_tapping_the_sources_own_cable_block_needs_it_built_for_the_
 
 def test_no_segment_is_held_to_more_than_its_source_puts_out() -> None:
     # The two segments m0 shares with the acceptor would sum 1.6 A and the acceptor's 3 to 5 A (8x),
-    # but a cable carries no more than its source's 3 A: 4x is enough.
+    # but a cable carries no more than its source's 3 A: 4x is enough, and 2x is short.
     assert validate(*_acceptor_trunk([4, 4, 4, 4])).ok
-    assert validate(*_acceptor_trunk([2, 4, 4, 4])).codes() == (
+    short = validate(*_acceptor_trunk([2, 4, 4, 4]))
+    # The first segment also builds the source's own block, short of the same 3 A: one defect, so
+    # one violation, the segment's, rather than the root's beside it (#347).
+    assert short.codes() == (ViolationCode.POWER_THICKNESS_INSUFFICIENT,), str(short)
+    assert "segment 0 carries 3 amps but its cable is only 2x" in short.violations[0].message
+
+
+def _lv_sink(mid: str, eut: float, facing: Facing = Facing.NORTH) -> Machine:
+    return Machine(
+        id=mid,
+        type="M",
+        voltage_tier="LV",
+        eut=eut,
+        orientation_options=[facing],
+        faces=FaceSpec(
+            ports=[Port(id="pi", commodity=Commodity.POWER, direction=IODirection.INPUT)]
+        ),
+    )
+
+
+def _rooted_power(
+    sinks: list[tuple[Machine, Placement, Terminal]],
+    segments: list[tuple[tuple[int, int, int], tuple[int, int, int]]],
+    thickness: list[int],
+) -> tuple[InputIR, LayoutResult]:
+    """An LV source at (1, 0, 0) docked south on (1, 0, 1), the root, feeding ``sinks``."""
+    source = Machine(
+        id="src",
+        type="Power Source (LV)",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[Port(id="po", commodity=Commodity.POWER, direction=IODirection.OUTPUT)]
+        ),
+    )
+    problem = InputIR(
+        bounding_region=CellBox(sx=4, sy=4, sz=4),
+        machines=[source, *(m for m, _, _ in sinks)],
+        nets=[
+            Net(
+                id="pw",
+                commodity=Commodity.POWER,
+                throughput=1.0,
+                endpoints=[
+                    MachineFaceRef(machine_id="src", port_id="po"),
+                    *(MachineFaceRef(machine_id=m.id, port_id="pi") for m, _, _ in sinks),
+                ],
+            )
+        ],
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[
+            Placement(machine_id="src", cell=_coord(1, 0, 0), orientation=Facing.NORTH),
+            *(p for _, p, _ in sinks),
+        ],
+        routes=[
+            Route(
+                net_id="pw",
+                commodity=Commodity.POWER,
+                terminals=[
+                    Terminal(
+                        machine_id="src", port_id="po", face=Facing.SOUTH, cell=_coord(1, 0, 1)
+                    ),
+                    *(t for _, _, t in sinks),
+                ],
+                segments=[
+                    Segment(start=_coord(*a), end=_coord(*b), channel=0) for a, b in segments
+                ],
+                thickness_per_segment=thickness,
+            )
+        ],
+    )
+    return problem, layout
+
+
+def _south_docked(mid: str, eut: float, x: int) -> tuple[Machine, Placement, Terminal]:
+    """A sink at (x, 0, 0) docked south on (x, 0, 1), beside the source."""
+    return (
+        _lv_sink(mid, eut),
+        Placement(machine_id=mid, cell=_coord(x, 0, 0), orientation=Facing.NORTH),
+        Terminal(machine_id=mid, port_id="pi", face=Facing.SOUTH, cell=_coord(x, 0, 1)),
+    )
+
+
+def _root_fork(thickness: list[int], eut: float = 30.0) -> tuple[InputIR, LayoutResult]:
+    """#347's first repro: two LV sinks, one leg each way out of the root (1, 0, 1). Each sits one
+    block out (31 V), so each leg carries 30/31 = 0.97 A (1x), while the root carries both, 1.94 A:
+    the source's whole 2 A."""
+    root = (1, 0, 1)
+    return _rooted_power(
+        [_south_docked("mA", eut, 0), _south_docked("mB", eut, 2)],
+        [(root, (0, 0, 1)), (root, (2, 0, 1))],
+        thickness,
+    )
+
+
+def _root_tap(thickness: list[int]) -> tuple[InputIR, LayoutResult]:
+    """#347's second repro: a 40 EU/t sink tapping the root (1, 0, 1) from the south, and a 30 EU/t
+    sink one block out. The one segment carries 30/31 = 0.97 A (1x), while the root also feeds the
+    tap's 40/32 = 1.25 A: 2.22 A, so the source's whole output is 3 A (4x)."""
+    tap = (
+        _lv_sink("mT", 40.0, Facing.SOUTH),
+        Placement(machine_id="mT", cell=_coord(1, 0, 2), orientation=Facing.SOUTH),
+        Terminal(machine_id="mT", port_id="pi", face=Facing.NORTH, cell=_coord(1, 0, 1)),
+    )
+    return _rooted_power([tap, _south_docked("mL", 30.0, 2)], [((1, 0, 1), (2, 0, 1))], thickness)
+
+
+def test_a_root_forking_into_two_legs_is_held_to_the_sources_whole_output() -> None:
+    # Every segment carries its own leg (1x is enough for each), but the root they share is built
+    # at the thickest of them and carries 2 A: a 1x root burns, which no segment check can see.
+    report = validate(*_root_fork([1, 1]))
+    assert report.codes() == (ViolationCode.POWER_THICKNESS_INSUFFICIENT,), str(report)
+    assert "own cable block carries its whole output, 2 amps, but is built 1x" in (
+        report.violations[0].message
+    )
+    assert validate(*_root_fork([2, 2])).ok
+    # The root is built at its THICKEST touching cable (route_blocks), so one leg rated for the
+    # whole output is enough; the other keeps the gauge its own load needs.
+    assert validate(*_root_fork([2, 1])).ok
+    assert validate(*_root_fork([1, 2])).ok
+    # 48 EU/t each: 3.10 A through the root needs 4x, while each leg's 1.55 A needs 2x.
+    assert validate(*_root_fork([2, 2], eut=48.0)).codes() == (
         ViolationCode.POWER_THICKNESS_INSUFFICIENT,
     )
+    assert validate(*_root_fork([4, 4], eut=48.0)).ok
+
+
+def test_a_root_over_16x_is_refused_though_every_leg_is_legal() -> None:
+    # Two 279 EU/t legs: 279/31 = 9 A each, which a 12x cable carries, but the root carries 18 A,
+    # which no cable does. Only the root is refused: the legs are rated for what they carry.
+    report = validate(*_root_fork([12, 12], eut=279.0))
+    assert report.codes() == (ViolationCode.POWER_THICKNESS_INSUFFICIENT,), str(report)
+    assert "own cable block carries its whole output, 18 amps, but is built 12x" in (
+        report.violations[0].message
+    )
+    maxed = validate(*_root_fork([16, 16], eut=279.0))
+    assert maxed.codes() == (ViolationCode.POWER_THICKNESS_INSUFFICIENT,), str(maxed)
+
+
+def test_a_sink_tapping_the_root_is_held_to_the_sources_whole_output() -> None:
+    # The tap loads no segment, so the lone segment needs only 1x for its own sink, but the root
+    # block it builds carries the tap's draw as well: 3 A.
+    for short in ([1], [2]):
+        report = validate(*_root_tap(short))
+        assert report.codes() == (ViolationCode.POWER_THICKNESS_INSUFFICIENT,), str(report)
+        assert f"whole output, 3 amps, but is built {short[0]}x" in report.violations[0].message
+    assert validate(*_root_tap([4])).ok
 
 
 def test_power_unknown_tier_cannot_be_amperage_verified() -> None:

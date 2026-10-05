@@ -53,7 +53,10 @@ What is checked now (needs only the IR):
   the source - GT cable loss), every segment carries the summed load of the machines downstream of
   it rounded up to whole amps per segment (machines buffer packets, so per-machine rounding would
   overstate), its cable must be at least that thick (which also rejects a load over the 16x cap),
-  and a run whose loss drops the delivered voltage to <= 0 is rejected as unpowerable at its tier;
+  the source's own cable block, built at the thickest cable touching it, must carry the source's
+  whole output (the root has no parent segment, so a fork or a tap there escapes the segment
+  check, #347), and a run whose loss drops the delivered voltage to <= 0 is rejected as
+  unpowerable at its tier;
   an off-ladder (unknown) tier cannot be verified and is reported as such. An Energy Acceptor
   accepts every whole amp its source offers (#336), so its load is the source's whole output (the
   whole amps every connection's steady load sums to), and no segment is held to more than that. A
@@ -1872,10 +1875,13 @@ def _check_power_amperage(
     *fractional* amp load at the loss-reduced delivered voltage that distance implies, summing
     the draw of every machine downstream of each segment, and rounding each segment's total up to
     whole amps (per-machine rounding would overstate - machines buffer packets) - and flags any
-    segment whose cable is thinner than that. A load over 16x has no legal thickness, so this
-    also catches the over-cap case the router is supposed to reject; a distance so long that loss
-    drops the delivered voltage to <= 0 is flagged as unpowerable, and an off-ladder tier as
-    unverifiable (``POWER_TIER_UNKNOWN``).
+    segment whose cable is thinner than that. The source's own cable block has no parent segment
+    yet carries everything the source puts out, so it is held to that whole output on its own: it
+    is built at the thickest cable touching it (``route_blocks``), and a root that forks into two
+    legs or that a sink taps can otherwise pass every segment and still burn (#347). A load over
+    16x has no legal thickness, so this also catches the over-cap case the router is supposed to
+    reject; a distance so long that loss drops the delivered voltage to <= 0 is flagged as
+    unpowerable, and an off-ladder tier as unverifiable (``POWER_TIER_UNKNOWN``).
 
     It also checks the other direction - that enough power actually **arrives**. Cable loss shrinks
     every packet, and a machine takes them through hatches that pass a bounded number per tick
@@ -2032,37 +2038,27 @@ def _check_power_amperage(
             unverified.update(t.machine_id for t in r.terminals)
             continue
 
-        # An Energy Acceptor accepts every whole amp its source offers until its network's
-        # storage is full (spike 6.3), so the cable to it carries the source's whole output: the
-        # whole amps every connection's steady load sums to, what the builder feeds that source.
-        # Its branch is loaded with that output in place of its own draw, and no segment can carry
-        # more than the source puts out. The validator's own reading, not the router's helper.
+        # The source's whole output on this route: the whole amps the steady loads of the
+        # connections on its cable tree sum to, every one of which the source's own block carries.
+        # The validator's own reading, not the router's helper.
         output = _required_amps(sum(amp_at.values()))
+        # An Energy Acceptor accepts every whole amp its source offers until its network's
+        # storage is full (spike 6.3), so the cable to it carries that whole output. Its branch is
+        # loaded with the output in place of its own draw, and no segment can carry more than the
+        # source puts out. One on the source's own block is the root check below.
         for cell, own in takes_all:
             amp_at[cell] += output - own
-        # One on the source's own cable block draws through no segment at all, only through that
-        # block, which is built at the thickest cable touching it (route_blocks): that cable must
-        # carry the whole output too.
-        if any(depth[cell] == 0 for cell, _ in takes_all):
-            root = source_cells[0]
-            root_cable = max(t for (a, b), t in zip(edges, tps, strict=True) if root in (a, b))
-            if root_cable < output:
-                out.append(
-                    Violation(
-                        ViolationCode.POWER_THICKNESS_INSUFFICIENT,
-                        f"power route for net {r.net_id!r}: an Energy Acceptor taps the source's "
-                        f"own cable block, built {root_cable}x, short of the {output} amps it "
-                        f"draws",
-                    )
-                )
 
+        root = source_cells[0]
+        root_short = False  # a segment leaving the root is itself held to the whole output, short
         loads = _subtree_loads(order, parent, depth, edges, amp_at)
-        for seg_idx, (load, thick) in enumerate(zip(loads, tps, strict=True)):
+        for seg_idx, (load, thick, edge) in enumerate(zip(loads, tps, edges, strict=True)):
             # a cable is rated in whole packets, so round the summed load up to whole amps
             req = _required_amps(load)
             if takes_all:
                 req = min(req, output)
             if thick < req:
+                root_short = root_short or (root in edge and req >= output)
                 out.append(
                     Violation(
                         ViolationCode.POWER_THICKNESS_INSUFFICIENT,
@@ -2070,6 +2066,24 @@ def _check_power_amperage(
                         f"but its cable is only {thick}x",
                     )
                 )
+
+        # The whole output passes through the source's own cable block, whichever leg it then
+        # takes, and that block is built at the thickest cable touching it (route_blocks, rule 1).
+        # Every other block has a parent segment carrying its whole subtree, which the check above
+        # holds; the root has none, so a root that forks into several legs, or that a sink taps,
+        # can be built thinner than what it carries even though every segment passes (#347). A
+        # segment leaving the root that is already short of the whole output is that same
+        # shortfall, reported once above: thickening it to its own load fixes the root as well.
+        root_cable = max(t for (a, b), t in zip(edges, tps, strict=True) if root in (a, b))
+        if root_cable < output and not root_short:
+            out.append(
+                Violation(
+                    ViolationCode.POWER_THICKNESS_INSUFFICIENT,
+                    f"power route for net {r.net_id!r}: the source's own cable block carries its "
+                    f"whole output, {output} amps, but is built {root_cable}x (the thickest cable "
+                    f"touching it)",
+                )
+            )
 
     # Every route measured: now the other direction - does enough power actually arrive? A hatch
     # passes at most its ``max_amps`` packets a tick and loss has shrunk each packet, so a machine
