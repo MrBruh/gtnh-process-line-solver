@@ -13,6 +13,7 @@ format::
         |
         '--> block_at(x, y, z) -> ("gregtech:gt.blockcasings5", 0)
         '--> tile_at(x, y, z)  -> TileEntity(mid=998, id="BaseMetaTileEntity", ...)
+                    '--> .ae   -> AETile(cable, parts by side, orientation)   an AE2 tile only
 
 Three details are easy to get wrong, and getting any of them wrong decodes to plausible nonsense
 rather than to an error:
@@ -32,6 +33,13 @@ ids compactly from 1 and omits ``AddBlocks`` entirely, so both shapes are handle
 extension, so a plain MCEdit file has none and every id in it is nameless. Rather than inventing a
 registry name, an unmapped id reads back as ``"<unmapped:2417>"``. Same doctrine as the texture
 dump: a visible gap is recoverable, a confident wrong answer is not.
+
+**An AE2 cable bus is all tile entity** (#339). Its block says only "cable bus"; the cable is the
+ItemStack under ``def:6`` and each part the one under ``def:N``, ``N`` the side's ForgeDirection
+ordinal, with what the part writes under ``extra:N`` (``docs/spikes/329-me-ae2.md`` 7.2 and 7.5,
+pinned on ``tests/golden/schematic/ae2-golden-*.schematic``). Those ItemStacks name their item by
+the **saving world's** numeric id, so :class:`AETile` reports ids, never names: a name needs that
+world's FML item table.
 """
 
 from __future__ import annotations
@@ -47,6 +55,136 @@ from .core import SchematicError
 
 #: The registry name of air, which is id 0 by convention in every ``.schematic`` dialect.
 _AIR: Final = "minecraft:air"
+
+#: The tile entity ids AE2 and AE2FluidCraft write: AE2's are the bare class name (spike 7.1).
+AE_TILE_IDS: Final = frozenset(
+    {
+        "BlockCableBus",
+        "BlockController",
+        "BlockDrive",
+        "BlockEnergyAcceptor",
+        "BlockInterface",
+        "fluid_interface",
+    }
+)
+#: The side a cable bus files its centre cable under: ``ForgeDirection.UNKNOWN``'s ordinal.
+CABLE_SIDE: Final = 6
+
+
+@dataclass(frozen=True)
+class ItemRef:
+    """A vanilla ItemStack as NBT holds it: ``{id: short, Count: byte, Damage: short}``.
+
+    ``id`` is the numeric item id of the world that wrote it. FML assigns those per world, so the
+    same item has another number elsewhere (``ItemMultiPart`` is 4631 in the AE2 golden's world and
+    4356 in another world of the same instance).
+    """
+
+    id: int
+    damage: int
+    count: int
+
+    @classmethod
+    def from_nbt(cls, tag: nbt.Compound) -> ItemRef:
+        return cls(id=number(tag, "id"), damage=number(tag, "Damage"), count=number(tag, "Count"))
+
+
+def number(tag: nbt.Compound, key: str) -> int:
+    """``tag[key]`` as an int, and 0 when it is absent or not a number: what Minecraft's own
+    ``NBTTagCompound.getShort`` and its siblings read from a missing or mistyped tag."""
+    value: Any = tag.get(key)
+    return int(value) if isinstance(value, int) else 0
+
+
+def _slot(key: str) -> int | None:
+    """The slot number of an inventory key ``#N``, or ``None`` for any other key. ASCII digits
+    only: ``str.isdigit`` also passes a superscript two, which ``int`` then refuses."""
+    digits = key[1:]
+    if key.startswith("#") and digits.isascii() and digits.isdecimal():
+        return int(digits)
+    return None
+
+
+def _slots(inventory: object) -> list[nbt.Compound]:
+    """An AE2 inventory's stacks in slot order (``{"#0": stack, "#1": ...}``); an absent inventory
+    is an empty one, since AE2 drops the tag rather than write an empty compound."""
+    if not isinstance(inventory, nbt.Compound):
+        return []
+    filled = [
+        (slot, value)
+        for key, value in inventory.items()
+        if (slot := _slot(key)) is not None and isinstance(value, nbt.Compound)
+    ]
+    return [value for _, value in sorted(filled, key=lambda pair: pair[0])]
+
+
+@dataclass(frozen=True)
+class AEPart:
+    """One AE2 part on a side of a cable bus: its item (``def:N``) and what it wrote (``extra:N``).
+
+    ``upgrades`` are its cards, ``config`` its filter or partition: AE stacks that carry a
+    ``StackType``, an item's with the world's numeric ``id`` and ``Damage``, a fluid's with only its
+    ``FluidName``. Settings stay in ``extra``.
+    """
+
+    side: int
+    item: ItemRef
+    extra: nbt.Compound
+
+    @property
+    def upgrades(self) -> tuple[ItemRef, ...]:
+        """The cards fitted, in slot order."""
+        return tuple(ItemRef.from_nbt(stack) for stack in _slots(self.extra.get("upgrades")))
+
+    @property
+    def config(self) -> tuple[nbt.Compound, ...]:
+        """The stacks it is set to, in slot order."""
+        return tuple(_slots(self.extra.get("config")))
+
+
+@dataclass(frozen=True)
+class AETile:
+    """What an AE2 tile entity says: a block device's orientation and colour, or a cable bus's
+    cable and its parts by side (ForgeDirection ordinal, 0 to 5).
+
+    ``forward`` and ``up`` are ForgeDirection names (``"NORTH"``), ``painted`` an ``AEColor``
+    ordinal (16 is Fluix, unpainted), ``has_redstone`` a cable bus's ``YesNo`` ordinal; each is
+    ``None`` where the tile does not write it.
+    """
+
+    cable: ItemRef | None
+    parts: Mapping[int, AEPart]
+    forward: str | None
+    up: str | None
+    painted: int | None
+    has_redstone: int | None
+
+
+def _ae_tile(tile: nbt.Compound) -> AETile:
+    def stack(side: int) -> nbt.Compound | None:
+        found = tile.get(f"def:{side}")
+        return found if isinstance(found, nbt.Compound) else None
+
+    parts: dict[int, AEPart] = {}
+    for side in range(CABLE_SIDE):
+        found = stack(side)
+        if found is not None:
+            extra = tile.get(f"extra:{side}")
+            parts[side] = AEPart(
+                side,
+                ItemRef.from_nbt(found),
+                extra if isinstance(extra, nbt.Compound) else nbt.Compound(),
+            )
+    cable = stack(CABLE_SIDE)
+    forward, up = tile.get("orientation_forward"), tile.get("orientation_up")
+    return AETile(
+        cable=ItemRef.from_nbt(cable) if cable is not None else None,
+        parts=parts,
+        forward=str(forward) if forward is not None else None,
+        up=str(up) if up is not None else None,
+        painted=_int_or_none(tile, "paintedColor"),
+        has_redstone=_int_or_none(tile, "hasRedstone"),
+    )
 
 
 @dataclass(frozen=True)
@@ -79,6 +217,11 @@ class TileEntity:
     def placed_facing(self) -> int | None:
         """The way the block was placed: ``main_facing`` for a basic machine, else ``facing``."""
         return self.main_facing if self.main_facing is not None else self.facing
+
+    @property
+    def ae(self) -> AETile | None:
+        """The AE2 view of this tile (module docstring), or ``None`` for one AE2 did not write."""
+        return _ae_tile(self.raw) if self.id in AE_TILE_IDS else None
 
 
 @dataclass(frozen=True)

@@ -54,6 +54,11 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
     `eRotation` changed nothing in the hologram. The maintainer's Schematica fork adds a mixin that
     reads the hologram's own tile entity instead (branch `fix/controller-facing`), confirmed in game
     on 2026-10-05; with it, `eRotation` and `eFlip` take effect in the hologram too.
+  - An **AE2 cable bus is all tile-entity NBT**: its cable, its colour and every part on it, each
+    part's cards and filter included (#339). So the printer places at best an empty cable bus, and
+    an exported ME network is in the hologram only; the builder places its cables and parts by
+    hand from it. Every item in a cable bus is named by the world's numeric id as well, so the
+    export writes cable buses only with `--world`, as it does covers (ME networks, below).
 - There is **no headless GT simulator**, so true correctness is only verifiable in-game.
 
 ## Machine faces
@@ -612,8 +617,8 @@ pipe's terminal, and pulls each network's machines together, stub included. The 
 network's cable after the pipes and before power (the router below); the CLI then says, per
 network, what its storage must supply, what lands there, how many of the main network's channels
 it spends, and what it draws (`system_io`; "What an ME network draws" below). The preview draws
-every ME block (#338, below), and the schematic export leaves them out with a warning that counts
-them (#339).
+every ME block (#338, below), and the schematic export writes them, its cable buses for a named
+world only (#339, below).
 
 A single block's outputs can be split: one product on ME and the rest piped. Its auto-output face
 still ejects every item, so the piped ones are merged and sorted by Item Filters as before (#249)
@@ -829,6 +834,43 @@ and a page that embeds any of it, on an ME network, a GT block that wears AE2 ar
 item's icon, credits what it embeds with the licence link on its HUD: it may be shared only for
 non-commercial purposes (`NOTICE`). A failing AE2 or FC jar, or one whose members do not decode,
 costs only the ME art, never the GT textures.
+
+### How the export writes an ME network (#339)
+
+`schematic/ae.py` writes every ME block as AE2 itself saves it, read off the maintainer's in-game
+golden (`tests/golden/schematic/ae2-golden-*.schematic`, spike 7.5) and held to it tag for tag:
+
+- **A controller or an acceptor** is its AE2 block (Data 0; a controller's 1 is AE's live
+  "online"), with `orientation_forward` its placed front and `orientation_up` `UP`, as AE2 orients
+  a block placed by hand; a controller is painted its network's colour (`paintedColor`), which is
+  what joins it to that network alone. Neither needs an item id, so both are always written.
+- **A GT ME hatch** is a GT block in its multiblock's casing, written like any hatch but by its own
+  mID (the texture pass finds it with `TextureManifest.me_hatch`), facing its cable; on a coloured
+  subnet it is painted that colour, GT's `mColor` being the dye plus one (AE colour `c` is
+  `mColor` `16 - c`, spike 5.2). One the manifest cannot name is refused, since the casing left in
+  its place would form a multiblock without it.
+- **A cable cell** is a `BlockCableBus` whose tile entity holds the cable (`def:6`, `ItemMultiPart`
+  at kind plus colour) and each part on its side (`def:N` / `extra:N`): the bus's default settings,
+  its cards one a slot, and its filter or partition (an item by the world's id and damage, a fluid
+  by name). A cable bus is written **only for a named world** (`--world`, the save folder or its
+  `level.dat`, as for covers): every item in it is numbered by the world's FML table, which
+  Schematica never remaps, so without one each cable cell is left out and counted. Either way
+  Schematica's printer places none of it (Platform, above): the ghost carries the network, and the
+  builder places it by hand. `--inspect-schematic FILE --world <save>` names the items in a file's
+  cable buses by that world's table; without it only AE2's own cables and buses are named.
+- **The ME Interface part and FC's Dual Interface part are left off their cable**, and listed by
+  cell and side: the golden has neither, so their NBT is unverified (spike 11).
+- **A filter slot for an item at any damage is left unset** (a resource `registry@32767`, such as a
+  coke oven's `minecraft:log@32767`), and listed with its bus. AE2 matches 32767 as "any damage"
+  only in its fuzzy lookup (`ItemList.findFuzzy`), which an export bus takes only with a Fuzzy Card
+  (`PartBaseExportBus.java:120`); written as is, the bus would move nothing. The builder fits a
+  Fuzzy Card or sets the slot to the one item they feed.
+- A part on a cell the layout lays no cable on (the validator refuses that) is counted and listed
+  rather than dropped.
+
+One `SchematicWarning` says what was left out and why. `--inspect-schematic --world` checks the
+world first: a table that puts `ItemMultiPart` at another id than the file's cables use is from
+another world, so it is set aside with a warning and the items stay numbers.
 
 ## Multiblocks
 

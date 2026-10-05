@@ -310,6 +310,14 @@ FC_PART_ITEMS: dict[MEDeviceKind, str] = {
 #: Each upgrade card's damage of :data:`MATERIAL_ITEM`, by its :class:`MECards` field.
 CARD_DAMAGE: dict[str, int] = {"acceleration": 30, "super_speed": 56, "capacity": 27}
 
+#: How each cable kind is named in game (AE2's own item names), for a builder reading a layout.
+CABLE_NAMES: dict[MECableKind, str] = {
+    MECableKind.GLASS: "ME Glass Cable",
+    MECableKind.COVERED: "ME Covered Cable",
+    MECableKind.SMART: "ME Smart Cable",
+    MECableKind.DENSE: "ME Dense Smart Cable",
+    MECableKind.DENSE_COVERED: "ME Dense Covered Cable",
+}
 #: How each device is named in game, for a builder reading a layout.
 DEVICE_NAMES: dict[MEDeviceKind, str] = {
     MEDeviceKind.IMPORT_BUS: "ME Import Bus",

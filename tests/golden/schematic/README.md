@@ -17,6 +17,8 @@ question: what a file Schematica accepts actually contains.
 | `sand-parallel-exported.schematic` | **proven in game, in part** | The same build as `sand-parallel-reference.schematic`, written by **our own exporter** rather than by Schematica, and built in game by the maintainer. It carries the pipe wiring the Schematica copy loses. Proven for geometry, wiring, facings and power; **not** for item throughput, which it gets wrong (see below). |
 | `sand-parallel-29-gui.schematic` | **golden, wiring** | The maintainer's later rebuild of the same line (9 hammers, 2 chests, the power source, 12 huge brass pipes and 3 `cable.tin.12` in a 3x3x4 box), saved from the Schematica GUI in a 2.9.0-beta-3 instance on 2026-10-04. The only save here made on GT 5.09.54, so the only one whose pipes carry their real `mConnections`: the exporter's bit order is checked against it (see below). |
 | `28-sfb.schematic`, `29-sfb.schematic` | **golden, format only** | The maintainer's saves from a 2.8.4 and a 2.9 instance of three frame boxes in a row along +X: a plain Steel frame, a plain Black Steel frame, and a Steel frame with a cover. They settle how Schematica stores a frame, whose world metadata is a material id rather than a nibble (see below). |
+| `ae2-golden-cmd.schematic`, `ae2-golden-gui.schematic` | **golden, AE2** | The maintainer's AE2 build for #339 in a 2.9.0-beta-3 world, saved with `/schematicaSave` and from the GUI on 2026-10-05: a controller, an acceptor, a drive, an ME Interface block, fifteen cable buses of four kinds and three colours with six kinds of bus on them, and three GT hatches facing a cable, one a painted Stocking Input Bus (ME). What the AE2 export writes is checked tag for tag against it (see below). |
+| `ae2-golden-items.json` | **golden, AE2** | That world's FML item table (`level.dat`), items only, cut to the ones the two saves and the tests name. A cable bus names every item by the world's numeric id, so the saves decode only against it. |
 
 None of these is a byte-for-byte expectation for our exporter. All were built by hand in
 game, so they will differ from a solved layout in placement, and the nitrobenzene one also
@@ -163,3 +165,24 @@ material, and warns that the ghost shows it wrong (`schematic.core._frame_cell`,
 The two saves differ only in what each instance assigns: the block's numeric id (2433 against 3027 in
 `SchematicaMapping`), GT's `nbtVersion` stamp (5.09.51.476 against 5.09.54.133), the cover's encoded
 id, and a zero `mRedstone` tag present only in the 2.8.4 one.
+
+## What the AE2 saves (`ae2-golden-*`) establish
+
+`docs/spikes/329-me-ae2.md` section 7.5 has the full decoding; `tests/test_schematic_ae.py` pins it.
+In short (#339):
+
+- **A cable bus is all tile entity.** Its block is `appliedenergistics2:tile.BlockCableBus` at Data
+  0; the cable is the ItemStack under `def:6` (`ItemMultiPart`, damage = kind + colour) and each part
+  the one under `def:N`, `N` its side's ForgeDirection ordinal, with what the part writes under
+  `extra:N`: its settings, its cards (`upgrades`, one a slot) and its filter or partition (`config`).
+- **Every item in it is named by the saving world's numeric id**, the cable, the parts, the cards
+  and an item filter alike, and Schematica never remaps tile NBT. The saves were checked against
+  that world's `level.dat` (`ae2-golden-items.json`); the instance's other world gives the same ids
+  to Tinkers' items.
+- **No `part` or `proxy` tag**, and no tag for an empty inventory: Schematica saves each tile entity
+  through a freshly loaded copy, which has no grid node, and AE2 drops an empty inventory's tag.
+- **The two saves agree** on every AE2 tag but `hasRedstone` (three bus cells read 1 in the
+  server save, 2 in the GUI one) and the controller's stored power: live state, as for GT.
+- **Not in them:** an ME Interface part, an FC Dual Interface part, dense covered cable, and GT's
+  Output Bus (ME) and Output Hatch (ME) (the two hatches beside the Stocking Input Bus (ME) are
+  normal LV ones). The export leaves those two parts out with a warning until a save has them.
