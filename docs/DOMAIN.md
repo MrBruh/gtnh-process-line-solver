@@ -441,6 +441,18 @@ where load **sums** along shared segments (Steiner-tree-like):
   2 and the under-supply check is what catches a genuine shortfall.
 - **Thickness** (1x / 2x / 4x / 8x / 12x / 16x, **16x max**) is sized to the **summed load** through
   that segment, rounded up to whole amps.
+- **The source's own cable block carries its whole output (#347).** Every amp the source puts out
+  passes through the block it feeds, whichever leg it then takes. Any other block has a parent
+  segment carrying everything beyond it, and a block is built at the thickest cable touching it
+  ("Cables and pipes as blocks" below), so it is never thinner than what passes through it. The
+  source's block has no parent segment: when two legs leave it, or a machine taps it, no one
+  segment carries the whole output, and a block built at the thickest of them burns. So every
+  segment leaving the source's block is sized for the source's **whole output**, the whole amps
+  every connection's load sums to, which is what the run tells the builder to feed that source
+  (`system_io.power_amps_by_source`); a leg's second block comes out thicker than its own load,
+  which never burns. A source whose whole output is over 16 A is refused there, never split over
+  two legs that each look legal. The validator holds the block to that output on its own
+  arithmetic, at the thickest cable touching it.
 - A segment needing **> 16x** must split into **parallel runs** or move to a **higher voltage
   tier** (more power per amp).
 - **Hatches ride casing cells, and casings are interchangeable.** A GT multiblock's shell asks
@@ -475,10 +487,9 @@ where load **sums** along shared segments (Steiner-tree-like):
   router loads the acceptor with that output in place of its own draw, and sizes no segment for
   more than the source puts out, since a cable carries no more than its source emits: every
   segment between the source and an acceptor is sized for the source's whole output, and every
-  other segment as before. An acceptor never taps the source's own cable block: it would draw
-  through no segment, and that block is built at its thickest cable, which nothing would size for
-  the whole output, so it lays a cable of its own (the validator refuses a root tap whose block is
-  built thinner than the output). The validator re-derives all of it on its own arithmetic. That holds
+  other segment as before. An acceptor may tap the source's own cable block like any machine: that
+  block is built for the whole output anyway (above, #347). The validator re-derives all of it on
+  its own arithmetic. That holds
   only while the source puts out what the run says, so the run tells the builder to feed it no
   more (a battery buffer with more batteries than that would push its extra amps down the
   acceptor's cable). The other way AE2 allows, a 1 A limit in front of the acceptor, is a block
@@ -522,7 +533,9 @@ and a 1x segment at once (the sand line does this at cell `(2,0,1)`). A cell is 
 fattest incident cable is the one that physically meets it, and under-sizing is what burns - so the
 cell is the maximum over its incident segments. As a coloured bar that was harmless smoothing; as a
 real block it is a build instruction, which is why it is written down here rather than left implicit
-in a render template.
+in a render template. The one block whose load no incident segment carries is the power source's
+own, which carries its whole output, so the router sizes the segments leaving it for that output
+(Power above, #347).
 
 **Texture layers.** GT composites an ordered stack of `(sprite, RGBA multiply)`; `<SET>` below is
 the material's texture set under `materialicons/`, and bare names are under `iconsets/`. Sprites are

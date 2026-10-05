@@ -32,6 +32,7 @@ from gtnh_solver.ir import (
     Port,
     Route,
 )
+from gtnh_solver.route_blocks import route_cells
 from gtnh_solver.router import route_power
 from gtnh_solver.router.power import _route_pass, _size_trunk
 from gtnh_solver.validator import validate
@@ -373,6 +374,61 @@ def test_power_rejects_over_16x_amperage() -> None:
     assert result.infeasibility.constraint == "amperage"
 
 
+# ------------------------------------------------------------- the source's own cable block (#347)
+
+_R, _A, _B = (0, 0, 0), (1, 0, 0), (-1, 0, 0)
+
+
+def test_power_two_legs_leaving_the_root_are_built_for_the_whole_output() -> None:
+    # #347's repro: two 30 EU/t LV sinks, one leg each side of the root. Each leg carries 30/31 =
+    # 0.97 A (1x alone), but the root carries both, 1.94 A, and is built at its thickest segment
+    # (route_blocks): every segment leaving it is sized for the source's whole 2 A.
+    sized = _size_trunk(
+        "p", [[_R, _A], [_R, _B]], {_R: 0, _A: 1, _B: 1}, [_A, _B], [(30, "LV")] * 2
+    )
+    assert not isinstance(sized, Infeasibility)
+    assert sized[1] == [2, 2]
+    # Two 48 EU/t legs: 1.55 A each (2x alone), 3.10 A through the root, so 4 A (4x).
+    sized = _size_trunk(
+        "p", [[_R, _A], [_R, _B]], {_R: 0, _A: 1, _B: 1}, [_A, _B], [(48, "LV")] * 2
+    )
+    assert not isinstance(sized, Infeasibility)
+    assert sized[1] == [4, 4]
+
+
+def test_power_a_sink_tapping_the_root_counts_toward_the_segment_leaving_it() -> None:
+    # #347's second repro: a 40 EU/t sink tapping the root loads no segment, and the 30 EU/t one a
+    # block out needs 1x, but the root block feeds both: 40/32 + 30/31 = 2.22 A, so 3 A (4x).
+    sized = _size_trunk("p", [[_R, _A]], {_R: 0, _A: 1}, [_R, _A], [(40, "LV"), (30, "LV")])
+    assert not isinstance(sized, Infeasibility)
+    assert sized[1] == [4]
+
+
+def test_power_only_the_segments_leaving_the_root_carry_the_whole_output() -> None:
+    # A two-hop leg past the fork keeps its own gauge beyond the root: 30/30 = 1 A at depth 2 (1x).
+    far = (2, 0, 0)
+    sized = _size_trunk(
+        "p",
+        [[_R, _A, far], [_R, _B]],
+        {_R: 0, _A: 1, far: 2, _B: 1},
+        [far, _B],
+        [(30, "LV"), (30, "LV")],
+    )
+    assert not isinstance(sized, Infeasibility)
+    assert sized[1] == [2, 1, 2]  # 1 + 30/31 = 1.97 A through the root
+
+
+def test_power_rejects_a_root_carrying_more_than_16x() -> None:
+    # Two 279 EU/t legs: 279/31 = 9 A each, a 12x cable apiece, but 18 A through the root, which no
+    # cable carries: rejected rather than certified as two legal legs.
+    sized = _size_trunk(
+        "p", [[_R, _A], [_R, _B]], {_R: 0, _A: 1, _B: 1}, [_A, _B], [(279, "LV")] * 2
+    )
+    assert isinstance(sized, Infeasibility)
+    assert sized.constraint == "amperage"
+    assert "the source's own cable block must carry 18 amps" in sized.detail
+
+
 def test_power_unknown_tier_is_infeasible() -> None:
     problem = InputIR(
         bounding_region=CellBox(sx=8, sy=4, sz=8),
@@ -467,9 +523,11 @@ def test_power_branched_trunk_sizes_each_branch_to_its_own_sink() -> None:
     # Source between two sinks on opposite sides: src(3,0,0), m0(0,0,0), m1(6,0,0). The source
     # docks west at (2,0,0) (toward its first sink); m0's leg is the 1-hop (2,0,0)->(1,0,0), and
     # m1's leg leaves the SAME root cell the other way (5 hops around the source body), so the
-    # tree BRANCHES at the root. Each branch carries only its own sink: m0 at depth 1 -> 31 V ->
-    # 2 amps, m1 at depth 5 -> 27 V -> 2 amps -> every segment is 2x. A path-trunk suffix sum
-    # would have overcharged the m0 branch with m1's amps too (4 amps -> 4x).
+    # tree BRANCHES at the root. Past the root each branch carries only its own sink: m1 at depth
+    # 5 -> 27 V -> 32/27 = 1.19 A -> 2x. A path-trunk suffix sum would have overcharged a branch
+    # with the other's amps too. The root itself carries both (m0 at depth 1: 32/31 = 1.03 A), so
+    # the source puts out ceil(2.22) = 3 A through it, and both segments leaving it are built for
+    # that: 4x (#347). Each alone would be 2x, and so would the root built from them.
     problem = InputIR(
         bounding_region=CellBox(sx=10, sy=4, sz=10),
         machines=[_src(), _load("m0", 32), _load("m1", 32)],
@@ -479,21 +537,17 @@ def test_power_branched_trunk_sizes_each_branch_to_its_own_sink() -> None:
     result = route_power(problem, placements)
     assert result.ok, result.infeasibility
     route = result.routes[0]
-    assert route.thickness_per_segment is not None
-    # Select the m0 branch by its cells - the root (2,0,0) -> (1,0,0) leg - not by lay order: the
-    # contract is that each branch is sized to its own sink, not which one is emitted first.
-    thickness_by_edge = {
-        frozenset(
-            {(s.start.x, s.start.y, s.start.z), (s.end.x, s.end.y, s.end.z)}
-        ): route.thickness_per_segment[i]
-        for i, s in enumerate(route.segments)
-    }
-    m0_branch = frozenset({(2, 0, 0), (1, 0, 0)})
-    assert m0_branch in thickness_by_edge  # the m0 branch exists as its own single-hop leg
-    assert thickness_by_edge[m0_branch] == 2  # not 4x: m1's amps do not ride this branch
-    assert set(route.thickness_per_segment) == {2}
-    branches = sum(1 for s in route.segments if (s.start.x, s.start.y, s.start.z) == (2, 0, 0))
-    assert branches == 2  # both legs leave the root cell - a real branch, not a path
+    root = (2, 0, 0)
+    # Select by cells, not by lay order: the contract is what each segment carries, not which one
+    # is emitted first.
+    thickness = _thickness_by_edge(route)
+    leaving_root = {edge: t for edge, t in thickness.items() if root in edge}
+    assert frozenset({root, (1, 0, 0)}) in leaving_root  # the m0 branch is its own one-hop leg
+    assert list(leaving_root.values()) == [4, 4]  # both legs leave the root - a real branch
+    past_root = {t for edge, t in thickness.items() if root not in edge}
+    assert past_root == {2}  # m1's own load: m0's amps do not ride its branch
+    built = {rc.cell: rc.thickness for rc in route_cells(route)}
+    assert built[root] == 4  # the block the source feeds carries its whole 3 A
     layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route])
     assert validate(problem, layout).ok, str(validate(problem, layout))
 
@@ -502,9 +556,11 @@ def test_power_sink_taps_the_sources_dock_cell() -> None:
     # src(0,0,0), m0(2,0,0), m1(4,0,0). The source docks east at (1,0,0); that same cell is m0's
     # west dock candidate, so m0 TAPS it - terminal on the trunk cell, distance 0, no new cable
     # (GT: one cable block feeds every adjacent wired face). m1 then extends the trunk with a
-    # 4-hop leg around m0's body (depth 4 -> 28 V -> 2 amps). Trunk total: 5 cells / 4 segments,
-    # each carrying only m1's 2 amps (m0 draws straight from the root and loads no segment). The
-    # old distinct-dock path-trunk needed 2 extra cells just to give m0 its own dock.
+    # 4-hop leg around m0's body (depth 4 -> 28 V -> 32/28 = 1.14 A). Trunk total: 5 cells / 4
+    # segments, each carrying only m1's 2 amps (m0 draws straight from the root and loads no
+    # segment), except the first: it builds the root, which feeds m0's 1 A as well, so it is sized
+    # for the source's whole ceil(2.14) = 3 A (#347). The old distinct-dock path-trunk needed 2
+    # extra cells just to give m0 its own dock.
     problem = InputIR(
         bounding_region=CellBox(sx=10, sy=4, sz=10),
         machines=[_src(), _load("m0", 32), _load("m1", 32)],
@@ -523,7 +579,7 @@ def test_power_sink_taps_the_sources_dock_cell() -> None:
     }
     assert len(cells) == 5  # the root + m1's 4-hop leg; no cable spent on m0
     assert len(route.segments) == 4
-    assert set(route.thickness_per_segment or []) == {2}  # only m1's 2 amps ride the cable
+    assert route.thickness_per_segment == [4, 2, 2, 2]  # the root's 3 A, then m1's alone
     layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route])
     assert validate(problem, layout).ok, str(validate(problem, layout))
 
@@ -602,8 +658,9 @@ def test_power_tap_picks_the_trunk_cell_nearest_the_source() -> None:
     cell_of = {t.machine_id: (t.cell.x, t.cell.y, t.cell.z) for t in route.terminals}
     assert cell_of["m1"] == (1, 0, 0)  # the root (depth 0), not the deeper (2,0,1) candidate
     # m0's 2-hop leg (1,0,0)->(1,0,1)->(2,0,1) puts m0 at depth 2 -> 30 V -> 2 amps; m1 taps the
-    # root and rides no segment, so both segments carry m0 alone.
-    assert route.thickness_per_segment == [2, 2]
+    # root and rides no segment, so the far segment carries m0 alone, and the one leaving the root
+    # is built for the root's ceil(1 + 32/30) = 3 A (#347).
+    assert route.thickness_per_segment == [4, 2]
     layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route])
     assert validate(problem, layout).ok, str(validate(problem, layout))
 
@@ -727,8 +784,9 @@ def test_power_sizes_an_acceptors_branch_for_its_sources_full_output() -> None:
     # The branched trunk above, with m1 an Energy Acceptor drawing 48 EU/t. Steady, m0 at depth 1
     # loads 32/31 A and the acceptor at depth 5 48/27 A: 2.81 A, so the source puts out 3 A. An
     # acceptor takes every whole amp offered until its network's storage is full (spike 6.3), so
-    # its branch carries all 3 (a 4x cable), where its own draw would size a 2x; m0's branch keeps
-    # its own 2x. The validator re-derives the same and passes it (test_validator holds it to the
+    # every segment of its branch carries all 3 (a 4x cable), where its own draw would size the
+    # four past the root at 2x. m0's one-hop branch leaves the root, so it is built for the same
+    # 3 A (#347). The validator re-derives the same and passes it (test_validator holds it to the
     # full output on its own arithmetic).
     problem = InputIR(
         bounding_region=CellBox(sx=10, sy=4, sz=10),
@@ -741,7 +799,7 @@ def test_power_sizes_an_acceptors_branch_for_its_sources_full_output() -> None:
     assert result.ok, result.infeasibility
     (route,) = result.routes
     thickness = _thickness_by_edge(route)
-    assert thickness.pop(frozenset({(2, 0, 0), (1, 0, 0)})) == 2  # m0's branch: its own load
+    assert len(thickness) == 6  # m0's one hop and the acceptor's five
     assert set(thickness.values()) == {4}  # every segment from the source to the acceptor: 3 A
     layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route])
     assert validate(problem, layout).ok, str(validate(problem, layout))
@@ -774,11 +832,12 @@ def test_power_no_segment_carries_more_than_its_source_puts_out() -> None:
     assert plain[1] == [4, 2, 2]
 
 
-def test_power_never_lets_an_acceptor_tap_the_sources_own_cable_block() -> None:
-    # The tap above, with m0 an Energy Acceptor: its west face is the source's dock cell, but a tap
-    # there would load no segment, and that block is built at its thickest segment, so nothing would
-    # be sized for the source's whole output it draws through it. It lays a leg instead, and every
-    # segment from the source to it carries that output: 40/30 + 30/28 = 2.4 A steady, so 3 A (4x).
+def test_power_lets_an_acceptor_tap_the_sources_own_cable_block() -> None:
+    # The tap above, with m0 an Energy Acceptor: its west face is the source's dock cell, so it taps
+    # it like any sink. Its draw rides no segment, but the root block it draws from is built for
+    # the source's whole output, which is what an acceptor takes: 40/32 + 30/28 = 2.3 A steady, so
+    # 3 A, on the segment leaving the root (4x); the rest carry m1 alone (2x). #336 kept an
+    # acceptor off the root because nothing sized that block; the root rule now does (#347).
     problem = InputIR(
         bounding_region=CellBox(sx=10, sy=4, sz=10),
         machines=[_src(), _acceptor("m0", 40), _load("m1", 30)],
@@ -790,39 +849,22 @@ def test_power_never_lets_an_acceptor_tap_the_sources_own_cable_block() -> None:
     assert result.ok, result.infeasibility
     (route,) = result.routes
     cell_of = {t.machine_id: t.cell.as_tuple() for t in route.terminals}
-    assert cell_of["m0"] != cell_of["src"]
-    thickness = _thickness_by_edge(route)
-    # The tree path from the source's cell to the acceptor's: every segment on it carries 3 A.
-    parent = {cell_of["src"]: cell_of["src"]}
-    frontier = [cell_of["src"]]
-    while frontier:
-        here = frontier.pop()
-        for edge in thickness:
-            if here in edge:
-                (there,) = edge - {here}
-                if there not in parent:
-                    parent[there] = here
-                    frontier.append(there)
-    path, cell = [], cell_of["m0"]
-    while cell != cell_of["src"]:
-        path.append(frozenset({cell, parent[cell]}))
-        cell = parent[cell]
-    assert path
-    assert {thickness[e] for e in path} == {4}
+    assert cell_of["m0"] == cell_of["src"]
+    assert route.thickness_per_segment == [4, 2, 2, 2]
     layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route])
     assert validate(problem, layout).ok, str(validate(problem, layout))
 
 
-def test_power_refuses_an_acceptor_on_the_root_cell() -> None:
-    # The reviewer's repro: an acceptor on the root (depth 0) beside a sink one block out. Its
-    # draw rides no segment, so nothing would carry the source's 3 A to it (40/32 + 30/31).
+def test_power_builds_the_root_for_an_acceptor_on_it() -> None:
+    # The #336 reviewer's repro: an acceptor on the root (depth 0) beside a sink one block out. Its
+    # draw rides no segment, but the segment leaving the root builds that block, so it is sized for
+    # the source's whole output: ceil(40/32 + 30/31) = 3 A (4x), not the sink's own 1x.
     root, x = (0, 0, 0), (1, 0, 0)
     sized = _size_trunk(
         "p", [[root, x]], {root: 0, x: 1}, [root, x], [(40.0, "LV"), (30.0, "LV")], ["acc", None]
     )
-    assert isinstance(sized, Infeasibility)
-    assert sized.constraint == "amperage"
-    assert "'acc' taps the source's own cable block" in sized.detail
+    assert not isinstance(sized, Infeasibility)
+    assert sized[1] == [4]
 
 
 def test_power_names_the_acceptor_whose_cable_is_over_the_cap() -> None:

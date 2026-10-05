@@ -57,8 +57,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   counted through every block and connection as AE2 counts them), each channel assumed to cross
   the line's whole region. An acceptor takes every amp its source offers until its network is
   full, so the cable from the source to it is sized for the source's whole output rather than the
-  acceptor's steady draw, never through the source's own cable block, and no cable for more than
-  its source puts out; feed that source no more than the run says.
+  acceptor's steady draw, and no cable for more than its source puts out; feed that source no more
+  than the run says.
   The validator holds every layout to it: a new `me_power_insufficient` violation for an acceptor
   network with no acceptor, none on a power cable, or one rated under what the laid network
   draws, and for a network that cannot store one flush of its GT ME output buses (16,000 AE for an
@@ -501,6 +501,23 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **The cable block a power source feeds is built for everything it puts out (#347).** Every amp
+  the source puts out passes through that block, whichever leg it then takes, but it was built at
+  its thickest touching segment, and a segment carries only the load beyond it. Where two or more
+  legs left the block, or a machine tapped it, it came out thinner than what it carries and would
+  burn, and the validator, which checked segments only, certified it: parallel-sand's source block
+  was 4x carrying 5 A on every seed. Every segment leaving the source's block is now sized for the
+  source's whole output (the amps the run tells you to feed it), and the validator holds that block,
+  at its thickest touching cable, to the whole output on its own arithmetic
+  (`power_thickness_insufficient`). A source whose whole output is over 16 A is refused rather than
+  split over two legal-looking legs. Only gauges change: across sand, parallel-sand, nitrobenzene
+  and iron, every layout keeps its cells, footprint and verdict, and the previews show a thicker
+  block at the source, and one beyond it, on the lines that fork there. The parallel-sand build
+  exported earlier and built in game (`tests/golden/schematic/`) is now refused for its 4x source
+  block as well as its plain pipes: it ran only at the third of its rate those pipes allowed, so it
+  never carried the 5 A, and the Schematica copy of the working build has 12x there. An Energy
+  Acceptor may now tap the source's block like any machine (#336 kept it off), since that block
+  carries the whole output it takes.
 - **An exported multiblock starts with its maintenance done.** A GT controller loads one flag per
   maintenance problem from its NBT, and the export wrote none, so a pasted line's multiblocks formed
   and then waited for every Maintenance Hatch to be taped again (its duct-tape overlay is GT's

@@ -100,7 +100,7 @@ Built in game by the maintainer, it established:
 | | result |
 |---|---|
 | geometry, wiring, facings | as authored |
-| power | **works**: `cable.tin.04` and `.02` run all nine hammers. The `.08` and `.12` in the Schematica copy were over provisioned |
+| power | **works at the starved rate**: `cable.tin.04` and `.02` run all nine hammers at the third of their rate the pipes allow. At the full rate the `.04` the source feeds carries all nine, 5 A, so since #347 the validator refuses it; the `.12` there in the Schematica copy carries it |
 | item throughput | **fails**: every run is a plain `gt_pipe_tin`, and only one of the three stone hammers is fed at a time, so the line runs at a third of its designed rate |
 
 The throughput failure is the useful part. It is why this file is kept even though the build it
@@ -109,11 +109,13 @@ validator refusing a pipe too thin for its net) are measured against. `validate(
 the time, which made it the concrete case of the validator passing a layout that fails in game.
 Since #190 it is refused, on the five pipe blocks of the stone and sand runs that carry more streams
 than a plain pipe's one insertion per 40 ticks, and `tests/test_golden_sand_parallel.py` pins that.
+Since #347 it is also refused on its cable block at the source, which the starved run never loaded.
 
 The Schematica copy stays because it is the only record of the gauges that **do** work: huge on the
-two runs to and from a chest, large on the two between hammer stages. Its twelve pipes sit on
-exactly the export's twelve cells, so the same test reads those gauges from it block by block onto
-the export's wiring, and pins that the validator accepts the result.
+two runs to and from a chest, large on the two between hammer stages, and `cable.tin.12` at the
+source with `.08` beyond. Its twelve pipes and three cables sit on exactly the export's cells, so
+the same test reads those gauges from it block by block onto the export's wiring, and pins that the
+validator accepts the result.
 
 ## What they establish
 
