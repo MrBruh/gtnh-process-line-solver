@@ -24,6 +24,7 @@ WebGL last mile stays a thin static template while the mapping here is pure and 
 
 from __future__ import annotations
 
+import logging
 import re
 from collections import Counter
 from collections.abc import Collection, Iterable, Mapping
@@ -31,7 +32,7 @@ from functools import cache
 from typing import Any
 
 from gtnh_solver.dataset import ADHOC_MAX_DEVICES, GT_ME_HATCHES, MEDeviceChoice, tier_voltage
-from gtnh_solver.dataset.ae_render import AERender, load_ae_render
+from gtnh_solver.dataset.ae_render import AE_RENDER_PATH, AERender, load_ae_render
 from gtnh_solver.hatch_locks import LOCK_SLOT, hatch_layers, hatch_locks
 from gtnh_solver.ir import (
     AEColor,
@@ -61,7 +62,9 @@ from gtnh_solver.system_io import (
     system_io,
 )
 
-from .me_blocks import RGB, SIDE_ORDER, MEBox, MEPart, me_blocks
+from .me_blocks import RGB, SIDE_ORDER, MEBox, MEPart, me_blocks, plain_blocks
+
+_log = logging.getLogger(__name__)
 
 #: Bump if the scene shape the viewer template expects changes. 2: ``me`` (the ME networks a
 #: layout builds, #338), each machine's ``meRole``, each hatch's ``gtMid``, and each I/O row's
@@ -692,6 +695,12 @@ def _hex(rgb: RGB) -> str:
     return "#{:02x}{:02x}{:02x}".format(*rgb)
 
 
+def _swatch(render: AERender | None, colour: AEColor) -> str:
+    """An AE colour as AE shows it plainly (its ``medium_variant``), or the part grey without the
+    render data to say."""
+    return _hex(render.colours[colour].medium_variant) if render is not None else _ME_PART_COLOR
+
+
 def _colour_name(colour: AEColor) -> str:
     """An AE colour as a person names it: ``light_blue`` -> ``Light Blue``, Fluix as Fluix."""
     return colour.value.replace("_", " ").title()
@@ -705,11 +714,28 @@ def _me_scene(
 
     ``lights`` is left for ``write_preview`` to fill with the light masks the texture pass embeds,
     which keeps this a pure function of its arguments and the committed render data.
+
+    **Render data that will not load costs only the ME look.** The schematic export builds this
+    scene too and needs nothing of AE2's, so a missing or stale ``render.json`` is a warning naming
+    the file, and every ME block is drawn as a plain cube in a flat colour
+    (``me_blocks.plain_blocks``), hover and legend intact.
     """
     if not layout.me_networks:
         return None
-    render = _ae_render()
-    blocks = me_blocks(problem, layout, render)
+    render: AERender | None
+    try:
+        render = _ae_render()
+    except (OSError, ValueError) as exc:  # missing, not JSON, another schema, or invalid
+        _log.warning(
+            "ME render data at %s cannot be read, so the ME blocks are drawn as plain cubes: %s; "
+            "re-run tools/derive_ae_render.py",
+            AE_RENDER_PATH,
+            exc,
+        )
+        render = None
+    blocks = (
+        me_blocks(problem, layout, render) if render is not None else plain_blocks(problem, layout)
+    )
     machines = {m.id: m for m in problem.machines}
     return {
         "networks": _me_networks(problem, layout, sysio, names, render),
@@ -746,7 +772,7 @@ def _me_scene(
                         device.cell,
                         render,
                         color=(
-                            _hex(render.colours[device.colour].medium_variant)
+                            _swatch(render, device.colour)
                             if device.role is MERole.CONTROLLER
                             else _ME_PART_COLOR
                         ),
@@ -765,7 +791,7 @@ def _me_networks(
     layout: LayoutResult,
     sysio: SystemIO,
     names: Mapping[str, str],
-    render: AERender,
+    render: AERender | None,
 ) -> list[dict[str, Any]]:
     """The legend's entry for each ME network: what it is, its channels, and what it asks of the
     player's storage (``system_io``'s ME section, so the legend and the CLI say the same)."""
@@ -785,7 +811,7 @@ def _me_networks(
                 "mode": spec.mode.value if spec is not None else None,
                 "colour": built.colour.value,
                 "colourName": _colour_name(built.colour),
-                "swatch": _hex(render.colours[built.colour].medium_variant),
+                "swatch": _swatch(render, built.colour),
                 "storage": spec.storage.value if spec is not None else None,
                 "power": spec.power.value if spec is not None else None,
                 # An attached network spends the main network's free channels, up to its budget;
@@ -819,18 +845,14 @@ def _me_networks(
 
 
 def _me_box(
-    box: MEBox, cell: Cell, render: AERender, *, color: str | None = None
+    box: MEBox, cell: Cell, render: AERender | None, *, color: str | None = None
 ) -> dict[str, Any]:
     """One ME box as the viewer draws it: its centre and size in blocks, the icon on each face in
-    three.js slot order (``None``: not drawn), the colour it falls back to where an icon did not
-    arrive, its light passes and the part of its cell it belongs to."""
+    three.js slot order (``None``: not drawn; ``""``: drawn with no icon), the colour it falls back
+    to where an icon did not arrive, its light passes and the part of its cell it belongs to."""
     x0, y0, z0, x1, y1, z1 = box.box
     if color is None:
-        color = (
-            _ME_PART_COLOR
-            if box.part is not None
-            else _hex(render.colours[box.colour].medium_variant)
-        )
+        color = _ME_PART_COLOR if box.part is not None else _swatch(render, box.colour)
     return {
         "center": [
             cell[0] + (x0 + x1) / 32,

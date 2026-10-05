@@ -36,7 +36,7 @@ from .atlas import pack_atlas
 from .html import render_html
 from .icons import resource_art
 from .jar import JAR_VERSION, asset_modid, gt5u_version_from_manifest, multi_jar_png_provider
-from .me_textures import credit, texturize_me
+from .me_textures import credit, me_icons, texturize_me
 from .scene import SCENE_VERSION, build_scene
 from .textures import PngProvider, TextureSummary, texturize_scene
 
@@ -83,32 +83,53 @@ def write_preview(
     An ME network's icons come from the AE2 and AE2FluidCraft jars (``dataset.mod_jars.ME_JARS``),
     fetched only when the layout has one, through the same provider as GT's. That provider absorbs
     a failed AE2 or FC jar (:func:`~gtnh_solver.previewer.jar.multi_jar_png_provider`): it costs
-    only that jar's icons, whose faces keep their flat colours, never the GT textures. Once any of
-    their art is embedded the page carries AE2's credit (``me_textures.credit``) in
-    ``scene["credit"]``: from either pass, since a GT block can wear AE2 art too (the Large Molecular
-    Assembler's quartz lamp), and the provider routes every ``assets/appliedenergistics2/`` path to
-    AE2's jar whichever pass asked for it.
+    only that jar's icons, whose faces keep their flat colours, never the GT textures; and the ME
+    pass runs in a try of its own, so even a jar member that is not a PNG strips only the ME art.
+
+    Once any of AE2's or FC's art is embedded the page carries AE2's credit (``me_textures.credit``)
+    in ``scene["credit"]``, wherever the art came from: the ME pass, or the GT pass (a GT block can
+    wear AE2 art, the Large Molecular Assembler's quartz lamp, and the provider routes every
+    ``assets/appliedenergistics2/`` path to AE2's jar whichever pass asks).
     """
     names, icons = _resource_art(problem, version or problem.pack_version)
     scene = build_scene(problem, layout, extra_names=names)
     scene["icons"] = icons
+    gt_art: set[str] = set()  # the asset namespaces the GT pass's art came from
+    me_art: frozenset[str] = frozenset()
     if textures:
-        served: set[str] = set()  # the asset namespaces the page's art came from
         try:
             manifest_path = resolve_dataset_path("textures/manifest.json", version=version)
             gt5u = gt5u_version_from_manifest(manifest_path) or JAR_VERSION
-            provider = _noting(multi_jar_png_provider(gt5u_jar(gt5u), ME_JARS), served)
-            texturize_scene(scene, version=version, png_provider=provider)
-            texturize_me(scene, provider)  # after the GT pass, whose texture pool it adds to
+            provider = multi_jar_png_provider(gt5u_jar(gt5u), ME_JARS)
+            texturize_scene(scene, version=version, png_provider=_noting(provider, gt_art))
+            me_art = _me_art(scene, provider)  # after the GT pass, whose texture pool it adds to
             pack_atlas(scene)  # the viewer draws every face from one image (previewer.atlas)
-            scene["credit"] = credit(frozenset(served))
         except Exception as exc:  # never let a texture fetch/parse issue block a preview
             _log.warning("texture pass skipped, using placeholder boxes: %s", exc)
             _untextured(scene)
+            gt_art.clear()
+            me_art = frozenset()
+    scene["credit"] = credit(frozenset(gt_art | me_art))
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(render_html(scene), encoding="utf-8")
     return out
+
+
+def _me_art(scene: dict[str, Any], provider: PngProvider) -> frozenset[str]:
+    """``texturize_me``, and on any failure nothing: the ME tiles and light masks it may have added
+    go, logged, and the ME boxes keep their flat colours. The GT art is not touched."""
+    try:
+        return texturize_me(scene, provider)
+    except Exception as exc:  # a jar member that is not a PNG, say: never cost the GT art
+        _log.warning("ME texture pass skipped, the ME blocks keep their flat colours: %s", exc)
+        faces, _ = me_icons(scene)
+        pool = scene.get("textures") or {}
+        for icon in faces:
+            pool.pop(icon, None)
+        if scene.get("me"):
+            scene["me"]["lights"] = {}
+        return frozenset()
 
 
 def _noting(provider: PngProvider, served: set[str]) -> PngProvider:
@@ -162,7 +183,6 @@ def _untextured(scene: dict[str, Any]) -> None:
         entry.pop("tile", None)  # the legend falls back to each type's colour swatch
     if scene.get("me"):  # the ME boxes fall back to their flat colours
         scene["me"]["lights"] = {}
-    scene["credit"] = None  # and no AE2 art ships, so none is credited
     scene["blocks"] = []
     scene.pop("textures", None)
     scene.pop("texturesActive", None)

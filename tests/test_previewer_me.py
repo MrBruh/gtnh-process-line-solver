@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import re
 import shutil
 import subprocess
@@ -27,9 +28,11 @@ from PIL import Image
 
 import gtnh_solver.previewer as previewer_package
 import gtnh_solver.previewer.jar as jar_module
+import gtnh_solver.previewer.scene as scene_module
 from gtnh_solver.adapter import adapt_file
 from gtnh_solver.dataset.ae_render import asset_path, load_ae_render
 from gtnh_solver.dataset.mod_jars import AE2, AE2FC
+from gtnh_solver.dataset.schema import DatasetSchemaError
 from gtnh_solver.ir import (
     CellBox,
     CellCoord,
@@ -265,6 +268,31 @@ def _sand_on_me() -> tuple[InputIR, LayoutResult]:
     return ir, solve(ir, seed=0, optimize=True)
 
 
+def test_unreadable_render_data_draws_each_me_block_as_a_plain_cube(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # The schematic export builds this scene too and needs nothing of AE2's, so a stale or missing
+    # render.json is a warning naming it, and the ME blocks are drawn as plain cubes.
+    def stale() -> Any:
+        raise DatasetSchemaError("render.json declares render schema 0")
+
+    monkeypatch.setattr(scene_module, "_ae_render", stale)
+    with caplog.at_level(logging.WARNING, logger="gtnh_solver.previewer.scene"):
+        scene = build_scene(*comb(2, mode=MEMode.SUBNET, with_controller=True))
+    assert "render.json" in caplog.text
+    me = _me(scene)
+    for entry in [*me["cells"], *me["blocks"]]:
+        (box,) = entry["boxes"]
+        assert box["faces"] == [""] * 6  # drawn, with no icon: the flat colour
+        assert box["lights"] == []
+    assert {c["cell"][0] for c in me["cells"]} == {0, 1, 2, 3, 4, 5}
+    assert me["blocks"][0]["role"] == "controller"
+    kinds = [p["kind"] for p in _cell(scene, [1, 0, 1])["parts"]]
+    assert kinds == ["export_bus"] * 2  # the hover keeps its parts
+    assert me["networks"][0]["swatch"] == "#9aa0a8"
+    assert "if (icon == null) continue;" in render_html(scene)
+
+
 def test_the_texture_summary_does_not_call_an_me_block_a_placeholder() -> None:
     summary = texturize_scene(
         build_scene(*attached_line()),
@@ -396,8 +424,11 @@ class _Nexus:
     """Serves a fake jar per URL holding every icon a preview could ask that jar for; ``failing``
     URLs raise as an outage would."""
 
-    def __init__(self, failing: frozenset[str] = frozenset()) -> None:
+    def __init__(
+        self, failing: frozenset[str] = frozenset(), garbled: frozenset[str] = frozenset()
+    ) -> None:
         self.failing = failing
+        self.garbled = garbled  # these URLs serve a jar whose members are not PNGs
         self.calls: list[str] = []
 
     def __call__(self, url: str, filename: str) -> None:
@@ -416,7 +447,8 @@ class _Nexus:
             entries = set(raw["icons"].values())
         with zipfile.ZipFile(filename, "w") as archive:
             for entry in sorted(entries):
-                archive.writestr(entry, _png(64 if "MECableSmart" in entry else 16))
+                png = _png(64 if "MECableSmart" in entry else 16)
+                archive.writestr(entry, b"not a png" if url in self.garbled else png)
 
 
 @pytest.fixture(scope="module")
@@ -472,6 +504,20 @@ def test_a_failing_ae2_jar_costs_only_the_me_icons_and_the_credit_with_them(
     assert AE2.url in nexus.calls
 
 
+def test_an_ae2_jar_of_non_pngs_strips_only_the_me_art(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sand_on_me: tuple[InputIR, LayoutResult]
+) -> None:
+    # The jar opens, but its members do not decode: the ME pass fails in its own try, so the ME
+    # boxes keep their flat colours and every GT tile stays.
+    scene = _preview(tmp_path, monkeypatch, sand_on_me, _Nexus(garbled=frozenset({AE2.url})))
+    tiles = set(scene["atlas"]["tiles"])
+    assert any(key.startswith("gregtech:") for key in tiles)
+    assert not any(key.startswith("appliedenergistics2:") for key in tiles)
+    assert any(m.get("expanded") for m in scene["machines"])
+    assert _me(scene)["lights"] == {}
+    assert scene["credit"] is None
+
+
 def test_a_preview_without_textures_embeds_no_art_and_no_credit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sand_on_me: tuple[InputIR, LayoutResult]
 ) -> None:
@@ -523,7 +569,8 @@ def test_the_viewer_draws_the_me_layer_from_the_scene() -> None:
         "if (m.expanded || ME_DRAWN.has(m.id)) continue;",
         # The AE2 faces share the atlas through a cutout copy of its material (glass cable).
         "aeMaterial.alphaTest = 0.1",
-        "if (ATLAS && icon in ATLAS.tiles) layerBatch.main.face(geo, f, b.center, aeMaterial",
+        "if (icon && ATLAS && icon in ATLAS.tiles) layerBatch.main.face(geo, f, b.center, aeMaterial",
+        "if (icon == null) continue;",
         "else layerBatch.main.face(geo, f, b.center, routeFlat(b.color), owner)",
         # Channel lights: an unlit (fullbright) tinted mask, drawn in front of the face it lights.
         "new THREE.MeshBasicMaterial({",

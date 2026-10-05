@@ -136,9 +136,10 @@ class MELight:
 @dataclass(frozen=True, slots=True)
 class MEBox:
     """One box to draw: where it is, the icon on each face (``None``: that face is not drawn,
-    because AE2 leaves it open or it lies against another box), the colour it is drawn in where an
-    icon is missing, the lights over it, and ``part``, the index of the part of its cell it draws
-    (``None`` for the cable or block itself)."""
+    because AE2 leaves it open or it lies against another box; ``""``: drawn, but with no icon, as
+    :func:`plain_blocks` draws everything), the colour it is drawn in where an icon is missing, the
+    lights over it, and ``part``, the index of the part of its cell it draws (``None`` for the cable
+    or block itself)."""
 
     box: Box
     faces: tuple[str | None, ...]
@@ -218,7 +219,7 @@ class MEBlocks:
 
     def icon_names(self) -> frozenset[str]:
         """Every icon these blocks draw a face with."""
-        return frozenset(icon for box in self.boxes() for icon in box.faces if icon is not None)
+        return frozenset(icon for box in self.boxes() for icon in box.faces if icon)
 
     def light_icons(self) -> frozenset[str]:
         """Every icon these blocks draw a light pass with."""
@@ -408,6 +409,55 @@ def me_blocks(problem: InputIR, layout: LayoutResult, render: AERender) -> MEBlo
         for cell, (network, cable) in world.cables.items()
     )
     return MEBlocks(cables=cables, devices=_block_devices(world, render))
+
+
+#: The cube a cable block is drawn as with no render data to shape it: a dense cable's core.
+_PLAIN_CABLE: Box = (3, 3, 3, 13, 13, 13)
+
+
+def plain_blocks(problem: InputIR, layout: LayoutResult) -> MEBlocks:
+    """Every ME block ``layout`` builds as one plain cube, drawn with no icon: what the preview falls
+    back to when the render data cannot be read. Each cable keeps its role and parts (for the hover
+    and the legend), and each controller and acceptor is a whole block; no connection or light is
+    worked out, since those are the render data's."""
+    world = _World(problem, layout)
+    plain = ("",) * len(SIDE_ORDER)
+    cables = tuple(
+        MECableBlock(
+            cell=cell,
+            network=network.id,
+            colour=network.colour,
+            kind=cable.kind,
+            channels=cable.me_channels,
+            capacity=CABLE_CAPACITY[cable.kind],
+            role=role.role if (role := world.infrastructure.get(cell)) is not None else None,
+            machine_id=role.machine_id if role is not None else None,
+            connections=(),
+            parts=tuple(
+                MEPart(side, device)
+                for side, device in sorted(
+                    world.parts.get(cell, {}).items(), key=lambda item: SIDE_ORDER.index(item[0])
+                )
+            ),
+            straight=False,
+            boxes=(MEBox(_PLAIN_CABLE, plain, network.colour),),
+        )
+        for cell, (network, cable) in world.cables.items()
+    )
+    devices = tuple(
+        MEBlockDevice(
+            cell=cell,
+            machine_id=device.machine.id,
+            role=device.role,
+            network=device.network,
+            colour=device.colour,
+            block=device.block,
+            look=None,
+            boxes=(MEBox(FULL_BLOCK, plain, device.colour),),
+        )
+        for cell, device in world.devices.items()
+    )
+    return MEBlocks(cables=cables, devices=devices)
 
 
 def _connections(

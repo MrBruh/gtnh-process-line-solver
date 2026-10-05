@@ -829,8 +829,9 @@ for (const [entries, block] of [[ME ? ME.cells : [], false], [ME ? ME.blocks : [
       gtBlockUVs(geo, b.center, e.cell);
       for (let f = 0; f < 6; f++) {
         const icon = b.faces[f];
-        if (!icon) continue;   // a face AE2 leaves open, or one lying against another box
-        if (ATLAS && icon in ATLAS.tiles) layerBatch.main.face(geo, f, b.center, aeMaterial, owner, tileUV(icon));
+        if (icon == null) continue;   // a face AE2 leaves open, or one lying against another box
+        // An empty icon is a face drawn with none: a plain cube, when the render data was unusable.
+        if (icon && ATLAS && icon in ATLAS.tiles) layerBatch.main.face(geo, f, b.center, aeMaterial, owner, tileUV(icon));
         else layerBatch.main.face(geo, f, b.center, routeFlat(b.color), owner);
       }
       for (const light of b.lights || []) {
