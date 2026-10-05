@@ -24,6 +24,12 @@ rate, one device and then two::
 
     none keeps up with two  ->  MEShortfall, naming the rate and the most two devices move
 
+A bus set to an item at any damage (``registry@32767``, :func:`wildcard_item`) takes a Fuzzy Card
+first (:data:`FUZZY_BUSES`), so its speed cards share the three slots left, and such a port splits
+across two buses sooner (spike 4.2). Such a port on a multiblock never gets GT's Stocking Input Bus
+(ME), whatever the policy: it pulls exactly the stacks set in its slots and has no fuzzy path, so
+it would move nothing (spike 5.4); the normal input bus with a carded export bus serves it.
+
 **Rates** come from three places, never from the interface itself: an ME interface takes a GT push
 straight into the network (spike 4.5), so what an interface moves is what GT pushes into it.
 
@@ -64,7 +70,9 @@ from gtnh_solver.ir.me import (
     MEEndpoint,
     MEHatchPolicy,
 )
+from gtnh_solver.ir.nets import port_resource
 
+from .icons import WILDCARD_DAMAGE
 from .voltage import VOLTAGE_BY_TIER
 
 # --- power (spike 6) -------------------------------------------------------------------------------
@@ -152,6 +160,40 @@ FLUID_SUPER_SPEED = (1, 32, 512, 6144, 49152)
 #: The tier a line must reach before a bus is fitted Hyper-Acceleration Cards: their recipe needs
 #: an Elite World Accelerator, an LuV machine (spike 4.3). A maintainer decision on #329.
 SUPER_SPEED_TIER = "LuV"
+#: The buses that take a Fuzzy Card, one each (``Upgrades.FUZZY``, ``Registration.java:644``,
+#: ``:653``, ``:762``): AE2's item buses. Fitted, a bus matches its filter or partition on AE2's
+#: fuzzy path, the only one that reads an item at any damage as more than that one stack, so every
+#: bus set to such an item gets one (spike 4.2, #353). FC's fluid buses take none
+#: (``CommonProxy.java:191-201``), and need none: a fluid has no damage.
+FUZZY_BUSES: frozenset[MEDeviceKind] = frozenset(
+    {MEDeviceKind.IMPORT_BUS, MEDeviceKind.EXPORT_BUS, MEDeviceKind.STORAGE_BUS}
+)
+
+
+def wildcard_item(resource: str) -> bool:
+    """Whether ``resource``, an item's ``registry@meta``, names it at Forge's wildcard damage, 32767
+    (``minecraft:log@32767``, any log). The meta is read as the number a filter's ``Damage`` holds,
+    so ``@032767`` is the wildcard too; a fluid's name has no meta. The one reading of a wildcard:
+    the adapter's choice, the validator's check and the export's filter all ask this.
+
+    It names a stack, not a guarantee: AE2 matches it at any damage only through the ore dictionary
+    or for a damageable item, even with a Fuzzy Card (spike 4.2)."""
+    _, at, meta = resource.rpartition("@")
+    return bool(at) and meta.isdigit() and int(meta) == WILDCARD_DAMAGE
+
+
+def wildcard_label(resource: str) -> str | None:
+    """How a person reads an item at any damage, ``"minecraft:log (any meta)"``, or ``None`` for
+    any other resource. A plan names a wildcard after one variant ("Oak Log"), which reads as if
+    only that one would do, so every label of one says this instead (#353)."""
+    return f"{resource.rpartition('@')[0]} (any meta)" if wildcard_item(resource) else None
+
+
+def needs_fuzzy_card(port: Port) -> bool:
+    """Whether a bus set to what ``port`` moves needs a Fuzzy Card: an item at any damage
+    (:func:`wildcard_item`), read off the port's ``{direction}:{resource}`` id."""
+    return port.commodity is Commodity.ITEM and wildcard_item(port_resource(port))
+
 
 # --- GT pushers (spike 4.7, 4.8) -----------------------------------------------------------------
 
@@ -307,8 +349,10 @@ FC_PART_ITEMS: dict[MEDeviceKind, str] = {
     MEDeviceKind.FLUID_STORAGE_BUS: "ae2fc:part_fluid_storage_bus",
     MEDeviceKind.DUAL_INTERFACE: "ae2fc:part_fluid_interface",
 }
-#: Each upgrade card's damage of :data:`MATERIAL_ITEM`, by its :class:`MECards` field.
-CARD_DAMAGE: dict[str, int] = {"acceleration": 30, "super_speed": 56, "capacity": 27}
+#: Each upgrade card's damage of :data:`MATERIAL_ITEM`, by its :class:`MECards` field, in the order
+#: the export fills a bus's upgrade slots. The Fuzzy Card is ``MaterialType.CardFuzzy`` (spike 4.2,
+#: 7.3); no golden holds one, so its damage is the source's alone (spike 11).
+CARD_DAMAGE: dict[str, int] = {"acceleration": 30, "super_speed": 56, "capacity": 27, "fuzzy": 29}
 
 #: How each cable kind is named in game (AE2's own item names), for a builder reading a layout.
 CABLE_NAMES: dict[MECableKind, str] = {
@@ -337,6 +381,7 @@ _CARD_NAMES = (
     ("acceleration", "Acceleration Card"),
     ("super_speed", "Hyper-Acceleration Card"),
     ("capacity", "Capacity Card"),
+    ("fuzzy", "Fuzzy Card"),
 )
 #: How a normal hatch kind is named in game, for a label.
 _HATCH_NAMES = {
@@ -402,31 +447,36 @@ def bus_rate(commodity: Commodity, cards: MECards) -> float:
     return bus_per_operation(commodity, cards) / BUS_PERIOD_TICKS
 
 
-def _speed_cards(*, super_speed: bool) -> list[MECards]:
-    """Every speed-card fit one bus can take, fewest cards first and, among equally many, fewest
-    Hyper-Acceleration Cards first; none of those at all when ``super_speed`` is off."""
+def _speed_cards(*, super_speed: bool, slots: int = UPGRADE_SLOTS) -> list[MECards]:
+    """Every speed-card fit one bus can take in ``slots`` upgrade slots, fewest cards first and,
+    among equally many, fewest Hyper-Acceleration Cards first; none of those at all when
+    ``super_speed`` is off."""
     return [
         MECards(acceleration=total - supers, super_speed=supers)
-        for total in range(UPGRADE_SLOTS + 1)
+        for total in range(slots + 1)
         for supers in (range(total + 1) if super_speed else (0,))
     ]
 
 
-def bus_cards_for(commodity: Commodity, rate: float, *, super_speed: bool = True) -> MECards | None:
+def bus_cards_for(
+    commodity: Commodity, rate: float, *, super_speed: bool = True, slots: int = UPGRADE_SLOTS
+) -> MECards | None:
     """The fewest speed cards with which one bus moves ``rate`` per tick, or ``None`` if none do.
 
     Fewest cards first, since each costs a slot and a craft; among equally many, the fewest
     Hyper-Acceleration Cards, which are LuV-gated; ``super_speed=False`` allows none. The cards
-    always fit in :data:`UPGRADE_SLOTS`.
+    always fit in ``slots``: the bus's :data:`UPGRADE_SLOTS`, less one where a Fuzzy Card takes it
+    (:data:`FUZZY_BUSES`).
     """
-    return next(
-        (c for c in _speed_cards(super_speed=super_speed) if bus_rate(commodity, c) >= rate), None
-    )
+    fits = _speed_cards(super_speed=super_speed, slots=slots)
+    return next((c for c in fits if bus_rate(commodity, c) >= rate), None)
 
 
-def max_bus_rate(commodity: Commodity, *, super_speed: bool = True) -> float:
-    """The most one bus moves per tick with the best speed cards it may take."""
-    return max(bus_rate(commodity, c) for c in _speed_cards(super_speed=super_speed))
+def max_bus_rate(
+    commodity: Commodity, *, super_speed: bool = True, slots: int = UPGRADE_SLOTS
+) -> float:
+    """The most one bus moves per tick with the best speed cards it may take in ``slots``."""
+    return max(bus_rate(commodity, c) for c in _speed_cards(super_speed=super_speed, slots=slots))
 
 
 def output_bus_push_rate(tier: str) -> float:
@@ -667,25 +717,35 @@ class _Option:
     carded: bool
     max_count: int
 
-    def device(self, share: float, *, super_speed: bool) -> MEDeviceChoice | None:
-        """This option at a ``share`` of the port's rate, or None if it cannot keep up."""
+    def _fuzzy_cards(self, fuzzy: bool) -> int:
+        """The Fuzzy Cards this option is fitted when the port asks for them: one on a bus of
+        :data:`FUZZY_BUSES`, none on anything else."""
+        return int(fuzzy and self.carded and self.template.kind in FUZZY_BUSES)
+
+    def device(self, share: float, *, super_speed: bool, fuzzy: bool) -> MEDeviceChoice | None:
+        """This option at a ``share`` of the port's rate, or None if it cannot keep up. A bus fitted
+        a Fuzzy Card (``fuzzy``) has one slot fewer for its speed cards."""
         if self.carded:
-            cards = bus_cards_for(self.commodity, share, super_speed=super_speed)
+            card = self._fuzzy_cards(fuzzy)
+            slots = UPGRADE_SLOTS - card
+            cards = bus_cards_for(self.commodity, share, super_speed=super_speed, slots=slots)
             if cards is None:
                 return None
             return MEDeviceChoice(
                 kind=self.template.kind,
-                cards=cards,
+                cards=cards.model_copy(update={"fuzzy": card}),
                 hatch_kind=self.template.hatch_kind,
                 per_tick=bus_rate(self.commodity, cards),
             )
         cap = self.template.per_tick
         return self.template if cap is None or cap >= share else None
 
-    def ceiling(self, *, super_speed: bool) -> float:
+    def ceiling(self, *, super_speed: bool, fuzzy: bool) -> float:
         """The most this option moves at its largest split: infinite when nothing bounds it."""
         if self.carded:
-            return max_bus_rate(self.commodity, super_speed=super_speed) * self.max_count
+            slots = UPGRADE_SLOTS - self._fuzzy_cards(fuzzy)
+            most = max_bus_rate(self.commodity, super_speed=super_speed, slots=slots)
+            return most * self.max_count
         cap = self.template.per_tick
         return float("inf") if cap is None else cap * self.max_count
 
@@ -702,6 +762,7 @@ def me_devices_for(
     auto_output: bool = False,
     super_speed: bool = True,
     push_rate: float | None = None,
+    fuzzy: bool = False,
 ) -> tuple[MEDeviceChoice, ...] | MEShortfall:
     """The ME device(s) serving one machine port, or the shortfall when none keep up.
 
@@ -717,6 +778,15 @@ def me_devices_for(
     through that face per tick (:func:`single_block_fluid_push_rate`), ``None`` when that bounds
     nothing. The caller decides which of a machine's outputs auto-outputs, and gives one ME Dual
     Interface a single block's item and fluid outputs when both ride one network.
+
+    ``fuzzy`` says the port moves an item at any damage (:func:`wildcard_item`), which a bus moves
+    only with a Fuzzy Card: each bus of :data:`FUZZY_BUSES` chosen for it is fitted one, and keeps
+    up with the speed cards that fit in the slots left. An interface or a GT ME output hatch is set
+    to nothing and takes whatever it is given, so it needs none. A GT Stocking Input Bus (ME) is
+    never chosen for such a port, under any policy: it extracts exactly the stack set in each slot
+    (``MTEHatchInputBusME``) and takes no card, so set to the wildcard it moves nothing, and set by
+    the player to one log it moves only that log. The multiblock gets a normal input bus fed by a
+    carded export bus instead.
 
     Devices are tried in the order the module docstring draws, one device and then
     :data:`MAX_DEVICES_PER_PORT`; the first that keeps up is returned, as that many equal devices
@@ -735,16 +805,17 @@ def me_devices_for(
         hatches=hatches,
         auto_output=auto_output,
         push_rate=push_rate,
+        fuzzy=fuzzy,
     )
     for group in groups:
         for count in range(1, MAX_DEVICES_PER_PORT + 1):
             for option in group:
                 if count > option.max_count:
                     continue
-                device = option.device(need / count, super_speed=allowed)
+                device = option.device(need / count, super_speed=allowed, fuzzy=fuzzy)
                 if device is not None:
                     return (device,) * count
-    ceiling = max(o.ceiling(super_speed=allowed) for group in groups for o in group)
+    ceiling = max(o.ceiling(super_speed=allowed, fuzzy=fuzzy) for group in groups for o in group)
     return MEShortfall(commodity=commodity, direction=direction, rate=need, capacity=ceiling)
 
 
@@ -758,11 +829,14 @@ def _option_groups(
     hatches: MEHatchPolicy,
     auto_output: bool,
     push_rate: float | None,
+    fuzzy: bool,
 ) -> list[list[_Option]]:
     """The ways to serve a port, in groups tried in turn; within a group, one device each is tried
     before two of any."""
     if multiblock:
-        return _multiblock_groups(commodity, direction, machine_tier, line_tier, hatches)
+        return _multiblock_groups(
+            commodity, direction, machine_tier, line_tier, hatches, fuzzy=fuzzy
+        )
     if direction is IODirection.INPUT:
         bus = (
             MEDeviceKind.EXPORT_BUS
@@ -789,9 +863,13 @@ def _multiblock_groups(
     machine_tier: str,
     line_tier: str,
     hatches: MEHatchPolicy,
+    *,
+    fuzzy: bool,
 ) -> list[list[_Option]]:
     """A multiblock port's ways: its GT ME hatch where the policy allows it, and a normal hatch with
-    the AE2 part in front of it (spike 4.8)."""
+    the AE2 part in front of it (spike 4.8). An item at any damage (``fuzzy``) is never given the
+    Stocking Input Bus (ME), which matches only the exact stacks set in it (:func:`me_devices_for`).
+    """
     hatch_kind, part = _NORMAL_HATCH_PART[(commodity, direction)]
     if part in _BUS_COMMODITY:
         normal = _bus(commodity, part, hatch_kind=hatch_kind)
@@ -805,6 +883,8 @@ def _multiblock_groups(
             max_count=MAX_DEVICES_PER_PORT,
         )
     gt = GT_ME_HATCHES[_GT_ME_HATCH_FOR[(commodity, direction)]]
+    if fuzzy and gt.kind is MEDeviceKind.GT_STOCKING_INPUT_BUS_ME:
+        return [[normal]]
     gt_option = _Option(
         commodity,
         MEDeviceChoice(kind=gt.kind, gt_mid=gt.mid, hatch_kind=gt.hatch_kind, per_tick=gt.per_tick),

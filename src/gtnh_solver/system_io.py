@@ -48,6 +48,7 @@ from gtnh_solver.dataset.me import (
     flush_ae,
     network_ae_per_tick,
     tree_channel_load,
+    wildcard_label,
 )
 from gtnh_solver.ir import (
     AEColor,
@@ -67,7 +68,7 @@ from gtnh_solver.ir import (
     Route,
     Segment,
 )
-from gtnh_solver.ir.nets import port_direction_map
+from gtnh_solver.ir.nets import port_direction_map, port_resource
 
 #: Per-commodity rate unit stem, no time suffix. The previewer appends ``/t`` or ``/s`` for its
 #: tick-vs-second toggle; a rate itself is per tick (typed, docs/IR.md).
@@ -177,12 +178,6 @@ def is_boundary_storage(machine_type: str) -> bool:
     return machine_type.startswith("Super ")
 
 
-def port_resource(port: Port) -> str:
-    """The resource a non-power port carries, recovered from its ``{direction}:{resource}`` id."""
-    prefix = f"{port.direction.value}:"
-    return port.id[len(prefix) :] if port.id.startswith(prefix) else port.id
-
-
 def net_resource(net: Net) -> str | None:
     """What ``net`` carries as one label: its fluid or item, or ``None`` for power.
 
@@ -199,7 +194,15 @@ def resource_label(resource: str, names: Mapping[str, str]) -> str:
 
     The name is ``InputIR.resource_names``, the exporter's, never one authored here. The id stays in
     the label because it is what a builder searches NEI for, and a name alone can be ambiguous.
+
+    An item at any damage (``minecraft:log@32767``) reads ``"minecraft:log (any meta)"``
+    (``dataset.me.wildcard_label``): the plan names it after one variant ("Oak Log"), which would
+    tell the builder to stock oak alone, when any log does (#353). The resource id itself is
+    unchanged wherever a contract carries it.
     """
+    wildcard = wildcard_label(resource)
+    if wildcard is not None:
+        return wildcard
     name = names.get(resource, "")
     return f"{name} ({resource})" if name and name != resource else resource
 

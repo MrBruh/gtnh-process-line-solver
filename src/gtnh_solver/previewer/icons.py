@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from gtnh_solver.dataset.icons import IconPack
 from gtnh_solver.ir import Commodity, InputIR
-from gtnh_solver.system_io import port_resource
+from gtnh_solver.ir.nets import port_resource
 
 from .textures import _png_data_uri
 

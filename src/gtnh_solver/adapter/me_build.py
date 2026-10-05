@@ -14,6 +14,7 @@ validator checks (docs/DOMAIN.md, "What a valid ME build is")::
         |                       rate; a single block's outputs on one network share one interface
         |                       on its auto-output face (a Dual Interface with fluids), unless a
         |                       pipe already holds that face, when import buses pull them
+        |                       (a bus set to an item at any damage takes a Fuzzy Card, #353)
         |-- infrastructure      attached: dense stubs, a channel budget's worth at most;
         |                       subnet: a link per commodity (link storage), a controller above 8;
         v                       acceptor power: an Energy Acceptor, rated for the network's draw
@@ -65,6 +66,7 @@ from gtnh_solver.dataset.me import (
     endpoint_moves,
     estimated_channel_load,
     me_devices_for,
+    needs_fuzzy_card,
     network_ae_per_tick,
     single_block_fluid_push_rate,
 )
@@ -91,6 +93,7 @@ from gtnh_solver.ir import (
     Port,
 )
 from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
+from gtnh_solver.ir.nets import port_resource
 
 from ._errors import InfeasiblePlanError, MEPlanError
 
@@ -263,7 +266,9 @@ def _port_networks(nets: Sequence[Net]) -> dict[tuple[str, str], str]:
 def _storage_endpoints(
     machine: Machine, by_port: Mapping[tuple[str, str], str], me: MEConfig
 ) -> list[MEEndpoint]:
-    """A chests subnet's storage bus on a boundary storage or buffer, partitioned to what it holds."""
+    """A chests subnet's storage bus on a boundary storage or buffer, partitioned to what it holds;
+    a Fuzzy Card on an item one partitioned to an item at any damage (#353), which it would
+    otherwise refuse to store anything as."""
     out: list[MEEndpoint] = []
     by_network: dict[str, list[Port]] = defaultdict(list)
     for port in machine.faces.ports:
@@ -272,13 +277,16 @@ def _storage_endpoints(
             by_network[network].append(port)
     for network, ports in sorted(by_network.items()):
         commodity = ports[0].commodity
-        resources = tuple(sorted({p.id.split(":", 1)[1] for p in ports}))
+        resources = tuple(sorted({port_resource(p) for p in ports}))
+        fuzzy = any(needs_fuzzy_card(p) for p in ports)
         out.append(
             MEEndpoint(
                 id=f"me:{network}",
                 network=network,
                 ports=tuple(p.id for p in ports),
-                device=MEDeviceSpec(kind=_LINK_BUS[commodity], config=resources),
+                device=MEDeviceSpec(
+                    kind=_LINK_BUS[commodity], cards=MECards(fuzzy=int(fuzzy)), config=resources
+                ),
             )
         )
     return out
@@ -340,6 +348,8 @@ def _machine_endpoints(
             # AE2 parts facing the machine.
             hatches=spec.hatches if machine.hatch_slots or not multiblock else MEHatchPolicy.NEVER,
             super_speed=spec.super_speed,
+            # A bus set to an item at any damage moves it only with a Fuzzy Card (spike 4.2).
+            fuzzy=needs_fuzzy_card(port),
         )
         if isinstance(chosen, MEShortfall):
             raise InfeasiblePlanError(
@@ -357,7 +367,7 @@ def _machine_endpoints(
 
 def _endpoints(port: Port, network: str, chosen: tuple[MEDeviceChoice, ...]) -> list[MEEndpoint]:
     """The endpoint(s) ``chosen`` devices make for ``port``: one, or two each carrying half."""
-    resource = port.id.split(":", 1)[1] if ":" in port.id else port.id
+    resource = port_resource(port)
     buses = {
         MEDeviceKind.IMPORT_BUS,
         MEDeviceKind.EXPORT_BUS,

@@ -18,8 +18,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   places no cable or bus (it applies no tile data, and a cable block is nothing else), so the ghost
   shows the network for you to build by hand, as the warning says. ME Interface and Dual Interface
   parts are not written yet, since the in-game build has neither; the warning lists where each goes.
-  A filter for an item at any damage (`@32767`, a coke oven's logs) is left unset and listed too:
-  AE2 matches it only through a Fuzzy Card, so the bus would otherwise move nothing.
+  A filter for an item at any damage (`@32767`, a coke oven's logs) is written on a bus with its
+  Fuzzy Card (#353); on a bus without one it is left unset and listed, since AE2 would match it
+  exactly and the bus would move nothing.
   `read_schematic` reads AE2 tiles back (`TileEntity.ae`: a cable block's cable and its parts by
   side, a block's orientation), and `--inspect-schematic` lists them: each cable block's cable and
   buses by side with their cards and filters, and each AE2 block's facing. `--world` now works with
@@ -530,6 +531,29 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   "needs repair" look). Each controller is now written with all six problems fixed, so a pasted
   line runs once it forms. A line built by hand from the ghost still has its maintenance done by
   hand, as in game.
+- **An ME bus set to an item at any damage gets a Fuzzy Card (#353).** A recipe input like the coke
+  oven's `minecraft:log@32767` (any log) put on ME got an export bus filtered to exactly that
+  stack, which AE2 matches only at damage 32767, so in game it moved nothing while the layout
+  reported VALID. AE2 reads the wildcard as any damage only on its fuzzy path, so every item
+  import, export and storage bus whose filter or partition is such an item is now fitted a Fuzzy
+  Card, left at AE2's default of ignoring damage, and keeps the wildcard as its filter: the bus
+  then moves every log the network holds. The card takes one of the bus's four upgrade slots, so
+  such a port faster than three Acceleration Cards carry (12.8 items/t before LuV) gets two buses.
+  `--list-nets` and the preview's hover name the card with the others. The validator now refuses
+  a bus set to such an item without the card (`me_fuzzy_card_missing`), so a layout that would
+  starve its machine in game is no longer called VALID. With `--world`, the `.schematic` export
+  writes the card in the bus's upgrade slots and the wildcard as its filter, where it had left the
+  slot unset and warned; `--inspect-schematic` names the card. No in-game save holds a Fuzzy Card
+  yet, so its tags are read from AE2's source. A multiblock's input of such an item no longer gets
+  GT's Stocking Input Bus (ME) under the `always` hatch policy or at EV and up: it extracts only
+  the exact stacks set in it and takes no card, so it too would have fed nothing. It gets a normal
+  input bus fed by a carded export bus, and the validator refuses a stocking bus on such a port
+  (`me_stocking_wildcard`). The run's notes and the preview name such an item
+  `minecraft:log (any meta)` instead of the plan's name for one variant ("Oak Log"), which read
+  as though only oak would do, and so does `--list-nets` (its `resource_name`); the resource ids
+  in the layout are unchanged. The card matches the wildcard through the ore dictionary (or a
+  damageable item at any durability), which the solver cannot see, so an item at any damage in no
+  ore name still moves nothing: the run's ME note names each one for you to check.
 - **The exported power source produces.** The `.schematic` export stands a Debug Power Generator in
   for the adapter's synthesized power source, but wrote it with no settings, and TecTech loads a
   generator with no settings as a consumer of 0 V x 0 A. Pasted into a world, it drew power instead
@@ -1116,6 +1140,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **The layout JSON is `LayoutResult` v6, and the problem `InputIR` v10 (#353).** An ME device's
+  cards now name the Fuzzy Card (`MECards.fuzzy`, 0 or 1), which a bus set to an item at any
+  damage needs to move anything in game; it takes one of the bus's four upgrade slots. Additive in
+  shape, but a consumer that ignored it would build that bus without the card, so the contract is
+  bumped: a v5 layout or a v9 problem is refused on parse (re-solve, or re-adapt the plan). A line
+  with no ME network lays exactly as before; only the `version` its layout states changes.
 - **The layout JSON is `LayoutResult` v5, and the problem `InputIR` v9 (#333).** A layout lists the
   ME blocks it builds per network (`me_networks`: AE2 cables and devices), and a problem the ME
   devices each machine needs (`Machine.me_endpoints`) and its ME infrastructure (`Machine.me_role`:

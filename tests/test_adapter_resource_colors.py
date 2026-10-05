@@ -16,7 +16,7 @@ import pytest
 
 from gtnh_solver.adapter import Edge, Node, Plan, Recipe, Resource, Storage, adapt_file, to_input_ir
 from gtnh_solver.ir import Commodity, InputIR
-from gtnh_solver.system_io import port_resource
+from gtnh_solver.ir.nets import port_resource
 
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 

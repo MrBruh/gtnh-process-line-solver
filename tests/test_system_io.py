@@ -37,6 +37,7 @@ from gtnh_solver.ir import (
     Segment,
     Terminal,
 )
+from gtnh_solver.ir.nets import port_resource
 from gtnh_solver.solver import solve
 from gtnh_solver.system_io import (
     BoundaryFlow,
@@ -47,7 +48,6 @@ from gtnh_solver.system_io import (
     me_network_metrics,
     net_label,
     net_resource,
-    port_resource,
     resource_label,
     system_io,
 )
@@ -518,6 +518,11 @@ def test_a_resource_is_labelled_by_its_plan_name_with_its_id_beside_it() -> None
     assert resource_label("benzene", names) == "benzene"  # the plan names it nothing
     assert resource_label("water", names) == "water"  # the name adds nothing to the id
     assert resource_label("liquid_toluene", {}) == "liquid_toluene"
+    # An item at any damage is every variant, not the one the plan names it after (#353).
+    logs = {"minecraft:log@32767": "Oak Log", "minecraft:log@1": "Spruce Wood"}
+    assert resource_label("minecraft:log@32767", logs) == "minecraft:log (any meta)"
+    assert resource_label("minecraft:log@32767", {}) == "minecraft:log (any meta)"
+    assert resource_label("minecraft:log@1", logs) == "Spruce Wood (minecraft:log@1)"
 
 
 def test_a_net_label_names_each_resource_in_the_pipe() -> None:

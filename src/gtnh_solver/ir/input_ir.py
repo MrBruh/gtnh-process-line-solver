@@ -27,7 +27,7 @@ from .geometry import CellBox, CellCoord, allowed_faces
 from .me import MEConfig, MEEndpoint, MERole
 
 #: Bump on any breaking change to the input contract; record it in ``ir/__init__.py``.
-INPUT_IR_VERSION = 9
+INPUT_IR_VERSION = 10
 
 #: What :attr:`InputIR.resource_colors` holds, once lowercased: ``#`` and six hex digits.
 _HEX_COLOR = re.compile(r"#[0-9a-f]{6}")

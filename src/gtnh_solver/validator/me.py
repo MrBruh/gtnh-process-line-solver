@@ -16,6 +16,8 @@ rebuilt here from the blocks the layout places, and AE's own channel pathing is 
         |                 a single block's interfaces on one face             ME_AUTO_OUTPUT_FACES
         |-- rates         each device keeps up with its share                ME_DEVICE_RATE_SHORT
         |                                                                     ME_UPGRADE_SLOTS
+        |                 a bus set to an item at any damage has a Fuzzy Card ME_FUZZY_CARD_MISSING
+        |                 no GT stocking bus serves an item at any damage     ME_STOCKING_WILDCARD
         |-- ground        cables in the region, on nothing else              ROUTE_* (as pipes)
         |                 a stub or link is a cable of its network           ME_INFRASTRUCTURE
         v
@@ -75,6 +77,7 @@ from gtnh_solver.dataset.me import (
     FLUID_BASE_MB,
     FLUID_OPERATION_TICKS,
     FLUID_SUPER_SPEED,
+    FUZZY_BUSES,
     GT_ME_HATCHES,
     ITEM_ACCELERATION,
     ITEM_SUPER_SPEED,
@@ -85,6 +88,7 @@ from gtnh_solver.dataset.me import (
     UNCHARGED_FLUID_DEVICES,
     UPGRADE_SLOTS,
     USAGE_MULTIPLIER,
+    wildcard_item,
 )
 from gtnh_solver.dataset.voltage import VOLTAGE_BY_TIER
 from gtnh_solver.ir import (
@@ -106,7 +110,7 @@ from gtnh_solver.ir import (
     Placement,
     Port,
 )
-from gtnh_solver.ir.nets import placement_index
+from gtnh_solver.ir.nets import placement_index, port_resource
 
 from ._geometry import FACE_DELTAS, OPPOSITE_FACE, Cell, body_cells, in_region, usable_faces
 from .report import Violation, ViolationCode
@@ -254,6 +258,7 @@ def check_me(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> ME
     devices = _check_endpoints(problem, layout, machines, out)
     _check_placement(problem, layout, machines, placements, devices, out)
     _check_rates(problem, machines, devices, out)
+    _check_wildcards(machines, devices, out)
     _check_ground(problem, layout, machines, placements, out)
     graph = _build_graph(problem, layout, machines, placements, built)
     grids = _check_channels(problem, graph, out)
@@ -570,6 +575,56 @@ def _check_rates(
                         machine_id=machine.id,
                     )
                 )
+
+
+def _check_wildcards(
+    machines: Mapping[str, Machine],
+    devices: Mapping[tuple[str, str], tuple[MEPlacedDevice, MEEndpoint, str]],
+    out: list[Violation],
+) -> None:
+    """Rule 4, the filter's half: an item at any damage reaches the network only through a device
+    that can match it (spike 4.2, 5.4, #353). No stack is ever at damage 32767, so (reading the
+    wildcard and a port's resource the way the rest of the line does, ``dataset.me.wildcard_item``
+    and ``ir.nets.port_resource``, data plumbing rather than a rule):
+
+    - a bus set to one carries a Fuzzy Card, read off the bus as built, its own config and cards:
+      AE2 matches a bus's filter or partition exactly without it, so such a bus moves nothing, or a
+      storage bus stores nothing, however fast its cards are;
+    - no GT Stocking Input Bus (ME) serves a port moving one: it extracts exactly the stacks set in
+      it and takes no card, so it would feed the machine nothing, or one variant at most.
+    """
+    for device, endpoint, _ in devices.values():
+        if device.kind is MEDeviceKind.GT_STOCKING_INPUT_BUS_ME:
+            wild = [
+                p.id
+                for p in _ports(machines.get(device.machine_id), endpoint)
+                if p.commodity is Commodity.ITEM and wildcard_item(port_resource(p))
+            ]
+            if wild:
+                out.append(
+                    Violation(
+                        ViolationCode.ME_STOCKING_WILDCARD,
+                        f"{device.kind.value} for {device.endpoint_id!r} of "
+                        f"{device.machine_id!r} serves {', '.join(wild)}, an item at any damage, "
+                        f"but it extracts only the exact stacks set in it and takes no Fuzzy "
+                        f"Card; a normal input bus fed by an export bus with one must serve it",
+                        machine_id=device.machine_id,
+                    )
+                )
+            continue
+        if device.kind not in FUZZY_BUSES or device.cards.fuzzy:
+            continue
+        wild = [r for r in device.config if wildcard_item(r)]
+        if wild:
+            out.append(
+                Violation(
+                    ViolationCode.ME_FUZZY_CARD_MISSING,
+                    f"{device.kind.value} for {device.endpoint_id!r} of {device.machine_id!r} is "
+                    f"set to {', '.join(wild)}, an item at any damage, which AE2 matches only "
+                    f"with a Fuzzy Card fitted; it has none, so it moves nothing",
+                    machine_id=device.machine_id,
+                )
+            )
 
 
 def _capacity(

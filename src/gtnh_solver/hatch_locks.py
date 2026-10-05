@@ -44,8 +44,7 @@ from collections import defaultdict
 
 from gtnh_solver.ir import InputIR, IODirection, LayoutResult
 from gtnh_solver.ir.geometry import Cell, rotated_slot
-from gtnh_solver.ir.nets import placement_index
-from gtnh_solver.system_io import port_resource
+from gtnh_solver.ir.nets import placement_index, port_resource
 
 #: Where a player sets the lock, per output kind, in the words GT's own GUI uses: the fluid hatch's
 #: slot is labelled "Locked Fluid" (``GT5U.machines.hatch_output.lockfluid.label`` in both packs),

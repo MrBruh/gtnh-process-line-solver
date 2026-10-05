@@ -664,6 +664,27 @@ hatches by mID, AE2's power figures, and which device serves a machine's port. I
   is drained by a fluid import bus instead.
 - **Cards**: the fewest Acceleration Cards that keep up, and Hyper-Acceleration Cards only on a line
   that has reached LuV, which their recipe needs.
+- **A bus set to an item at any damage takes a Fuzzy Card** (#353). A plan names such an item with
+  Forge's wildcard meta, `registry@32767` (a coke oven's `minecraft:log@32767`). AE2 matches a
+  bus's filter or partition exactly unless a Fuzzy Card is fitted, and no real stack is at damage
+  32767, so without the card the bus moves nothing. With it, set to ignore damage (`IGNORE_ALL`, a
+  fresh bus's own setting), AE2 matches the wildcard through the ore dictionary, every item of the
+  stack's ore names registered at 32767: every log the network holds, other mods' included, as a
+  recipe taking any log does (spike 4.2). A damageable item matches at any durability. Every item
+  import, export and storage bus whose config names such an item gets one, and keeps the wildcard
+  as its filter. The card takes one of the bus's four slots, so its speed cards get three, and a
+  port faster than three move is split across two buses, each with its own card. Fluid buses take
+  none: a fluid has no damage. Two limits the solver cannot see, having no ore dictionary: **a
+  wildcard item in no ore name that is not damageable still moves nothing with the card** (AE2
+  keeps 32767 exact for it), which is why the run's ME note names each wildcard for the builder to
+  check; and **the card widens every slot of its bus**, so a chests subnet's storage bus
+  partitioned to `minecraft:log@32767` and `minecraft:sand` also takes in anything sharing an ore
+  name with sand. A multiblock's input of such an item never gets GT's Stocking Input Bus (ME), whatever
+  the hatch policy: it pulls exactly the stacks set in it and takes no card, so it would move
+  nothing; a normal input bus fed by a carded export bus takes its place. The output side needs
+  nothing: an interface or a GT ME output bus takes whatever the machine makes. Wherever a run,
+  `--list-nets` or the preview names such an item it reads `minecraft:log (any meta)`, not the
+  plan's name for one variant of it (the resource id itself is unchanged).
 
 ### What a valid ME build is (#333)
 
@@ -689,7 +710,13 @@ blocks too, a dense and a smart one, at their own cell.
    Interface (spike 4.6).
 4. **Every device keeps up** with its share of its ports' rate: a bus by its cards (spike 4.2,
    4.3), a GT ME output hatch by its flush (spike 5.3), an interface in front of a normal output bus
-   by that bus's push (spike 4.8); a bus takes four cards at most.
+   by that bus's push (spike 4.8); a bus takes four cards at most, a Fuzzy Card among them. And
+   **a bus set to an item at any damage carries a Fuzzy Card** (`ME_FUZZY_CARD_MISSING`, #353):
+   read off the bus as built, an item import, export or storage bus whose filter or partition
+   names a `registry@32767` item and has no card moves nothing, however fast its cards are. Nor
+   does **a GT Stocking Input Bus (ME) serve such an item** (`ME_STOCKING_WILDCARD`): it extracts
+   exactly the stacks set in it and takes no card (spike 5.4), so the adapter gives that port a
+   normal input bus fed by a carded export bus under every hatch policy.
 
 **Which blocks join which network** is AE's to decide, not the layout's (spike 3): a cable block
 joins every compatible neighbour (Fluix joins every colour) on a side no part takes; a part joins
@@ -878,11 +905,12 @@ golden (`tests/golden/schematic/ae2-golden-*.schematic`, spike 7.5) and held to 
   cable buses by that world's table; without it only AE2's own cables and buses are named.
 - **The ME Interface part and FC's Dual Interface part are left off their cable**, and listed by
   cell and side: the golden has neither, so their NBT is unverified (spike 11).
-- **A filter slot for an item at any damage is left unset** (a resource `registry@32767`, such as a
-  coke oven's `minecraft:log@32767`), and listed with its bus. AE2 matches 32767 as "any damage"
-  only in its fuzzy lookup (`ItemList.findFuzzy`), which an export bus takes only with a Fuzzy Card
-  (`PartBaseExportBus.java:120`); written as is, the bus would move nothing. The builder fits a
-  Fuzzy Card or sets the slot to the one item they feed.
+- **A bus set to an item at any damage** (a resource `registry@32767`, such as a coke oven's
+  `minecraft:log@32767`) is written with its Fuzzy Card (`ItemMultiMaterial` 29, after the speed
+  cards) and the wildcard as its filter, at damage 32767, its fuzzy mode left at the `IGNORE_ALL`
+  every bus writes (#353). No in-game save holds a Fuzzy Card yet, so those tags come from AE2's
+  source (spike 7.5); #354 asks for one. A wildcard slot on a bus with no card, which the validator
+  refuses, is left unset and listed: AE2 would match 32767 exactly, and the bus would move nothing.
 - A part on a cell the layout lays no cable on (the validator refuses that) is counted and listed
   rather than dropped.
 

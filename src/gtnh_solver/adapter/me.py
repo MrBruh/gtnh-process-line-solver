@@ -31,7 +31,7 @@ from collections.abc import Collection, Mapping, Sequence
 
 from gtnh_solver import __version__
 from gtnh_solver.dataset import VOLTAGE_BY_TIER, PhysicalDataset, me_devices_for
-from gtnh_solver.dataset.me import MEShortfall
+from gtnh_solver.dataset.me import MEShortfall, needs_fuzzy_card, wildcard_label
 from gtnh_solver.ir import (
     Commodity,
     IODirection,
@@ -126,13 +126,15 @@ def net_list(
             else NetKind.INTERNAL
         )
         resource = net.fluid_or_item or ",".join(net.items)
+        # A wildcard reads as any meta, not the one variant the plan names it after (#353).
+        wildcard = wildcard_label(net.fluid_or_item) if net.fluid_or_item else None
         entries.append(
             NetEntry(
                 id=net.id,
                 kind=kind,
                 commodity=net.commodity,
                 resource=resource,
-                resource_name=names.get(resource),
+                resource_name=wildcard or names.get(resource),
                 rate=net.throughput,
                 producers=tuple(producers),
                 consumers=tuple(consumers),
@@ -157,6 +159,7 @@ def _end(machine: Machine, port: Port, multiblock: bool, tier: str) -> NetEnd:
         machine_tier=machine.voltage_tier,
         line_tier=tier,
         auto_output=not multiblock and port.direction is IODirection.OUTPUT,
+        fuzzy=needs_fuzzy_card(port),
     )
     if isinstance(chosen, MEShortfall):
         suggested = f"none keeps up: {chosen.detail}"

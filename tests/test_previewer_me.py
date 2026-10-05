@@ -44,6 +44,7 @@ from gtnh_solver.ir import (
     Machine,
     MECableCell,
     MECableKind,
+    MECards,
     MEDeviceKind,
     MEMode,
     MERole,
@@ -140,6 +141,21 @@ def test_a_parts_hover_names_the_device_its_cards_and_what_it_serves() -> None:
     )
     (out,) = _cell(scene, [1, 0, 1])["parts"]
     assert (out["label"], out["side"], out["flow"]) == ("ME Interface", "east", "out")
+
+
+def test_a_parts_hover_names_its_fuzzy_card_and_the_wildcard_it_is_set_to() -> None:
+    """A bus set to an item at any damage carries a Fuzzy Card (#353); the hover says so, with the
+    other cards, and names the wildcard it is set to."""
+    problem, layout = attached_line()
+    (network,) = layout.me_networks
+    feed = network.devices[0].model_copy(
+        update={"cards": MECards(acceleration=1, fuzzy=1), "config": ("minecraft:log@32767",)}
+    )
+    network = network.model_copy(update={"devices": [feed, *network.devices[1:]]})
+    scene = build_scene(problem, layout.model_copy(update={"me_networks": [network]}))
+    (part,) = _cell(scene, [2, 0, 2])["parts"]
+    assert part["label"] == "ME Export Bus (1 x Acceleration Card, 1 x Fuzzy Card)"
+    assert [r["id"] for r in part["resources"]] == ["minecraft:log@32767"]
 
 
 def test_box_faces_are_in_three_js_slot_order() -> None:

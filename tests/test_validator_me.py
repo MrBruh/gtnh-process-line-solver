@@ -14,8 +14,10 @@ from hypothesis import strategies as st
 
 from gtnh_solver.ir import (
     AEColor,
+    Commodity,
     Facing,
     InputIR,
+    IODirection,
     LayoutResult,
     MECableCell,
     MECableKind,
@@ -27,6 +29,7 @@ from gtnh_solver.ir import (
     MENetworkSpec,
     MEPower,
     Placement,
+    Port,
 )
 from gtnh_solver.validator import me as vme
 from gtnh_solver.validator import validate
@@ -44,6 +47,7 @@ from tests._me_fixtures import (
     device,
     endpoint,
     gt_hatch_line,
+    single,
 )
 
 _ME_CODES = {c for c in ViolationCode if c.value.startswith("me_")}
@@ -250,17 +254,20 @@ def test_a_single_block_auto_outputs_through_one_face() -> None:
 # ------------------------------------------------------------------ rule 4: rates and cards
 
 
-def _recard(problem: InputIR, layout: LayoutResult, cards: MECards) -> tuple[InputIR, LayoutResult]:
-    """Fit ``a``'s export bus with ``cards``, in the problem and the layout alike."""
+def _recard(
+    problem: InputIR, layout: LayoutResult, cards: MECards, config: tuple[str, ...] = ()
+) -> tuple[InputIR, LayoutResult]:
+    """Fit ``a``'s export bus with ``cards`` and set it to ``config``, in the problem and the
+    layout alike."""
     a = next(m for m in problem.machines if m.id == "a")
-    feed = endpoint("feed", ("in",), MEDeviceKind.EXPORT_BUS, cards=cards)
+    feed = endpoint("feed", ("in",), MEDeviceKind.EXPORT_BUS, cards=cards, config=config)
     a2 = a.model_copy(update={"me_endpoints": (feed, a.me_endpoints[1])})
     problem = problem.model_copy(
         update={"machines": [a2 if m.id == "a" else m for m in problem.machines]}
     )
     network = _network(layout)
     devices = [
-        d.model_copy(update={"cards": cards})
+        d.model_copy(update={"cards": cards, "config": config})
         if (d.machine_id, d.endpoint_id) == ("a", "feed")
         else d
         for d in network.devices
@@ -277,6 +284,105 @@ def test_a_bus_too_slow_for_its_port_is_refused() -> None:
 def test_a_bus_takes_four_cards() -> None:
     problem, layout = _recard(*attached_line(), MECards(acceleration=4, capacity=1))
     assert ViolationCode.ME_UPGRADE_SLOTS in _codes(problem, layout)
+
+
+_ANY_LOG = "minecraft:log@32767"  # Forge's wildcard: any log
+
+
+def test_a_bus_set_to_an_item_at_any_damage_needs_a_fuzzy_card() -> None:
+    """#353: AE2 matches a bus's filter exactly unless a Fuzzy Card is fitted, and no stack is at
+    damage 32767, so a bus set to one with no card moves nothing. Read off the bus as built, so it
+    is refused even where the problem asked for exactly that bus."""
+    problem, layout = _recard(*attached_line(), MECards(acceleration=1), (_ANY_LOG,))
+    report = validate(problem, layout)
+    assert set(report.codes()) == {ViolationCode.ME_FUZZY_CARD_MISSING}
+    (missing,) = report.violations
+    assert missing.machine_id == "a"
+    assert _ANY_LOG in missing.message
+    # The card mends it, and a bus set to one exact log never needed it.
+    assert validate(*_recard(*attached_line(), MECards(acceleration=1, fuzzy=1), (_ANY_LOG,))).ok
+    assert validate(*_recard(*attached_line(), MECards(acceleration=1), ("minecraft:log@1",))).ok
+
+
+def test_a_fuzzy_card_takes_one_of_four_slots() -> None:
+    cards = MECards(acceleration=4, fuzzy=1)
+    problem, layout = _recard(*attached_line(), cards, (_ANY_LOG,))
+    assert ViolationCode.ME_UPGRADE_SLOTS in _codes(problem, layout)
+
+
+@pytest.mark.parametrize(
+    ("kind", "config", "missing"),
+    [
+        (MEDeviceKind.EXPORT_BUS, (_ANY_LOG,), True),
+        (MEDeviceKind.IMPORT_BUS, ("minecraft:sand", _ANY_LOG), True),
+        (MEDeviceKind.STORAGE_BUS, (_ANY_LOG,), True),  # a partition: it would store no log
+        (MEDeviceKind.EXPORT_BUS, ("minecraft:log@1", "minecraft:log"), False),
+        (MEDeviceKind.EXPORT_BUS, ("minecraft:log@327670", "minecraft:log@any"), False),
+        (MEDeviceKind.EXPORT_BUS, ("minecraft:log@032767",), True),  # the same number
+        (MEDeviceKind.FLUID_EXPORT_BUS, ("water",), False),  # a fluid has no damage
+        (MEDeviceKind.INTERFACE, (), False),
+    ],
+)
+def test_the_fuzzy_rule_reads_each_bus_by_its_own_config(
+    kind: MEDeviceKind, config: tuple[str, ...], missing: bool
+) -> None:
+    built = device("m", endpoint("e", ("p",), kind, config=config), (0, 0, 0), Facing.NORTH)
+    out: list[Violation] = []
+    vme._check_wildcards({}, {("m", "e"): (built, endpoint("e", ("p",), kind), MAIN)}, out)
+    assert [v.code for v in out] == ([ViolationCode.ME_FUZZY_CARD_MISSING] if missing else [])
+    carded = built.model_copy(update={"cards": MECards(fuzzy=1)})
+    out.clear()
+    vme._check_wildcards({}, {("m", "e"): (carded, endpoint("e", ("p",), kind), MAIN)}, out)
+    assert out == []
+
+
+@pytest.mark.parametrize(
+    ("port_id", "commodity", "refused"),
+    [
+        (f"input:{_ANY_LOG}", Commodity.ITEM, True),
+        ("input:minecraft:log@1", Commodity.ITEM, False),
+        ("input:water", Commodity.FLUID, False),
+    ],
+)
+def test_a_stocking_input_bus_never_serves_an_item_at_any_damage(
+    port_id: str, commodity: Commodity, refused: bool
+) -> None:
+    """#353: GT's Stocking Input Bus (ME) extracts only the exact stacks set in it and takes no
+    Fuzzy Card, so one serving a port that moves any log feeds the machine nothing. Read off the
+    port the bus serves, since a stocking bus is set in game, not in the layout."""
+    kind = MEDeviceKind.GT_STOCKING_INPUT_BUS_ME
+    built_for = endpoint("e", (port_id,), kind, gt_mid=2718, hatch_kind="InputBus")
+    machine = single(
+        "mb", [Port(id=port_id, commodity=commodity, direction=IODirection.INPUT)], [built_for]
+    )
+    built = device("mb", built_for, (0, 0, 0), Facing.NORTH)
+    out: list[Violation] = []
+    vme._check_wildcards({"mb": machine}, {("mb", "e"): (built, built_for, MAIN)}, out)
+    assert [v.code for v in out] == ([ViolationCode.ME_STOCKING_WILDCARD] if refused else [])
+    if refused:
+        assert out[0].machine_id == "mb"
+        assert port_id in out[0].message
+
+
+@pytest.mark.parametrize(
+    "resource",
+    ["minecraft:log@32767", "minecraft:log@032767", "minecraft:log@327670", "minecraft:log@1"],
+)
+def test_the_gate_reads_a_wildcard_as_the_adapter_and_the_export_do(resource: str) -> None:
+    """One reading of a wildcard (``dataset.me.wildcard_item``): what the gate refuses without a
+    card is exactly what the adapter gives one, and what the export leaves unset without one."""
+    from gtnh_solver.dataset.me import needs_fuzzy_card, wildcard_item
+    from gtnh_solver.ir import Port
+    from gtnh_solver.schematic.ae import _WorldItems
+
+    built_for = endpoint("e", ("p",), MEDeviceKind.EXPORT_BUS, config=(resource,))
+    out: list[Violation] = []
+    built = device("m", built_for, (0, 0, 0), Facing.NORTH)
+    vme._check_wildcards({}, {("m", "e"): (built, built_for, MAIN)}, out)
+    refused = bool(out)
+    port = Port(id=f"input:{resource}", commodity=Commodity.ITEM, direction=IODirection.INPUT)
+    unset = _WorldItems({"minecraft:log": 17}).filter_stack(resource, fluid=False) is None
+    assert refused == needs_fuzzy_card(port) == unset == wildcard_item(resource)
 
 
 def test_a_gt_me_output_bus_flushes_39_items_a_tick() -> None:

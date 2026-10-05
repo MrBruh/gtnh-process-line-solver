@@ -513,4 +513,15 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   builds nothing wrong. An acceptor network's Energy Acceptor is a placement (`Machine.me_role`),
 #   so building it needs no new field either.
 #
+# InputIR v10 / LayoutResult v6 (BREAKING) - added `MECards.fuzzy: int` (0 or 1), the Fuzzy Card
+#   (#353), on both an endpoint's `MEDeviceSpec.cards` and a placed device's `MEPlacedDevice.cards`.
+#   AE2 reads an item at any damage (`registry@32767`) as any damage only on its fuzzy path, which
+#   an item bus takes only with the card fitted, so the adapter gives one to every item bus whose
+#   filter or partition names such an item, set to ignore damage (AE2's `IGNORE_ALL`, a fresh
+#   bus's own setting, so no field records it), and the validator refuses a bus without it
+#   (`ME_FUZZY_CARD_MISSING`). The card takes one of the bus's four upgrade slots, and
+#   `MECards.count` counts it. Additive in shape, breaking by omission, the rule `hatches` set: a
+#   consumer that ignores the field builds that bus without the card, and in game it moves nothing.
+#   A v9 problem and a v5 layout are refused on parse; re-adapt the plan and re-solve it.
+#
 # ---------------------------------------------------------------------------

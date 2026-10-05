@@ -91,12 +91,13 @@ def endpoint(
     gt_mid: int | None = None,
     hatch_kind: str | None = None,
     share: float = 1.0,
+    config: tuple[str, ...] = (),
 ) -> MEEndpoint:
     return MEEndpoint(
         id=endpoint_id,
         network=network,
         ports=ports,
-        device=MEDeviceSpec(kind=kind, gt_mid=gt_mid, cards=cards or MECards()),
+        device=MEDeviceSpec(kind=kind, gt_mid=gt_mid, cards=cards or MECards(), config=config),
         hatch_kind=hatch_kind,
         share=share,
     )

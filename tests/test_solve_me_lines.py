@@ -20,13 +20,22 @@ from typing import Any
 import pytest
 
 import gtnh_solver.cli as cli_module
+from gtnh_solver.adapter.me_build import build_me
 from gtnh_solver.cli import main
-from gtnh_solver.dataset.me import me_devices_for
+from gtnh_solver.dataset.me import me_devices_for, needs_fuzzy_card
 from gtnh_solver.ir import (
+    CellBox,
     Commodity,
+    FaceSpec,
+    Facing,
     InputIR,
+    IODirection,
     LayoutResult,
     LayoutStatus,
+    Machine,
+    MachineFaceRef,
+    MECards,
+    MEConfig,
     MEDeviceKind,
     MEHatchPolicy,
     MEMode,
@@ -35,10 +44,14 @@ from gtnh_solver.ir import (
     MEPower,
     MERole,
     MEStorage,
+    Net,
     NetList,
+    Port,
 )
+from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 from gtnh_solver.solver import solve
 from gtnh_solver.validator import validate
+from gtnh_solver.validator.report import ViolationCode
 
 _ROOT = Path(__file__).resolve().parents[1]
 _SAND = str(_ROOT / "examples" / "gtnh-sand.json")
@@ -148,6 +161,7 @@ def test_nitrobenzene_with_items_and_fluids_on_one_attached_network(
                 machine_tier=machine.voltage_tier,
                 line_tier=listed.line_tier,
                 hatches=policy,
+                fuzzy=needs_fuzzy_card(port),
             )
             assert isinstance(chosen, tuple), chosen
             device = endpoint.device
@@ -170,7 +184,16 @@ def test_nitrobenzene_with_items_and_fluids_on_one_attached_network(
     gt_laid = {(d.machine_id, d.endpoint_id) for d in laid.devices if d.gt_mid is not None}
     assert gt_laid == expected_gt
     if policy is MEHatchPolicy.ALWAYS:
-        assert len(gt_laid) == len(laid.devices) == 28
+        # Every connection is a GT ME hatch but the Coke Oven's feed of any log: a stocking bus
+        # matches only the exact stacks set in it, so a normal input bus takes it, fed by an export
+        # bus with a Fuzzy Card (#353).
+        assert (len(gt_laid), len(laid.devices)) == (27, 28)
+        (fed,) = [d for d in laid.devices if d.gt_mid is None]
+        assert (fed.kind, fed.config, fed.cards.fuzzy) == (
+            MEDeviceKind.EXPORT_BUS,
+            ("minecraft:log@32767",),
+            1,
+        )
     else:
         # `never` by definition, and `tier_aware` because nitrobenzene is an HV line.
         assert listed.line_tier == "HV"
@@ -185,6 +208,132 @@ def test_nitrobenzene_with_items_and_fluids_on_one_attached_network(
         line.startswith("note: ME network main (attached): 28 device(s) on 28 channel(s) ")
         for line in capsys.readouterr().err.splitlines()
     )
+
+
+def test_nitrobenzene_with_items_on_me_feeds_its_coke_oven_any_log_through_a_fuzzy_card(
+    solves: list[tuple[InputIR, LayoutResult]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#353, as it was found: ``gtnh-nitrobenzene.json --me items``. The Coke Oven burns
+    ``minecraft:log@32767``, any log, which AE2 matches only through a Fuzzy Card. Its export bus is
+    laid with one, still set to the wildcard, and the layout is VALID; the same bus without the
+    card, the build this used to lay, is refused by the gate."""
+    assert main([_NITROBENZENE, "--me", "items"]) == 0
+    ((problem, layout),) = solves
+    _assert_laid_whole(problem, layout)
+    # The run names the wildcard as any log, and asks the builder to check it: the card matches
+    # every variant only through the ore dictionary, which the solver cannot see.
+    (note,) = [
+        line
+        for line in capsys.readouterr().err.splitlines()
+        if line.startswith("note: ME network main (attached): 3 device(s)")
+    ]
+    assert "stock minecraft:log (any meta) 0.0625 items/t" in note
+    assert note.endswith(
+        "; check minecraft:log (any meta): a Fuzzy Card matches any meta only via the ore "
+        "dictionary"
+    )
+    (laid,) = layout.me_networks
+    (logs,) = [d for d in laid.devices if d.config == ("minecraft:log@32767",)]
+    coke_oven = next(m for m in problem.machines if m.id == logs.machine_id)
+    assert (coke_oven.type, logs.kind, logs.cards.fuzzy) == (
+        "Coke Oven",
+        MEDeviceKind.EXPORT_BUS,
+        1,
+    )
+    assert [d for d in laid.devices if d.cards.fuzzy] == [logs]
+
+    # Strip the card from the endpoint and the bus alike: exactly the pre-#353 build.
+    bare = logs.cards.model_copy(update={"fuzzy": 0})
+    endpoints = tuple(
+        e.model_copy(update={"device": e.device.model_copy(update={"cards": bare})})
+        if e.id == logs.endpoint_id
+        else e
+        for e in coke_oven.me_endpoints
+    )
+    oven = coke_oven.model_copy(update={"me_endpoints": endpoints})
+    old_problem = problem.model_copy(
+        update={"machines": [oven if m.id == oven.id else m for m in problem.machines]}
+    )
+    devices = [d.model_copy(update={"cards": bare}) if d == logs else d for d in laid.devices]
+    old_layout = layout.model_copy(
+        update={"me_networks": [laid.model_copy(update={"devices": devices})]}
+    )
+    assert set(validate(old_problem, old_layout).codes()) == {ViolationCode.ME_FUZZY_CARD_MISSING}
+
+
+def test_a_wildcard_port_split_across_two_carded_buses_solves_valid() -> None:
+    """A port moving any log at 15 items/t needs four Acceleration Cards on one bus, but a Fuzzy
+    Card leaves three, so the adapter gives it two buses with a card each (#353). The solve lays
+    both and the full gate certifies it; strip the card from either and the gate refuses it."""
+    log = "minecraft:log@32767"
+    chest = Machine(
+        id="s0",
+        type="Super Chest",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[Port(id=f"output:{log}", commodity=Commodity.ITEM, direction=IODirection.OUTPUT)]
+        ),
+    )
+    oven = Machine(
+        id="m",
+        type="t",
+        voltage_tier="LV",
+        orientation_options=list(HORIZONTAL_FACINGS_ORDERED),
+        faces=FaceSpec(
+            ports=[
+                Port(
+                    id=f"input:{log}",
+                    commodity=Commodity.ITEM,
+                    direction=IODirection.INPUT,
+                    rate=15.0,
+                )
+            ]
+        ),
+    )
+    feed = Net(
+        id="logs",
+        commodity=Commodity.ITEM,
+        fluid_or_item=log,
+        throughput=15.0,
+        me_network="main",
+        endpoints=[
+            MachineFaceRef(machine_id="s0", port_id=f"output:{log}"),
+            MachineFaceRef(machine_id="m", port_id=f"input:{log}"),
+        ],
+    )
+    me = MEConfig(networks=[MENetworkSpec(id="main", mode=MEMode.ATTACHED)])
+    machines, nets = build_me(
+        [chest, oven],
+        [feed],
+        me,
+        storage_ids={"s0"},
+        multiblock_ids=set(),
+        line_tier="LV",
+        recipe_ticks={},
+    )
+    problem = InputIR(
+        bounding_region=CellBox(sx=6, sy=3, sz=6), machines=machines, nets=nets, me=me
+    )
+    layout = solve(problem)
+    _assert_laid_whole(problem, layout)
+    (laid,) = layout.me_networks
+    buses = [d for d in laid.devices if d.machine_id == "m"]
+    assert [(d.kind, d.cards, d.config) for d in buses] == [
+        (MEDeviceKind.EXPORT_BUS, MECards(acceleration=3, fuzzy=1), (log,))
+    ] * 2
+
+    first = buses[0]
+    bare = first.model_copy(update={"cards": first.cards.model_copy(update={"fuzzy": 0})})
+    devices = [bare if d == first else d for d in laid.devices]
+    stripped = layout.model_copy(
+        update={"me_networks": [laid.model_copy(update={"devices": devices})]}
+    )
+    codes = set(validate(problem, stripped).codes())
+    # The bus no longer matches its endpoint's cards either, which the gate also says.
+    assert ViolationCode.ME_FUZZY_CARD_MISSING in codes
+    assert codes <= {ViolationCode.ME_FUZZY_CARD_MISSING, ViolationCode.ME_DEVICE_MISMATCH}
 
 
 # ------------------------------------------------------------------ sand, on a subnet

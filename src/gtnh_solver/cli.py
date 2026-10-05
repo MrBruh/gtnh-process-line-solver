@@ -89,7 +89,7 @@ from gtnh_solver.adapter import (
 from gtnh_solver.adapter.core import _effective_handler, _recipe_map
 from gtnh_solver.dataset import PhysicalDataset, list_versions, load_physical_dataset
 from gtnh_solver.dataset.coverage import format_report, measure
-from gtnh_solver.dataset.me import PROVIDER_BUFFER_AE
+from gtnh_solver.dataset.me import PROVIDER_BUFFER_AE, wildcard_item
 from gtnh_solver.dataset.roots import extractor_hint, resolve_dataset_path
 from gtnh_solver.ir import (
     Commodity,
@@ -380,8 +380,10 @@ def _note_me_networks(problem: InputIR, layout: LayoutResult) -> None:
 
     What its storage must hold for the line to run and what lands there, and how many of the main
     network's channels it spends: none of it is in the build, so a builder who reads only the
-    layout would not know to stock the main network or keep channels free for it. Then what it
-    draws (#336, :func:`_me_power_note`). Two lines per network, on stderr like the other notes.
+    layout would not know to stock the main network or keep channels free for it. An item at any
+    damage it moves is named for checking: its bus's Fuzzy Card matches every variant only through
+    the ore dictionary, which the solver cannot see (#353). Then what it draws (#336,
+    :func:`_me_power_note`). Two lines per network, on stderr like the other notes.
     """
     names = problem.resource_names
     io = system_io(problem, layout)
@@ -401,6 +403,15 @@ def _note_me_networks(problem: InputIR, layout: LayoutResult) -> None:
                     for flow in flows
                 )
                 parts.append(f"{verb} {listed}")
+        # A Fuzzy Card reads a wildcard as any meta only through the ore dictionary (#353), which
+        # the solver cannot see, so the builder is asked to check each one.
+        wild = [r for f in (*network.supplies, *network.absorbs) for r in f.resources]
+        wild = list(dict.fromkeys(r for r in wild if wildcard_item(r)))
+        if wild:
+            labels = ", ".join(resource_label(r, names) for r in wild)
+            parts.append(
+                f"check {labels}: a Fuzzy Card matches any meta only via the ore dictionary"
+            )
         print(
             f"note: ME network {network.network} ({network.mode.value}): {'; '.join(parts)}",
             file=sys.stderr,

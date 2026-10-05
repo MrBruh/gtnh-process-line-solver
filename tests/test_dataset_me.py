@@ -32,11 +32,14 @@ from gtnh_solver.dataset.me import (
     colours_connect,
     max_bus_rate,
     me_devices_for,
+    needs_fuzzy_card,
     network_ae_per_tick,
     output_bus_push_rate,
     reaches,
     single_block_fluid_push_rate,
     super_speed_allowed,
+    wildcard_item,
+    wildcard_label,
 )
 from gtnh_solver.ir import Commodity, IODirection, Port
 from gtnh_solver.ir.me import (
@@ -168,7 +171,9 @@ def test_item_identities() -> None:
         MEDeviceKind.INTERFACE: 440,
     }
     assert me.FC_PART_ITEMS[MEDeviceKind.DUAL_INTERFACE] == "ae2fc:part_fluid_interface"
-    assert me.CARD_DAMAGE == {"acceleration": 30, "super_speed": 56, "capacity": 27}
+    assert me.CARD_DAMAGE == {"acceleration": 30, "super_speed": 56, "capacity": 27, "fuzzy": 29}
+    # Every card the contract names has an item: the export writes each from this table.
+    assert set(me.CARD_DAMAGE) == set(MECards.model_fields)
     # Every AE2 or FC part is an item one way or the other, never both.
     parts = set(me.PART_DAMAGE) | set(me.FC_PART_ITEMS)
     assert not set(me.PART_DAMAGE) & set(me.FC_PART_ITEMS)
@@ -177,6 +182,50 @@ def test_item_identities() -> None:
 
 def test_every_device_has_a_name() -> None:
     assert set(me.DEVICE_NAMES) == set(MEDeviceKind)
+
+
+def test_the_item_buses_take_a_fuzzy_card() -> None:
+    """``Upgrades.FUZZY`` is registered on AE2's import, export and storage bus, one each
+    (``Registration.java:644``, ``:653``, ``:762``), and on none of FC's fluid buses
+    (``CommonProxy.java:191-201``)."""
+    assert {
+        MEDeviceKind.IMPORT_BUS,
+        MEDeviceKind.EXPORT_BUS,
+        MEDeviceKind.STORAGE_BUS,
+    } == me.FUZZY_BUSES
+
+
+@pytest.mark.parametrize(
+    ("resource", "expected"),
+    [
+        ("minecraft:log@32767", True),  # Forge's wildcard: any log
+        ("natura:tree@32767", True),
+        ("minecraft:log@1", False),  # spruce, exactly
+        ("minecraft:log", False),  # no meta is meta 0
+        ("gregtech:gt.metaitem.01@2022", False),
+        ("minecraft:log@327670", False),
+        ("minecraft:log@032767", True),  # the number a filter's Damage holds, however spelled
+        ("minecraft:log@any", False),
+        ("water", False),  # a fluid has no meta
+    ],
+)
+def test_a_wildcard_item_is_one_at_meta_32767(resource: str, expected: bool) -> None:
+    assert wildcard_item(resource) is expected
+    # Its label says any meta, by the registry name alone, and nothing else gets one.
+    label = wildcard_label(resource)
+    assert (label is not None) is expected
+    if label is not None:
+        assert label == f"{resource.rpartition('@')[0]} (any meta)"
+
+
+def test_a_port_moving_an_item_at_any_damage_needs_a_fuzzy_card() -> None:
+    def port(port_id: str, commodity: Commodity = Commodity.ITEM) -> Port:
+        return Port(id=port_id, commodity=commodity, direction=IODirection.INPUT)
+
+    assert needs_fuzzy_card(port("input:minecraft:log@32767"))
+    assert not needs_fuzzy_card(port("input:minecraft:log@1"))
+    assert not needs_fuzzy_card(port("input:items"))  # a merged run names no one item
+    assert not needs_fuzzy_card(port("input:minecraft:log@32767", Commodity.FLUID))
 
 
 def test_every_cable_kind_has_a_name() -> None:
@@ -274,6 +323,34 @@ def test_a_bus_needs_no_card_for_its_base_rate() -> None:
     assert bus_cards_for(Commodity.ITEM, 0.2) == MECards()
     assert bus_cards_for(Commodity.ITEM, 0.21) == MECards(acceleration=1)
     assert bus_cards_for(Commodity.ITEM, 20, super_speed=False) is None
+
+
+@given(
+    st.sampled_from(_MOVED),
+    st.floats(min_value=0, max_value=1e9, allow_nan=False),
+    st.booleans(),
+    st.integers(min_value=0, max_value=me.UPGRADE_SLOTS),
+)
+def test_the_speed_cards_fit_in_the_slots_left(
+    commodity: Commodity, rate: float, super_speed: bool, slots: int
+) -> None:
+    """A slot another card takes (a Fuzzy Card's, #353) is one the speed cards cannot: the cards
+    chosen fit in what is left, and the most a bus moves is what the best of those fits moves."""
+    cards = bus_cards_for(commodity, rate, super_speed=super_speed, slots=slots)
+    ceiling = max_bus_rate(commodity, super_speed=super_speed, slots=slots)
+    if cards is None:
+        assert rate > ceiling
+        return
+    assert cards.count <= slots
+    assert bus_rate(commodity, cards) >= rate
+    assert ceiling <= max_bus_rate(commodity, super_speed=super_speed)
+
+
+def test_three_slots_carry_less_than_four() -> None:
+    # Three Acceleration Cards move 64 items an operation, four 96 (spike 4.2).
+    assert max_bus_rate(Commodity.ITEM, super_speed=False, slots=3) == 64 / me.BUS_PERIOD_TICKS
+    assert bus_cards_for(Commodity.ITEM, 15, super_speed=False, slots=3) is None
+    assert bus_cards_for(Commodity.ITEM, 15, super_speed=False) == MECards(acceleration=4)
 
 
 # --- pushers and power -----------------------------------------------------------------------------
@@ -542,6 +619,103 @@ def test_an_lv_line_splits_across_two_buses_rather_than_take_hyper_cards() -> No
     assert len(turned_off) == 2
 
 
+def test_a_bus_set_to_an_item_at_any_damage_is_fitted_a_fuzzy_card() -> None:
+    """#353: AE2 reads 32767 as any damage only on its fuzzy path, which a bus takes only with a
+    Fuzzy Card. The card takes a slot, so the speed cards get three."""
+    (device,) = _choose(
+        Commodity.ITEM, IODirection.INPUT, 5.0, multiblock=False, machine_tier="LV", fuzzy=True
+    )
+    assert device.kind is MEDeviceKind.EXPORT_BUS
+    assert device.cards == MECards(acceleration=2, fuzzy=1)
+    assert device.per_tick == bus_rate(Commodity.ITEM, MECards(acceleration=2))
+    assert device.label == "ME Export Bus (2 x Acceleration Card, 1 x Fuzzy Card)"
+    # An import bus pulling a machine's output takes one the same way.
+    (pull,) = _choose(Commodity.ITEM, IODirection.OUTPUT, 1.0, multiblock=False, fuzzy=True)
+    assert (pull.kind, pull.cards) == (MEDeviceKind.IMPORT_BUS, MECards(acceleration=1, fuzzy=1))
+    # A multiblock's export bus in front of its input bus too.
+    (fed,) = _choose(
+        Commodity.ITEM, IODirection.INPUT, 0.1, hatches=MEHatchPolicy.NEVER, fuzzy=True
+    )
+    assert (fed.kind, fed.hatch_kind, fed.cards) == (
+        MEDeviceKind.EXPORT_BUS,
+        "InputBus",
+        MECards(fuzzy=1),
+    )
+    assert fed.label == "Input Bus + ME Export Bus (1 x Fuzzy Card)"
+
+
+def test_a_fuzzy_bus_splits_across_two_buses_sooner() -> None:
+    """15 items/t takes four Acceleration Cards on one bus. With a Fuzzy Card only three fit, which
+    move 12.8, so the port gets two buses, each with its own card."""
+    (plain,) = _choose(Commodity.ITEM, IODirection.INPUT, 15.0, multiblock=False, line_tier="LV")
+    assert plain.cards == MECards(acceleration=4)
+    fuzzy = _choose(
+        Commodity.ITEM, IODirection.INPUT, 15.0, multiblock=False, line_tier="LV", fuzzy=True
+    )
+    assert [d.cards for d in fuzzy] == [MECards(acceleration=3, fuzzy=1)] * 2
+    assert all(d.cards.count == me.UPGRADE_SLOTS for d in fuzzy)
+    # What two buses cannot carry with three slots each is a shortfall that says so.
+    short = me_devices_for(
+        Commodity.ITEM,
+        IODirection.INPUT,
+        30.0,
+        multiblock=False,
+        machine_tier="LV",
+        line_tier="LV",
+        fuzzy=True,
+    )
+    assert isinstance(short, MEShortfall)
+    assert short.capacity == pytest.approx(2 * 64 / me.BUS_PERIOD_TICKS)
+
+
+def test_a_device_with_no_filter_takes_no_fuzzy_card() -> None:
+    """An interface and a GT ME output bus take whatever the machine makes, and a fluid device takes
+    no Fuzzy Card (a fluid has no damage), so ``fuzzy`` leaves each as it was."""
+    (interface,) = _choose(
+        Commodity.ITEM, IODirection.OUTPUT, 3.0, multiblock=False, auto_output=True, fuzzy=True
+    )
+    assert (interface.kind, interface.cards) == (MEDeviceKind.INTERFACE, MECards())
+    (output,) = _choose(
+        Commodity.ITEM, IODirection.OUTPUT, 3.0, hatches=MEHatchPolicy.ALWAYS, fuzzy=True
+    )
+    assert (output.gt_mid, output.cards) == (2710, MECards())
+    (fluid,) = _choose(Commodity.FLUID, IODirection.INPUT, 100.0, multiblock=False, fuzzy=True)
+    assert fluid.kind is MEDeviceKind.FLUID_EXPORT_BUS
+    assert fluid.cards.fuzzy == 0
+    (stocking,) = _choose(
+        Commodity.FLUID, IODirection.INPUT, 100.0, hatches=MEHatchPolicy.ALWAYS, fuzzy=True
+    )
+    assert (stocking.gt_mid, stocking.cards) == (2717, MECards())
+
+
+@pytest.mark.parametrize(
+    ("hatches", "line_tier"),
+    [(MEHatchPolicy.ALWAYS, "LV"), (MEHatchPolicy.ALWAYS, "UV"), (MEHatchPolicy.TIER_AWARE, "EV")],
+)
+def test_an_item_at_any_damage_never_gets_a_stocking_input_bus(
+    hatches: MEHatchPolicy, line_tier: str
+) -> None:
+    """#353: GT's Stocking Input Bus (ME) extracts exactly the stacks set in it and takes no card,
+    so it cannot feed an item at any damage; under every policy that would choose it, the port
+    gets a normal input bus fed by an export bus with a Fuzzy Card."""
+    (plain,) = _choose(Commodity.ITEM, IODirection.INPUT, 3.0, hatches=hatches, line_tier=line_tier)
+    assert plain.gt_mid == 2718
+    (fed,) = _choose(
+        Commodity.ITEM, IODirection.INPUT, 3.0, hatches=hatches, line_tier=line_tier, fuzzy=True
+    )
+    assert (fed.kind, fed.gt_mid, fed.hatch_kind, fed.cards.fuzzy) == (
+        MEDeviceKind.EXPORT_BUS,
+        None,
+        "InputBus",
+        1,
+    )
+    # Its speed cards are the fewest that keep up in the three slots the Fuzzy Card leaves.
+    allowed = super_speed_allowed(line_tier)
+    speed = bus_cards_for(Commodity.ITEM, 3.0, super_speed=allowed, slots=me.UPGRADE_SLOTS - 1)
+    assert speed is not None
+    assert fed.cards == speed.model_copy(update={"fuzzy": 1})
+
+
 def test_an_auto_output_goes_into_an_interface() -> None:
     (items,) = _choose(Commodity.ITEM, IODirection.OUTPUT, 3.0, multiblock=False, auto_output=True)
     assert (items.kind, items.per_tick) == (MEDeviceKind.INTERFACE, None)
@@ -621,6 +795,7 @@ def test_power_is_never_an_me_port() -> None:
     hatches=st.sampled_from(list(MEHatchPolicy)),
     auto_output=st.booleans(),
     push_rate=st.none() | st.floats(min_value=0, max_value=1e4, allow_nan=False),
+    fuzzy=st.booleans(),
 )
 def test_every_choice_keeps_up_or_is_a_real_shortfall(
     commodity: Commodity,
@@ -632,6 +807,7 @@ def test_every_choice_keeps_up_or_is_a_real_shortfall(
     hatches: MEHatchPolicy,
     auto_output: bool,
     push_rate: float | None,
+    fuzzy: bool,
 ) -> None:
     chosen = me_devices_for(
         commodity,
@@ -643,6 +819,7 @@ def test_every_choice_keeps_up_or_is_a_real_shortfall(
         hatches=hatches,
         auto_output=auto_output,
         push_rate=push_rate,
+        fuzzy=fuzzy,
     )
     if isinstance(chosen, MEShortfall):
         assert chosen.capacity < rate
@@ -654,6 +831,12 @@ def test_every_choice_keeps_up_or_is_a_real_shortfall(
         assert device.per_tick * len(chosen) >= rate * (1 - 1e-12)
     if device.cards.super_speed:
         assert super_speed_allowed(line_tier)
+    # A Fuzzy Card on exactly the buses asked for one, and every card in the bus's four slots.
+    assert device.cards.fuzzy == int(fuzzy and device.kind in me.FUZZY_BUSES)
+    assert device.cards.count <= me.UPGRADE_SLOTS
+    # An item at any damage never reaches a machine through a stocking bus, which matches exactly.
+    if fuzzy and commodity is Commodity.ITEM:
+        assert device.kind is not MEDeviceKind.GT_STOCKING_INPUT_BUS_ME
     # A multiblock's every connection takes a hatch slot; a single block's none.
     assert (device.hatch_kind is not None) is multiblock
     if hatches is MEHatchPolicy.NEVER:
