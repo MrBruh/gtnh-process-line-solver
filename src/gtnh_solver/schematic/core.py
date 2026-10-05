@@ -10,7 +10,8 @@ The pipeline, and why each step exists::
         |                         a single-block machine, each already yaw-rotated and clamped,
         |                         its tiered parts already the blocks the node chose (#312)
         '---> route cells         one cell per cable/pipe block, with the sides it connects on
-        |
+        '---> ME blocks           ae.lower_me: AE2 cable buses (for a named world's item ids),
+        |                         controllers, acceptors; a GT ME hatch rides the machine cubes
         v  lower()                a single block also gets its covers (gt.covers) when the
     grid[W*H*L] of Cell(block, data, tile)   target world's item ids are given (world.item_ids)
         |
@@ -45,6 +46,11 @@ pipe casing, coils and machine casings are whatever ``Machine.structure_blocks``
 ``previewer.textures.expand_machine`` before the cubes reach this module, so a swapped casing is
 just another plain block here and needs no code of its own; the manifest must name it like any
 other, which is why the committed one carries every block the plant's channels accept.
+
+**An ME network is AE2 blocks** (#339, :mod:`.ae`). A cable bus is all tile entity, and every item
+in it is named by the world's numeric item id, so cable buses are written only when the caller
+passes the target world's item table (``item_ids``); a controller, an acceptor and a GT ME hatch
+need none and are always written.
 
 **Block ids are ours to choose.** ``SchematicaMapping`` maps registry name to the id used in this
 file, and Schematica remaps onto whatever the loading instance assigned, so the ids here are
@@ -195,8 +201,9 @@ class SchematicWarning(UserWarning):
     """The file was written, but part of it will not rebuild faithfully in game.
 
     GT frame boxes, whose material the ghost cannot show (#212); output faces that need a cover,
-    which the printer never fits even when the ghost shows them; and Item Filters' slots, which the
-    export does not write (#249). Each warning names what to build by hand and where.
+    which the printer never fits even when the ghost shows them; Item Filters' slots, which the
+    export does not write (#249); and ME cable buses, which the printer never builds and which need
+    a named world to be written at all (#339). Each warning names what to build by hand and where.
     """
 
 
@@ -478,8 +485,12 @@ def lower(
 
     Coordinates are relative to the layout's tight content bounds, so the emitted file is the
     built structure rather than the solver's oversized search region. ``item_ids`` is the target
-    world's item id table; with it, every cover face gets its cover written (module docstring).
+    world's item id table; with it, every cover face gets its cover written (module docstring),
+    and every ME cable bus (:mod:`.ae`).
     """
+    # Imported here: ae builds on this module's Cell and errors, so it imports this one.
+    from .ae import lower_me, warn_about_me
+
     cover_item = _cover_item_id(item_ids)
     amps_by_source = system_io(problem, layout).power_amps_by_source
     scene = build_scene(problem, layout)
@@ -497,7 +508,7 @@ def lower(
     me_blocks = {m.id for m in problem.machines if m.me_role is not None}
     for machine in scene["machines"]:
         if machine["id"] in me_blocks:
-            continue  # an ME block, which the export does not write yet (_warn_about_me)
+            continue  # an ME block: a cable cell, a controller or an acceptor, lower_me's to write
         cubes = machine_cubes(machine, docs, manifest, auto_out)
         if not cubes:
             cubes = _stand_in_cubes(machine, manifest)
@@ -538,35 +549,21 @@ def lower(
             key = tuple(int(raw["cell"][i]) - origin[i] for i in range(3))
             grid[key] = cell  # type: ignore[index]
 
+    me = lower_me(
+        problem,
+        layout,
+        grid,
+        origin=origin,
+        manifest=manifest,
+        item_ids=item_ids,
+    )
+
     _warn_about_frames(grid, manifest)
     _warn_about_covers(covers, written=cover_item is not None)
     _warn_about_filters(filters)
     _warn_about_output_side(forbids)
-    _warn_about_me(layout, len(me_blocks))
+    warn_about_me(me)
     return size, grid  # type: ignore[return-value]
-
-
-def _warn_about_me(layout: LayoutResult, blocks: int) -> None:
-    """Say what of the ME networks the export leaves out, until it writes them (#339).
-
-    No AE2 block is written: not the cable, the parts on it, or the ``blocks`` the networks need of
-    their own (attach stubs, links, controllers, acceptors). A GT ME hatch stands in a multiblock's
-    casing, which needs a block there to form, so it is written as the normal hatch of its slot
-    and the builder swaps it. Counted, since the builder places each by hand from the layout.
-    """
-    cables = sum(len(n.cables) for n in layout.me_networks)
-    devices = [d for n in layout.me_networks for d in n.devices]
-    gt_hatches = sum(1 for d in devices if d.gt_mid is not None)
-    if not (cables or devices or blocks):
-        return
-    warnings.warn(
-        f"the export writes no ME block yet (GitHub #339): {cables} AE2 cable(s), "
-        f"{len(devices) - gt_hatches} part(s) and {blocks} network block(s) (stubs, links, "
-        f"controllers, acceptors) are left out, and {gt_hatches} GT ME hatch(es) are written as "
-        "the normal hatch of their slot. Place them by hand from the layout's me_networks.",
-        SchematicWarning,
-        stacklevel=3,
-    )
 
 
 def _warn_about_frames(grid: dict[tuple[int, int, int], Cell], manifest: TextureManifest) -> None:
@@ -839,7 +836,8 @@ def write_schematic(
     Resolves the dataset the same way the previewer does, so a preview and an export of one solve
     describe the same blocks - provided the caller passes both the same ``version``, which is why
     the CLI hands each of them the version it derived from the plan (#206). ``item_ids``, the
-    target world's item table (:func:`gtnh_solver.schematic.world.item_ids`), adds the covers.
+    target world's item table (:func:`gtnh_solver.schematic.world.item_ids`), adds the covers and
+    the ME cable buses (:mod:`.ae`).
 
     **A missing half of the dataset is refused by name** rather than surfacing as a bare
     ``FileNotFoundError``, which the CLI can only report as "could not write" the output:

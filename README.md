@@ -81,7 +81,7 @@ gtnh-solve examples/gtnh-sand.json        # solve an exported plan, print the la
 gtnh-solve plan.json > layout.json        # ...which is how it goes to a file
 gtnh-solve plan.json --preview view.html  # ...or a double-clickable 3D preview (three.js)
 gtnh-solve plan.json --schematic line.schematic   # ...or a Schematica build ghost (1.7.10)
-gtnh-solve plan.json --schematic line.schematic --world saves/MyWorld  # ...showing its covers
+gtnh-solve plan.json --schematic line.schematic --world saves/MyWorld  # ...with covers and AE2
 gtnh-solve plan.json --fast               # skip optimization: a near-instant constructive layout
 gtnh-solve plan.json --effort minimal     # one short optimizing attempt: a quick, rougher layout
 gtnh-solve plan.json --seed 3             # pick the solver seed (deterministic per seed)

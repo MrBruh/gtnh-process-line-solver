@@ -40,15 +40,18 @@ from gtnh_solver.ir import (
 from gtnh_solver.placement import Objective
 from gtnh_solver.previewer.textures import TextureManifest
 from gtnh_solver.schematic import read_schematic
-from gtnh_solver.schematic.core import POWER_SOURCE_STAND_IN, SchematicWarning, _warn_about_me
+from gtnh_solver.schematic.ae import MELowering, warn_about_me
+from gtnh_solver.schematic.core import POWER_SOURCE_STAND_IN, SchematicWarning
 from gtnh_solver.solver import Effort, solve
 from gtnh_solver.validator import validate
-from tests._helpers import on_me
+from tests._helpers import on_me, world_save
 from tests._me_fixtures import SUB, acceptor_comb, comb, gt_hatch_line
 from tests._me_fixtures import endpoint as me_endpoint
 
 _ROOT = Path(__file__).resolve().parents[1]
 _SAND = str(_ROOT / "examples" / "gtnh-sand.json")
+#: The item ids of the world the AE2 golden was saved in (#339), for a ``--world`` fixture.
+_GOLDEN_ITEMS = _ROOT / "tests" / "golden" / "schematic" / "ae2-golden-items.json"
 _COMMITTED_MANIFEST = _ROOT / "data" / "textures" / "manifest.json"
 #: Every shipped gtnh-factory-flow plan, which --list-nets must list.
 _EXAMPLES = sorted(str(p) for p in (_ROOT / "examples").glob("*.json"))
@@ -442,6 +445,57 @@ def test_sand_with_items_on_me_solves_valid_on_an_me_network(
     assert _ITEMS_NOTE in capsys.readouterr().err.splitlines()
 
 
+# ------------------------------------------------------------------ --fast on ME (#352)
+
+#: What ``--fast`` says on a line with ME blocks to lay, verbatim: the run lays another layout than
+#: the constructive one asked for, and takes a second or two to, so it says why.
+_FAST_NOTE = (
+    "note: --fast lays one constructive placement, which leaves no room for ME devices, so this "
+    "line with an ME network gets one short optimizing attempt instead (--effort minimal)"
+)
+
+
+def test_fast_lays_sand_on_me_valid_as_its_minimal_attempt(
+    real_solves: list[tuple[InputIR, LayoutResult]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    # gtnh-solver-site's contract (its #22): a fast run of sand with its items on ME exits 0 with a
+    # VALID layout. It is the layout `--effort minimal` prints, and the run says once why it is not
+    # the constructive one.
+    assert main([_SAND, "--fast", "--me", "items"]) == 0
+    fast = capsys.readouterr()
+    ((problem, layout),) = real_solves
+    assert layout.status is LayoutStatus.VALID, layout.infeasibility
+    assert validate(problem, layout).ok
+    assert fast.err.splitlines().count(_FAST_NOTE) == 1
+    assert main([_SAND, "--effort", "minimal", "--me", "items"]) == 0
+    minimal = capsys.readouterr()
+    assert fast.out == minimal.out
+    assert "--fast" not in minimal.err
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [[], ["--me", "power"], ["--me", "fluids"]],
+    ids=["no-me", "power-left-to-you", "a-network-nothing-rides"],
+)
+def test_fast_says_nothing_of_me_on_a_line_with_no_me_block_to_lay(
+    flags: list[str], capsys: pytest.CaptureFixture[str], solved_problems: list[InputIR]
+) -> None:
+    # Sand has no fluid net, so its fluids on ME declare a network that lays no block.
+    assert main([_SAND, "--fast", *flags]) == 0
+    assert "--fast" not in capsys.readouterr().err
+
+
+def test_fast_on_me_with_a_budget_says_both_in_one_note(
+    capsys: pytest.CaptureFixture[str], solved_problems: list[InputIR]
+) -> None:
+    # The fast path's own budget note says it lays one constructive placement, which this line
+    # does not, so the budget is said at the end of the ME note instead: one line, never both.
+    assert main([_SAND, "--fast", "--me", "items", "--rounds", "2"]) == 0
+    said = [line for line in capsys.readouterr().err.splitlines() if "--fast" in line]
+    assert said == [_FAST_NOTE + "; --time-budget/--rounds ignored"]
+
+
 # ------------------------------------------------------------------ power left to the builder (#225)
 
 
@@ -589,32 +643,51 @@ def test_an_external_subnets_flush_is_said_where_its_power_is_stored(
 def test_sand_with_items_on_me_exports_its_machines_and_counts_what_it_leaves_out(
     real_solves: list[tuple[InputIR, LayoutResult]], tmp_path: Path
 ) -> None:
-    # The export writes no AE2 block until #339, and must not choke on the stub: every machine of
-    # the line is still written, and one warning counts the ME blocks a builder places by hand.
+    # With no world named, the export writes no AE2 cable bus (its items need the world's ids,
+    # #339) and must not choke on the stub: every machine of the line is still written, and one
+    # warning counts the cable blocks and parts a builder places by hand.
     schematic = tmp_path / "x.schematic"
-    with pytest.warns(SchematicWarning, match=r"writes no ME block yet") as caught:
+    with pytest.warns(SchematicWarning, match=r"left out") as caught:
         assert main([_SAND, "--me", "items", "--schematic", str(schematic)]) == 0
     ((problem, layout),) = real_solves
     (network,) = layout.me_networks
-    (message,) = [str(w.message) for w in caught if "ME block" in str(w.message)]
-    assert f"{len(network.cables)} AE2 cable(s), {len(network.devices)} part(s) and 1 network " in (
-        message
-    )
+    (message,) = [str(w.message) for w in caught if "ME networks" in str(w.message)]
+    assert (
+        f"{len(network.cables)} AE2 cable block(s) and the {len(network.devices)} part(s) on them "
+        "are left out"
+    ) in message
     machines = [m for m in problem.machines if m.me_role is None]  # the hammers and the source
     written = [t for t in read_schematic(schematic).tile_entities if t.id == "BaseMetaTileEntity"]
     assert len(written) == len(machines)
 
 
-def test_a_gt_me_hatch_is_counted_as_written_in_its_normal_slot() -> None:
-    _, layout = gt_hatch_line()
-    with pytest.warns(SchematicWarning, match=r"1 GT ME hatch\(es\) are written as the normal"):
-        _warn_about_me(layout, 1)
-
-
-def test_a_layout_with_no_me_network_says_nothing_of_it(
-    solved_sand: tuple[InputIR, LayoutResult],
+def test_sand_with_items_on_me_and_a_world_writes_every_cable_bus(
+    real_solves: list[tuple[InputIR, LayoutResult]], tmp_path: Path
 ) -> None:
-    _, layout = solved_sand
+    # `gtnh-solve examples/gtnh-sand.json --me items --schematic x --world <save>`: the world's
+    # item ids let the export write every cable cell as a cable bus (#339), its cable named by
+    # that world's ItemMultiPart id, and the warning says the printer places none of it.
+    items = json.loads((_GOLDEN_ITEMS).read_text(encoding="utf-8"))["items"]
+    world = world_save(tmp_path, items)
+    schematic = tmp_path / "x.schematic"
+    with pytest.warns(SchematicWarning, match=r"printer applies no tile-entity NBT") as caught:
+        assert (
+            main([_SAND, "--me", "items", "--schematic", str(schematic), "--world", str(world)])
+            == 0
+        )
+    ((_, layout),) = real_solves
+    (network,) = layout.me_networks
+    buses = [t for t in read_schematic(schematic).tile_entities if t.id == "BlockCableBus"]
+    assert len(buses) == len(network.cables)
+    part_item = items["appliedenergistics2:item.ItemMultiPart"]
+    assert all(t.ae is not None and t.ae.cable is not None for t in buses)
+    assert {t.ae.cable.id for t in buses if t.ae and t.ae.cable} == {part_item}
+    (message,) = [str(w.message) for w in caught if "ME networks" in str(w.message)]
+    assert f"{len(network.cables)} AE2 cable block(s)" in message
+    assert "left out" not in message
+
+
+def test_a_layout_with_no_me_network_says_nothing_of_it() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        _warn_about_me(layout, 0)
+        warn_about_me(MELowering())

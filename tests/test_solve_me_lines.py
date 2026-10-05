@@ -241,7 +241,9 @@ def test_sand_on_a_chests_subnet_reads_its_chests_through_storage_buses(
     assert _CHESTS_NOTE in capsys.readouterr().err.splitlines()
 
 
+@pytest.mark.parametrize("flags", [[], ["--fast"]], ids=["default", "fast"])
 def test_sand_on_a_link_subnet_powered_by_an_energy_acceptor(
+    flags: list[str],
     solves: list[tuple[InputIR, LayoutResult]],
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
@@ -249,9 +251,12 @@ def test_sand_on_a_link_subnet_powered_by_an_energy_acceptor(
     # #336: the adapter places an Energy Acceptor on sand's LV trunk, rated for an estimate of what
     # the network draws, and the laid network stays under it; the layout printed on stdout reports
     # the laid figure for a reader of the layout alone, and the run says where the power comes from.
+    # A fast run lays it too (#352), as gtnh-solver-site runs one: its constructive placement put
+    # the acceptor against the link, which the ME router refuses, so it is one minimal attempt.
     listed = _listed(_SAND, capsys)
     network = MENetworkSpec(id="line", mode=MEMode.SUBNET, power=MEPower.ACCEPTOR)
-    assert main([_SAND, "--me-plan", _plan_file(tmp_path, listed, network, {Commodity.ITEM})]) == 0
+    path = _plan_file(tmp_path, listed, network, {Commodity.ITEM})
+    assert main([_SAND, "--me-plan", path, *flags]) == 0
     ((problem, layout),) = solves
     _assert_laid_whole(problem, layout)
     (acceptor,) = [m for m in problem.machines if m.me_role is MERole.ACCEPTOR]

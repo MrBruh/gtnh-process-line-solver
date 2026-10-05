@@ -7,6 +7,25 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **The `.schematic` export writes ME networks (#339).** Each controller and Energy Acceptor is
+  written as its AE2 block, facing as placed and a controller in its network's colour, and each GT
+  ME hatch by its own mID, painted its subnet's colour (the old warning that called it a plain bus
+  of its slot had been wrong since #338). With `--world`, each AE2 cable block is written too, with
+  the cable's kind and colour and every bus on it, with its upgrade cards and its filter or
+  partition, exactly as AE2 saves one: checked tag for tag against an in-game build saved with
+  Schematica (`tests/golden/schematic/ae2-golden-*`). A cable block names its items by the world's
+  own item ids, so without a world it is left out and the warning counts it. Schematica's printer
+  places no cable or bus (it applies no tile data, and a cable block is nothing else), so the ghost
+  shows the network for you to build by hand, as the warning says. ME Interface and Dual Interface
+  parts are not written yet, since the in-game build has neither; the warning lists where each goes.
+  A filter for an item at any damage (`@32767`, a coke oven's logs) is left unset and listed too:
+  AE2 matches it only through a Fuzzy Card, so the bus would otherwise move nothing.
+  `read_schematic` reads AE2 tiles back (`TileEntity.ae`: a cable block's cable and its parts by
+  side, a block's orientation), and `--inspect-schematic` lists them: each cable block's cable and
+  buses by side with their cards and filters, and each AE2 block's facing. `--world` now works with
+  it too, naming every item by the world the file was saved in (a world whose ids do not match the
+  file's is set aside with a warning); without it AE2's own cables and buses are still named from
+  the file, and other items print as the world's numeric ids.
 - **The preview draws ME networks (#338).** Every AE2 block a line on ME is built with is drawn as
   AE2 draws it: each cable block (smart, dense, ...) with an arm toward each side it joins, a plug
   where it meets a controller or a GT ME hatch, and a straight bar where AE2 draws one; each bus,
@@ -60,10 +79,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   needs of its own (dense attach stubs on the edge where your main network enters, links, a
   controller). Every layout is held to AE2's rules by the validator. The run says, per network,
   what its storage must hold, what lands there, and how many of your main network's channels it
-  spends; the preview's I/O panel lists the same. Not yet: the schematic export leaves the ME
-  blocks out, with a warning that counts what to place by hand (#339). `--fast` cannot lay a line
-  on ME (its touching row leaves no face for the devices), so it returns an explicit partial
-  layout; use the default solve.
+  spends; the preview's I/O panel lists the same. The schematic export writes the ME blocks since
+  #339 (above).
 - **The `.schematic` export can write each conveyor and pump cover, so the ghost shows where it
   goes.** Pass `--world` with the save folder (or `level.dat`) of the world the build goes in. GT
   names a cover's item by the world's numeric item id, which FML assigns per world (two worlds of
@@ -491,6 +508,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   from that source (`system_io`'s per-source figure, so the file and the preview agree; LV 32 V x
   2 A for the sand line), with GT 2.9's keys in the tag types a 2.9 save writes and 2.8's `eEUT`
   and `eAMP` alongside.
+- **`--fast` lays a line with nets on ME (#352).** Its one constructive placement is a touching
+  row, so that neighbours auto-feed. Nothing on ME auto-feeds, so in that row a single block kept
+  too few free faces for its ME devices, and ME blocks (a subnet's two links, a link and its
+  acceptor, two networks' blocks) stood side by side where the ME router must refuse them: every
+  fast run with nets on ME came back an explicit partial layout with nothing ME laid. A fast solve
+  of a line with ME blocks to lay is now one short optimizing attempt instead, exactly the layout
+  `--effort minimal` lays for the same seed and objective, and the run says so on stderr (a time
+  budget or a round count is still ignored). With `--fast --me items`, sand, nitrobenzene and
+  parallel-sand now come back VALID in a few seconds each, where they were partial; so does sand
+  on an acceptor subnet. One short attempt is still a minimal effort: sand with one net on a subnet
+  beside the main network comes back partial at seed 0 (VALID on 4 of 16 seeds), and the default
+  solve lays it. Every caller of `solve(optimize=False)` gets it, gtnh-solver-site included, and
+  `solver.fast_falls_back(problem)` says beforehand which a fast solve will do. A line with no ME
+  block to lay (no network, or only one that nothing rides) keeps the constructive layout byte for
+  byte.
 - **Every shipped example exports on a fresh clone, the converted ShadowTheAge line included
   (#319).** `gtnh-solve examples/shadow-nitrobenzene.json --schematic` was refused on a fresh
   clone: the committed `data/textures/manifest.json` was cut from a 2.8.4 dump, which has no 2.9

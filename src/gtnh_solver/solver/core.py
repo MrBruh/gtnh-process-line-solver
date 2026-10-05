@@ -89,6 +89,20 @@ candidate and the loop is exactly the grid.
 annealing and no multi-start (near-instant, simpler layout), still validated. The two modes are
 the "optimize or not" choice the planned unified site exposes to the builder.
 
+**A line with ME blocks to lay is the exception** (``fast_falls_back``, #352): its fast solve is one
+``minimal`` attempt, exactly ``solve(..., effort="minimal")`` for the same seed and objective. The
+constructive placement is a touching row, so that neighbours auto-feed, and nothing on ME
+auto-feeds: in that row a single block keeps too few free faces for its ME devices beside its other
+connections, and the blocks of one network, or of two, touch where the ME router must refuse them.
+Only the annealer and the crowding gate keep them apart, and one short attempt of both lays sand,
+nitrobenzene and parallel-sand with their items on ME, each in seconds, where the row lays none::
+
+    solve(optimize=False)
+      |  no ME blocks to lay   the constructive placement, assembled as it stands (as always)
+      |  ME blocks to lay      the optimized path at minimal effort: one short anneal, the gate,
+      v                        capped negotiation; effort, time budget and rounds still ignored
+    a layout, validated like any other
+
 **Effort** sets how hard the optimized path works, not what it does. ``full`` (the default) is the
 search described above, the one layout quality is judged on. ``minimal`` runs every stage once on
 small budgets: one attempt, a short anneal, and a cap on the router's negotiation rounds, which are
@@ -213,20 +227,23 @@ def solve(
       multi-start - near-instant and simple. Its layout is still validated, so it is VALID or an
       explicit partial/infeasibility, never silently invalid; but it will not cluster machines for
       auto-output, relocate a power source onto shorter cable, or try another placement for an
-      unroutable net the way the optimizer can.
+      unroutable net the way the optimizer can. A line with ME blocks to lay
+      (:func:`fast_falls_back`) gets one ``minimal`` optimizing attempt instead, the same layout
+      as ``effort="minimal"`` for this seed and objective, since the constructive placement
+      leaves its ME devices no room (module docstring).
 
     ``objective`` selects what "compact" means (the site's *second* control, next to optimize or
     not): ``footprint`` (default) minimizes the floor area and stacks tall, ``volume`` minimizes
     the enclosing box and stays flat/cubic, ``balanced`` weighs both. It drives the placement
     cost and the quality ranking; the fast path ignores it (constructive placement is floor-first
-    by construction).
+    by construction), except on a line it hands to one minimal attempt.
 
     ``jobs`` is how many processes the attempts may run in (module docstring). It changes how long
     a solve takes, never what it returns; ``1`` runs every attempt in this process.
 
     ``effort`` sets the optimized path's budgets (module docstring): ``full`` searches for the best
     layout, ``minimal`` runs every stage once on small budgets. None takes :data:`DEFAULT_EFFORT`.
-    The fast path ignores it, having only the one attempt.
+    The fast path ignores it, having only the one attempt (``minimal`` on a line with ME blocks).
 
     ``time_budget`` (seconds) and ``rounds`` buy more of the same search, round after round of the
     grid with fresh seeds (module docstring): ``rounds`` runs exactly that many, ``time_budget`` as
@@ -242,12 +259,30 @@ def solve(
     if time_budget is not None and not 0 <= time_budget < math.inf:
         raise ValueError(f"time_budget must be a finite number of seconds >= 0, got {time_budget}")
     if not optimize:
-        return _with_shortfall_reason(problem, _solve_fast(problem, seed, objective))
+        if not fast_falls_back(problem):
+            return _with_shortfall_reason(problem, _solve_fast(problem, seed, objective))
+        # One minimal attempt instead (#352). Still the fast path's single attempt, so whatever
+        # effort, time budget or round count the caller gave is ignored, as it is there.
+        effort, time_budget, rounds = "minimal", None, None
     budget = _BUDGETS[effort or DEFAULT_EFFORT]
     layout, done = _search(problem, seed, objective, jobs, budget, time_budget, rounds)
     if time_budget is None and rounds is None:
         return layout
     return layout.model_copy(update={"metrics": layout.metrics.model_copy(update={"rounds": done})})
+
+
+def fast_falls_back(problem: InputIR) -> bool:
+    """Whether ``solve(problem, optimize=False)`` makes one ``minimal`` optimizing attempt rather
+    than lay the constructive placement (module docstring, #352).
+
+    It does when the problem has an ME block to lay: an ME device on one of its machines, or a block
+    of an ME network's own (an attach stub, a link, a controller, an acceptor). Those are what the
+    constructive row cannot place. A network that nothing rides lays no block (the adapter gives it
+    none, and the ME router has nothing to build for it), so a line with only that keeps the fast
+    path and its layout exactly. A function of the problem alone, so a caller can say which a fast
+    solve will do before running it, as ``gtnh-solve --fast`` does.
+    """
+    return any(m.me_endpoints or m.me_role is not None for m in problem.machines)
 
 
 def _search(

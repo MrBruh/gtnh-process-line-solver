@@ -211,6 +211,23 @@ def test_fast_mode_is_deterministic() -> None:
     assert solve(ir, optimize=False) == solve(ir, optimize=False)
 
 
+@pytest.mark.parametrize(
+    "me_commodities", [(), (Commodity.FLUID,)], ids=["no-me-network", "a-network-nothing-rides"]
+)
+def test_a_fast_solve_with_no_me_block_to_lay_is_the_constructive_layout(
+    me_commodities: tuple[Commodity, ...],
+) -> None:
+    # Only a line with an ME block to lay gets a minimal attempt in place of the fast path (#352,
+    # tests/test_solver_me.py); every other fast solve is the constructive placement assembled as
+    # it stands, byte for byte. Sand has no fluid net, so its fluids on ME declare a network that
+    # nothing rides, which lays no block.
+    problem = adapt_file(_SAND, me_commodities=me_commodities)
+    assert [n.id for n in problem.me.networks] == (["main"] if me_commodities else [])
+    assert not solver_core.fast_falls_back(problem)
+    constructive, _ = solver_core._assemble(problem, place(problem).placements, 0, repair=False)
+    assert solve(problem, optimize=False).model_dump_json() == constructive.model_dump_json()
+
+
 def test_fast_mode_passes_through_infeasibility() -> None:
     # two 1x1x1 machines into a 1x1x1 region: constructive placement cannot fit them, and fast mode
     # surfaces that as an explicit infeasibility rather than a silent failure.

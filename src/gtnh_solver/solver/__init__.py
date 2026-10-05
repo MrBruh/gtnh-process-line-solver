@@ -11,11 +11,13 @@ quality is only knowable after routing). No attempt depends on another, so a slo
 a pool of processes. Deterministic: bounded attempts keyed off ``seed``, and the same layout
 whatever the number of processes. Phase 2 layers a wall-clock anytime budget on top (return the best
 valid layout on timeout, never hang). An :data:`Effort` of ``minimal`` runs every stage once on
-small budgets instead, to check that a line solves rather than to find its best layout.
+small budgets instead, to check that a line solves rather than to find its best layout. The fast
+path (``optimize=False``) is one constructive placement, or one ``minimal`` attempt on a line with
+ME blocks to lay (:func:`fast_falls_back`).
 """
 
 from __future__ import annotations
 
-from .core import Effort, solve
+from .core import Effort, fast_falls_back, solve
 
-__all__ = ["Effort", "solve"]
+__all__ = ["Effort", "fast_falls_back", "solve"]

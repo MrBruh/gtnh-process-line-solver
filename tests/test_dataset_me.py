@@ -179,6 +179,10 @@ def test_every_device_has_a_name() -> None:
     assert set(me.DEVICE_NAMES) == set(MEDeviceKind)
 
 
+def test_every_cable_kind_has_a_name() -> None:
+    assert set(me.CABLE_NAMES) == set(MECableKind)
+
+
 def test_colour_ordinals() -> None:
     """Spike 7.3: White 0 through Black 15, Fluix (AE2's Transparent) 16."""
     assert [c.ordinal for c in AEColor] == list(range(17))

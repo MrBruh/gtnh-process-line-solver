@@ -1,0 +1,17 @@
+{
+  "source": "FML.ItemData of the 2.9.0-beta-3 world the AE2 goldens were saved in (saves/New World/level.dat), items only, cut to the ones the goldens and the tests name",
+  "items": {
+    "appliedenergistics2:item.ItemMultiPart": 4631,
+    "appliedenergistics2:item.ItemMultiMaterial": 4630,
+    "appliedenergistics2:item.ItemBasicStorageCell.1k": 4604,
+    "ae2fc:part_fluid_import": 4653,
+    "ae2fc:part_fluid_export": 4654,
+    "ae2fc:part_fluid_storage_bus": 4655,
+    "gregtech:gt.metaitem.01": 7639,
+    "minecraft:cobblestone": 4,
+    "minecraft:sand": 12,
+    "ae2fc:part_fluid_interface": 4650,
+    "minecraft:gravel": 13,
+    "minecraft:stone": 1
+  }
+}
