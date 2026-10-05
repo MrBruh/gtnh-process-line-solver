@@ -34,14 +34,36 @@ straight into the network (spike 4.5), so what an interface moves is what GT pus
   and a single block's item auto-output every output stack on each completion, so neither bounds it;
 - a **GT ME hatch** flushes its buffer every 41 ticks (:data:`GT_ME_HATCHES`); its stocking input
   hatches hold nothing and draw from network stock, so only that stock and power bound them.
+
+**A network's power** (spike 6) is :func:`network_ae_per_tick`, then :func:`ae_to_eu`::
+
+    AE/t = ( idle                 1 a device, 3 a controller block; cables and an acceptor 0
+           + channelsByBlocks/128 tree_channel_load (twice the channels through every node), or
+                                  adhoc_channel_load (nodes x channels) with no controller
+           + items moved          endpoint_moves: one per item inserted or extracted
+           + 1000 mB charges )    fluid_operations_per_tick: one per started 1000 mB an operation moves
+           x 10                   USAGE_MULTIPLIER;  EU/t = AE/t / 2
+
+A network with no acceptor, controller or cell holds :data:`DEFAULT_GRID_BUFFER_AE`, less than one
+GT ME output bus flush costs (:func:`flush_ae`); an acceptor or a controller holds
+:data:`PROVIDER_BUFFER_AE`.
 """
 
 from __future__ import annotations
 
+import math
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
-from gtnh_solver.ir import Commodity, IODirection
-from gtnh_solver.ir.me import AEColor, MECableKind, MECards, MEDeviceKind, MEHatchPolicy
+from gtnh_solver.ir import Commodity, IODirection, Port
+from gtnh_solver.ir.me import (
+    AEColor,
+    MECableKind,
+    MECards,
+    MEDeviceKind,
+    MEEndpoint,
+    MEHatchPolicy,
+)
 
 from .voltage import VOLTAGE_BY_TIER
 
@@ -66,6 +88,13 @@ MB_PER_FLUID_OPERATION = 1000
 #: AE/t a network's channels cost, per channel per hop counted the way AE counts them (spike 6.2):
 #: the channels passing through every node and every connection, summed, over this.
 CHANNEL_LOAD_PER_AE = 128.0
+#: AE a grid holds when nothing in it stores energy (``EnergyGridCache.buffer``): all a network with
+#: no acceptor, controller or cell can spend in one tick (spike 6.3). The multiplier does not scale
+#: it.
+DEFAULT_GRID_BUFFER_AE = 1_000.0
+#: AE an Energy Acceptor or a controller block stores: its ``setInternalMaxPower(8000)`` times
+#: :data:`USAGE_MULTIPLIER` (spike 6.1).
+PROVIDER_BUFFER_AE = 8_000.0 * USAGE_MULTIPLIER
 
 # --- cables and channels (spike 1, 2) ------------------------------------------------------------
 
@@ -152,6 +181,9 @@ class GTMEHatch:
     commodity: Commodity
     direction: IODirection
     per_tick: float | None
+    #: What an output bus or hatch caches between flushes by default (items, mB), ``None`` for a
+    #: stocking hatch, which caches nothing (spike 5.3, 5.4).
+    capacity: int | None = None
 
 
 #: Ticks between an ME output bus's or hatch's flushes under continuous load (``tick >
@@ -173,6 +205,7 @@ GT_ME_HATCHES: dict[int, GTMEHatch] = {
             Commodity.ITEM,
             IODirection.OUTPUT,
             1600 / GT_ME_FLUSH_TICKS,
+            1600,
         ),
         GTMEHatch(
             2713,
@@ -183,6 +216,7 @@ GT_ME_HATCHES: dict[int, GTMEHatch] = {
             Commodity.FLUID,
             IODirection.OUTPUT,
             128000 / GT_ME_FLUSH_TICKS,
+            128000,
         ),
         GTMEHatch(
             2718,
@@ -434,6 +468,126 @@ def network_ae_per_tick(
 def ae_to_eu(ae: float) -> float:
     """GT EU that buys ``ae`` AE: an energy acceptor turns 1 EU into :data:`AE_PER_EU` AE."""
     return ae / AE_PER_EU
+
+
+def tree_channel_load(node_channels: Iterable[int]) -> int:
+    """``channelsByBlocks`` of a network whose channels come from a controller (its own, or the main
+    network's for an attached one), from the channels through each of its nodes (spike 6.2).
+
+    AE sums the channels through every node its pathing visits and through every connection it
+    visits (``PathingCalculation.propagateAssignments``). Each node hangs from exactly one
+    connection, its route toward the controller, and that connection carries the node's own count
+    (spike 2.3), so the sum is twice the nodes'. ``node_channels`` lists every node: a cable block's
+    channels, a channel device's 1, an Energy Acceptor's 0. A controller is not a node of the walk.
+    """
+    return 2 * sum(node_channels)
+
+
+def adhoc_channel_load(nodes: int, channels: int) -> int:
+    """``channelsByBlocks`` of an ad-hoc network: every node of the grid times its channels in use
+    (``PathGridCache.onUpdateTick``, spike 6.2)."""
+    return nodes * channels
+
+
+#: Ticks between the operations a fluid device moves in, where the device's own clock sets them: a
+#: fluid bus every :data:`BUS_PERIOD_TICKS` at the most (spike 4.1), a GT ME output hatch at each
+#: flush (spike 5.3). A device not listed is charged as if it moved every tick, the most often it
+#: can: GT's stocking input hatch extracts once per recipe, whose length a problem does not carry.
+FLUID_OPERATION_TICKS: dict[MEDeviceKind, int] = {
+    MEDeviceKind.FLUID_IMPORT_BUS: BUS_PERIOD_TICKS,
+    MEDeviceKind.FLUID_EXPORT_BUS: BUS_PERIOD_TICKS,
+    MEDeviceKind.GT_OUTPUT_HATCH_ME: GT_ME_FLUSH_TICKS,
+}
+#: The devices a fluid moves through without a charge: FC's dual interface ``fill`` injects a pushed
+#: fluid unpowered (``DualityFluidInterface.fill``, spike 4.6, 6.1).
+UNCHARGED_FLUID_DEVICES: frozenset[MEDeviceKind] = frozenset({MEDeviceKind.DUAL_INTERFACE})
+#: The storage buses. One is the network's storage, not a mover: what passes through it is charged
+#: to the device that inserts or extracts it.
+STORAGE_BUSES: frozenset[MEDeviceKind] = frozenset(
+    {MEDeviceKind.STORAGE_BUS, MEDeviceKind.FLUID_STORAGE_BUS}
+)
+#: Slack on a charge count, so float dust in ``rate x period`` never starts one more charge.
+_CHARGE_EPSILON = 1e-9
+
+
+def fluid_operations_per_tick(kind: MEDeviceKind, mb_per_tick: float) -> float:
+    """The 1000 mB charges per tick a ``kind`` device moving ``mb_per_tick`` starts (spike 6.1).
+
+    Each operation pays one charge for every started 1000 mB it moves, so a device that operates
+    every ``p`` ticks (:data:`FLUID_OPERATION_TICKS`, else every tick) pays ``ceil(mb_per_tick x p /
+    1000)`` every ``p`` ticks: a slow fluid still pays a whole charge per operation. A fluid pushed
+    into a dual interface pays none (:data:`UNCHARGED_FLUID_DEVICES`).
+    """
+    if mb_per_tick <= 0 or kind in UNCHARGED_FLUID_DEVICES:
+        return 0.0
+    period = FLUID_OPERATION_TICKS.get(kind, 1)
+    started = math.ceil(mb_per_tick * period / MB_PER_FLUID_OPERATION - _CHARGE_EPSILON)
+    return started / period
+
+
+def endpoint_moves(endpoint: MEEndpoint, ports: Mapping[str, Port]) -> tuple[float, float]:
+    """``(items per tick, 1000 mB charges per tick)`` one ME device moves into or out of its network.
+
+    Every item it inserts or extracts is one charge and every fluid move is charged by
+    :func:`fluid_operations_per_tick`, each port it serves at the endpoint's ``share`` of the port's
+    rate (``ports`` maps a port id to its port). So a net between two machines on one network costs
+    an insert and an extract per item, one the network supplies an extract only, and one it stores
+    an insert only. A storage bus moves nothing of its own (:data:`STORAGE_BUSES`), and a port whose
+    plan states no rate moves nothing here.
+    """
+    kind = endpoint.device.kind
+    items = fluid = 0.0
+    if kind in STORAGE_BUSES:
+        return items, fluid
+    for port_id in endpoint.ports:
+        port = ports.get(port_id)
+        if port is None or port.rate is None:
+            continue
+        rate = port.rate * endpoint.share
+        if port.commodity is Commodity.ITEM:
+            items += rate
+        elif port.commodity is Commodity.FLUID:
+            fluid += fluid_operations_per_tick(kind, rate)
+    return items, fluid
+
+
+def flush_ae(hatch: GTMEHatch) -> float:
+    """AE one full flush of a GT ME output bus or hatch costs: its default cache inserted in one
+    powered insert, in one tick (spike 5.3). 16,000 for the Output Bus (ME)'s 1,600 items, 1,280 for
+    the Output Hatch (ME)'s 128,000 mB; 0 for a stocking hatch, which caches nothing."""
+    if hatch.capacity is None:
+        return 0.0
+    if hatch.commodity is Commodity.ITEM:
+        charges = hatch.capacity * AE_PER_ITEM
+    else:
+        charges = math.ceil(hatch.capacity / MB_PER_FLUID_OPERATION) * AE_PER_FLUID_OPERATION
+    return charges * USAGE_MULTIPLIER
+
+
+#: The fewest cable blocks the adapter assumes between each ME device and its channel source when
+#: it rates an Energy Acceptor before any cable is laid (:func:`estimated_channel_load`; the adapter
+#: assumes the region's Manhattan diameter when that is longer). Generous on purpose: the validator
+#: holds the acceptor's draw to the figure the laid network really costs, so an estimate under it
+#: fails the layout, while one over it only sizes the power cable a little up.
+ESTIMATED_CABLE_HOPS = 16
+
+
+def estimated_channel_load(
+    devices: int, *, adhoc: bool, blocks: int = 0, hops: int = ESTIMATED_CABLE_HOPS
+) -> int:
+    """The ``channelsByBlocks`` a network of ``devices`` channel devices is rated for before its
+    cable is laid: an upper bound for any network whose every device's channel crosses at most
+    ``hops`` cable blocks.
+
+    With a controller that is :func:`tree_channel_load` over each device's node and the blocks on its
+    path, each carrying at most every channel; ad hoc, :func:`adhoc_channel_load` over the devices,
+    at most as many cables as their paths, and ``blocks`` block devices (an Energy Acceptor), times
+    every device's channel. The layout's own figure is computed from the cable it lays.
+    """
+    paths = devices * hops
+    if adhoc:
+        return adhoc_channel_load(devices + paths + blocks, devices)
+    return tree_channel_load((devices, paths))
 
 
 # --- choosing a port's device ----------------------------------------------------------------------

@@ -32,6 +32,7 @@ from gtnh_solver.ir import (
     MEMode,
     MENetworkSpec,
     MEPlan,
+    MEPower,
     MERole,
     MEStorage,
     NetList,
@@ -238,6 +239,38 @@ def test_sand_on_a_chests_subnet_reads_its_chests_through_storage_buses(
     roles = [(m.id, m.me_role) for m in problem.machines if m.me_role is not None]
     assert roles == [("me-controller:line", MERole.CONTROLLER)]
     assert _CHESTS_NOTE in capsys.readouterr().err.splitlines()
+
+
+def test_sand_on_a_link_subnet_powered_by_an_energy_acceptor(
+    solves: list[tuple[InputIR, LayoutResult]],
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    # #336: the adapter places an Energy Acceptor on sand's LV trunk, rated for an estimate of what
+    # the network draws, and the laid network stays under it; the layout printed on stdout reports
+    # the laid figure for a reader of the layout alone, and the run says where the power comes from.
+    listed = _listed(_SAND, capsys)
+    network = MENetworkSpec(id="line", mode=MEMode.SUBNET, power=MEPower.ACCEPTOR)
+    assert main([_SAND, "--me-plan", _plan_file(tmp_path, listed, network, {Commodity.ITEM})]) == 0
+    ((problem, layout),) = solves
+    _assert_laid_whole(problem, layout)
+    (acceptor,) = [m for m in problem.machines if m.me_role is MERole.ACCEPTOR]
+    assert (acceptor.id, acceptor.voltage_tier) == ("me-acceptor:line", "LV")
+    (metrics,) = layout.metrics.me
+    assert metrics.power is MEPower.ACCEPTOR
+    assert 0 < metrics.eu_per_tick <= acceptor.eut
+    assert (metrics.acceptor_eu_per_tick, metrics.acceptor_source) == (
+        acceptor.eut,
+        "power-source:LV",
+    )
+    assert metrics.acceptor_source_amps
+    printed = capsys.readouterr()
+    assert LayoutResult.model_validate_json(printed.out).metrics.me == [metrics]
+    assert any(
+        line.startswith("note: ME network line (subnet): its Energy Acceptor draws ")
+        and "feed power-source:LV no more than that" in line
+        for line in printed.err.splitlines()
+    )
 
 
 # ------------------------------------------------------------------ over budget

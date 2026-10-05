@@ -458,6 +458,26 @@ where load **sums** along shared segments (Steiner-tree-like):
   layout reserves **the source's front face as the external feed entry**: placement pins that
   face flush on the region boundary (validator-enforced), internal cables use the other five
   faces, and the builder runs power in through the wall the front touches.
+- **An Energy Acceptor takes its source's whole output (#336).** An ME network powered by the
+  line's own EU (below, "What an ME network draws") gets an AE2 Energy Acceptor, a machine on the
+  shared-amperage tree like any other. But an acceptor has **no amp cap and no voltage check**: it
+  accepts every whole amp its source offers until its network's storage is full (80,000 AE per
+  acceptor), so a network that starts empty pulls the source's full output, not its steady draw
+  (spike 6.3, `GTPowerSink`), and a GT cable carrying more than it is rated for burns. So the
+  cable from the source to an acceptor is sized for **the source's full output**: the whole amps
+  every connection on that source's net sums to at its delivered voltage, which is the amperage
+  the run tells the builder to feed that source (`system_io.power_amps_by_source`). The power
+  router loads the acceptor with that output in place of its own draw, and sizes no segment for
+  more than the source puts out, since a cable carries no more than its source emits: every
+  segment between the source and an acceptor is sized for the source's whole output, and every
+  other segment as before. An acceptor never taps the source's own cable block: it would draw
+  through no segment, and that block is built at its thickest cable, which nothing would size for
+  the whole output, so it lays a cable of its own (the validator refuses a root tap whose block is
+  built thinner than the output). The validator re-derives all of it on its own arithmetic. That holds
+  only while the source puts out what the run says, so the run tells the builder to feed it no
+  more (a battery buffer with more batteries than that would push its extra amps down the
+  acceptor's cable). The other way AE2 allows, a 1 A limit in front of the acceptor, is a block
+  this solver does not place.
 - **A crop card is an input on the edge too, through its Crop Manager (#282).** An arodoid crop
   card's `machineCount` is the number of crop sticks planted, never a machine count, and the field
   is not part of the line. So the field is not simulated: a card harvested by a Crop Manager (the
@@ -586,12 +606,12 @@ everything physically.
 
 A net on ME is built as AE2 instead of a pipe (#335). The adapter (`adapter/me_build.py`) gives
 each machine port on it an ME device and each network the blocks it needs of its own (dense attach
-stubs, links, a controller over 8 devices), and drops the boundary chests an attached or link
-network's storage replaces. Placement charges each device a face and a cell beside it, like a
+stubs, links, a controller over 8 devices, an Energy Acceptor when the line's own EU powers it,
+#336), and drops the boundary chests an attached or link network's storage replaces. Placement charges each device a face and a cell beside it, like a
 pipe's terminal, and pulls each network's machines together, stub included. The solver lays each
 network's cable after the pipes and before power (the router below); the CLI then says, per
-network, what its storage must supply, what lands there, and how many of the main network's
-channels it spends (`system_io`). The preview draws no ME block yet (#338), and the schematic
+network, what its storage must supply, what lands there, how many of the main network's channels
+it spends, and what it draws (`system_io`; "What an ME network draws" below). The preview draws no ME block yet (#338), and the schematic
 export leaves them out with a warning that counts them (#339).
 
 A single block's outputs can be split: one product on ME and the rest piped. Its auto-output face
@@ -669,6 +689,21 @@ its front. The validator builds that graph from the blocks, and:
    (spike 2.4); where blocks form a cycle, the validator counts every device AE could route through
    a block, which is sound for any order AE picks (spike 2.5).
 
+**Power**, by what the laid network draws (spike 6; "What an ME network draws" below):
+
+9. **A network on an Energy Acceptor gets what it draws.** Its acceptor is placed, reached by a
+   power cable, and rated (its `eut`) for at least the network's EU/t, which the validator computes
+   on its own from the blocks: the devices it places, and the channel term from its own pathing,
+   never the router's `me_channels`. Under `--me power` neither the cable nor the rating is
+   checked: the builder brings every machine's power, the acceptor's included. And its store must
+   hold one flush of each GT ME output bus or hatch at once, 16,000 AE for an Output Bus (ME),
+   where a grid with no acceptor, controller or cell holds only 1,000 (spike 5.3, 6.3); an
+   acceptor or a controller holds 80,000. An externally powered network is not judged: it draws on
+   the main network or through a quartz fiber, whose store the layout cannot see, and the run
+   tells the builder what that store must hold (below). A rating under the laid figure names the
+   acceptor: another placement, laying less cable, can meet it, so the solver ranks that layout as
+   one that left the acceptor's power net unrouted rather than as a bug.
+
 ### How the router lays an ME network (#334)
 
 `router/me.py` builds to those rules by laying each network as a **forest of trees**, one root per
@@ -699,6 +734,62 @@ adapter gives a single block an interface only when every output of the block ri
 network, so no pipe or auto-output competes for the face, and `output_faces` reads the face the
 interface works on as the block's auto-output face. The router still takes a pin per endpoint
 (`endpoint_faces`) for a caller that needs one.
+
+### What an ME network draws (#336)
+
+An AE2 network draws AE every tick, and the pack converts 1 EU into 2 AE (spike 6.1;
+`dataset/me.py`):
+
+    AE/t = (idle + channelsByBlocks / 128 + items moved + 1000 mB charges) x 10,   EU/t = AE/t / 2
+
+- **idle**: 1 AE/t for every device (a bus, an interface, a storage bus, a GT ME hatch) and 3 for
+  every controller block; cables and an acceptor draw none.
+- **the channel term** is not `channels / 128`: AE sums the channels through every node and through
+  every connection its pathing visits (spike 6.2). On a tree each node hangs from one connection,
+  which carries the node's own count, so that is twice the channels through every node (88 on the
+  spike 2.7 trace). Ad hoc it is every node times the channels in use.
+- **moves**: one charge for every item a device inserts or extracts, so a net between two machines
+  on one network pays an insert and an extract per item, one the network supplies an extract only,
+  and one it stores an insert only. A fluid pays one charge for every started 1000 mB of each
+  operation: a fluid bus operates every 5 ticks, an ME output hatch at each flush, anything else
+  is charged as if it moved every tick; a Dual Interface takes a pushed fluid free (spike 4.6).
+
+**How a network is powered** is the user's choice (`MENetworkSpec.power`). `external` leaves it to
+the builder: an attached network adds its draw to the main network's, and a subnet is fed through
+a quartz fiber from a network with power. `acceptor` gives a subnet an Energy Acceptor on the
+line's own EU: the adapter adds one per such network, at the line's highest powered tier (an
+acceptor takes any voltage, and the highest carries its draw in the fewest amps on the thinnest
+cable; never below LV), before the power synthesis, so it joins that tier's shared-amperage tree
+and is cabled for its source's whole output (above, "Power"). It is also a leaf of its network's
+tree, touched by one cable. **An attached network is refused an acceptor** (`MEPlanError`, exit
+2): it is part of the player's main network, which their base already powers, and an acceptor
+there would power the whole base and keep filling its storage from this line's supply.
+
+**The acceptor is rated before any cable is laid**, since the power synthesis sizes its draw then.
+Its `eut` is an upper bound on what the network draws: its devices idle and moving what their
+ports state, a controller's idle, and the channel term of a network in which every device's
+channel crosses as many cable blocks as the line's region is wide, high and deep together (its
+Manhattan diameter as the adapter first sizes it, never fewer than 16; `estimated_channel_load`).
+The router lays each device's cable as a shortest path from the cable already laid, so a channel
+goes further only where the halo forces a detour, and the validator holds the rating to what the
+laid network really draws, so that case fails the layout rather than passing it. The rating is
+not re-made from the laid network: the problem the caller holds would then disagree with the
+layout it was solved for. A generous rating costs little, since the highest tier carries it in
+few amps.
+
+**What a run reports is the laid figure**, from the cable the layout lays (each cable's channels,
+each device's one; `system_io.laid_me_ae_per_tick`). The CLI says it per network the way the
+builder supplies it: an attached network "adds X AE/t (Y EU/t) to your main network's power
+draw", an external subnet is to be fed it "through a quartz fiber", and an acceptor network's
+note gives the acceptor's draw and rating and tells the builder to feed its source no more than
+the amps its cable is sized for. An external subnet with no controller of its own, whose GT ME
+output flushes more at once than AE's 1,000 AE default buffer, is told the network powering it
+must store that much (`external_store_ae`); an attached network draws on the main network's
+controller and a subnet with a controller on its own, each holding 80,000 AE. For an attached
+network the figure is what it adds, short of the main network's own cable between its controller
+and the stub, which the layout cannot see. The layout carries the same per network in
+`LayoutMetrics.me` (docs/IR.md), since gtnh-solver-site reads only the layout: the draw, the
+store, and for an acceptor its rating, its source and the most amps to feed that source.
 
 ## Multiblocks
 

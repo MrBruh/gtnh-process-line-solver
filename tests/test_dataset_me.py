@@ -38,8 +38,16 @@ from gtnh_solver.dataset.me import (
     single_block_fluid_push_rate,
     super_speed_allowed,
 )
-from gtnh_solver.ir import Commodity, IODirection
-from gtnh_solver.ir.me import AEColor, MECableKind, MECards, MEDeviceKind, MEHatchPolicy
+from gtnh_solver.ir import Commodity, IODirection, Port
+from gtnh_solver.ir.me import (
+    AEColor,
+    MECableKind,
+    MECards,
+    MEDeviceKind,
+    MEDeviceSpec,
+    MEEndpoint,
+    MEHatchPolicy,
+)
 
 _MOVED = (Commodity.ITEM, Commodity.FLUID)
 _TIERS = ("ULV", "LV", "MV", "HV", "EV", "IV", "LuV", "ZPM", "UV", "UHV")
@@ -134,11 +142,14 @@ def test_every_hatch_kind_is_one_the_ir_knows() -> None:
 
 
 def test_power_figures() -> None:
-    """Spike 6.1: the pack's x10 usage multiplier and 2 AE per EU."""
+    """Spike 6.1: the pack's x10 usage multiplier and 2 AE per EU; spike 6.3: a grid with nothing
+    to store energy in holds 1,000 AE, and an acceptor or a controller 8,000 times the multiplier."""
     assert me.USAGE_MULTIPLIER == 10.0
     assert me.AE_PER_EU == 2.0
     assert me.DEFAULT_IDLE_AE == 1.0
     assert me.CONTROLLER_IDLE_AE == 3.0
+    assert me.DEFAULT_GRID_BUFFER_AE == 1_000
+    assert me.PROVIDER_BUFFER_AE == 80_000
 
 
 def test_item_identities() -> None:
@@ -285,6 +296,86 @@ def test_network_power_is_the_hand_trace() -> None:
     assert network_ae_per_tick(idle=0, items_per_tick=2) == pytest.approx(20)
     assert network_ae_per_tick(idle=0, fluid_operations_per_tick=0.5) == pytest.approx(5)
     assert me.ae_to_eu(120) == pytest.approx(60)
+
+
+def test_the_channel_term_is_twice_the_channels_through_every_node() -> None:
+    """Spike 2.7's controller trace, from its counts: D1, D2, D3 and S1 carry 8, S2 4, S3 0, the
+    eight granted buses 1 each and S3's starved bus 0. 44 through the nodes, and 44 through the
+    connections they hang from (C-D1 8 ... S2-S3 0, each bus's 1): 88, as AE sums them."""
+    nodes = [8, 8, 8, 8, 4, 0, *([1] * 8), 0]
+    assert me.tree_channel_load(nodes) == 88
+    assert network_ae_per_tick(idle=0, channel_load=me.tree_channel_load(nodes)) == 6.875
+
+
+def test_an_adhoc_network_pays_every_node_for_every_channel() -> None:
+    """Spike 2.7's ad-hoc trace: three smart cables and eight buses, all granted, so 11 nodes pay
+    for 8 channels each (``PathGridCache``: nodes x channels in use)."""
+    assert me.adhoc_channel_load(3 + 8, 8) == 88
+    assert me.adhoc_channel_load(12, 0) == 0  # a ninth bus takes every channel away
+
+
+@pytest.mark.parametrize(
+    ("kind", "mb_per_tick", "charges"),
+    [
+        # A fluid bus moves every 5 ticks: 500 mB an operation is one started bucket, 1500 two.
+        (MEDeviceKind.FLUID_EXPORT_BUS, 100, 0.2),
+        (MEDeviceKind.FLUID_IMPORT_BUS, 300, 0.4),
+        # An ME output hatch flushes every 41 ticks: 41 buckets a flush at 1000 mB/t.
+        (MEDeviceKind.GT_OUTPUT_HATCH_ME, 1000, 1.0),
+        # A stocking hatch's clock is its recipe, which a problem does not carry: every tick.
+        (MEDeviceKind.GT_STOCKING_INPUT_HATCH_ME, 50, 1.0),
+        # FC's dual interface takes a pushed fluid unpowered (spike 4.6).
+        (MEDeviceKind.DUAL_INTERFACE, 5000, 0.0),
+        (MEDeviceKind.FLUID_EXPORT_BUS, 0, 0.0),
+    ],
+)
+def test_a_fluid_move_pays_for_every_started_bucket_of_each_operation(
+    kind: MEDeviceKind, mb_per_tick: float, charges: float
+) -> None:
+    """Spike 6.1: ``ceil(amount / 1000)`` charges an operation, so a slow fluid still pays a whole
+    charge each time its device moves."""
+    assert me.fluid_operations_per_tick(kind, mb_per_tick) == pytest.approx(charges)
+
+
+def test_an_endpoint_moves_its_share_of_each_port_and_a_storage_bus_moves_nothing() -> None:
+    """Spike 6.1: one charge an item, whichever way it goes; the device that inserts or extracts
+    pays, never the storage bus the items pass through."""
+    ports = {
+        "in": Port(id="in", commodity=Commodity.ITEM, direction=IODirection.INPUT, rate=2.0),
+        "out": Port(id="out", commodity=Commodity.ITEM, direction=IODirection.OUTPUT, rate=1.0),
+        "oil": Port(id="oil", commodity=Commodity.FLUID, direction=IODirection.OUTPUT, rate=500),
+        "free": Port(id="free", commodity=Commodity.ITEM, direction=IODirection.INPUT),
+    }
+
+    def moves(kind: MEDeviceKind, *served: str, share: float = 1.0) -> tuple[float, float]:
+        spec = MEDeviceSpec(kind=kind)
+        endpoint = MEEndpoint(id="e", network="n", ports=served, device=spec, share=share)
+        return me.endpoint_moves(endpoint, ports)
+
+    assert moves(MEDeviceKind.EXPORT_BUS, "in", share=0.5) == (1.0, 0.0)  # half of a split port
+    assert moves(MEDeviceKind.DUAL_INTERFACE, "out", "oil") == (1.0, 0.0)  # the fluid goes free
+    assert moves(MEDeviceKind.FLUID_IMPORT_BUS, "oil") == pytest.approx((0.0, 0.6))
+    assert moves(MEDeviceKind.STORAGE_BUS, "in") == (0.0, 0.0)
+    assert moves(MEDeviceKind.EXPORT_BUS, "free") == (0.0, 0.0)  # no rate stated, none charged
+
+
+def test_one_output_bus_flush_costs_more_than_a_grid_with_no_store_holds() -> None:
+    """Spike 5.3 and 6.3: the Output Bus (ME) inserts its 1,600 items at once, 16,000 AE, which
+    only an acceptor, a controller or a cell can hold; the hatch's 128,000 mB is 128 buckets."""
+    assert me.flush_ae(GT_ME_HATCHES[2710]) == 16_000
+    assert me.flush_ae(GT_ME_HATCHES[2713]) == 1_280
+    assert me.flush_ae(GT_ME_HATCHES[2718]) == 0  # a stocking bus caches nothing
+    assert me.DEFAULT_GRID_BUFFER_AE < me.flush_ae(GT_ME_HATCHES[2710]) <= me.PROVIDER_BUFFER_AE
+
+
+def test_an_acceptor_is_rated_for_the_cable_it_assumes() -> None:
+    """The estimate before any cable is laid: each device's channel crosses ``hops`` blocks."""
+    assert me.ESTIMATED_CABLE_HOPS == 16
+    # With a controller: twice (the devices' own 10 + 10 paths of 16 cable blocks).
+    assert me.estimated_channel_load(10, adhoc=False) == 2 * (10 + 160)
+    assert me.estimated_channel_load(10, adhoc=False, hops=28) == 2 * (10 + 280)
+    # Ad hoc: 5 devices, 80 cables and the acceptor each pay for the 5 channels.
+    assert me.estimated_channel_load(5, adhoc=True, blocks=1) == (5 + 80 + 1) * 5
 
 
 # --- 3. the device choice --------------------------------------------------------------------------

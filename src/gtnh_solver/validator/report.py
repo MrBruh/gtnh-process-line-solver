@@ -153,6 +153,9 @@ class ViolationCode(str, Enum):
     ME_CABLE_OVERLOAD = "me_cable_overload"  # a block AE would route more channels through
     ME_ATTACH_BUDGET = "me_attach_budget"  # an attached network over the main network's budget
     ME_ADHOC_OVERFLOW = "me_adhoc_overflow"  # a controller-less network over 8 channel devices
+    # an acceptor network whose Energy Acceptor is missing, on no power cable or rated under the
+    # network's draw, or a network storing less than one GT ME output flush costs (#336)
+    ME_POWER_INSUFFICIENT = "me_power_insufficient"
 
 
 @dataclass(frozen=True)

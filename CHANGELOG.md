@@ -7,6 +7,31 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **An ME subnet can be powered by an Energy Acceptor on the line's own EU (#336).** Set an
+  `MEPlan` subnet's `power` to `acceptor` and the solve places an AE2 Energy Acceptor for it on
+  the line's highest powered tier, cabled into that tier's power like any machine and touched once
+  by the network's cable. An attached network is refused one (exit 2): your base powers your main
+  network. The acceptor's draw is rated before any cable is laid, as an upper bound, from the
+  network's devices, what they move and the channels they spend (AE2's own formula, channels
+  counted through every block and connection as AE2 counts them), each channel assumed to cross
+  the line's whole region. An acceptor takes every amp its source offers until its network is
+  full, so the cable from the source to it is sized for the source's whole output rather than the
+  acceptor's steady draw, never through the source's own cable block, and no cable for more than
+  its source puts out; feed that source no more than the run says.
+  The validator holds every layout to it: a new `me_power_insufficient` violation for an acceptor
+  network with no acceptor, none on a power cable, or one rated under what the laid network
+  draws, and for a network that cannot store one flush of its GT ME output buses (16,000 AE for an
+  Output Bus (ME), against the 1,000 AE a network with no acceptor or controller holds); under
+  `--me power` the acceptor's cable and rating are yours. An externally powered network is not
+  judged: an ad-hoc subnet fed through a quartz fiber is told how much the network powering it must
+  store for one flush.
+  Every run now says what each ME network draws, from the cable it lays: what an attached network
+  adds to your main network's power draw, what to feed an external subnet through a quartz fiber,
+  or what its acceptor draws. The layout carries the same per network in the new
+  `metrics.me` (additive, no contract bump: absent on a line with no ME network), with its
+  devices, channel budget, main-network channels, the store an external subnet needs, what its
+  storage supplies and takes in, and for an acceptor its rating, its power source and the most
+  amps to feed that source, for readers of the layout alone such as gtnh-solver-site.
 - **Nets on ME are built (#335).** A solve with nets on ME now lays each ME network: the ME
   device each port needs (an export or import bus, an interface or Dual Interface, or one of GT's
   ME hatches on a multiblock), the AE2 cable joining them as a tree, and the blocks the network

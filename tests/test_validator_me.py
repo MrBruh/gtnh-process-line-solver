@@ -25,15 +25,17 @@ from gtnh_solver.ir import (
     MEMode,
     MENetworkLayout,
     MENetworkSpec,
+    MEPower,
     Placement,
 )
 from gtnh_solver.validator import me as vme
 from gtnh_solver.validator import validate
-from gtnh_solver.validator.report import ViolationCode
+from gtnh_solver.validator.report import Violation, ViolationCode
 from tests._helpers import property_examples
 from tests._me_fixtures import (
     MAIN,
     SUB,
+    acceptor_comb,
     attached_line,
     cable,
     comb,
@@ -76,8 +78,19 @@ def _cables(layout: LayoutResult, cables: list[MECableCell]) -> LayoutResult:
         lambda: comb(8, mode=MEMode.SUBNET, with_controller=True),
         gt_hatch_line,
         lambda: gt_hatch_line(normal=True),
+        acceptor_comb,
+        lambda: acceptor_comb(with_controller=True),
     ],
-    ids=["attached", "comb8", "adhoc8", "controller8", "gt_hatch", "normal_hatch"],
+    ids=[
+        "attached",
+        "comb8",
+        "adhoc8",
+        "controller8",
+        "gt_hatch",
+        "normal_hatch",
+        "adhoc_acceptor",
+        "controller_acceptor",
+    ],
 )
 def test_a_build_by_the_rules_validates(build: object) -> None:
     problem, layout = build()  # type: ignore[operator]
@@ -542,3 +555,112 @@ def test_the_me_gate_reports_but_never_raises(
     )
     report = validate(problem, _with_network(layout, built))
     assert isinstance(report.ok, bool)
+
+
+# ------------------------------------------------------------------ rule 9: power (#336)
+
+
+@pytest.mark.parametrize(
+    ("with_controller", "draw"),
+    [(True, 26.46875), (False, 11.703125)],
+    ids=["tree", "adhoc"],
+)
+def test_an_acceptor_rated_for_what_its_network_draws_passes_and_under_it_is_starved(
+    with_controller: bool, draw: float
+) -> None:
+    # The fixture's hand trace: the network draws exactly ``draw`` EU/t (acceptor_comb).
+    assert validate(*acceptor_comb(with_controller=with_controller, eut=draw)).ok
+    problem, layout = acceptor_comb(with_controller=with_controller, eut=draw - 0.01)
+    (violation,) = validate(problem, layout).violations
+    assert violation.code is ViolationCode.ME_POWER_INSUFFICIENT
+    assert violation.machine_id == "acc"  # a placement laying less cable mends it
+    assert f"({draw:g} EU/t)" in violation.message
+
+
+def test_the_power_gate_counts_channels_from_the_blocks_not_the_routers_count() -> None:
+    # The cables' ``me_channels`` are the router's bookkeeping; the gate runs AE's own pathing.
+    problem, layout = acceptor_comb(with_controller=True, eut=26.46875)
+    network = _network(layout, SUB)
+    for channels in (0, 8):
+        counted = [c.model_copy(update={"me_channels": channels}) for c in network.cables]
+        recounted = _with_network(layout, network.model_copy(update={"cables": counted}))
+        assert validate(problem, recounted).ok
+
+
+def test_an_acceptor_no_power_cable_reaches_is_starved() -> None:
+    problem, layout = acceptor_comb()
+    codes = _codes(problem, layout.model_copy(update={"routes": []}))
+    assert codes == {ViolationCode.ME_POWER_INSUFFICIENT, ViolationCode.MISSING_CONNECTION}
+
+
+def test_an_acceptor_network_with_no_acceptor_placed_is_starved() -> None:
+    problem, layout = acceptor_comb()
+    unplaced = layout.model_copy(
+        update={
+            "placements": [p for p in layout.placements if p.machine_id != "acc"],
+            "routes": [],
+        }
+    )
+    report = validate(problem, unplaced)
+    starved = [v for v in report.violations if v.code is ViolationCode.ME_POWER_INSUFFICIENT]
+    assert len(starved) == 1
+    assert "none is placed" in starved[0].message
+
+
+def test_power_left_to_the_builder_is_neither_cabled_nor_rated() -> None:
+    # Under ``--me power`` no source or cable is laid for any machine: the acceptor is fed by
+    # whatever the builder brings, like the rest of the line, so neither its cable nor its rating
+    # (here far under the network's 11.7 EU/t) means anything to check.
+    problem, layout = acceptor_comb(eut=1.0)
+    external = problem.model_copy(
+        update={
+            "me": problem.me.model_copy(update={"power_external": True}),
+            "machines": [m for m in problem.machines if m.id != "src"],
+            "nets": [n for n in problem.nets if n.id != "power:LV"],
+        }
+    )
+    unpowered = layout.model_copy(
+        update={
+            "placements": [p for p in layout.placements if p.machine_id != "src"],
+            "routes": [],
+        }
+    )
+    assert validate(external, unpowered).ok
+
+
+def test_an_output_bus_flush_needs_an_energy_store_on_an_acceptor_network() -> None:
+    # An Output Bus (ME) flushes 16,000 AE at once (spike 5.3). With no acceptor or controller the
+    # network holds only AE's 1,000 AE default buffer (spike 6.3), so most of every flush stays put.
+    problem, layout = gt_hatch_line(subnet=True)
+    spec = problem.me.networks[0].model_copy(update={"power": MEPower.ACCEPTOR})
+    starved = problem.model_copy(update={"me": MEConfig(networks=[spec])})
+    messages = [
+        v.message
+        for v in validate(starved, layout).violations
+        if v.code is ViolationCode.ME_POWER_INSUFFICIENT
+    ]
+    assert len(messages) == 2  # no acceptor placed, and nothing stores a flush
+    assert any("stores 1000 AE, less than the 16000 AE" in m for m in messages)
+
+
+def test_an_externally_powered_flush_is_not_judged() -> None:
+    # The main network, or the network behind a quartz fiber, is the store, which the layout cannot
+    # see: no violation (the run tells the builder what it must hold, test_system_io).
+    assert validate(*gt_hatch_line()).ok
+    assert validate(*gt_hatch_line(subnet=True)).ok
+
+
+def test_the_channel_term_is_the_spike_trace() -> None:
+    """Spike 2.7's controller trace with its starved ninth bus left off: D1, D2, D3 and S1 carry 8,
+    S2 4, S3 0 and each bus 1, through every node and the connection it hangs from: 88."""
+    dense, smart, part = (vme._DENSE, 32, False), (vme._PREFERRED, 8, False), (vme._OTHER, 8, True)
+    spec = {"C": (vme._OTHER, 0, False), "D1": dense, "D2": dense, "D3": dense}
+    spec |= {"S1": smart, "S2": smart, "S3": smart}
+    buses = {f"S{s}b{i}": part for s in (1, 2) for i in range(4)}
+    spec |= buses
+    links = [("C", "D1"), ("D1", "D2"), ("D2", "D3"), ("D3", "S1"), ("S1", "S2"), ("S2", "S3")]
+    links += [(name[:2], name) for name in buses]
+    graph, _ = _graph(spec, links)
+    out: list[Violation] = []
+    assert vme._check_piece(graph, list(range(len(graph.nodes))), MAIN, False, out) == 88
+    assert out == []

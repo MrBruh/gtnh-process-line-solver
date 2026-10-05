@@ -141,6 +141,7 @@ from gtnh_solver.router import (
     route_me,
     route_power,
 )
+from gtnh_solver.system_io import me_network_metrics
 from gtnh_solver.validator import ValidationReport, ViolationCode, validate
 
 from ._structure import footprint_and_layers, me_cable_cells, structure_cells, structure_quality
@@ -618,8 +619,17 @@ def _assemble(
     placement_list, power, me = laid.placements, laid.power, laid.me
     me_cells = me_cable_cells(me.networks)
     routes = [*routing.routes, *power.routes]
-    # footprint/layers for every result
+    # footprint/layers for every result, and what each ME network asks of the player (#336)
     metrics = _layout_metrics(problem, placement_list, routes, me_cells)
+    if problem.me.networks:
+        drawn = LayoutResult(
+            status=LayoutStatus.VALID,
+            seed=seed,
+            placements=placement_list,
+            routes=routes,
+            me_networks=list(me.networks),
+        )
+        metrics = metrics.model_copy(update={"me": me_network_metrics(problem, drawn)})
 
     # Which casing cell each connection turns into a hatch, plus the maintenance hatch and muffler
     # that belong to no net. Last, because a muffler needs empty air in front of it and only a
@@ -789,13 +799,17 @@ def _starved_machines(report: ValidationReport) -> tuple[str, ...]:
     A starve is distance-driven: the cable loss over the run this placement implied leaves the
     machine's hatches unable to take in its ``eut``, though every segment is correctly thick. So
     a placement with the machine nearer its source is the fix, and the attempt ranks as having left
-    its power net unrouted. Any *other* violation alongside it is a genuine placer/router bug,
-    which no placement fixes - so a mixed report names no net, as before.
+    its power net unrouted. An Energy Acceptor rated under what its ME network's cable costs
+    (``ME_POWER_INSUFFICIENT`` naming it, #336) is the same kind of defect: its rating is an
+    estimate made before any cable was laid, and a placement laying less cable meets it. Any
+    *other* violation alongside it is a genuine placer/router bug, which no placement fixes - so a
+    mixed report names no net, as before.
     """
     starved = tuple(
         v.machine_id
         for v in report.violations
-        if v.code is ViolationCode.POWER_SUPPLY_INSUFFICIENT and v.machine_id is not None
+        if v.code in (ViolationCode.POWER_SUPPLY_INSUFFICIENT, ViolationCode.ME_POWER_INSUFFICIENT)
+        and v.machine_id is not None
     )
     return starved if len(starved) == len(report.violations) else ()
 
@@ -811,7 +825,8 @@ def _validation_infeasibility(report: ValidationReport, starved: tuple[str, ...]
             detail="; ".join(v.message for v in report.violations),
             suggested_relaxation=(
                 "shorten the power run - a smaller bounding region, or a power source nearer the "
-                "load; no attempt could place these machines close enough"
+                "load; no attempt could place these machines close enough (for an Energy "
+                "Acceptor, no attempt laid its ME network's cable as short as it was rated for)"
             ),
         )
     codes = ", ".join(v.code.value for v in report.violations)

@@ -18,15 +18,19 @@ from gtnh_solver.ir import (
     CellBox,
     Commodity,
     InputIR,
+    LayoutMetrics,
     LayoutResult,
     Machine,
     MEConfig,
     MEDeviceKind,
     MEDeviceSpec,
+    MEFlowMetrics,
     MEMode,
     MENetworkLayout,
+    MENetworkMetrics,
     MENetworkSpec,
     MEPlan,
+    MEPower,
     MEStorage,
     Net,
     NetEnd,
@@ -272,3 +276,36 @@ def test_the_contracts_round_trip_and_refuse_older_versions() -> None:
         InputIR.model_validate(problem.model_dump() | {"version": 8})
     with pytest.raises(ValidationError, match="contract version 4"):
         LayoutResult.model_validate(layout.model_dump() | {"version": 4})
+
+
+def test_a_layout_reports_each_network_only_when_it_has_one() -> None:
+    # LayoutMetrics.me is additive (#336): left out of the dump while empty, so a layout with no ME
+    # network serializes as it did before, and carried through a round trip when it has one.
+    assert "me" not in LayoutMetrics(footprint=4).model_dump(mode="json")
+    stone = MEFlowMetrics(resources=("stone",), commodity=Commodity.ITEM, rate=0.1)
+    network = MENetworkMetrics(
+        id="main",
+        mode=MEMode.ATTACHED,
+        colour=AEColor.FLUIX,
+        power=MEPower.ACCEPTOR,
+        devices=6,
+        channel_budget=32,
+        main_channels=6,
+        ae_per_tick=71.9,
+        eu_per_tick=35.95,
+        acceptor_eu_per_tick=40.0,
+        acceptor_source="power-source:HV",
+        acceptor_source_amps=1,
+        supplies=[stone],
+    )
+    metrics = LayoutMetrics(footprint=4, me=[network])
+    dumped = metrics.model_dump(mode="json")["me"][0]
+    assert (dumped["power"], dumped["acceptor_source_amps"]) == ("acceptor", 1)
+    assert LayoutMetrics.model_validate_json(metrics.model_dump_json()) == metrics
+
+
+def test_a_networks_report_never_names_power_as_a_flow() -> None:
+    with pytest.raises(ValidationError, match="never power"):
+        MEFlowMetrics(resources=("eu",), commodity=Commodity.POWER, rate=1.0)
+    with pytest.raises(ValidationError):
+        MEFlowMetrics(resources=(), commodity=Commodity.ITEM, rate=1.0)

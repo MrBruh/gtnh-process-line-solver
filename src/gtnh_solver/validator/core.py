@@ -54,13 +54,18 @@ What is checked now (needs only the IR):
   it rounded up to whole amps per segment (machines buffer packets, so per-machine rounding would
   overstate), its cable must be at least that thick (which also rejects a load over the 16x cap),
   and a run whose loss drops the delivered voltage to <= 0 is rejected as unpowerable at its tier;
-  an off-ladder (unknown) tier cannot be verified and is reported as such. A power source's front face
+  an off-ladder (unknown) tier cannot be verified and is reported as such. An Energy Acceptor
+  accepts every whole amp its source offers (#336), so its load is the source's whole output (the
+  whole amps every connection's steady load sums to), and no segment is held to more than that. A
+  power source's front face
   is its reserved external-feed face and must lie flush on the region boundary (power enters
   from outside the structure; the front-face rule already keeps internal cables off it).
   ME (AE2) networks - ``validator.me``: each ME endpoint built once as specified, every device
   where its job is and keeping up, every ME cable on free ground, and AE's own graph rebuilt from
   the blocks: one network a piece, a channel source for each, and AE's channel pathing within every
-  block's capacity, the attach budget and the ad-hoc limit (#333).
+  block's capacity, the attach budget and the ad-hoc limit (#333); and an acceptor-powered
+  network's acceptor placed, cabled and rated for what the laid network draws, with a store for
+  one GT ME output flush (#336).
   item throughput - every item pipe block makes at least as many insertions per service interval
   as the deliveries GT charges it for (``_check_item_pipe_throughput``): the route's streams are
   re-derived from its own geometry by GT's nearest-first rule, each charged to the blocks GT's
@@ -103,6 +108,7 @@ from gtnh_solver.ir import (
     IODirection,
     LayoutResult,
     Machine,
+    MERole,
     Net,
     PipeFamily,
     PlacedHatch,
@@ -1956,6 +1962,7 @@ def _check_power_amperage(
         # fractional per machine (packets amortize through the machine buffer) and round up to whole
         # amps only per segment below. Re-derived from geometry, independent of the router's numbers.
         amp_at: dict[Cell, float] = defaultdict(float)
+        takes_all: list[tuple[Cell, float]] = []  # each Energy Acceptor's cell and its own load
         uncheckable = False
         for t in r.terminals:
             if port_dir.get((t.machine_id, t.port_id)) is not IODirection.INPUT:
@@ -1994,6 +2001,10 @@ def _check_power_amperage(
             # ``volts``. Summed over the machine's hatches - which may sit on different routes at
             # different distances - this is the power that reaches it.
             port_cap = _port_max_amps(machine, t.port_id)
+            if machine.me_role is MERole.ACCEPTOR:
+                # An Energy Acceptor takes every whole amp offered (spike 6.3): no ceiling starves
+                # it, and whether its network gets enough is ME_POWER_INSUFFICIENT's to say.
+                port_cap = math.inf
             if port_cap is None:
                 # A connection whose ceiling is unknown cannot be measured, and a machine judged on
                 # its OTHER connections alone would be reported starved on part of its intake. So
@@ -2015,14 +2026,42 @@ def _check_power_amperage(
                 uncheckable = True
                 break
             amp_at[cell] += port_eut / volts
+            if machine.me_role is MERole.ACCEPTOR:
+                takes_all.append((cell, port_eut / volts))
         if uncheckable:
             unverified.update(t.machine_id for t in r.terminals)
             continue
+
+        # An Energy Acceptor accepts every whole amp its source offers until its network's
+        # storage is full (spike 6.3), so the cable to it carries the source's whole output: the
+        # whole amps every connection's steady load sums to, what the builder feeds that source.
+        # Its branch is loaded with that output in place of its own draw, and no segment can carry
+        # more than the source puts out. The validator's own reading, not the router's helper.
+        output = _required_amps(sum(amp_at.values()))
+        for cell, own in takes_all:
+            amp_at[cell] += output - own
+        # One on the source's own cable block draws through no segment at all, only through that
+        # block, which is built at the thickest cable touching it (route_blocks): that cable must
+        # carry the whole output too.
+        if any(depth[cell] == 0 for cell, _ in takes_all):
+            root = source_cells[0]
+            root_cable = max(t for (a, b), t in zip(edges, tps, strict=True) if root in (a, b))
+            if root_cable < output:
+                out.append(
+                    Violation(
+                        ViolationCode.POWER_THICKNESS_INSUFFICIENT,
+                        f"power route for net {r.net_id!r}: an Energy Acceptor taps the source's "
+                        f"own cable block, built {root_cable}x, short of the {output} amps it "
+                        f"draws",
+                    )
+                )
 
         loads = _subtree_loads(order, parent, depth, edges, amp_at)
         for seg_idx, (load, thick) in enumerate(zip(loads, tps, strict=True)):
             # a cable is rated in whole packets, so round the summed load up to whole amps
             req = _required_amps(load)
+            if takes_all:
+                req = min(req, output)
             if thick < req:
                 out.append(
                     Violation(

@@ -26,8 +26,18 @@ rebuilt here from the blocks the layout places, and AE's own channel pathing is 
         |                                                                     ME_ADHOC_OVERFLOW
         |-- pathing       AE's 3-queue BFS: every block carries no more      ME_CABLE_OVERLOAD
         |                 devices than its capacity; the budget holds        ME_ATTACH_BUDGET
+        |-- power         an acceptor network's acceptor placed, cabled and  ME_POWER_INSUFFICIENT
+        |                 rated for what the laid network draws; a store
+        |                 holding one GT ME output flush (spike 6, #336)
         v
     violations, plus two abstentions: nets on ME nothing serves yet, subnet blocks on the edge
+    (an externally powered network's store lies outside the build: the gate does not judge it, and
+    the run tells the builder what it must hold, ``system_io.MENetworkIO.external_store_ae``)
+
+**What a network draws is the gate's own figure** (spike 6): idle draws and moves from the devices
+the layout places, and the channel term from the pathing below, twice the channels through every
+node AE reaches (each hangs from one connection carrying the same), never the cables'
+``me_channels`` the router wrote.
 
 **The pathing is exact on a tree and sound on a cycle** (spike 2.4, 2.5). AE hands out channels
 by a BFS from the channel sources over three queues (dense, then other cables, then everything
@@ -44,24 +54,37 @@ block within capacity here is within capacity in game.
 from __future__ import annotations
 
 import heapq
+import math
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from gtnh_solver.dataset.me import (
     ADHOC_MAX_DEVICES,
+    AE_PER_EU,
+    AE_PER_FLUID_OPERATION,
+    AE_PER_ITEM,
     BUS_PERIOD_TICKS,
     CABLE_CAPACITY,
+    CHANNEL_LOAD_PER_AE,
+    CONTROLLER_IDLE_AE,
+    DEFAULT_GRID_BUFFER_AE,
+    DEFAULT_IDLE_AE,
     DEVICE_CAPACITY,
     FLUID_ACCELERATION,
     FLUID_BASE_MB,
+    FLUID_OPERATION_TICKS,
     FLUID_SUPER_SPEED,
     GT_ME_HATCHES,
     ITEM_ACCELERATION,
     ITEM_SUPER_SPEED,
+    MB_PER_FLUID_OPERATION,
     OUTPUT_BUS_PUSH_TICKS,
     PART_CABLES,
+    PROVIDER_BUFFER_AE,
+    UNCHARGED_FLUID_DEVICES,
     UPGRADE_SLOTS,
+    USAGE_MULTIPLIER,
 )
 from gtnh_solver.dataset.voltage import VOLTAGE_BY_TIER
 from gtnh_solver.ir import (
@@ -78,6 +101,7 @@ from gtnh_solver.ir import (
     MEMode,
     MENetworkLayout,
     MEPlacedDevice,
+    MEPower,
     MERole,
     Placement,
     Port,
@@ -232,7 +256,8 @@ def check_me(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> ME
     _check_rates(problem, machines, devices, out)
     _check_ground(problem, layout, machines, placements, out)
     graph = _build_graph(problem, layout, machines, placements, built)
-    _check_channels(problem, graph, out)
+    grids = _check_channels(problem, graph, out)
+    _check_power(problem, layout, machines, placements, devices, grids, out)
     return MEAbstentions(
         unbuilt_me_nets=_unbuilt(problem),
         boundary_exposure=_exposure(problem, layout, machines, placements),
@@ -834,9 +859,24 @@ def _components(graph: _Graph) -> list[list[int]]:
     return pieces
 
 
-def _check_channels(problem: InputIR, graph: _Graph, out: list[Violation]) -> None:
-    """Rules 5 to 8 over the graph AE builds."""
+@dataclass
+class _Grid:
+    """What AE's graph says about one network's power (spike 6): ``channel_load`` is AE's
+    ``channelsByBlocks`` over its pieces, ``devices`` its channel devices, ``controllers`` its
+    controller blocks, and ``stores`` the blocks that store energy for it (acceptors and
+    controllers)."""
+
+    channel_load: int = 0
+    devices: int = 0
+    controllers: int = 0
+    stores: int = 0
+
+
+def _check_channels(problem: InputIR, graph: _Graph, out: list[Violation]) -> dict[str, _Grid]:
+    """Rules 5 to 8 over the graph AE builds; returns each network's :class:`_Grid` (a network
+    merged with another is AE's one grid, already a violation, and gets none)."""
     specs = {n.id: n for n in problem.me.networks}
+    grids: dict[str, _Grid] = {}
     pieces = _components(graph)
     pieces_of: dict[str, list[list[int]]] = defaultdict(list)
     for piece in pieces:
@@ -877,8 +917,14 @@ def _check_channels(problem: InputIR, graph: _Graph, out: list[Violation]) -> No
                     f"over its budget of {spec.me_channel_budget}",
                 )
             )
+        grid = grids[network_id] = _Grid(
+            devices=devices,
+            controllers=sum(graph.nodes[i].controller for p in network_pieces for i in p),
+            stores=sum(graph.nodes[i].key[0] == "block" for p in network_pieces for i in p),
+        )
         for piece in network_pieces:
-            _check_piece(graph, piece, network_id, attached, out)
+            grid.channel_load += _check_piece(graph, piece, network_id, attached, out)
+    return grids
 
 
 def _check_piece(
@@ -887,8 +933,9 @@ def _check_piece(
     network_id: str,
     attached: bool,
     out: list[Violation],
-) -> None:
-    """One connected piece of one network: where its channels come from, and whether they fit."""
+) -> int:
+    """One connected piece of one network: where its channels come from, and whether they fit.
+    Returns the piece's ``channelsByBlocks``, AE's channel term (spike 6.2)."""
     nodes = graph.nodes
     controllers = [i for i in piece if nodes[i].controller]
     devices = [i for i in piece if nodes[i].channel]
@@ -901,7 +948,9 @@ def _check_piece(
                     f"devices; with more than {ADHOC_MAX_DEVICES} AE gives none of them a channel",
                 )
             )
-        return  # ad hoc: no topology check at all (spike 2.6)
+            return 0
+        # ad hoc: no topology check at all (spike 2.6), and every node pays for every channel
+        return len(piece) * len(devices)
     if controllers and (attached or not _one_cluster(graph, controllers)):
         why = (
             "is attached to the main network, whose own controller it would conflict with"
@@ -914,7 +963,7 @@ def _check_piece(
                 f"ME network {network_id!r} {why}, so AE gives every device 0 channels (spike 2.2)",
             )
         )
-        return
+        return 0
     roots = [i for i in piece if nodes[i].root] if attached else []
     labels, parents = _pathing(graph, piece, roots, controllers)
     starved = [i for i in devices if i not in labels]
@@ -944,6 +993,10 @@ def _check_piece(
                     ),
                 )
             )
+    # Every node AE reaches carries the channels below it, and so does the one connection it hangs
+    # from (spike 6.2): twice the sum. Where ties leave a choice of parent, ``below`` counts every
+    # device a node could carry, which errs high, the safe way for a power figure.
+    return 2 * sum(len(below.get(i, ())) for i in labels)
 
 
 def _one_cluster(graph: _Graph, controllers: list[int]) -> bool:
@@ -1085,3 +1138,144 @@ def _subtree_devices(
             mine |= below.get(child, set())
         below[node] = mine
     return below
+
+
+# --- 7. power ---------------------------------------------------------------------------------------
+
+
+def _check_power(
+    problem: InputIR,
+    layout: LayoutResult,
+    machines: Mapping[str, Machine],
+    placements: Mapping[str, Placement],
+    devices: Mapping[tuple[str, str], tuple[MEPlacedDevice, MEEndpoint, str]],
+    grids: Mapping[str, _Grid],
+    out: list[Violation],
+) -> None:
+    """Rule 9: a network on an Energy Acceptor gets the power it draws, and can pay for one flush
+    of its GT ME output buses and hatches (spike 6). An externally powered network draws on the
+    main network or through a quartz fiber, whose store the layout cannot see, so it is not judged
+    here; under ``--me power`` no rating is either, since the builder brings every machine's
+    power."""
+    flush: dict[str, float] = defaultdict(float)
+    for device, _, network_id in devices.values():
+        flush[network_id] = max(flush[network_id], _flush_ae(device))
+    reached = _powered_machines(problem, layout)
+    for spec in problem.me.networks:
+        grid = grids.get(spec.id)
+        if grid is None or spec.power is MEPower.EXTERNAL:
+            continue  # not built, merged with another network (already a violation), or external
+        ae = _network_ae(problem, machines, devices, grid, spec.id)
+        acceptors = [
+            m
+            for m in machines.values()
+            if m.me_role is MERole.ACCEPTOR and m.me_network == spec.id and m.id in placements
+        ]
+        if ae > 0 and not acceptors:
+            _starved(
+                out,
+                f"ME network {spec.id!r} is powered by an Energy Acceptor, but none is "
+                f"placed for it, so nothing feeds its {ae:g} AE/t",
+            )
+        # A network drawing nothing (no device) needs no power; under --me power every machine's
+        # power, an acceptor's included, is the builder's to bring.
+        if ae > 0 and not problem.me.power_external:
+            for acceptor in acceptors:
+                if acceptor.id not in reached:
+                    _starved(
+                        out,
+                        f"Energy Acceptor {acceptor.id!r} of ME network {spec.id!r} is on no power "
+                        f"cable, so nothing feeds the network's {ae:g} AE/t",
+                    )
+        rated = math.fsum(a.eut for a in acceptors)
+        needed = ae / AE_PER_EU
+        if acceptors and not problem.me.power_external and rated + _POWER_EPSILON < needed:
+            _starved(
+                out,
+                f"ME network {spec.id!r} draws {ae:g} AE/t ({needed:g} EU/t), but its Energy "
+                f"Acceptor(s) are rated for {rated:g} EU/t",
+                acceptors[0].id,
+            )
+        stored = PROVIDER_BUFFER_AE * grid.stores if grid.stores else DEFAULT_GRID_BUFFER_AE
+        if flush[spec.id] > stored:
+            _starved(
+                out,
+                f"ME network {spec.id!r} stores {stored:g} AE, less than the {flush[spec.id]:g} AE "
+                f"one flush of its GT ME output bus or hatch costs, so most of each flush stays "
+                f"cached",
+            )
+
+
+#: Slack on comparing a rated draw to the figure the network needs, for float dust.
+_POWER_EPSILON = 1e-9
+
+
+def _starved(out: list[Violation], message: str, machine_id: str | None = None) -> None:
+    """An ``ME_POWER_INSUFFICIENT``. ``machine_id`` names the acceptor only when its rating falls
+    short of the cable laid: the one case another placement, laying less cable, can mend."""
+    out.append(Violation(ViolationCode.ME_POWER_INSUFFICIENT, message, machine_id=machine_id))
+
+
+def _powered_machines(problem: InputIR, layout: LayoutResult) -> set[str]:
+    """The machines a power cable reaches: a power INPUT port's terminal on one of the routed power
+    trees' own cells."""
+    inputs = {(m.id, p.id) for m in problem.machines for p in m.power_input_ports}
+    reached: set[str] = set()
+    for route in layout.routes:
+        if route.commodity is not Commodity.POWER:
+            continue
+        cells = route.cells()
+        for terminal in route.terminals:
+            if (terminal.machine_id, terminal.port_id) in inputs and (
+                terminal.cell.as_tuple() in cells
+            ):
+                reached.add(terminal.machine_id)
+    return reached
+
+
+def _network_ae(
+    problem: InputIR,
+    machines: Mapping[str, Machine],
+    devices: Mapping[tuple[str, str], tuple[MEPlacedDevice, MEEndpoint, str]],
+    grid: _Grid,
+    network_id: str,
+) -> float:
+    """AE/t ``network_id`` draws, on the validator's own arithmetic over the rule DATA (spike 6.1,
+    6.2): its devices' and controllers' idle draws, the channel term AE's pathing gives
+    (:func:`_check_piece`), and a charge for every item and every started 1000 mB each placed
+    device moves, all times the pack's multiplier."""
+    items = fluid = 0.0
+    for device, endpoint, owner in devices.values():
+        machine = machines.get(device.machine_id)
+        if owner != network_id or machine is None or device.kind in _STORAGE_BUSES:
+            continue  # a storage bus is the network's storage: the mover pays
+        for port in _ports(machine, endpoint):
+            if port.rate is None or port.rate <= 0:
+                continue
+            rate = port.rate * endpoint.share
+            if port.commodity is Commodity.ITEM:
+                items += rate
+            elif device.kind not in UNCHARGED_FLUID_DEVICES:
+                period = FLUID_OPERATION_TICKS.get(device.kind, 1)
+                fluid += math.ceil(rate * period / MB_PER_FLUID_OPERATION - _POWER_EPSILON) / period
+    nominal = (
+        grid.devices * DEFAULT_IDLE_AE
+        + grid.controllers * CONTROLLER_IDLE_AE
+        + grid.channel_load / CHANNEL_LOAD_PER_AE
+        + items * AE_PER_ITEM
+        + fluid * AE_PER_FLUID_OPERATION
+    )
+    return nominal * USAGE_MULTIPLIER
+
+
+def _flush_ae(device: MEPlacedDevice) -> float:
+    """AE one full flush of ``device`` costs if it is a GT ME output bus or hatch, else 0: its
+    default cache inserted at once (spike 5.3), on the validator's own arithmetic."""
+    hatch = GT_ME_HATCHES.get(device.gt_mid) if device.gt_mid is not None else None
+    if hatch is None or hatch.capacity is None:
+        return 0.0
+    if hatch.commodity is Commodity.ITEM:
+        charges = hatch.capacity * AE_PER_ITEM
+    else:
+        charges = math.ceil(hatch.capacity / MB_PER_FLUID_OPERATION) * AE_PER_FLUID_OPERATION
+    return charges * USAGE_MULTIPLIER

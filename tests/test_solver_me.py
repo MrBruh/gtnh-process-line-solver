@@ -31,6 +31,7 @@ from gtnh_solver.ir import (
     MEDeviceKind,
     MEMode,
     MENetworkSpec,
+    MEPower,
     Net,
     Placement,
     Terminal,
@@ -39,10 +40,13 @@ from gtnh_solver.placement import place
 from gtnh_solver.router import MERouteResult, claims_by_machine, place_hatches, route
 from gtnh_solver.solver import core, solve
 from gtnh_solver.solver._structure import me_cable_cells, structure_cells, structure_quality
-from gtnh_solver.validator import validate
+from gtnh_solver.validator import ValidationReport, ViolationCode, validate
+from gtnh_solver.validator.report import Violation
 from tests._helpers import consumer, net, producer
 from tests._me_fixtures import (
     MAIN,
+    SUB,
+    acceptor_comb,
     attached_line,
     coord,
     endpoint,
@@ -90,6 +94,36 @@ def test_a_line_with_no_me_network_lays_none() -> None:
     layout = solve(problem, seed=0)
     assert layout.status is LayoutStatus.VALID
     assert layout.me_networks == []
+    # Nor does it report one: the layout dumps exactly as before ME power (#336).
+    assert "me" not in layout.metrics.model_dump(mode="json")
+
+
+def test_an_acceptor_network_solves_with_its_acceptor_on_the_lines_power() -> None:
+    # The fixture's line, given room to lay it in: the acceptor is placed and cabled like any
+    # machine drawing EU, and the layout reports what the network it feeds draws (#336).
+    problem, _ = acceptor_comb()
+    problem = problem.model_copy(update={"bounding_region": CellBox(sx=8, sy=2, sz=8)})
+    layout = solve(problem, seed=0)
+    assert layout.status is LayoutStatus.VALID, layout.infeasibility
+    assert validate(problem, layout).ok
+    (metrics,) = layout.metrics.me
+    assert (metrics.id, metrics.power) == (SUB, MEPower.ACCEPTOR)
+    assert 0 < metrics.eu_per_tick <= 30.0
+    (cable,) = [r for r in layout.routes if r.net_id == "power:LV"]
+    assert "acc" in {t.machine_id for t in cable.terminals}
+
+
+def test_an_acceptor_rated_under_its_laid_cable_ranks_like_a_starved_machine() -> None:
+    # Its rating was set before any cable was laid, so another placement laying less cable meets
+    # it: the attempt names the acceptor, as it would a machine too far from its source.
+    rated_under = Violation(ViolationCode.ME_POWER_INSUFFICIENT, "rated under", machine_id="acc")
+    assert core._starved_machines(ValidationReport((rated_under,))) == ("acc",)
+    # A missing acceptor or a missing flush store names no machine: no placement mends those.
+    unnamed = Violation(ViolationCode.ME_POWER_INSUFFICIENT, "none placed")
+    assert core._starved_machines(ValidationReport((unnamed,))) == ()
+    # Nor does a report with anything else wrong beside it.
+    other = Violation(ViolationCode.MISSING_CONNECTION, "unrouted")
+    assert core._starved_machines(ValidationReport((rated_under, other))) == ()
 
 
 # ------------------------------------------------------------------ the two orders

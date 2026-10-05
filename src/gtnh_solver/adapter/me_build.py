@@ -15,8 +15,25 @@ validator checks (docs/DOMAIN.md, "What a valid ME build is")::
         |                       on its auto-output face (a Dual Interface with fluids), unless a
         |                       pipe already holds that face, when import buses pull them
         |-- infrastructure      attached: dense stubs, a channel budget's worth at most;
-        v                       subnet: a link per commodity (link storage), a controller above 8
+        |                       subnet: a link per commodity (link storage), a controller above 8;
+        v                       acceptor power: an Energy Acceptor, rated for the network's draw
     Machine.me_endpoints, Machine.me_role       (or InfeasiblePlanError / MEPlanError)
+
+**An acceptor network's Energy Acceptor** is a machine drawing EU like any other, so the power
+synthesis that runs next gives it a power port and puts it on the shared-amperage tree of the line's
+highest tier: an acceptor takes any voltage (spike 6.3), and the highest draws the fewest amps on
+the thinnest cable. Only a subnet takes one: an attached network is part of the player's main
+network, which their base already powers, and an acceptor there would power the whole base and keep
+filling its storage from the line's supply, so that choice is refused (:class:`MEPlanError`).
+
+Its ``eut`` must be known before any cable is laid, so it is an UPPER BOUND on the network's draw
+(``dataset.me``, spike 6): its devices' idle draws, a controller's, what they move, and the channel
+term of a network whose every device's channel crosses as many cable blocks as the line's region
+is wide, high and deep together (its Manhattan diameter, never under ``ESTIMATED_CABLE_HOPS``). The
+router lays each device's cable as a shortest path from the cable already laid, so only a detour
+the halo forces takes a channel further than that; the validator holds the rating to what the laid
+network really draws, so such a layout is caught. Too high a rating only thickens a power cable,
+and on the highest tier barely that.
 
 **Ports on ME are never shared with a pipe.** Every net on one machine port must ride the same
 network: a port's device takes all of its output, or feeds all of its input, so a port half piped
@@ -39,11 +56,19 @@ from collections.abc import Collection, Mapping, Sequence
 
 from gtnh_solver.dataset.me import (
     ADHOC_MAX_DEVICES,
+    CONTROLLER_IDLE_AE,
+    DEFAULT_IDLE_AE,
+    ESTIMATED_CABLE_HOPS,
     MEDeviceChoice,
     MEShortfall,
+    ae_to_eu,
+    endpoint_moves,
+    estimated_channel_load,
     me_devices_for,
+    network_ae_per_tick,
     single_block_fluid_push_rate,
 )
+from gtnh_solver.dataset.voltage import VOLTAGE_BY_TIER
 from gtnh_solver.ir import (
     Commodity,
     FaceSpec,
@@ -59,6 +84,7 @@ from gtnh_solver.ir import (
     MEHatchPolicy,
     MEMode,
     MENetworkSpec,
+    MEPower,
     MERole,
     MEStorage,
     Net,
@@ -79,7 +105,9 @@ _LINK_BUS = {
     Commodity.FLUID: MEDeviceKind.FLUID_STORAGE_BUS,
 }
 _BUFFER_TYPE = {Commodity.ITEM: "Super Chest", Commodity.FLUID: "Super Tank"}
-#: The tier an infrastructure block is listed at: none draws power (an acceptor's arrives in #336).
+_ACCEPTOR_TYPE = "ME Energy Acceptor"
+#: The tier an infrastructure block is listed at. None of them draws power but an acceptor, which
+#: takes the line's highest powered tier and never one below this (:func:`_acceptor_tier`).
 _INFRA_TIER = "LV"
 
 
@@ -92,10 +120,13 @@ def build_me(
     multiblock_ids: Collection[str],
     line_tier: str,
     recipe_ticks: Mapping[str, float],
+    cable_hops: int = 0,
 ) -> tuple[list[Machine], list[Net]]:
     """``machines`` and ``nets`` with the ME side the choice stamped on ``nets`` needs (module
     docstring). ``storage_ids`` are the boundary storages and output buffers; ``recipe_ticks`` the
-    shortest recipe each machine runs, which bounds a single block's fluid push. Raises
+    shortest recipe each machine runs, which bounds a single block's fluid push; ``cable_hops``
+    the most cable blocks an Energy Acceptor's rating assumes each device's channel crosses, the
+    region's Manhattan diameter (never fewer than ``ESTIMATED_CABLE_HOPS``). Raises
     :class:`MEPlanError` for a port shared by a pipe and ME or by two networks, and
     :class:`InfeasiblePlanError` for a port no device keeps up with or a network over its budget."""
     if not any(net.rides_me for net in nets):
@@ -121,7 +152,8 @@ def build_me(
         m.model_copy(update={"me_endpoints": tuple(endpoints[m.id])}) if endpoints.get(m.id) else m
         for m in machines
     ]
-    return machines + _infrastructure(machines, nets, me), nets
+    hops = max(ESTIMATED_CABLE_HOPS, cable_hops)
+    return machines + _infrastructure(machines, nets, me, hops), nets
 
 
 # --- boundary storages -----------------------------------------------------------------------------
@@ -393,9 +425,10 @@ def _auto_output(
 
 
 def _infrastructure(
-    machines: Sequence[Machine], nets: Sequence[Net], me: MEConfig
+    machines: Sequence[Machine], nets: Sequence[Net], me: MEConfig, hops: int
 ) -> list[Machine]:
-    """Each network's stubs, links and controller (module docstring)."""
+    """Each network's stubs, links, controller and acceptor (module docstring); ``hops`` is the
+    cable an acceptor's rating assumes between each device and its channel source."""
     devices: dict[str, int] = defaultdict(int)
     for machine in machines:
         for endpoint in machine.me_endpoints:
@@ -409,32 +442,103 @@ def _infrastructure(
         count = devices.get(spec.id, 0)
         if count == 0 and spec.id not in carried:
             continue
-        if spec.mode is MEMode.ATTACHED:
-            if count > spec.me_channel_budget:
-                raise InfeasiblePlanError(
-                    Infeasibility(
-                        constraint="me_channel_budget",
-                        detail=(
-                            f"ME network {spec.id!r} needs {count} channels of your main network, "
-                            f"over the {spec.me_channel_budget} you said it has free"
-                        ),
-                        suggested_relaxation=(
-                            "make it a subnet (its own controller, one channel of your main "
-                            "network through a link), raise the budget, or keep some nets piped"
-                        ),
-                    )
+        blocks = _network_blocks(spec, count, carried.get(spec.id, set()))
+        if spec.power is MEPower.ACCEPTOR:
+            if spec.mode is MEMode.ATTACHED:
+                raise MEPlanError(
+                    f"ME network {spec.id!r} is attached to your main network, which your base "
+                    f"already powers: an Energy Acceptor there would power your whole base and "
+                    f"keep filling its storage from this line's supply. Leave its power external, "
+                    f"or make it a subnet to give it an acceptor of its own"
                 )
-            stubs = max(1, math.ceil(count / _STUB_CHANNELS))
-            out.extend(_stub(spec, i) for i in range(stubs))
-            continue
-        if spec.storage is MEStorage.LINK:
-            for commodity in (Commodity.ITEM, Commodity.FLUID):
-                if commodity in carried.get(spec.id, set()):
-                    out.append(_link(spec, commodity))
-                    count += 1
-        if count > ADHOC_MAX_DEVICES:
-            out.append(_controller(spec))
+            blocks.append(_acceptor(spec, [*machines, *blocks], hops))
+        out.extend(blocks)
     return out
+
+
+def _network_blocks(
+    spec: MENetworkSpec, count: int, carried: Collection[Commodity]
+) -> list[Machine]:
+    """One network's stubs, links and controller, for the ``count`` devices its machines need."""
+    if spec.mode is MEMode.ATTACHED:
+        if count > spec.me_channel_budget:
+            raise InfeasiblePlanError(
+                Infeasibility(
+                    constraint="me_channel_budget",
+                    detail=(
+                        f"ME network {spec.id!r} needs {count} channels of your main network, "
+                        f"over the {spec.me_channel_budget} you said it has free"
+                    ),
+                    suggested_relaxation=(
+                        "make it a subnet (its own controller, one channel of your main "
+                        "network through a link), raise the budget, or keep some nets piped"
+                    ),
+                )
+            )
+        stubs = max(1, math.ceil(count / _STUB_CHANNELS))
+        return [_stub(spec, i) for i in range(stubs)]
+    out: list[Machine] = []
+    if spec.storage is MEStorage.LINK:
+        for commodity in (Commodity.ITEM, Commodity.FLUID):
+            if commodity in carried:
+                out.append(_link(spec, commodity))
+                count += 1
+    if count > ADHOC_MAX_DEVICES:
+        out.append(_controller(spec))
+    return out
+
+
+def _acceptor(spec: MENetworkSpec, machines: Sequence[Machine], hops: int) -> Machine:
+    """The Energy Acceptor powering ``spec`` from the line's EU supply, rated for an estimate of the
+    network's draw (module docstring), each device's channel crossing ``hops`` cable blocks.
+    ``machines`` are every machine of the line, its other infrastructure blocks included: their
+    endpoints on ``spec`` are its devices."""
+    devices = 0
+    items = fluid = 0.0
+    for machine in machines:
+        ports = {p.id: p for p in machine.faces.ports}
+        for endpoint in machine.me_endpoints:
+            if endpoint.network != spec.id:
+                continue
+            devices += 1
+            moved, charges = endpoint_moves(endpoint, ports)
+            items += moved
+            fluid += charges
+    controllers = sum(
+        1 for m in machines if m.me_role is MERole.CONTROLLER and m.me_network == spec.id
+    )
+    adhoc = spec.mode is MEMode.SUBNET and not controllers
+    ae = network_ae_per_tick(
+        idle=devices * DEFAULT_IDLE_AE + controllers * CONTROLLER_IDLE_AE,
+        # The acceptor is a node of the grid too, which an ad-hoc channel term counts.
+        channel_load=estimated_channel_load(devices, adhoc=adhoc, blocks=1, hops=hops),
+        items_per_tick=items,
+        fluid_operations_per_tick=fluid,
+    )
+    return Machine(
+        id=f"me-acceptor:{spec.id}",
+        type=_ACCEPTOR_TYPE,
+        voltage_tier=_acceptor_tier(machines),
+        eut=ae_to_eu(ae),
+        orientation_options=list(HORIZONTAL_FACINGS_ORDERED),
+        me_role=MERole.ACCEPTOR,
+        me_network=spec.id,
+    )
+
+
+def _acceptor_tier(machines: Sequence[Machine]) -> str:
+    """The tier an Energy Acceptor is supplied at: the highest any powered machine of the line runs
+    at. An acceptor takes any voltage (spike 6.3), and the highest tier carries its draw in the
+    fewest amps on the thinnest cable the line already lays (a maintainer decision on #336);
+    :data:`_INFRA_TIER` for a line with no powered machine above it on the ladder."""
+    ladder = list(VOLTAGE_BY_TIER)
+    floor = ladder.index(_INFRA_TIER)
+    tiers = [
+        ladder.index(m.voltage_tier)
+        for m in machines
+        if m.eut > 0 and m.me_role is None and m.voltage_tier in VOLTAGE_BY_TIER
+    ]
+    return ladder[max([floor, *tiers])]
 
 
 def _stub(spec: MENetworkSpec, index: int) -> Machine:

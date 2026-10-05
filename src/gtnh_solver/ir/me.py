@@ -183,7 +183,8 @@ class MEPower(str, Enum):
 
     - ``external`` (the default): the builder supplies it (a quartz fiber, the main network); the
       run reports what it draws;
-    - ``acceptor``: an Energy Acceptor on the line's own EU supply.
+    - ``acceptor``: an Energy Acceptor on the line's own EU supply. A subnet's choice only: the
+      adapter refuses it on an attached network, which the player's base already powers.
     """
 
     EXTERNAL = "external"
@@ -521,3 +522,61 @@ class MENetworkLayout(StrictModel):
         if len(cells) != len(set(cells)):
             raise ValueError(f"ME network {self.id!r} lists a cable cell twice")
         return self
+
+
+# --- what a layout reports about each network (LayoutResult v5, additive, #336) ---------------------
+
+
+class MEFlowMetrics(FrozenModel):
+    """One resource an ME network's storage must supply, or takes in: its ids (a merged run's
+    several), what kind it is, and the summed rate of the nets that move it (items/t, mB/t)."""
+
+    resources: tuple[str, ...] = Field(min_length=1)
+    commodity: Commodity
+    rate: float = Field(ge=0.0)
+
+    @field_validator("commodity")
+    @classmethod
+    def _check_commodity(cls, value: Commodity) -> Commodity:
+        if value is Commodity.POWER:
+            raise ValueError("ME stores items and fluids, never power")
+        return value
+
+
+class MENetworkMetrics(StrictModel):
+    """What one ME network of a layout asks of the player, for a reader of the layout alone.
+
+    ``devices`` are its channel devices, each spending one channel; ``channel_budget`` what they
+    may spend: an attached network's free channels on the main network, an ad-hoc subnet's 8, and
+    ``None`` for a subnet with a controller, whose cables each carry 32 from it. ``main_channels``
+    are the main network's channels it spends (an attached network one a device, a link subnet one
+    a link). ``ae_per_tick`` is what it draws, computed from the cable the layout lays (spike 6),
+    and ``eu_per_tick`` the same in EU: what an Energy Acceptor takes for it, or what the main
+    network (attached) or a quartz fiber (an external subnet) must carry. ``external_store_ae`` is
+    what the network powering it from outside must keep stored for one flush of its GT ME output
+    buses and hatches, 0 when its own blocks or the main network's controller hold it.
+
+    On an acceptor network, ``acceptor_eu_per_tick`` is what its Energy Acceptor is rated for (the
+    draw the line's power is sized for, at least ``eu_per_tick``), ``acceptor_source`` the power
+    source feeding it, and ``acceptor_source_amps`` that source's whole output: an acceptor takes
+    every amp offered until its network is full, so its cable is sized for exactly that, and the
+    builder must feed the source **no more** than ``acceptor_source_amps``. ``None`` where there is
+    no acceptor, or no cable reaches it. ``supplies`` must be in its storage for the line to run,
+    and ``absorbs`` lands there.
+    """
+
+    id: str = Field(min_length=1)
+    mode: MEMode
+    colour: AEColor
+    power: MEPower
+    devices: int = Field(ge=0)
+    channel_budget: int | None = Field(default=None, ge=0)
+    main_channels: int = Field(ge=0)
+    ae_per_tick: float = Field(ge=0.0)
+    eu_per_tick: float = Field(ge=0.0)
+    external_store_ae: float = Field(default=0.0, ge=0.0)
+    acceptor_eu_per_tick: float | None = Field(default=None, ge=0.0)
+    acceptor_source: str | None = Field(default=None, min_length=1)
+    acceptor_source_amps: int | None = Field(default=None, ge=1)
+    supplies: list[MEFlowMetrics] = Field(default_factory=list)
+    absorbs: list[MEFlowMetrics] = Field(default_factory=list)

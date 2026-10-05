@@ -87,6 +87,7 @@ from gtnh_solver.adapter import (
 from gtnh_solver.adapter.core import _effective_handler, _recipe_map
 from gtnh_solver.dataset import PhysicalDataset, list_versions, load_physical_dataset
 from gtnh_solver.dataset.coverage import format_report, measure
+from gtnh_solver.dataset.me import PROVIDER_BUFFER_AE
 from gtnh_solver.dataset.roots import extractor_hint, resolve_dataset_path
 from gtnh_solver.ir import (
     Commodity,
@@ -96,6 +97,7 @@ from gtnh_solver.ir import (
     LayoutStatus,
     MEMode,
     MEPlan,
+    MEPower,
 )
 from gtnh_solver.previewer import write_preview
 from gtnh_solver.previewer.jar import cached_jar
@@ -103,7 +105,7 @@ from gtnh_solver.previewer.textures import TextureManifest
 from gtnh_solver.schematic import SchematicError, item_ids, read_schematic, write_schematic
 from gtnh_solver.schematic.read import Schematic
 from gtnh_solver.solver import Effort, solve
-from gtnh_solver.system_io import RATE_STEM, resource_label, system_io
+from gtnh_solver.system_io import RATE_STEM, MENetworkIO, resource_label, system_io
 from gtnh_solver.validator import validate
 
 #: Every GT machine, cable and pipe is a meta of this one block; an mID IS its meta.
@@ -368,11 +370,12 @@ def _note_me_networks(problem: InputIR, layout: LayoutResult) -> None:
 
     What its storage must hold for the line to run and what lands there, and how many of the main
     network's channels it spends: none of it is in the build, so a builder who reads only the
-    layout would not know to stock the main network or keep channels free for it. One line per
-    network, on stderr like the other notes.
+    layout would not know to stock the main network or keep channels free for it. Then what it
+    draws (#336, :func:`_me_power_note`). Two lines per network, on stderr like the other notes.
     """
     names = problem.resource_names
-    for network in system_io(problem, layout).me:
+    io = system_io(problem, layout)
+    for network in io.me:
         if network.mode is MEMode.ATTACHED:
             channels = f"{network.main_channels} channel(s) of your main network"
         elif network.main_channels:
@@ -392,6 +395,46 @@ def _note_me_networks(problem: InputIR, layout: LayoutResult) -> None:
             f"note: ME network {network.network} ({network.mode.value}): {'; '.join(parts)}",
             file=sys.stderr,
         )
+        power = _me_power_note(problem, network)
+        print(
+            f"note: ME network {network.network} ({network.mode.value}): {power}", file=sys.stderr
+        )
+
+
+def _me_power_note(problem: InputIR, network: MENetworkIO) -> str:
+    """What one ME network draws, said the way the builder supplies it (spike 6): an attached
+    network adds to the main network's draw, an external subnet is fed through a quartz fiber, and
+    an acceptor network's Energy Acceptor draws from the line's own power, taking every amp its
+    source offers until it is full, which is why its cable is sized for that source's whole output.
+    An external subnet that leans on the network powering it for a GT ME output flush is told to
+    keep that much stored there (``MENetworkIO.external_store_ae``)."""
+    draw = f"{network.ae_per_tick:g} AE/t ({network.eu_per_tick:g} EU/t)"
+    if network.power is MEPower.ACCEPTOR:
+        rated = f"rated {network.acceptor_eu_per_tick or 0:g} EU/t"
+        source = network.acceptor_source
+        if source is None:
+            return (
+                f"its Energy Acceptor draws {draw}, {rated}, from your own power supply"
+                if problem.me.power_external
+                else f"its Energy Acceptor draws {draw}, {rated}, but no power cable reaches it"
+            )
+        amps = network.acceptor_source_amps
+        full = f"{amps} A" if amps is not None else "output"
+        return (
+            f"its Energy Acceptor draws {draw}, {rated}, on {source}; it takes every amp offered "
+            f"until it stores {PROVIDER_BUFFER_AE:,.0f} AE, so its cable is sized for {source}'s "
+            f"full {full}: feed {source} no more than that"
+        )
+    if network.mode is MEMode.ATTACHED:
+        said = f"adds {draw} to your main network's power draw"
+    else:
+        said = f"feed it {draw} through a quartz fiber from a powered network"
+    if network.external_store_ae:
+        said += (
+            f"; one GT ME output flush spends {network.external_store_ae:,.0f} AE at once, so the "
+            f"network powering it must store that much"
+        )
+    return said
 
 
 def _note_rounds(args: argparse.Namespace, layout: LayoutResult) -> None:

@@ -18,6 +18,13 @@ both sides agree. A test breaks one rule at a time on top of them and expects it
 - :func:`gt_hatch_line`: a multiblock whose product leaves through GT's Output Bus (ME), front
   facing a cable from the stub; or, with ``normal=True``, a normal output bus with an interface part
   in front of it.
+- :func:`acceptor_comb`: a two-machine subnet :func:`comb` powered by an Energy Acceptor on the
+  row's east end, fed by a power source through two blocks of cable (#336)::
+
+      z=0   (C)  m0    .    .    .    .    .        C: the controller, with ``with_controller``
+      z=1    c  c(2)  c(0) c(0) c(0) c(0)  ACC      c: a smart cable carrying both channels
+      z=2    .   m1    .    .    .    .    #        #: LV cable, from the source's east face to the
+      z=3    .    .    .    .   SRC   #    #           acceptor's south face; SRC's front faces south
 """
 
 from __future__ import annotations
@@ -47,11 +54,15 @@ from gtnh_solver.ir import (
     MENetworkLayout,
     MENetworkSpec,
     MEPlacedDevice,
+    MEPower,
     MERole,
     Net,
     PlacedHatch,
     Placement,
     Port,
+    Route,
+    Segment,
+    Terminal,
 )
 
 MAIN = "main"
@@ -271,10 +282,12 @@ def comb(
     return problem, layout
 
 
-def gt_hatch_line(*, normal: bool = False) -> tuple[InputIR, LayoutResult]:
+def gt_hatch_line(*, normal: bool = False, subnet: bool = False) -> tuple[InputIR, LayoutResult]:
     """A 2x1x1 multiblock at (1, 0, 1) facing north, its product leaving through the casing cell at
     (1, 0, 1): GT's Output Bus (ME) with its front south onto a cable from the stub, or with
-    ``normal`` a normal output bus there and an interface part on that cable facing back at it."""
+    ``normal`` a normal output bus there and an interface part on that cable facing back at it.
+    With ``subnet`` the network is an orange ad-hoc subnet instead, its two cables smart and no
+    stub: nothing of its own stores energy for a flush."""
     if normal:
         out = endpoint("out", ("out",), MEDeviceKind.INTERFACE, hatch_kind="OutputBus")
     else:
@@ -295,11 +308,16 @@ def gt_hatch_line(*, normal: bool = False) -> tuple[InputIR, LayoutResult]:
         hatch_cells=2,
         me_endpoints=(out,),
     )
+    spec = (
+        MENetworkSpec(id=MAIN, mode=MEMode.SUBNET, colour=AEColor.ORANGE)
+        if subnet
+        else MENetworkSpec(id=MAIN, mode=MEMode.ATTACHED)
+    )
     problem = InputIR(
         bounding_region=CellBox(sx=5, sy=1, sz=4),
-        machines=[mb, stub()],
+        machines=[mb] if subnet else [mb, stub()],
         nets=[me_net("prod", ("mb", "out"))],
-        me=MEConfig(networks=[MENetworkSpec(id=MAIN, mode=MEMode.ATTACHED)]),
+        me=MEConfig(networks=[spec]),
     )
     built = (
         device("mb", out, (1, 0, 2), Facing.NORTH)
@@ -309,7 +327,10 @@ def gt_hatch_line(*, normal: bool = False) -> tuple[InputIR, LayoutResult]:
     layout = LayoutResult(
         status=LayoutStatus.VALID,
         seed=0,
-        placements=[at("stub", 0, 0, 2, Facing.WEST), at("mb", 1, 0, 1, Facing.NORTH)],
+        placements=[
+            *([] if subnet else [at("stub", 0, 0, 2, Facing.WEST)]),
+            at("mb", 1, 0, 1, Facing.NORTH),
+        ],
         hatches=[
             PlacedHatch(
                 machine_id="mb",
@@ -322,10 +343,96 @@ def gt_hatch_line(*, normal: bool = False) -> tuple[InputIR, LayoutResult]:
         me_networks=[
             MENetworkLayout(
                 id=MAIN,
-                colour=AEColor.FLUIX,
-                cables=[cable(0, 0, 2, MECableKind.DENSE), cable(1, 0, 2)],
+                colour=AEColor.ORANGE if subnet else AEColor.FLUIX,
+                cables=[
+                    cable(0, 0, 2, MECableKind.SMART if subnet else MECableKind.DENSE),
+                    cable(1, 0, 2),
+                ],
                 devices=[built],
             )
         ],
+    )
+    return problem, layout
+
+
+def acceptor_comb(
+    *, with_controller: bool = False, eut: float = 30.0
+) -> tuple[InputIR, LayoutResult]:
+    """A subnet :func:`comb` of two machines powered by an Energy Acceptor rated ``eut`` EU/t
+    (module docstring), its cables carrying the channels AE routes through them. Only a subnet
+    takes an acceptor: an attached network is the player's base's to power.
+
+    What the network draws, by hand (spike 6): two export buses idle at 1 AE/t each and extract
+    0.1 items/t each. Ad hoc, every node (six cables, two buses, the acceptor) pays for both
+    channels: 9 x 2 = 18, so (2 + 18/128 + 0.2) x 10 = 23.40625 AE/t, 11.703125 EU/t. With the
+    controller (3 AE/t idle), the channel term is twice the channels through every node, the root
+    cable and the cable holding both buses 2 each, the buses 1 each: 2 x 6 = 12, so (5 + 12/128 +
+    0.2) x 10 = 52.9375 AE/t, 26.46875 EU/t.
+    """
+    problem, layout = comb(2, mode=MEMode.SUBNET, with_controller=with_controller)
+    (network,) = layout.me_networks
+    spec = problem.me.networks[0].model_copy(update={"power": MEPower.ACCEPTOR})
+    power_in = Port(id="power:in", commodity=Commodity.POWER, direction=IODirection.INPUT)
+    acceptor = Machine(
+        id="acc",
+        type="ME Energy Acceptor",
+        voltage_tier="LV",
+        eut=eut,
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(ports=[power_in]),
+        me_role=MERole.ACCEPTOR,
+        me_network=network.id,
+    )
+    source = Machine(
+        id="src",
+        type="Power Source (LV)",
+        voltage_tier="LV",
+        orientation_options=[Facing.SOUTH],
+        faces=FaceSpec(
+            ports=[Port(id="power:out", commodity=Commodity.POWER, direction=IODirection.OUTPUT)]
+        ),
+    )
+    power = Net(
+        id="power:LV",
+        commodity=Commodity.POWER,
+        throughput=eut,
+        endpoints=[
+            MachineFaceRef(machine_id="src", port_id="power:out"),
+            MachineFaceRef(machine_id="acc", port_id="power:in"),
+        ],
+    )
+    problem = InputIR(
+        bounding_region=CellBox(sx=7, sy=1, sz=4),
+        machines=[*problem.machines, acceptor, source],
+        nets=[*problem.nets, power],
+        me=MEConfig(networks=[spec]),
+    )
+    # Both buses sit on the cable at x = 1, so the cells from the root to there carry both.
+    cables = [
+        c.model_copy(update={"me_channels": 2 if c.cell.x <= 1 else 0}) for c in network.cables
+    ]
+    route = Route(
+        net_id="power:LV",
+        commodity=Commodity.POWER,
+        terminals=[
+            Terminal(machine_id="src", port_id="power:out", face=Facing.EAST, cell=coord(5, 0, 3)),
+            Terminal(machine_id="acc", port_id="power:in", face=Facing.SOUTH, cell=coord(6, 0, 2)),
+        ],
+        segments=[
+            Segment(start=coord(5, 0, 3), end=coord(6, 0, 3), channel=0),
+            Segment(start=coord(6, 0, 3), end=coord(6, 0, 2), channel=0),
+        ],
+        thickness_per_segment=[1, 1],
+    )
+    layout = layout.model_copy(
+        update={
+            "placements": [
+                *layout.placements,
+                at("acc", 6, 0, 1, Facing.NORTH),
+                at("src", 4, 0, 3, Facing.SOUTH),
+            ],
+            "routes": [route],
+            "me_networks": [network.model_copy(update={"cables": cables})],
+        }
     )
     return problem, layout

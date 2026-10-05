@@ -21,22 +21,46 @@ formats it.
   channel devices it has, and how many channels of the player's main network it spends: an
   attached network one per device, a link subnet one per link, a chests subnet none. For an
   attached or link network that storage is the player's main network, which is outside the build,
-  so its stock is reported, never checked.
+  so its stock is reported, never checked. And what it draws (#336), from the cable the layout
+  lays (:func:`laid_me_ae_per_tick`, spike 6): what an attached network adds to the main network,
+  what a quartz fiber must carry to an external subnet, or what its Energy Acceptor takes from the
+  line's EU supply. The same figures go into the layout itself (``LayoutMetrics.me``, through
+  :func:`me_network_metrics`), for a reader that sees only the layout.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 
 from gtnh_solver.dataset import UnknownTierError, UnpowerableError, amp_load, whole_amps
+from gtnh_solver.dataset.me import (
+    ADHOC_MAX_DEVICES,
+    CONTROLLER_IDLE_AE,
+    DEFAULT_GRID_BUFFER_AE,
+    DEFAULT_IDLE_AE,
+    GT_ME_HATCHES,
+    adhoc_channel_load,
+    ae_to_eu,
+    endpoint_moves,
+    flush_ae,
+    network_ae_per_tick,
+    tree_channel_load,
+)
 from gtnh_solver.ir import (
+    AEColor,
     Commodity,
     InputIR,
     IODirection,
     LayoutResult,
+    MEFlowMetrics,
     MEMode,
+    MENetworkLayout,
+    MENetworkMetrics,
+    MENetworkSpec,
+    MEPower,
     MERole,
     Net,
     Port,
@@ -86,7 +110,20 @@ class MENetworkIO:
 
     ``supplies`` must be in the network's storage for the line to run, and ``absorbs`` lands there;
     for an attached or link network that storage is the player's main network. ``devices`` are its
-    channel devices, ``main_channels`` the main network's channels it spends.
+    channel devices, ``main_channels`` the main network's channels it spends, and
+    ``channel_budget`` what its devices may spend (``ir.MENetworkMetrics``).
+
+    ``ae_per_tick`` and ``eu_per_tick`` are what it draws, from the cable laid
+    (:func:`laid_me_ae_per_tick`). ``external_store_ae`` is what the network powering it from
+    outside must keep stored for one flush of its GT ME output buses and hatches (spike 5.3, 6.3):
+    the largest flush, when that is more than AE's 1,000 AE default buffer and nothing of its own
+    stores energy (an external subnet with no controller), else 0; an attached network draws on the
+    main network's controller, and an acceptor network on its acceptor, which the validator holds.
+    On an acceptor network, ``acceptor_eu_per_tick`` is what its Energy Acceptor is rated for, an
+    upper bound set before the cable was laid that the validator holds to be enough,
+    ``acceptor_source`` the power source whose cable reaches it, and ``acceptor_source_amps`` that
+    source's whole output, which the acceptor's cable is sized for: the most the builder may feed
+    it, since the acceptor takes every amp offered.
     """
 
     network: str
@@ -95,6 +132,15 @@ class MENetworkIO:
     absorbs: tuple[MEFlow, ...]
     devices: int
     main_channels: int
+    colour: AEColor = AEColor.FLUIX
+    power: MEPower = MEPower.EXTERNAL
+    channel_budget: int | None = None
+    ae_per_tick: float = 0.0
+    eu_per_tick: float = 0.0
+    external_store_ae: float = 0.0
+    acceptor_eu_per_tick: float | None = None
+    acceptor_source: str | None = None
+    acceptor_source_amps: int | None = None
 
 
 @dataclass(frozen=True)
@@ -294,15 +340,22 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
         power_total=power_total,
         power_amps_by_tier=power_amps_by_tier,
         power_amps_by_source=power_amps_by_source,
-        me=_me_io(problem, port_dir),
+        me=me_network_io(problem, layout.me_networks, power_amps_by_source),
     )
 
 
-def _me_io(
-    problem: InputIR, port_dir: Mapping[tuple[str, str], IODirection]
+def me_network_io(
+    problem: InputIR,
+    networks: Sequence[MENetworkLayout],
+    amps_by_source: Mapping[str, int] = MappingProxyType({}),
 ) -> tuple[MENetworkIO, ...]:
-    """Each ME network's ask of the player (module docstring). Several nets moving one resource
-    the same way (water fed to three machines) are one flow, their rates summed."""
+    """Each ME network's ask of the player (module docstring), its power from ``networks``, the
+    networks a layout lays, and ``amps_by_source`` what each power source is fed
+    (``SystemIO.power_amps_by_source``). Several nets moving one resource the same way (water fed
+    to three machines) are one flow, their rates summed."""
+    port_dir = port_direction_map(problem)
+    source_of = _power_source_of(problem, port_dir)
+    laid = {n.id: n for n in networks}
     out: list[MENetworkIO] = []
     for spec in problem.me.networks:
         supplies: dict[tuple[tuple[str, ...], Commodity], MEFlow] = {}
@@ -325,6 +378,20 @@ def _me_io(
         links = sum(
             1 for m in problem.machines if m.me_role is MERole.LINK and m.me_network == spec.id
         )
+        acceptors = [
+            m for m in problem.machines if m.me_role is MERole.ACCEPTOR and m.me_network == spec.id
+        ]
+        built = laid.get(spec.id)
+        ae = laid_me_ae_per_tick(problem, spec, built)
+        source = next(
+            (
+                source_of[(m.id, p.id)]
+                for m in acceptors
+                for p in m.power_input_ports
+                if (m.id, p.id) in source_of
+            ),
+            None,
+        )
         out.append(
             MENetworkIO(
                 network=spec.id,
@@ -333,9 +400,121 @@ def _me_io(
                 absorbs=tuple(absorbs.values()),
                 devices=devices,
                 main_channels=devices if spec.mode is MEMode.ATTACHED else links,
+                colour=problem.me.colour(spec.id),
+                power=spec.power,
+                channel_budget=_channel_budget(problem, spec),
+                ae_per_tick=ae,
+                eu_per_tick=ae_to_eu(ae),
+                external_store_ae=_external_store(problem, spec, built),
+                acceptor_eu_per_tick=(
+                    sum(m.eut for m in acceptors) if spec.power is MEPower.ACCEPTOR else None
+                ),
+                acceptor_source=source,
+                acceptor_source_amps=amps_by_source.get(source) if source is not None else None,
             )
         )
     return tuple(out)
+
+
+def me_network_metrics(problem: InputIR, layout: LayoutResult) -> list[MENetworkMetrics]:
+    """Each ME network of ``layout`` as the layout carries it (``LayoutMetrics.me``): the
+    :class:`MENetworkIO` :func:`system_io` reports for it."""
+    return [
+        MENetworkMetrics(
+            id=io.network,
+            mode=io.mode,
+            colour=io.colour,
+            power=io.power,
+            devices=io.devices,
+            channel_budget=io.channel_budget,
+            main_channels=io.main_channels,
+            ae_per_tick=io.ae_per_tick,
+            eu_per_tick=io.eu_per_tick,
+            external_store_ae=io.external_store_ae,
+            acceptor_eu_per_tick=io.acceptor_eu_per_tick,
+            acceptor_source=io.acceptor_source,
+            acceptor_source_amps=io.acceptor_source_amps,
+            supplies=[_flow_metrics(f) for f in io.supplies],
+            absorbs=[_flow_metrics(f) for f in io.absorbs],
+        )
+        for io in system_io(problem, layout).me
+    ]
+
+
+def _flow_metrics(flow: MEFlow) -> MEFlowMetrics:
+    return MEFlowMetrics(resources=flow.resources, commodity=flow.commodity, rate=flow.rate)
+
+
+def laid_me_ae_per_tick(
+    problem: InputIR, spec: MENetworkSpec, laid: MENetworkLayout | None
+) -> float:
+    """AE/t the ME network ``spec`` draws as ``laid`` builds it (spike 6, ``dataset.me``).
+
+    Its devices' and controllers' idle draws, what each laid device moves (one charge per item, one
+    per started 1000 mB), and the channel term over the cable laid: with a controller (a subnet's
+    own, or the main network's for an attached network), twice the channels through every node, a
+    cable carrying its ``me_channels`` and each device its one; ad hoc, every node (cable, device,
+    acceptor) times the channels in use, none once there are more than 8. For an attached network
+    this is what it adds to the main network, short of the main network's own cable between its
+    controller and the stub, which the layout cannot see. ``laid`` is None for a network the layout
+    does not build, which counts no device and no cable.
+    """
+    cables = laid.cables if laid is not None else []
+    devices = laid.devices if laid is not None else []
+    machines = {m.id: m for m in problem.machines}
+    items = fluid = 0.0
+    for device in devices:
+        machine = machines.get(device.machine_id)
+        if machine is None:
+            continue
+        for endpoint in machine.me_endpoints:
+            if endpoint.id == device.endpoint_id:
+                moved, charges = endpoint_moves(endpoint, {p.id: p for p in machine.faces.ports})
+                items += moved
+                fluid += charges
+    roles = [m.me_role for m in problem.machines if m.me_network == spec.id]
+    controllers = roles.count(MERole.CONTROLLER)
+    if spec.mode is MEMode.SUBNET and not controllers:
+        channels = len(devices) if len(devices) <= ADHOC_MAX_DEVICES else 0
+        nodes = len(cables) + len(devices) + roles.count(MERole.ACCEPTOR)
+        load = adhoc_channel_load(nodes, channels)
+    else:
+        load = tree_channel_load([*(c.me_channels for c in cables), *(1 for _ in devices)])
+    return network_ae_per_tick(
+        idle=len(devices) * DEFAULT_IDLE_AE + controllers * CONTROLLER_IDLE_AE,
+        channel_load=load,
+        items_per_tick=items,
+        fluid_operations_per_tick=fluid,
+    )
+
+
+def _external_store(problem: InputIR, spec: MENetworkSpec, laid: MENetworkLayout | None) -> float:
+    """What the network powering ``spec`` from outside must keep stored for one flush of its GT
+    ME output buses and hatches (``MENetworkIO.external_store_ae``): only an external subnet with
+    no controller of its own leans on that store for a flush over AE's default buffer."""
+    controlled = any(
+        m.me_role is MERole.CONTROLLER and m.me_network == spec.id for m in problem.machines
+    )
+    if spec.power is not MEPower.EXTERNAL or spec.mode is not MEMode.SUBNET or controlled:
+        return 0.0
+    devices = laid.devices if laid is not None else []
+    largest = max(
+        (flush_ae(GT_ME_HATCHES[d.gt_mid]) for d in devices if d.gt_mid in GT_ME_HATCHES),
+        default=0.0,
+    )
+    return largest if largest > DEFAULT_GRID_BUFFER_AE else 0.0
+
+
+def _channel_budget(problem: InputIR, spec: MENetworkSpec) -> int | None:
+    """What a network's devices may spend: an attached one's budget on the main network, an
+    ad-hoc subnet's 8, and None for a subnet with a controller, whose cables each carry 32 from
+    it."""
+    if spec.mode is MEMode.ATTACHED:
+        return spec.me_channel_budget
+    controlled = any(
+        m.me_role is MERole.CONTROLLER and m.me_network == spec.id for m in problem.machines
+    )
+    return None if controlled else ADHOC_MAX_DEVICES
 
 
 def _carried(net: Net | None, port: Port) -> tuple[str, ...]:

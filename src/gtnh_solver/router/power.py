@@ -29,6 +29,17 @@ machines load the net more for the same ``eut``; only each segment's summed load
 whole amps. A run so long that the delivered voltage reaches 0 cannot be powered at this tier and
 is rejected.
 
+**An Energy Acceptor is the one sink that takes more than its draw** (spike 6.3): it accepts every
+whole amp its source offers until its ME network's storage is full, so the branch to it is sized for
+the source's full output (the whole amps every sink's steady load sums to), and no segment for more
+than that::
+
+    source (outputs ceil(1.5 + 0.75) = 3 A) ==3x== [C] ==3x== acceptor (0.75 A steady, takes all 3)
+                                                    |
+                                                   2x
+                                                    |
+                                                   m0 (1.5 A)
+
 **Where the cable may go is settled first.** Every power net takes part in ``router.core``'s
 negotiation as a tree, alongside the pipes, so the pipes that this router must route around were
 laid leaving room for a trunk. This router then lays the actual cable in that space: the negotiated
@@ -76,6 +87,7 @@ from gtnh_solver.ir import (
     InputIR,
     Machine,
     MachineFaceRef,
+    MERole,
     Net,
     Placement,
     Route,
@@ -356,7 +368,17 @@ def _route_trunk(
         # A tap lays no cable and a zero-segment cable route fails validation (ROUTE_DISCONTINUOUS:
         # its gauge lives on its segments), so the last sink must extend a trunk with none yet.
         may_tap = bool(legs) or i < len(sinks) - 1
-        taps = [t for t in cand if _cell(t) in depth] if may_tap else []
+        # An Energy Acceptor never taps the source's own cable block: a root tap loads no segment,
+        # and that block is built at its thickest segment, so nothing would be sized for the whole
+        # output the acceptor draws through it. It lays a leg instead, whose first segment carries
+        # that output (``_size_trunk``); a deeper trunk cell it may tap, since the segments above
+        # that cell carry its draw.
+        acceptor = machines[sinks[i].machine_id].me_role is MERole.ACCEPTOR
+        taps = (
+            [t for t in cand if _cell(t) in depth and not (acceptor and _cell(t) == root)]
+            if may_tap
+            else []
+        )
         if taps:
             tapped = min(taps, key=lambda t: depth[_cell(t)])  # shallowest; min() keeps cand order
             terminals.append(tapped)
@@ -390,7 +412,10 @@ def _route_trunk(
         (machines[e.machine_id].port_eut(e.port_id), machines[e.machine_id].voltage_tier)
         for e in sinks
     ]
-    sized = _size_trunk(net_id, legs, depth, sink_cells, loads)
+    inrush = [
+        e.machine_id if machines[e.machine_id].me_role is MERole.ACCEPTOR else None for e in sinks
+    ]
+    sized = _size_trunk(net_id, legs, depth, sink_cells, loads, inrush)
     if isinstance(sized, Infeasibility):
         return sized
     segments, thickness = sized
@@ -416,6 +441,7 @@ def _size_trunk(
     depth: Mapping[Cell, int],
     sink_cells: Sequence[Cell],
     loads: Sequence[tuple[float, str]],
+    inrush: Sequence[str | None] = (),
 ) -> tuple[list[Segment], list[int]] | Infeasibility:
     """Size each segment to the summed load of the sink terminals on its far-from-root side.
 
@@ -434,11 +460,22 @@ def _size_trunk(
     laid order, the thickness list aligned 1:1 - the validator re-derives all of this
     independently. A run whose delivered voltage reaches 0 (:class:`UnpowerableError`) or a
     segment whose summed load exceeds 16x is rejected, not silently certified.
+
+    **An Energy Acceptor takes its source's full output** (``inrush[i]`` names sink ``m_i`` when it
+    is one, spike 6.3): it accepts every whole amp offered until its network's storage is full, so
+    the cable to it must carry everything the source puts out, not the network's steady draw. The
+    source's output is the whole amps its sinks' steady loads sum to, the figure the builder is told
+    to feed it (``system_io.power_amps_by_source``). An acceptor then loads its branch with that
+    output in place of its own draw, and no segment carries more than the source puts out, so
+    every segment from the source to an acceptor is sized for the source's whole output and every
+    other segment as before. An acceptor on the root cell would load no segment at all, so that is
+    refused (``_route_trunk`` never lays one), and a cable to an acceptor over the 16x cap names it.
     """
     amp_at: dict[Cell, float] = {}
+    steady: list[float] = []  # each sink's own load, the source's output summed from them
     for (eut, tier), cell in zip(loads, sink_cells, strict=True):
         try:
-            amp_at[cell] = amp_at.get(cell, 0.0) + amp_load(eut, tier, distance=depth[cell])
+            load = amp_load(eut, tier, distance=depth[cell])
         except UnknownTierError:
             return Infeasibility(
                 constraint="voltage_tier",
@@ -452,6 +489,26 @@ def _size_trunk(
                 suggested_relaxation="place the machine nearer the source, split the net, or use a "
                 "higher voltage tier - Phase 2 multi-source optimization",
             )
+        steady.append(load)
+        amp_at[cell] = amp_at.get(cell, 0.0) + load
+
+    cap: int | None = None  # the source's full output, once an acceptor makes it a segment's load
+    behind: dict[Cell, str] = {}  # cell -> an acceptor at or beyond it, to name over the cap
+    if any(inrush):
+        cap = whole_amps(sum(steady))
+        amp_at = {}
+        for load, cell, acceptor in zip(steady, sink_cells, inrush, strict=True):
+            amp_at[cell] = amp_at.get(cell, 0.0) + (cap if acceptor else load)
+            if acceptor:
+                if depth[cell] == 0:
+                    return Infeasibility(
+                        constraint="amperage",
+                        detail=f"power net {net_id!r}: Energy Acceptor {acceptor!r} taps the "
+                        f"source's own cable block, which no segment sizes for the {cap} amps it "
+                        "draws",
+                        suggested_relaxation="dock the acceptor on a cable of its own",
+                    )
+                behind.setdefault(cell, acceptor)
 
     # Subtree sums, leaves first: every leg is laid parent-before-child and only attaches to
     # cells laid before it, so walking the legs in reverse (each leg child-end first) folds every
@@ -460,6 +517,8 @@ def _size_trunk(
     for path in reversed(legs):
         for parent, child in reversed(list(pairwise(path))):
             subtree[parent] = subtree.get(parent, 0.0) + subtree.get(child, 0.0)
+            if child in behind:
+                behind.setdefault(parent, behind[child])
 
     segments: list[Segment] = []
     thickness: list[int] = []
@@ -468,6 +527,16 @@ def _size_trunk(
             # Everything on the segment's far-from-root side, rounded to the whole packets
             # (amps) the cable must actually be rated for.
             amps = whole_amps(subtree.get(child, 0.0))
+            if cap is not None:
+                amps = min(amps, cap)  # a cable never carries more than its source puts out
+            if amps > MAX_CABLE_THICKNESS and child in behind:
+                return Infeasibility(
+                    constraint="amperage",
+                    detail=f"power net {net_id!r}: the cable to Energy Acceptor {behind[child]!r} "
+                    f"must carry {amps} amps, its source's whole output, over the 16x cable cap",
+                    suggested_relaxation="give the acceptor's tier less to carry (split its "
+                    "source's group) or power its ME network from outside the build",
+                )
             if amps > MAX_CABLE_THICKNESS:
                 return Infeasibility(
                     constraint="amperage",

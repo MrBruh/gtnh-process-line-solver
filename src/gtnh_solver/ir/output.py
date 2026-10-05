@@ -25,7 +25,7 @@ from pydantic import (
 from ._base import StrictModel, check_contract_version
 from .enums import Commodity, Facing, LayoutStatus, PipeFamily, PipeSize
 from .geometry import Cell, CellCoord
-from .me import MENetworkLayout
+from .me import MENetworkLayout, MENetworkMetrics
 
 #: Bump on any breaking change to the output contract; record it in ``ir/__init__.py``.
 #: v1 added ``LayoutResult.hatches``. Additive, and yet a bump: a consumer that ignores it
@@ -251,12 +251,19 @@ class LayoutMetrics(StrictModel):
     #: count (``solver.solve``), so ``--rounds`` this many replays a timed solve exactly. Left out
     #: of the dump while None, so a layout solved without either serializes exactly as before.
     rounds: int | None = Field(default=None, ge=1)
+    #: What each ME network asks of the player (#336): its devices and channels, its power in AE/t
+    #: and EU/t from the cable the layout lays, and what its storage supplies and takes in, in
+    #: problem order. Left out of the dump while empty, so a line with no ME network serializes
+    #: exactly as before.
+    me: list[MENetworkMetrics] = Field(default_factory=list)
 
     @model_serializer(mode="wrap")
-    def _omit_unset_rounds(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+    def _omit_unset(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
         data: dict[str, Any] = handler(self)
         if self.rounds is None:
             data.pop("rounds", None)
+        if not self.me:
+            data.pop("me", None)
         return data
 
 

@@ -44,7 +44,7 @@ from gtnh_solver.schematic.core import POWER_SOURCE_STAND_IN, SchematicWarning, 
 from gtnh_solver.solver import Effort, solve
 from gtnh_solver.validator import validate
 from tests._helpers import on_me
-from tests._me_fixtures import SUB, comb, gt_hatch_line
+from tests._me_fixtures import SUB, acceptor_comb, comb, gt_hatch_line
 from tests._me_fixtures import endpoint as me_endpoint
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -498,9 +498,13 @@ def test_sand_with_power_left_to_the_builder_places_and_exports_no_power_source(
 def test_a_subnet_says_whose_channels_it_spends(capsys: pytest.CaptureFixture[str]) -> None:
     problem, layout = comb(2, mode=MEMode.SUBNET)
     _note_me_networks(problem, layout)
+    # Then what it draws (#336): two buses idle, extracting 0.2 items/t, and every one of the eight
+    # ad-hoc nodes paying for both channels: (2 + 16/128 + 0.2) x 10 AE/t.
     assert capsys.readouterr().err.splitlines() == [
         "note: ME network sub (subnet): 2 device(s) on none of your main network's channels; "
-        "stock n0 1 items/t, n1 1 items/t"
+        "stock n0 1 items/t, n1 1 items/t",
+        "note: ME network sub (subnet): feed it 23.25 AE/t (11.625 EU/t) through a quartz fiber "
+        "from a powered network",
     ]
     linked = InputIR.model_validate(
         {
@@ -521,8 +525,65 @@ def test_a_subnet_says_whose_channels_it_spends(capsys: pytest.CaptureFixture[st
         }
     )
     _note_me_networks(linked, layout)
-    (line,) = capsys.readouterr().err.splitlines()
+    line, _ = capsys.readouterr().err.splitlines()
     assert "3 device(s) on 1 channel(s) of your main network, one per link" in line
+
+
+def _power_note(problem: InputIR, layout: LayoutResult, capsys: pytest.CaptureFixture[str]) -> str:
+    """The second line :func:`_note_me_networks` prints for a one-network line: what it draws."""
+    _note_me_networks(problem, layout)
+    _, power = capsys.readouterr().err.splitlines()
+    return power
+
+
+def test_an_attached_network_says_what_it_adds_to_the_main_networks_draw(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Two buses idle, extracting 0.2 items/t, and their own channels twice over (the comb's cables
+    # state none): (2 + 4/128 + 0.2) x 10 AE/t.
+    assert _power_note(*comb(2), capsys) == (
+        "note: ME network main (attached): adds 22.3125 AE/t (11.1562 EU/t) to your main "
+        "network's power draw"
+    )
+
+
+def test_an_acceptor_network_states_its_draw_and_that_its_cable_takes_the_sources_whole_output(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The fixture's hand trace: 23.4062 AE/t, on an acceptor rated 30 EU/t that src feeds 1 A.
+    assert _power_note(*acceptor_comb(), capsys) == (
+        "note: ME network sub (subnet): its Energy Acceptor draws 23.4062 AE/t (11.7031 EU/t), "
+        "rated 30 EU/t, on src; it takes every amp offered until it stores 80,000 AE, so its cable "
+        "is sized for src's full 1 A: feed src no more than that"
+    )
+
+
+def test_an_acceptor_says_where_its_power_comes_from_when_no_source_feeds_it(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    problem, layout = acceptor_comb()
+    unrouted = problem.model_copy(update={"nets": [n for n in problem.nets if n.id != "power:LV"]})
+    assert _power_note(unrouted, layout, capsys).endswith("but no power cable reaches it")
+    external = unrouted.model_copy(
+        update={"me": problem.me.model_copy(update={"power_external": True})}
+    )
+    assert _power_note(external, layout, capsys).endswith(
+        "rated 30 EU/t, from your own power supply"
+    )
+
+
+def test_an_external_subnets_flush_is_said_where_its_power_is_stored(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # An Output Bus (ME) flushes 16,000 AE at once (spike 5.3), more than AE's default buffer: an
+    # ad-hoc subnet fed through a quartz fiber leans on the network powering it for that.
+    assert _power_note(*gt_hatch_line(subnet=True), capsys).endswith(
+        "; one GT ME output flush spends 16,000 AE at once, so the network powering it must store "
+        "that much"
+    )
+    # The main network's controller stores it for an attached one, and a normal bus flushes none.
+    assert "flush" not in _power_note(*gt_hatch_line(), capsys)
+    assert "flush" not in _power_note(*gt_hatch_line(normal=True, subnet=True), capsys)
 
 
 def test_sand_with_items_on_me_exports_its_machines_and_counts_what_it_leaves_out(
