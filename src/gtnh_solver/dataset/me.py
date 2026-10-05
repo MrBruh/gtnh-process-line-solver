@@ -335,8 +335,10 @@ FC_PART_ITEMS: dict[MEDeviceKind, str] = {
     MEDeviceKind.FLUID_STORAGE_BUS: "ae2fc:part_fluid_storage_bus",
     MEDeviceKind.DUAL_INTERFACE: "ae2fc:part_fluid_interface",
 }
-#: Each upgrade card's damage of :data:`MATERIAL_ITEM`, by its :class:`MECards` field.
-CARD_DAMAGE: dict[str, int] = {"acceleration": 30, "super_speed": 56, "capacity": 27}
+#: Each upgrade card's damage of :data:`MATERIAL_ITEM`, by its :class:`MECards` field, in the order
+#: the export fills a bus's upgrade slots. The Fuzzy Card is ``MaterialType.CardFuzzy`` (spike 4.2,
+#: 7.3); no golden holds one, so its damage is the source's alone (spike 11).
+CARD_DAMAGE: dict[str, int] = {"acceleration": 30, "super_speed": 56, "capacity": 27, "fuzzy": 29}
 
 #: How each cable kind is named in game (AE2's own item names), for a builder reading a layout.
 CABLE_NAMES: dict[MECableKind, str] = {

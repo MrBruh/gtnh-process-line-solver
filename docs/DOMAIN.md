@@ -891,11 +891,12 @@ golden (`tests/golden/schematic/ae2-golden-*.schematic`, spike 7.5) and held to 
   cable buses by that world's table; without it only AE2's own cables and buses are named.
 - **The ME Interface part and FC's Dual Interface part are left off their cable**, and listed by
   cell and side: the golden has neither, so their NBT is unverified (spike 11).
-- **A filter slot for an item at any damage is left unset** (a resource `registry@32767`, such as a
-  coke oven's `minecraft:log@32767`), and listed with its bus. AE2 matches 32767 as "any damage"
-  only in its fuzzy lookup (`ItemList.findFuzzy`), which an export bus takes only with a Fuzzy Card
-  (`PartBaseExportBus.java:120`); written as is, the bus would move nothing. The builder fits a
-  Fuzzy Card or sets the slot to the one item they feed.
+- **A bus set to an item at any damage** (a resource `registry@32767`, such as a coke oven's
+  `minecraft:log@32767`) is written with its Fuzzy Card (`ItemMultiMaterial` 29, after the speed
+  cards) and the wildcard as its filter, at damage 32767, its fuzzy mode left at the `IGNORE_ALL`
+  every bus writes (#353). No in-game save holds a Fuzzy Card yet, so those tags come from AE2's
+  source (spike 7.5); #354 asks for one. A wildcard slot on a bus with no card, which the validator
+  refuses, is left unset and listed: AE2 would match 32767 exactly, and the bus would move nothing.
 - A part on a cell the layout lays no cable on (the validator refuses that) is counted and listed
   rather than dropped.
 

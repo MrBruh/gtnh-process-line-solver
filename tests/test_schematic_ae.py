@@ -945,9 +945,15 @@ def _me_message(caught: Iterable[warnings.WarningMessage]) -> str:
     return message
 
 
+#: The golden world's table with vanilla's log in it, at the id every 1.7.10 world gives it (a
+#: vanilla block keeps its id, as the table's cobblestone 4 and sand 12 do).
+_ITEMS_WITH_LOG = {**_ITEMS, "minecraft:log": 17}
+
+
 def test_a_wildcard_filter_slot_is_left_unset_and_listed() -> None:
-    """``minecraft:log@32767`` means any log, which AE2 matches only through a Fuzzy Card, so the
-    slot is left empty (the slots after it keep their numbers) and the warning names it."""
+    """``minecraft:log@32767`` means any log, which AE2 matches only through a Fuzzy Card. On a bus
+    with none, which the validator refuses, the slot is left empty (the slots after it keep their
+    numbers) and the warning names it."""
     problem, layout = _golden_layout()
     export, imported = layout.me_networks[1].devices
     wild = export.model_copy(update={"config": ("minecraft:log@32767", "minecraft:cobblestone")})
@@ -970,6 +976,81 @@ def test_a_bus_set_only_to_a_wildcard_writes_no_config() -> None:
     with pytest.warns(SchematicWarning, match=r"1 filter slot\(s\) are left unset"):
         exported = _export(problem, _with_devices(layout, 1, [wild, imported]))
     assert "config" not in _ae(exported, 3, 0, 2).parts[_UP].extra
+
+
+def test_a_fuzzy_card_is_written_after_the_speed_cards_with_its_wildcard_filter() -> None:
+    """#353: a bus set to any log carries a Fuzzy Card (``ItemMultiMaterial`` 29, after the speed
+    cards), its filter is written as that stack at damage 32767, and its fuzzy mode is the
+    ``IGNORE_ALL`` every bus writes. No golden holds either (spike 7.5): AE2's source alone."""
+    problem, layout = _golden_layout()
+    export, imported = layout.me_networks[1].devices
+    carded = export.model_copy(
+        update={
+            "cards": MECards(acceleration=1, super_speed=1, fuzzy=1),
+            "config": ("minecraft:log@32767", "minecraft:cobblestone"),
+        }
+    )
+    with pytest.warns(SchematicWarning) as caught:
+        exported = _export(
+            problem, _with_devices(layout, 1, [carded, imported]), item_ids=_ITEMS_WITH_LOG
+        )
+    part = _ae(exported, 3, 0, 2).parts[_UP]
+    assert part.upgrades == (ItemRef(_CARD, 30, 1), ItemRef(_CARD, 56, 1), ItemRef(_CARD, 29, 1))
+    assert [_item(s) for s in part.config] == [(17, 32767), (_ITEMS["minecraft:cobblestone"], 0)]
+    assert _typed(part.extra["config"]["#0"]) == _typed(
+        nbt.Compound(
+            {
+                "StackType": nbt.String("item"),
+                "id": nbt.Short(17),
+                "Damage": nbt.Short(32767),
+                "Count": nbt.Byte(0),
+                "Cnt": nbt.Long(1),
+                "Req": nbt.Long(0),
+                "Craft": nbt.Byte(0),
+            }
+        )
+    )
+    assert part.extra["FUZZY_MODE"] == "IGNORE_ALL"
+    assert "left unset" not in _me_message(caught)
+    # --inspect-schematic names the card with the others.
+    from gtnh_solver.schematic.ae import describe_item
+
+    assert describe_item(ItemRef(_CARD, 29, 1), part_item=_PART, names=_NAMES) == "Fuzzy Card"
+
+
+def test_nitrobenzenes_coke_oven_bus_exports_with_its_fuzzy_card_and_any_log() -> None:
+    """``gtnh-nitrobenzene.json --me items`` for a named world (the golden's, with vanilla's log):
+    the Coke Oven's export bus is written with its Fuzzy Card and set to any log, so it is no longer
+    one of the slots the warning lists as unset."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        problem = adapt_file(
+            str(_EXAMPLES / "gtnh-nitrobenzene.json"),
+            physical=load_physical_dataset(_COMMITTED_MULTIBLOCKS),
+            me_commodities={Commodity.ITEM},
+        )
+    layout = solve(problem)
+    assert layout.status is LayoutStatus.VALID
+    (network,) = layout.me_networks
+    (logs,) = [d for d in network.devices if d.config == ("minecraft:log@32767",)]
+    low = build_scene(problem, layout)["bounds"]["min"]
+    cell = (logs.cell.x - int(low[0]), logs.cell.y - int(low[1]), logs.cell.z - int(low[2]))
+
+    with pytest.warns(SchematicWarning) as caught:
+        root = build_schematic(
+            problem,
+            layout,
+            manifest=_manifest(),
+            docs=load_multiblock_docs(_COMMITTED_MULTIBLOCKS),
+            item_ids=_ITEMS_WITH_LOG,
+        )
+    exported = read_schematic(nbt.dumps("Schematic", root))
+    part = _ae(exported, *cell).parts[FORGE_DIRECTION[logs.side]]
+    assert part.item == ItemRef(_PART, PART_DAMAGE[MEDeviceKind.EXPORT_BUS], 1)
+    assert part.upgrades == (ItemRef(_CARD, 29, 1),)
+    assert [_item(s) for s in part.config] == [(17, 32767)]
+    assert part.extra["FUZZY_MODE"] == "IGNORE_ALL"
+    assert "left unset" not in _me_message(caught)
 
 
 def test_a_part_where_no_cable_is_laid_is_counted_rather_than_dropped() -> None:

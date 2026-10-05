@@ -18,8 +18,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   places no cable or bus (it applies no tile data, and a cable block is nothing else), so the ghost
   shows the network for you to build by hand, as the warning says. ME Interface and Dual Interface
   parts are not written yet, since the in-game build has neither; the warning lists where each goes.
-  A filter for an item at any damage (`@32767`, a coke oven's logs) is left unset and listed too:
-  AE2 matches it only through a Fuzzy Card, so the bus would otherwise move nothing.
+  A filter for an item at any damage (`@32767`, a coke oven's logs) is written on a bus with its
+  Fuzzy Card (#353); on a bus without one it is left unset and listed, since AE2 would match it
+  exactly and the bus would move nothing.
   `read_schematic` reads AE2 tiles back (`TileEntity.ae`: a cable block's cable and its parts by
   side, a block's orientation), and `--inspect-schematic` lists them: each cable block's cable and
   buses by side with their cards and filters, and each AE2 block's facing. `--world` now works with
@@ -540,7 +541,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   such a port faster than three Acceleration Cards carry (12.8 items/t before LuV) gets two buses.
   `--list-nets` and the preview's hover name the card with the others. The validator now refuses
   a bus set to such an item without the card (`me_fuzzy_card_missing`), so a layout that would
-  starve its machine in game is no longer called VALID.
+  starve its machine in game is no longer called VALID. With `--world`, the `.schematic` export
+  writes the card in the bus's upgrade slots and the wildcard as its filter, where it had left the
+  slot unset and warned; `--inspect-schematic` names the card. No in-game save holds a Fuzzy Card
+  yet, so its tags are read from AE2's source.
 - **The exported power source produces.** The `.schematic` export stands a Debug Power Generator in
   for the adapter's synthesized power source, but wrote it with no settings, and TecTech loads a
   generator with no settings as a consumer of 0 V x 0 A. Pasted into a world, it drew power instead

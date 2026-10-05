@@ -31,9 +31,14 @@ player, like any block.
 
 **Two parts are not written yet.** The golden has no ME Interface part and no AE2FluidCraft Dual
 Interface part (it outputs into an Interface block instead), so their NBT is unverified and the
-export leaves them off their cable, listing each for the builder (:data:`UNVERIFIED_PARTS`). Nor
-is a filter slot for an item at any damage (``@32767``), which AE2 reads as that only with a Fuzzy
-Card fitted (:meth:`_WorldItems.filter_stack`): it is left unset and listed.
+export leaves them off their cable, listing each for the builder (:data:`UNVERIFIED_PARTS`).
+
+**A bus set to an item at any damage** (``@32767``) carries a Fuzzy Card (#353), written in the
+upgrade slot after its speed cards, with its filter written as that stack and the bus's fuzzy mode
+left at the ``IGNORE_ALL`` every bus writes (:func:`_settings`); the card makes AE2 read the
+wildcard as any damage. No golden holds a Fuzzy Card or a wildcard filter, so both are AE2's
+source alone (spike 7.5). A wildcard slot on a bus with no card, which the validator refuses, is
+left unset and listed rather than written to move nothing (:meth:`_WorldItems.filter_stack`).
 
 What is left out, and what is only in the ghost, is said in one :class:`SchematicWarning`.
 """
@@ -108,12 +113,18 @@ _REDSTONE_UNDECIDED: Final = 2
 _DATA: Final = 0
 
 
+#: A bus's ``FUZZY_MODE``: ``IGNORE_ALL``, the mode that ignores damage, which every item bus
+#: registers as its default (``PartSharedItemBus.java:64``, ``PartStorageBus.java:143``). It is what
+#: a fitted Fuzzy Card needs, so a bus with one writes it exactly as a bus without one does.
+_FUZZY_MODE: Final = "IGNORE_ALL"
+
+
 def _settings(kind: MEDeviceKind) -> nbt.Compound:
     """What a fresh bus of ``kind`` writes besides its inventories: the defaults its class
     registers (``PartSharedItemBus.java:63-64``, ``PartBaseExportBus.java:53-54``,
     ``PartStorageBus.java:141-145``), exactly as the golden's buses carry them (spike 7.5). An FC
     bus writes what its AE2 parent does."""
-    bus = {"filter": "", "FUZZY_MODE": "IGNORE_ALL", "REDSTONE_CONTROLLED": "IGNORE"}
+    bus = {"filter": "", "FUZZY_MODE": _FUZZY_MODE, "REDSTONE_CONTROLLED": "IGNORE"}
     if kind in (MEDeviceKind.IMPORT_BUS, MEDeviceKind.FLUID_IMPORT_BUS):
         return nbt.Compound({k: nbt.String(v) for k, v in bus.items()})
     if kind in (MEDeviceKind.EXPORT_BUS, MEDeviceKind.FLUID_EXPORT_BUS):
@@ -124,7 +135,7 @@ def _settings(kind: MEDeviceKind) -> nbt.Compound:
     if kind in (MEDeviceKind.STORAGE_BUS, MEDeviceKind.FLUID_STORAGE_BUS):
         storage = {
             "filter": "",
-            "FUZZY_MODE": "IGNORE_ALL",
+            "FUZZY_MODE": _FUZZY_MODE,
             "ACCESS": "READ_WRITE",
             "EXTRACTION_MODE": "LOOSE",
             "STORAGE_FILTER": "EXTRACTABLE_ONLY",
@@ -154,7 +165,8 @@ class MELowering:
     unverified: list[tuple[MEDeviceKind, Key, Facing]] = field(default_factory=list)
     #: Parts on a cell the layout lays no cable on, which a valid layout never has: kind, cell, side.
     cableless: list[tuple[MEDeviceKind, Key, Facing]] = field(default_factory=list)
-    #: Config slots left unset for an item at the wildcard meta: kind, cell, side, resource.
+    #: Config slots left unset for an item at the wildcard meta, on a bus with no Fuzzy Card (which
+    #: the validator refuses): kind, cell, side, resource.
     wildcards: list[tuple[MEDeviceKind, Key, Facing, str]] = field(default_factory=list)
 
 
@@ -187,15 +199,17 @@ class _WorldItems:
             }
         )
 
-    def filter_stack(self, resource: str, *, fluid: bool) -> nbt.Compound | None:
+    def filter_stack(
+        self, resource: str, *, fluid: bool, fuzzy: bool = False
+    ) -> nbt.Compound | None:
         """One ``config`` slot: the AE stack a bus is set to, ``resource`` a fluid's name or an item's
         ``registry[@meta]`` (the adapter's resource ids). ``Cnt`` 1 for either: no bus reads it.
 
-        ``None`` for an item at the wildcard meta (``@32767``, "any damage"), which no slot can hold
-        as meant: AE2 matches 32767 as a wildcard only in its fuzzy lookup (``ItemList.findFuzzy``),
-        which an export bus takes only with a Fuzzy Card (``PartBaseExportBus.java:120``), so written
-        as is the bus moves nothing. The slot is left unset and the warning names it
-        (:func:`warn_about_me`).
+        An item at the wildcard meta (``@32767``, "any damage") is written as that stack on a bus
+        with a Fuzzy Card (``fuzzy``), which makes AE2 match it at any damage
+        (``ItemList.findFuzzy``, spike 4.2), as a player's filter is saved whatever its damage.
+        ``None`` on a bus without one: AE2 then matches 32767 exactly and the bus moves nothing,
+        so the slot is left unset and the warning names it (:func:`warn_about_me`).
         """
         counts = {
             "Count": nbt.Byte(0),
@@ -209,7 +223,7 @@ class _WorldItems:
             )
         name, _, meta = resource.partition("@")
         damage = int(meta) if meta else 0
-        if damage == WILDCARD_DAMAGE:
+        if damage == WILDCARD_DAMAGE and not fuzzy:
             return None
         return nbt.Compound(
             {
@@ -236,7 +250,8 @@ def _part(
     and the resources of the config slots left unset (:meth:`_WorldItems.filter_stack`).
 
     An empty inventory is left out, as AE2 drops its tag (``AppEngInternalInventory.writeToNBT``).
-    The cards go one a slot, Acceleration first, as the golden's export bus holds them.
+    The cards go one a slot in :data:`CARD_DAMAGE` order, Acceleration first, as the golden's
+    export bus holds them, and a Fuzzy Card last.
     """
     name = DEVICE_NAMES[device.kind]
     if device.kind in PART_DAMAGE:
@@ -252,7 +267,8 @@ def _part(
     if cards:
         extra["upgrades"] = _inventory(cards)
     fluid = device.kind in _FLUID_PARTS
-    config = [items.filter_stack(r, fluid=fluid) for r in device.config]
+    fuzzy = device.cards.fuzzy > 0
+    config = [items.filter_stack(r, fluid=fluid, fuzzy=fuzzy) for r in device.config]
     if any(slot is not None for slot in config):
         extra["config"] = _inventory(config)
     unset = [r for r, slot in zip(device.config, config, strict=True) if slot is None]
@@ -479,8 +495,9 @@ def warn_about_me(report: MELowering) -> None:
         )
         said.append(
             f"{len(report.wildcards)} filter slot(s) are left unset, since each names an item at "
-            "any damage (@32767), which AE2 matches only through a Fuzzy Card: fit one, or set the "
-            f"slot to the item by hand: {listed}"
+            "any damage (@32767), which AE2 matches only through a Fuzzy Card, and the bus has "
+            "none (the validator refuses such a layout): fit one, or set the slot to the item by "
+            f"hand: {listed}"
         )
     if not said:
         return
@@ -508,6 +525,7 @@ _CARD_NAMES: Final = {
     CARD_DAMAGE["acceleration"]: "Acceleration Card",
     CARD_DAMAGE["super_speed"]: "Hyper-Acceleration Card",
     CARD_DAMAGE["capacity"]: "Capacity Card",
+    CARD_DAMAGE["fuzzy"]: "Fuzzy Card",
 }
 
 

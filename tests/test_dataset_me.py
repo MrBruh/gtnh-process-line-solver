@@ -170,7 +170,9 @@ def test_item_identities() -> None:
         MEDeviceKind.INTERFACE: 440,
     }
     assert me.FC_PART_ITEMS[MEDeviceKind.DUAL_INTERFACE] == "ae2fc:part_fluid_interface"
-    assert me.CARD_DAMAGE == {"acceleration": 30, "super_speed": 56, "capacity": 27}
+    assert me.CARD_DAMAGE == {"acceleration": 30, "super_speed": 56, "capacity": 27, "fuzzy": 29}
+    # Every card the contract names has an item: the export writes each from this table.
+    assert set(me.CARD_DAMAGE) == set(MECards.model_fields)
     # Every AE2 or FC part is an item one way or the other, never both.
     parts = set(me.PART_DAMAGE) | set(me.FC_PART_ITEMS)
     assert not set(me.PART_DAMAGE) & set(me.FC_PART_ITEMS)
