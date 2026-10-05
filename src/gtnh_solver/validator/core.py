@@ -2041,6 +2041,21 @@ def _check_power_amperage(
         output = _required_amps(sum(amp_at.values()))
         for cell, own in takes_all:
             amp_at[cell] += output - own
+        # One on the source's own cable block draws through no segment at all, only through that
+        # block, which is built at the thickest cable touching it (route_blocks): that cable must
+        # carry the whole output too.
+        if any(depth[cell] == 0 for cell, _ in takes_all):
+            root = source_cells[0]
+            root_cable = max(t for (a, b), t in zip(edges, tps, strict=True) if root in (a, b))
+            if root_cable < output:
+                out.append(
+                    Violation(
+                        ViolationCode.POWER_THICKNESS_INSUFFICIENT,
+                        f"power route for net {r.net_id!r}: an Energy Acceptor taps the source's "
+                        f"own cable block, built {root_cable}x, short of the {output} amps it "
+                        f"draws",
+                    )
+                )
 
         loads = _subtree_loads(order, parent, depth, edges, amp_at)
         for seg_idx, (load, thick) in enumerate(zip(loads, tps, strict=True)):

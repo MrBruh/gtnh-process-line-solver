@@ -757,7 +757,7 @@ def test_power_no_segment_carries_more_than_its_source_puts_out() -> None:
         {root: 0, shared: 1, a: 2, b: 2},
         [a, b],
         [(45.0, "LV"), (45.0, "LV")],
-        [True, True],
+        ["a", "b"],
     )
     assert not isinstance(sized, Infeasibility)
     _, thickness = sized
@@ -772,3 +772,66 @@ def test_power_no_segment_carries_more_than_its_source_puts_out() -> None:
     )
     assert not isinstance(plain, Infeasibility)
     assert plain[1] == [4, 2, 2]
+
+
+def test_power_never_lets_an_acceptor_tap_the_sources_own_cable_block() -> None:
+    # The tap above, with m0 an Energy Acceptor: its west face is the source's dock cell, but a tap
+    # there would load no segment, and that block is built at its thickest segment, so nothing would
+    # be sized for the source's whole output it draws through it. It lays a leg instead, and every
+    # segment from the source to it carries that output: 40/30 + 30/28 = 2.4 A steady, so 3 A (4x).
+    problem = InputIR(
+        bounding_region=CellBox(sx=10, sy=4, sz=10),
+        machines=[_src(), _acceptor("m0", 40), _load("m1", 30)],
+        nets=[_pnet("m0", "m1")],
+        me=_ACCEPTOR_ME,
+    )
+    placements = [at("src", 0, 0, 0), at("m0", 2, 0, 0), at("m1", 4, 0, 0)]
+    result = route_power(problem, placements)
+    assert result.ok, result.infeasibility
+    (route,) = result.routes
+    cell_of = {t.machine_id: t.cell.as_tuple() for t in route.terminals}
+    assert cell_of["m0"] != cell_of["src"]
+    thickness = _thickness_by_edge(route)
+    # The tree path from the source's cell to the acceptor's: every segment on it carries 3 A.
+    parent = {cell_of["src"]: cell_of["src"]}
+    frontier = [cell_of["src"]]
+    while frontier:
+        here = frontier.pop()
+        for edge in thickness:
+            if here in edge:
+                (there,) = edge - {here}
+                if there not in parent:
+                    parent[there] = here
+                    frontier.append(there)
+    path, cell = [], cell_of["m0"]
+    while cell != cell_of["src"]:
+        path.append(frozenset({cell, parent[cell]}))
+        cell = parent[cell]
+    assert path
+    assert {thickness[e] for e in path} == {4}
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route])
+    assert validate(problem, layout).ok, str(validate(problem, layout))
+
+
+def test_power_refuses_an_acceptor_on_the_root_cell() -> None:
+    # The reviewer's repro: an acceptor on the root (depth 0) beside a sink one block out. Its
+    # draw rides no segment, so nothing would carry the source's 3 A to it (40/32 + 30/31).
+    root, x = (0, 0, 0), (1, 0, 0)
+    sized = _size_trunk(
+        "p", [[root, x]], {root: 0, x: 1}, [root, x], [(40.0, "LV"), (30.0, "LV")], ["acc", None]
+    )
+    assert isinstance(sized, Infeasibility)
+    assert sized.constraint == "amperage"
+    assert "'acc' taps the source's own cable block" in sized.detail
+
+
+def test_power_names_the_acceptor_whose_cable_is_over_the_cap() -> None:
+    # A 520 EU/t machine tapping the root and an acceptor one block out: the source puts out
+    # ceil(520/32 + 30/31) = 18 A, all of which the acceptor's cable carries, over the 16x cap.
+    root, x = (0, 0, 0), (1, 0, 0)
+    sized = _size_trunk(
+        "p", [[root, x]], {root: 0, x: 1}, [x, root], [(30.0, "LV"), (520.0, "LV")], ["acc", None]
+    )
+    assert isinstance(sized, Infeasibility)
+    assert sized.constraint == "amperage"
+    assert "Energy Acceptor 'acc' must carry 18 amps" in sized.detail

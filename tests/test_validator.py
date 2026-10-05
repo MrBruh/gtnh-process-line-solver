@@ -1226,6 +1226,48 @@ def test_an_acceptors_cable_is_held_to_its_sources_full_output() -> None:
     assert "carries 3 amps" in steady.violations[0].message
 
 
+def test_an_acceptor_tapping_the_sources_own_cable_block_needs_it_built_for_the_output() -> None:
+    # The acceptor moved onto the source's dock cell (0, 0, 1), at (0, 0, 2) facing south: its draw
+    # rides no segment, only that block, built at its thickest cable. 28/32 + 48/30 = 2.5 A steady,
+    # so 3 A; the cable to m0 carries m0's 1.6 A (2x), which leaves the block short of 3.
+    problem, layout = _acceptor_trunk([2, 2, 2, 2])
+    acceptor = next(m for m in problem.machines if m.id == "acc")
+    problem = problem.model_copy(
+        update={
+            "machines": [
+                m
+                if m.id != "acc"
+                else acceptor.model_copy(update={"orientation_options": [Facing.SOUTH]})
+                for m in problem.machines
+            ]
+        }
+    )
+    route = layout.routes[0]
+    at_root = Terminal(machine_id="acc", port_id="pi", face=Facing.NORTH, cell=_coord(0, 0, 1))
+    tapped = route.model_copy(
+        update={
+            "terminals": [*route.terminals[:2], at_root],
+            "segments": route.segments[:2],
+            "thickness_per_segment": [2, 2],
+        }
+    )
+    placed = [
+        p
+        if p.machine_id != "acc"
+        else p.model_copy(update={"cell": _coord(0, 0, 2), "orientation": Facing.SOUTH})
+        for p in layout.placements
+    ]
+    thin = layout.model_copy(update={"routes": [tapped], "placements": placed})
+    report = validate(problem, thin)
+    assert report.codes() == (ViolationCode.POWER_THICKNESS_INSUFFICIENT,), str(report)
+    assert "taps the source's own cable block, built 2x, short of the 3 amps" in (
+        report.violations[0].message
+    )
+    # Built for the whole output, the block carries it.
+    thick = tapped.model_copy(update={"thickness_per_segment": [4, 4]})
+    assert validate(problem, thin.model_copy(update={"routes": [thick]})).ok
+
+
 def test_no_segment_is_held_to_more_than_its_source_puts_out() -> None:
     # The two segments m0 shares with the acceptor would sum 1.6 A and the acceptor's 3 to 5 A (8x),
     # but a cable carries no more than its source's 3 A: 4x is enough.

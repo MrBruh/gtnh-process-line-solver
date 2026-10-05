@@ -470,7 +470,10 @@ where load **sums** along shared segments (Steiner-tree-like):
   router loads the acceptor with that output in place of its own draw, and sizes no segment for
   more than the source puts out, since a cable carries no more than its source emits: every
   segment between the source and an acceptor is sized for the source's whole output, and every
-  other segment as before. The validator re-derives the same on its own arithmetic. That holds
+  other segment as before. An acceptor never taps the source's own cable block: it would draw
+  through no segment, and that block is built at its thickest cable, which nothing would size for
+  the whole output, so it lays a cable of its own (the validator refuses a root tap whose block is
+  built thinner than the output). The validator re-derives all of it on its own arithmetic. That holds
   only while the source puts out what the run says, so the run tells the builder to feed it no
   more (a battery buffer with more batteries than that would push its extra amps down the
   acceptor's cable). The other way AE2 allows, a 1 A limit in front of the acceptor, is a block
