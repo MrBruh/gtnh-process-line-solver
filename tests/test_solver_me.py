@@ -4,8 +4,9 @@ An attempt routes the pipes, then the ME networks around them, then power around
 every connection into its hatch, an ME device's included (``solver.core._assemble``). Neither order
 of ME and power always fits, so an attempt that fails also lays power first and keeps whichever
 leaves fewer nets unmoved. These pin that wiring: the layout carries the networks the validator then
-holds to AE2's rules, a GT ME hatch is placed as the slot kind its endpoint names, and a line with
-no ME network never pays for the second order.
+holds to AE2's rules, a GT ME hatch is placed as the slot kind its endpoint names, a line with no
+ME network never pays for the second order, and a fast solve of a line with ME blocks to lay is one
+minimal attempt (#352).
 """
 
 from __future__ import annotations
@@ -124,6 +125,62 @@ def test_an_acceptor_rated_under_its_laid_cable_ranks_like_a_starved_machine() -
     # Nor does a report with anything else wrong beside it.
     other = Violation(ViolationCode.MISSING_CONNECTION, "unrouted")
     assert core._starved_machines(ValidationReport((rated_under, other))) == ()
+
+
+# ------------------------------------------------------------------ the fast path (#352)
+
+
+@pytest.mark.parametrize("seed", [0, 1])
+def test_a_fast_solve_of_a_line_on_me_is_its_minimal_attempt(seed: int) -> None:
+    # The constructive row leaves the attached line's single blocks no face for their export
+    # buses, so a fast solve of a line with ME blocks to lay is one minimal attempt instead: the
+    # very layout `effort="minimal"` lays for the seed, which is VALID here.
+    problem, _ = attached_line()
+    fast = solve(problem, seed=seed, optimize=False)
+    assert fast.model_dump_json() == solve(problem, seed=seed, effort="minimal").model_dump_json()
+    assert fast.status is LayoutStatus.VALID, fast.infeasibility
+    assert validate(problem, fast).ok
+    assert [n.id for n in fast.me_networks] == [MAIN]
+
+
+@pytest.mark.parametrize(
+    "asked",
+    [{"effort": "full"}, {"rounds": 3}, {"time_budget": 60.0}],
+    ids=["effort", "rounds", "time-budget"],
+)
+def test_the_fast_paths_minimal_attempt_ignores_effort_and_a_budget(asked: dict[str, Any]) -> None:
+    # It is still the fast path's one attempt, so what the fast path ignores it ignores too, and it
+    # reports no rounds.
+    problem, _ = attached_line()
+    fast = solve(problem, optimize=False, **asked)
+    assert fast == solve(problem, effort="minimal")
+    assert fast.metrics.rounds is None
+
+
+def test_the_fast_paths_minimal_attempt_keeps_the_callers_seed_and_objective() -> None:
+    problem, _ = attached_line()
+    fast = solve(problem, seed=2, optimize=False, objective="volume")
+    assert fast == solve(problem, seed=2, effort="minimal", objective="volume")
+    assert fast.seed == 2
+
+
+def test_only_a_line_with_an_me_block_to_lay_leaves_the_fast_path() -> None:
+    attached, _ = attached_line()
+    assert core.fast_falls_back(attached)  # its machines' ME devices, and its stub
+    main = MEConfig(networks=[MENetworkSpec(id=MAIN, mode=MEMode.ATTACHED)])
+    # A network's own block is enough alone: a stub with no device to serve is still laid.
+    lone_stub = InputIR(bounding_region=CellBox(sx=2, sy=1, sz=2), machines=[stub()], me=main)
+    assert core.fast_falls_back(lone_stub)
+    # A network nothing rides lays no block (the adapter gives it none), so its line keeps the fast
+    # path, like a line with no network at all.
+    idle = InputIR(
+        bounding_region=CellBox(sx=4, sy=1, sz=3),
+        machines=[producer("a"), consumer("b")],
+        nets=[net("n", "a", "b")],
+        me=main,
+    )
+    assert not core.fast_falls_back(idle)
+    assert not core.fast_falls_back(idle.model_copy(update={"me": MEConfig()}))
 
 
 # ------------------------------------------------------------------ the two orders

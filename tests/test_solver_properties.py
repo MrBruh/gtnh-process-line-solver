@@ -758,9 +758,11 @@ def test_a_random_me_plan_is_valid_or_explicitly_infeasible(
     refuses the plan before any solve or the solve cannot lay it. The events say which networks
     the nets rode and whether a GT ME hatch was laid.
 
-    At the time of writing (CI budget) about 30% of the annealed path's examples are valid and 10%
-    of the fast path's, 40-60% partial_invalid (mostly an ME leaf the halo leaves no way to, at a
-    minimal effort), and 10-20% refused by the adapter, with every network shape and GT ME hatches
+    A fast solve of a line with ME blocks to lay is the same minimal attempt the annealed path
+    makes (#352), so the two paths' mixes are alike: at the time of writing (CI budget) 20-35% of
+    either's examples are valid (the fast path's 19% before #352, against 33% after on the same
+    draws), 35-50% partial_invalid (mostly an ME leaf the halo leaves no way to, at a minimal
+    effort), and 10-20% refused by the adapter, with every network shape and GT ME hatches
     represented. A run that stops reaching ``status=valid`` with an ME network proves much less."""
     if isinstance(drawn, Infeasibility):
         event("status=refused by the adapter")

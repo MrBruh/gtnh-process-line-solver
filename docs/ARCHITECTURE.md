@@ -128,7 +128,12 @@ doc as intent and reconcile.
   placement defect rather than a bug. No attempt depends on another, so a slow line runs them in
   a pool of processes - `solver/core.py`). When no attempt is VALID it lays the `--fast` layout,
   unless the crowding gate proves that one cannot dock, and returns it if VALID, so optimizing is
-  never worse than not (#132). A bank-column layout, where the
+  never worse than not (#132). The fast path itself (`solve(optimize=False)`, `--fast`) lays that
+  constructive placement as it stands, except on a line with ME blocks to lay
+  (`solver.fast_falls_back`, #352), where it runs one `minimal` attempt instead: the constructive
+  row touches so that neighbours auto-feed, which leaves a single block no face for its ME devices
+  and puts ME blocks side by side where the ME router must refuse them, and only the annealer and
+  the crowding gate keep them apart. A bank-column layout, where the
   line has one, is routed first and ranked with the grid's attempts: a candidate, never a
   verdict. It also owns the **power-source
   repair pass** (`solver/repair.py`): the annealer has no gradient on a source (a 1x1x1 block
@@ -384,7 +389,8 @@ solver's quality ranking of routed layouts (`placement/search.py`, `solver/core.
 
 All three stay inside the **buildable** family: required-I/O-face reachability is a HARD
 constraint (convenient access is soft), routing is single-channel realizable, and the fast
-constructive path (`--fast`) ignores the objective (it is floor-first by construction). Note that
+constructive path (`--fast`) ignores the objective (it is floor-first by construction), except on a
+line with ME blocks to lay, whose one `minimal` attempt keeps it (#352). Note that
 `--objective volume` is **not** the v1.1 *theoretical-min-volume* mode below: it still produces a
 buildable, single-channel-realizable layout - it just weights the enclosing box instead of the
 floor.
