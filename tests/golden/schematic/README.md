@@ -100,7 +100,7 @@ Built in game by the maintainer, it established:
 | | result |
 |---|---|
 | geometry, wiring, facings | as authored |
-| power | **works at the starved rate**: `cable.tin.04` and `.02` run all nine hammers at the third of their rate the pipes allow. At the full rate the `.04` the source feeds carries all nine, 5 A, so since #347 the validator refuses it; the `.12` there in the Schematica copy carries it |
+| power | **works, at the starved rate**: `cable.tin.04` and `.02` run all nine hammers. The build ran at a third of its designed rate, so it likely never carried the full load (inferred, not observed): at full rate the `.04` block the source feeds would carry 4.22 A nominal (4.36 A after cable loss), over its 4 A. Since #347 the validator refuses that block, pending the maintainer's in-game check at full rate (#347); the `.12` there in the Schematica copy carries it |
 | item throughput | **fails**: every run is a plain `gt_pipe_tin`, and only one of the three stone hammers is fed at a time, so the line runs at a third of its designed rate |
 
 The throughput failure is the useful part. It is why this file is kept even though the build it
@@ -109,7 +109,9 @@ validator refusing a pipe too thin for its net) are measured against. `validate(
 the time, which made it the concrete case of the validator passing a layout that fails in game.
 Since #190 it is refused, on the five pipe blocks of the stone and sand runs that carry more streams
 than a plain pipe's one insertion per 40 ticks, and `tests/test_golden_sand_parallel.py` pins that.
-Since #347 it is also refused on its cable block at the source, which the starved run never loaded.
+Since #347 it is also refused on its cable block at the source, which the starved run likely never
+loaded to the full 4.22 A. That refusal is inferred from the power model, not seen in game, and the
+test pins it pending the maintainer's in-game check at full rate.
 
 The Schematica copy stays because it is the only record of the gauges that **do** work: huge on the
 two runs to and from a chest, large on the two between hammer stages, and `cable.tin.12` at the

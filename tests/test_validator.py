@@ -1272,9 +1272,11 @@ def test_no_segment_is_held_to_more_than_its_source_puts_out() -> None:
     # The two segments m0 shares with the acceptor would sum 1.6 A and the acceptor's 3 to 5 A (8x),
     # but a cable carries no more than its source's 3 A: 4x is enough, and 2x is short.
     assert validate(*_acceptor_trunk([4, 4, 4, 4])).ok
-    assert validate(*_acceptor_trunk([4, 2, 4, 4])).codes() == (
-        ViolationCode.POWER_THICKNESS_INSUFFICIENT,
-    )
+    short = validate(*_acceptor_trunk([2, 4, 4, 4]))
+    # The first segment also builds the source's own block, short of the same 3 A: one defect, so
+    # one violation, the segment's, rather than the root's beside it (#347).
+    assert short.codes() == (ViolationCode.POWER_THICKNESS_INSUFFICIENT,), str(short)
+    assert "segment 0 carries 3 amps but its cable is only 2x" in short.violations[0].message
 
 
 def _lv_sink(mid: str, eut: float, facing: Facing = Facing.NORTH) -> Machine:
@@ -1398,6 +1400,18 @@ def test_a_root_forking_into_two_legs_is_held_to_the_sources_whole_output() -> N
         ViolationCode.POWER_THICKNESS_INSUFFICIENT,
     )
     assert validate(*_root_fork([4, 4], eut=48.0)).ok
+
+
+def test_a_root_over_16x_is_refused_though_every_leg_is_legal() -> None:
+    # Two 279 EU/t legs: 279/31 = 9 A each, which a 12x cable carries, but the root carries 18 A,
+    # which no cable does. Only the root is refused: the legs are rated for what they carry.
+    report = validate(*_root_fork([12, 12], eut=279.0))
+    assert report.codes() == (ViolationCode.POWER_THICKNESS_INSUFFICIENT,), str(report)
+    assert "own cable block carries its whole output, 18 amps, but is built 12x" in (
+        report.violations[0].message
+    )
+    maxed = validate(*_root_fork([16, 16], eut=279.0))
+    assert maxed.codes() == (ViolationCode.POWER_THICKNESS_INSUFFICIENT,), str(maxed)
 
 
 def test_a_sink_tapping_the_root_is_held_to_the_sources_whole_output() -> None:

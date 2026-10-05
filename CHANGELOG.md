@@ -507,17 +507,23 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   legs left the block, or a machine tapped it, it came out thinner than what it carries and would
   burn, and the validator, which checked segments only, certified it: parallel-sand's source block
   was 4x carrying 5 A on every seed. Every segment leaving the source's block is now sized for the
-  source's whole output (the amps the run tells you to feed it), and the validator holds that block,
-  at its thickest touching cable, to the whole output on its own arithmetic
-  (`power_thickness_insufficient`). A source whose whole output is over 16 A is refused rather than
-  split over two legal-looking legs. Only gauges change: across sand, parallel-sand, nitrobenzene
-  and iron, every layout keeps its cells, footprint and verdict, and the previews show a thicker
-  block at the source, and one beyond it, on the lines that fork there. The parallel-sand build
-  exported earlier and built in game (`tests/golden/schematic/`) is now refused for its 4x source
-  block as well as its plain pipes: it ran only at the third of its rate those pipes allowed, so it
-  never carried the 5 A, and the Schematica copy of the working build has 12x there. An Energy
-  Acceptor may now tap the source's block like any machine (#336 kept it off), since that block
-  carries the whole output it takes.
+  whole output on that cable, the whole amps every load on it sums to (for the adapter's sources,
+  which each feed one cable, the amps the run tells you to feed it), and the validator holds that
+  block, at its thickest touching cable, to the same figure on its own arithmetic
+  (`power_thickness_insufficient`). A cable whose whole output is over 16 A is refused at the
+  source rather than split over two legal-looking legs. On the lines measured (sand,
+  parallel-sand, nitrobenzene and iron at `--effort minimal`, six seeds each) only gauges change:
+  every layout keeps its cells, footprint and verdict, and the previews show a thicker block at the
+  source, and one beyond it, where the trunk forks there. Elsewhere a power group the adapter packs
+  to about 16 A at nominal load can now be refused at the source once cable loss is counted:
+  platline's EV group, 16.00 A nominal, needs 17 A there. A follow-up issue is to give that
+  partition headroom for loss. The parallel-sand build exported earlier and built in game
+  (`tests/golden/schematic/`) is now refused for its 4x source block as well as its plain pipes.
+  That is inferred, not observed: it ran at the third of its rate those pipes allowed, so it likely
+  never carried the full load, which at full rate is 4.22 A nominal against its 4 A. The test pins
+  the refusal pending an in-game check at full rate, and the Schematica copy of the working build
+  has 12x there. An Energy Acceptor may now tap the source's block like any machine (#336 kept it
+  off), since that block carries the whole output it takes.
 - **An exported multiblock starts with its maintenance done.** A GT controller loads one flag per
   maintenance problem from its NBT, and the export wrote none, so a pasted line's multiblocks formed
   and then waited for every Maintenance Hatch to be taped again (its duct-tape overlay is GT's

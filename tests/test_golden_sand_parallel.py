@@ -35,9 +35,11 @@ pipes sit on exactly the export's twelve cells. It has huge on the two runs to a
 large on the two between hammer stages, and the validator must accept that.
 
 **So is the cable gauge.** The export's cable column is 4x at the source, 4x, then 2x, and it ran
-the hammers, but only at that third of their designed rate, so it never carried what the line draws
-at full rate. At full rate all nine hammers draw through the block the source feeds, 5 A against a
-4x cable, which the validator refuses since #347. The Schematica copy has 12x at the source and 8x
+the hammers. It ran them at a third of their designed rate, though, so it likely never carried the
+full load; that is inferred, not observed. At full rate all nine hammers draw through the block the
+source feeds: 9 x 15/32 = 4.22 A at nominal voltage (4.36 A after cable loss, so 5 A), over its
+4 A. Since #347 the validator refuses that block, and the test pins the refusal **pending the
+maintainer's in-game check at full rate** (#347). The Schematica copy has 12x at the source and 8x
 beyond on the same three cells, and the working build takes its cable gauges from there too.
 """
 
@@ -287,7 +289,7 @@ def working_build() -> tuple[InputIR, LayoutResult]:
     return _working_build()
 
 
-def test_the_export_built_in_game_is_refused_for_its_plain_pipes(
+def test_the_export_built_in_game_is_refused_for_its_plain_pipes_and_its_source_block(
     proven_build: tuple[InputIR, LayoutResult],
 ) -> None:
     """The case #190 was filed for: this layout ran at a third of its rate and ``validate()`` passed
@@ -297,8 +299,10 @@ def test_the_export_built_in_game_is_refused_for_its_plain_pipes(
     it, one stream a block, and a normal pipe carries that.
 
     Geometry, wiring and facings were proven in game, so beside the pipe size the only thing
-    refused is the one block the starved run never loaded: the cable the source feeds. At full rate
-    it carries all nine hammers, 5 A, on a 4x cable (#347).
+    refused is the cable block the source feeds. That refusal is inferred, not observed: the
+    starved run likely never put the full load through it, and at full rate it would carry all nine
+    hammers, 4.22 A at nominal voltage (4.36 A after cable loss, so 5 A), over its 4 A. It is
+    pinned pending the maintainer's in-game check at full rate (#347).
     """
     problem, layout = proven_build
     assert set(_item_sizes(layout.routes).values()) == {PipeSize.NORMAL}  # 5591, as built

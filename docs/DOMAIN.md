@@ -447,12 +447,17 @@ where load **sums** along shared segments (Steiner-tree-like):
   ("Cables and pipes as blocks" below), so it is never thinner than what passes through it. The
   source's block has no parent segment: when two legs leave it, or a machine taps it, no one
   segment carries the whole output, and a block built at the thickest of them burns. So every
-  segment leaving the source's block is sized for the source's **whole output**, the whole amps
-  every connection's load sums to, which is what the run tells the builder to feed that source
-  (`system_io.power_amps_by_source`); a leg's second block comes out thicker than its own load,
-  which never burns. A source whose whole output is over 16 A is refused there, never split over
-  two legs that each look legal. The validator holds the block to that output on its own
-  arithmetic, at the thickest cable touching it.
+  segment leaving the source's block is sized for the source's **whole output** on that cable, the
+  whole amps every connection on it sums to; a leg's second block comes out thicker than its own
+  load, which never burns. That is the root's own figure, per route. For a source on one net, as
+  every source the adapter synthesizes is, it is the amperage the run tells the builder to feed
+  that source (`system_io.power_amps_by_source`); that report sums a hand-built source's several
+  nets, while each of their roots carries only its own. An output over 16 A is refused at the
+  source, never split over two legs that each look legal. The adapter still packs a tier's sources
+  to 16 A at nominal load, with no headroom for cable loss, so a group packed close to 16 A can be
+  refused here (platline's EV group: 16.00 A nominal, 17 A at the source); giving that partition
+  headroom is a follow-up. The validator holds the block to that output on its own arithmetic, at
+  the thickest cable touching it.
 - A segment needing **> 16x** must split into **parallel runs** or move to a **higher voltage
   tier** (more power per amp).
 - **Hatches ride casing cells, and casings are interchangeable.** A GT multiblock's shell asks

@@ -460,10 +460,12 @@ def _size_trunk(
     independently. A run whose delivered voltage reaches 0 (:class:`UnpowerableError`) or a
     segment whose summed load exceeds 16x is rejected, not silently certified.
 
-    **The source's own cable block carries its whole output** (#347). The source's output is the
-    whole amps its sinks' steady loads sum to, the figure the builder is told to feed it
-    (``system_io.power_amps_by_source``), and all of it passes through the root, whichever leg it
-    then takes. Every other cell has a parent segment carrying its whole subtree, but the root has
+    **The source's own cable block carries its whole output** (#347). That output is the whole amps
+    the steady loads of this trunk's sinks sum to, and all of it passes through the root, whichever
+    leg it then takes. It is the root's own figure, per route: ``system_io.power_amps_by_source``
+    gives the same number for a source on one net (every source the adapter synthesizes), but sums
+    a hand-built source's several nets, and each of their roots carries only its own. Every other
+    cell has a parent segment carrying its whole subtree, but the root has
     none: it is built at the thickest segment touching it (``route_blocks``), and with two legs
     leaving it, or a sink tapping it, no subtree sum reaches the whole output. So every segment
     leaving the root is sized for the whole output (a leg's second block comes out thicker than its

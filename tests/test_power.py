@@ -429,6 +429,28 @@ def test_power_rejects_a_root_carrying_more_than_16x() -> None:
     assert "the source's own cable block must carry 18 amps" in sized.detail
 
 
+def test_power_route_refuses_a_root_over_16x_on_legal_legs() -> None:
+    # The branched trunk above, loaded heavier: m0 one block out (31 V) draws 279/31 = 9 A and m1
+    # five out (27 V) 243/27 = 9 A, so each leg needs a 12x cable, legal on its own, but the source's
+    # own block carries 18 A. route_power refuses the net rather than lay two legal legs on it.
+    problem = InputIR(
+        bounding_region=CellBox(sx=10, sy=4, sz=10),
+        machines=[_src(), _load("m0", 279), _load("m1", 243)],
+        nets=[_pnet("m0", "m1")],
+    )
+    placements = [at("src", 3, 0, 0), at("m0", 0, 0, 0), at("m1", 6, 0, 0)]
+    result = route_power(problem, placements)
+    assert not result.ok
+    assert result.failed_nets == ("power:LV",)
+    assert result.infeasibility is not None
+    assert result.infeasibility.constraint == "amperage"
+    assert "the source's own cable block must carry 18 amps" in result.infeasibility.detail
+    # Either sink alone fits a cable: it is the shared root that is over the cap.
+    for sink in ("m0", "m1"):
+        alone = problem.model_copy(update={"nets": [_pnet(sink)]})
+        assert route_power(alone, placements).ok
+
+
 def test_power_unknown_tier_is_infeasible() -> None:
     problem = InputIR(
         bounding_region=CellBox(sx=8, sy=4, sz=8),
