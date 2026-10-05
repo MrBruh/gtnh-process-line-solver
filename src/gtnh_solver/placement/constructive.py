@@ -140,7 +140,7 @@ _Window = tuple[int, int]
 #: Origin strides of the seed lattice along x and z: a one-cell channel between the blocks of a
 #: row, a two-cell aisle between rows (module docstring).
 _LATTICE_STRIDE_X = 1
-_LATTICE_STRIDE_Z = 2
+_LATTICE_STRIDE_Z = 3
 
 #: SPIKE knob (initial-placement sweep): seed a line with a multiblock on the shelf too, each machine
 #: a unit at its footprint, instead of the plain first-fit strip. False is main's behaviour.
