@@ -184,6 +184,32 @@ def test_a_part_must_face_the_normal_hatch_it_serves() -> None:
     assert ViolationCode.ME_DEVICE_PLACEMENT in codes
 
 
+def _slotless(problem: InputIR, layout: LayoutResult) -> tuple[InputIR, LayoutResult]:
+    """``gt_hatch_line(normal=True)`` with no slot recorded for the multiblock, so no hatch on it:
+    what a plan adapted without the machine's structure gets (#335)."""
+    machines = [
+        m.model_copy(update={"hatch_slots": (), "hatch_cells": 0}) if m.id == "mb" else m
+        for m in problem.machines
+    ]
+    return problem.model_copy(update={"machines": machines}), layout.model_copy(
+        update={"hatches": []}
+    )
+
+
+def test_a_part_on_a_multiblock_with_no_recorded_slots_needs_only_face_it() -> None:
+    # No slot was recorded, so no hatch is placed there, as for a pipe's terminal.
+    problem, layout = _slotless(*gt_hatch_line(normal=True))
+    assert ViolationCode.ME_DEVICE_PLACEMENT not in _codes(problem, layout)
+
+
+def test_a_part_on_a_multiblock_with_no_recorded_slots_must_still_face_it() -> None:
+    problem, layout = _slotless(*gt_hatch_line(normal=True))
+    network = _network(layout)
+    turned = [d.model_copy(update={"side": Facing.EAST}) for d in network.devices]
+    moved = _with_network(layout, network.model_copy(update={"devices": turned}))
+    assert ViolationCode.ME_DEVICE_PLACEMENT in _codes(problem, moved)
+
+
 # ------------------------------------------------------------------ rule 3: one auto-output face
 
 

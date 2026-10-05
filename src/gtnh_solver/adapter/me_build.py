@@ -56,6 +56,7 @@ from gtnh_solver.ir import (
     MEDeviceKind,
     MEDeviceSpec,
     MEEndpoint,
+    MEHatchPolicy,
     MEMode,
     MENetworkSpec,
     MERole,
@@ -302,7 +303,10 @@ def _machine_endpoints(
             multiblock=multiblock,
             machine_tier=machine.voltage_tier,
             line_tier=line_tier,
-            hatches=spec.hatches,
+            # A GT ME hatch stands in a casing slot, and a multiblock whose structure the dataset
+            # lacks has none recorded (no hatch is placed there, as for a pipe), so its devices are
+            # AE2 parts facing the machine.
+            hatches=spec.hatches if machine.hatch_slots or not multiblock else MEHatchPolicy.NEVER,
             super_speed=spec.super_speed,
         )
         if isinstance(chosen, MEShortfall):

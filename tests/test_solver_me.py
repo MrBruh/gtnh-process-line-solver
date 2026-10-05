@@ -15,18 +15,23 @@ from typing import Any
 
 import pytest
 
+from gtnh_solver.adapter.me_build import build_me
 from gtnh_solver.ir import (
     CellBox,
+    Commodity,
+    FaceSpec,
     Facing,
     Infeasibility,
     InputIR,
     IODirection,
     LayoutStatus,
     Machine,
+    MachineFaceRef,
     MEConfig,
     MEDeviceKind,
     MEMode,
     MENetworkSpec,
+    Net,
     Placement,
     Terminal,
 )
@@ -277,3 +282,54 @@ def test_me_cable_counts_as_route_cells_in_the_ranking() -> None:
     cabled = structure_quality(problem, layout.placements, [], "footprint", cells)
     # The blend adds every cable block; the floor it spans grows too where it sprawls.
     assert cabled[0] - bare[0] >= len(cells)
+
+
+def test_a_multiblock_with_no_recorded_slots_takes_parts_facing_it_and_solves() -> None:
+    # The plan says multiblock but the dataset has no structure for it, so no slot is recorded and
+    # no hatch is placed on it, as for a pipe's terminal. Its devices are AE2 parts facing the
+    # machine, never a GT ME hatch (which would need a slot), and the line solves: before, it
+    # waited on a hatch nobody places and could never pass the validator.
+    made = Machine(
+        id="m0",
+        type="t",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(ports=[item_port("item:out", IODirection.OUTPUT, rate=0.0)]),
+    )
+    chest = Machine(
+        id="s0",
+        type="Super Chest",
+        voltage_tier="LV",
+        orientation_options=list(Facing)[:4],
+        faces=FaceSpec(ports=[item_port("input:r0", IODirection.INPUT)]),
+    )
+    product = Net(
+        id="e0",
+        commodity=Commodity.ITEM,
+        fluid_or_item="r0",
+        throughput=0.0,
+        me_network="me0",
+        endpoints=[
+            MachineFaceRef(machine_id="m0", port_id="item:out"),
+            MachineFaceRef(machine_id="s0", port_id="input:r0"),
+        ],
+    )
+    me = MEConfig(networks=[MENetworkSpec(id="me0", mode=MEMode.SUBNET)])
+    machines, nets = build_me(
+        [made, chest],
+        [product],
+        me,
+        storage_ids={"s0"},
+        multiblock_ids={"m0"},
+        line_tier="LV",
+        recipe_ticks={},
+    )
+    (built,) = next(m for m in machines if m.id == "m0").me_endpoints
+    assert built.device.gt_mid is None
+    problem = InputIR(
+        bounding_region=CellBox(sx=2, sy=1, sz=2), machines=machines, nets=nets, me=me
+    )
+    layout = solve(problem, seed=0)
+    assert layout.status is LayoutStatus.VALID, layout.infeasibility
+    assert validate(problem, layout).ok
+    assert layout.hatches == []
