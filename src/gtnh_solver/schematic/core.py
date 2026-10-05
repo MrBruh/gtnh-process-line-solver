@@ -411,6 +411,34 @@ def _single_block_tile(
 #: The most ``eVoltage`` (a TAG_Int) holds; GT's MAX tier is 2^31 by our ladder and Integer.MAX in GT.
 _INT_MAX: Final = 2**31 - 1
 
+#: A multiblock controller's maintenance flags, one per problem, true once it is fixed
+#: (``MTEMultiBlockBase.saveNBTData``; 2.8 and 2.9 write the same keys as TAG_Byte booleans).
+_MAINTENANCE_FLAGS: Final = (
+    "mWrench",
+    "mScrewdriver",
+    "mSoftMallet",
+    "mHardHammer",
+    "mSolderingTool",
+    "mCrowbar",
+)
+
+
+def _maintained_controller(cell: Cell) -> Cell:
+    """A multiblock controller with its maintenance done, so a pasted line runs without repairs.
+
+    A controller loads one flag per maintenance problem from its NBT (``MTEMultiBlockBase``
+    5.09.54.133 lines 464-471), so a tile without them starts with all six problems, as a freshly
+    built machine does: a paste of the EV nitrobenzene line formed, then waited for every
+    Maintenance Hatch to be taped again. Written fixed, it runs once it forms. The ghost shows
+    none of this, and a line built by hand still has its maintenance done by hand, as in game.
+    """
+    if cell.tile is None:
+        return cell
+    tile = nbt.Compound(cell.tile)
+    for flag in _MAINTENANCE_FLAGS:
+        tile[flag] = nbt.Byte(1)
+    return Cell(cell.block, cell.data, tile)
+
 
 def _power_source_tile(cell: Cell, tier: str, amps: int) -> Cell:
     """The stand-in power source, set to feed its line: producing at the tier's voltage, ``amps`` A.
@@ -516,6 +544,9 @@ def lower(
         single = len(cubes) == 1 and tuple(machine.get("size", (1, 1, 1))) == (1, 1, 1)
         for cube in cubes:
             cell = _cube_cell(cube, manifest, front, origin)
+            # A multiblock's controller: the docs are keyed by each controller's block@meta.
+            if not single and f"{cube.block}@{cube.meta}" in docs:
+                cell = _maintained_controller(cell)
             key = tuple(cube.cell[i] - origin[i] for i in range(3))
             if single:
                 machine_outputs = outputs.get(str(machine["id"]))

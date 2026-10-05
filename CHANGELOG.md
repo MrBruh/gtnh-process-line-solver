@@ -501,6 +501,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **An exported multiblock starts with its maintenance done.** A GT controller loads one flag per
+  maintenance problem from its NBT, and the export wrote none, so a pasted line's multiblocks formed
+  and then waited for every Maintenance Hatch to be taped again (its duct-tape overlay is GT's
+  "needs repair" look). Each controller is now written with all six problems fixed, so a pasted
+  line runs once it forms. A line built by hand from the ghost still has its maintenance done by
+  hand, as in game.
 - **The exported power source produces.** The `.schematic` export stands a Debug Power Generator in
   for the adapter's synthesized power source, but wrote it with no settings, and TecTech loads a
   generator with no settings as a consumer of 0 V x 0 A. Pasted into a world, it drew power instead
