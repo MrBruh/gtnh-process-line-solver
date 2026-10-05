@@ -1253,8 +1253,8 @@ function renderLegend() {
       if (n.power !== 'acceptor') row(nets, '  power it yourself (a quartz fiber or your main network)');
     }
   }
-  // The credit in full, wherever AE2's or FC's art is on the page: on an ME network, or on a GT block
-  // that wears it (the Large Molecular Assembler's quartz lamp).
+  // The credit in full, wherever AE2's or FC's art is on the page: on an ME network, on a GT block
+  // that wears it (the Large Molecular Assembler's quartz lamp), or as an AE2 or FC item's icon.
   if (CREDIT) {
     const credit = el('span');
     credit.className = 'credit';

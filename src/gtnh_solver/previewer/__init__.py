@@ -30,11 +30,11 @@ from typing import Any
 from gtnh_solver.dataset.icons import IconPack, resolve_icon_index
 from gtnh_solver.dataset.mod_jars import ME_JARS, gt5u_jar
 from gtnh_solver.dataset.roots import resolve_dataset_path
-from gtnh_solver.ir import InputIR, LayoutResult
+from gtnh_solver.ir import Commodity, InputIR, LayoutResult
 
 from .atlas import pack_atlas
 from .html import render_html
-from .icons import resource_art
+from .icons import carried_kinds, resource_art
 from .jar import JAR_VERSION, asset_modid, gt5u_version_from_manifest, multi_jar_png_provider
 from .me_textures import credit, me_icons, texturize_me
 from .scene import SCENE_VERSION, build_scene
@@ -87,9 +87,11 @@ def write_preview(
     pass runs in a try of its own, so even a jar member that is not a PNG strips only the ME art.
 
     Once any of AE2's or FC's art is embedded the page carries AE2's credit (``me_textures.credit``)
-    in ``scene["credit"]``, wherever the art came from: the ME pass, or the GT pass (a GT block can
-    wear AE2 art, the Large Molecular Assembler's quartz lamp, and the provider routes every
-    ``assets/appliedenergistics2/`` path to AE2's jar whichever pass asks).
+    in ``scene["credit"]``, wherever the art came from: the ME pass, the GT pass (a GT block can wear
+    AE2 art, the Large Molecular Assembler's quartz lamp, and the provider routes every
+    ``assets/appliedenergistics2/`` path to AE2's jar whichever pass asks), or the item icons (an
+    AE2 or FC item the line moves, known by its id's namespace; fluid ids carry none, so a fluid's
+    icon is never counted).
     """
     names, icons = _resource_art(problem, version or problem.pack_version)
     scene = build_scene(problem, layout, extra_names=names)
@@ -109,7 +111,7 @@ def write_preview(
             _untextured(scene)
             gt_art.clear()
             me_art = frozenset()
-    scene["credit"] = credit(frozenset(gt_art | me_art))
+    scene["credit"] = credit(frozenset(gt_art | me_art | _item_icon_mods(problem, icons)))
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(render_html(scene), encoding="utf-8")
@@ -130,6 +132,16 @@ def _me_art(scene: dict[str, Any], provider: PngProvider) -> frozenset[str]:
         if scene.get("me"):
             scene["me"]["lights"] = {}
         return frozenset()
+
+
+def _item_icon_mods(problem: InputIR, icons: Mapping[str, str]) -> frozenset[str]:
+    """The mod namespaces of the item icons the page embeds: an item id is ``mod:name``, so an AE2
+    or FC item's icon (certus quartz, a fluix crystal) is that mod's art. A fluid id names no mod."""
+    return frozenset(
+        resource.partition(":")[0]
+        for resource, kind in carried_kinds(problem).items()
+        if kind is Commodity.ITEM and resource in icons and ":" in resource
+    )
 
 
 def _noting(provider: PngProvider, served: set[str]) -> PngProvider:

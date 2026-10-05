@@ -411,6 +411,20 @@ def test_the_credit_names_the_mods_the_licence_and_the_terms() -> None:
     only_ae2 = credit(frozenset({"appliedenergistics2"}))
     assert only_ae2 is not None
     assert "AE2FluidCraft" not in only_ae2["text"]
+    assert "AE2FluidCraft" not in only_ae2["short"]
+
+
+def test_fc_art_alone_is_credited_to_fc_on_ae2s_terms() -> None:
+    # FC declares LGPL-3.0, but nobody checked whether its art derives from AE2's, so NOTICE shares
+    # it on AE2's terms; the credit names FC, not AlgorithmX2, and says why the terms apply.
+    fc = credit(frozenset({"ae2fc"}))
+    assert fc is not None
+    assert "AlgorithmX2" not in fc["short"]
+    assert "AE2FluidCraft" in fc["short"]
+    assert "non-commercial" in fc["short"]
+    assert "LGPL-3.0" in fc["text"]
+    assert "unchecked" in fc["text"]
+    assert fc["licence"] == "CC BY-NC-SA 3.0"
 
 
 # --- write_preview, end to end, with the jars faked ----------------------------------------------------
@@ -515,6 +529,31 @@ def test_an_ae2_jar_of_non_pngs_strips_only_the_me_art(
     assert not any(key.startswith("appliedenergistics2:") for key in tiles)
     assert any(m.get("expanded") for m in scene["machines"])
     assert _me(scene)["lights"] == {}
+    assert scene["credit"] is None
+
+
+def test_an_ae2_item_icon_earns_the_credit_even_without_textures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An item id names its mod, so an AE2 item's icon (a fluix crystal) is AE2's art on the page.
+    # A fluid id names none, and so is never counted.
+    fluix = "appliedenergistics2:item.ItemMultiMaterial@7"
+    problem, layout = attached_line()
+    nets = [
+        n.model_copy(update={"fluid_or_item": fluix}) if n.id == "stone" else n
+        for n in problem.nets
+    ]
+    problem = problem.model_copy(update={"nets": nets})
+    monkeypatch.setattr(
+        previewer_package, "_resource_art", lambda *_: ({}, {fluix: "data:image/png;base64,"})
+    )
+    scene = _preview(tmp_path, monkeypatch, (problem, layout), _Nexus(), textures=False)
+    assert scene["credit"] is not None
+    assert "AlgorithmX2" in scene["credit"]["short"]
+    monkeypatch.setattr(
+        previewer_package, "_resource_art", lambda *_: ({}, {"stone": "data:image/png;base64,"})
+    )
+    scene = _preview(tmp_path, monkeypatch, attached_line(), _Nexus(), textures=False)
     assert scene["credit"] is None
 
 

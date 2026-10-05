@@ -123,21 +123,32 @@ def _first_frame(png: bytes) -> bytes:
 def credit(mods: frozenset[str]) -> dict[str, Any] | None:
     """What a page that embeds the art of ``mods`` must show (module docstring), or ``None`` when
     it embeds none of AE2's or FC's: ``text`` in full for the legend, ``short`` for the HUD, each
-    followed by the licence's name linked to ``url``. Read by the viewer as data; the words are this
-    module's own, never the scene's."""
+    followed by the licence's name linked to ``url``. It names what is embedded, whether that art
+    is an ME network's, a GT block's or an item's: AE2's credit wherever AE2's art is (FC's beside
+    it), and FC alone with the note ``NOTICE`` gives it. Read by the viewer as data; the words are
+    this module's own, never the scene's."""
     named = [credit for modid, credit in _MOD_CREDITS.items() if modid in mods]
     if not named:
         return None
+    terms = "share this preview for non-commercial purposes only, and with this credit."
+    if AE2.modid in mods:
+        # AE2's own art is CC BY-NC-SA 3.0, and FC's beside it rides the same terms.
+        fc = " and GTNewHorizons (AE2FluidCraft)" if AE2FC.modid in mods else ""
+        short = f"Textures (c) AlgorithmX2 et al (AE2){fc}, non-commercial sharing only:"
+        text = f"Textures from {', and from '.join(named)}. Licensed {AE2_LICENCE}: {terms}"
+    else:
+        # FC alone declares LGPL-3.0, but whether its art derives from AE2's is unchecked (NOTICE).
+        short = "Textures from AE2FluidCraft (GTNewHorizons), on AE2's terms, non-commercial only:"
+        text = (
+            f"Textures from {named[0]}. It declares LGPL-3.0, but whether its art derives from "
+            f"Applied Energistics 2's ({AE2_LICENCE}) is unchecked, so it is shared on those "
+            f"terms: {terms}"
+        )
     return {
         "mods": named,
         "licence": AE2_LICENCE,
         "url": AE2_LICENCE_URL,
         # The HUD's one line, which no fold hides; the legend carries ``text`` in full.
-        "short": "ME textures (c) AlgorithmX2 et al (AE2), non-commercial sharing only:",
-        "text": (
-            "ME textures from "
-            + " and ".join(named)
-            + f", licensed {AE2_LICENCE}: share this preview for non-commercial purposes only, "
-            "and with this credit."
-        ),
+        "short": short,
+        "text": text,
     }
