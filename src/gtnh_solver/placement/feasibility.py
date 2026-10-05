@@ -70,8 +70,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from gtnh_solver.ir import Facing, InputIR, Machine, Placement
-from gtnh_solver.ir.geometry import Cell
+from gtnh_solver.ir import Facing, InputIR, Machine, MERole, Placement
+from gtnh_solver.ir.geometry import FACE_OFFSETS, Cell, occupied_cells
 from gtnh_solver.ir.nets import (
     SINGLE_BLOCK_IO_FACES,
     connection_counts,
@@ -99,7 +99,9 @@ def crowded_machines(problem: InputIR, placements: Sequence[Placement]) -> tuple
     proves shortfalls rather than deciding the question, and what it cannot see it does not
     report. It is also only about *docking*: whether a pipe can then be routed between the docks
     is the router's question, not this one. The verdict depends on the geometry alone, never on
-    the order the placements arrive in.
+    the order the placements arrive in. It also names ME network blocks placed where AE would join
+    them into a loop or merge two networks (:func:`_me_block_clashes`, #335), the one placement
+    defect the ME router refuses outright.
 
     Judged with the router's own :func:`dock_candidates`, so the cells counted here are the cells
     a hatch may really occupy (only faces ``Machine.allowed_faces`` grants the port, so the front
@@ -155,7 +157,41 @@ def crowded_machines(problem: InputIR, placements: Sequence[Placement]) -> tuple
             by_machine[placement.machine_id], _stand_ins(placement.machine_id, by_machine, reach)
         )
     ]
+    crowded += _me_block_clashes(problem, placements)
     return tuple(dict.fromkeys(crowded))  # de-duplicated, first occurrence order
+
+
+def _me_block_clashes(problem: InputIR, placements: Sequence[Placement]) -> list[str]:
+    """ME network blocks placed where the ME router must refuse their network, in placement order.
+
+    AE joins every block it can, so two attach stubs of one network side by side close a loop
+    through the main network, two of its links or acceptors close one through each other, and
+    blocks of two networks merge them; ``router.me`` refuses each (``me_infrastructure``). Placing
+    them a cell apart is the placer's job, so the gate names them and the anneal looks on. A link
+    or acceptor beside a stub or a controller is fine (it joins there), and so are controllers
+    side by side, which AE runs as one.
+    """
+    machines = {m.id: m for m in problem.machines}
+    blocks: list[tuple[str, Machine, set[Cell]]] = []
+    for placement in placements:
+        machine = machines.get(placement.machine_id)
+        if machine is None or machine.me_network is None:
+            continue
+        cells = set(occupied_cells(placement.cell, machine.footprint, placement.orientation))
+        blocks.append((placement.machine_id, machine, cells))
+    clashing: list[str] = []
+    for i, (a_id, a, a_cells) in enumerate(blocks):
+        around = {(x + dx, y + dy, z + dz) for x, y, z in a_cells for dx, dy, dz in FACE_OFFSETS}
+        for b_id, b, b_cells in blocks[i + 1 :]:
+            if around.isdisjoint(b_cells):
+                continue
+            joins = a.me_network == b.me_network and (
+                {a.me_role, b.me_role} != {MERole.ATTACH}
+                and not {a.me_role, b.me_role} <= {MERole.LINK, MERole.ACCEPTOR}
+            )
+            if not joins:
+                clashing += [a_id, b_id]
+    return clashing
 
 
 def single_block_shortfalls(problem: InputIR) -> dict[str, int]:

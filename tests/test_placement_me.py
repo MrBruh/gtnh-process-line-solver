@@ -24,6 +24,7 @@ from gtnh_solver.ir import (
     MENetworkSpec,
     MERole,
     Net,
+    Placement,
     Port,
     RelativeFace,
 )
@@ -284,3 +285,60 @@ def test_an_attached_line_anneals_to_a_placement_the_gate_passes() -> None:
     result = optimize_placement(problem, seed=0, max_iterations=200)
     assert result.ok
     assert crowded_machines(problem, result.placements) == ()
+
+
+# ------------------------------------------------------------------ ME blocks the router would refuse
+
+
+def _stub_at(machine_id: str, network: str = MAIN) -> Machine:
+    return Machine(
+        id=machine_id,
+        type="ME Dense Smart Cable",
+        voltage_tier="LV",
+        orientation_options=[Facing.WEST],
+        me_role=MERole.ATTACH,
+        me_network=network,
+        outside_front=True,
+    )
+
+
+def _blocks(*machines: Machine) -> InputIR:
+    """``machines`` (ME blocks) on a 1x1x3 strip of the west edge, with every network they name."""
+    ids = list(dict.fromkeys(m.me_network for m in machines if m.me_network is not None))
+    return InputIR(
+        bounding_region=CellBox(sx=1, sy=1, sz=3), machines=list(machines), me=_networks(*ids)
+    )
+
+
+def _strip(*ids: str) -> list[Placement]:
+    return [at(mid, 0, 0, z, orientation=Facing.WEST) for z, mid in enumerate(ids) if mid]
+
+
+def test_two_links_of_one_subnet_side_by_side_are_turned_away() -> None:
+    # A subnet moving items and fluids has two links; touching, AE joins them into a loop.
+    problem = _blocks(_link("item"), _link("fluid"))
+    assert crowded_machines(problem, _strip("item", "fluid")) == ("item", "fluid")
+    assert crowded_machines(problem, _strip("item", "", "fluid")) == ()
+
+
+def test_two_stubs_of_one_network_side_by_side_are_turned_away() -> None:
+    problem = _blocks(_stub_at("s0"), _stub_at("s1"))
+    assert crowded_machines(problem, _strip("s0", "s1")) == ("s0", "s1")
+
+
+def test_blocks_of_two_networks_side_by_side_are_turned_away() -> None:
+    problem = _blocks(_stub_at("s0"), _link("l0"))
+    assert crowded_machines(problem, _strip("s0", "l0")) == ("s0", "l0")
+
+
+def test_a_link_beside_its_own_controller_is_fine() -> None:
+    controller = Machine(
+        id="ctrl",
+        type="ME Controller",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        me_role=MERole.CONTROLLER,
+        me_network=SUB,
+    )
+    problem = _blocks(_link("l0"), controller)
+    assert crowded_machines(problem, [*_strip("l0"), at("ctrl", 0, 0, 1)]) == ()
