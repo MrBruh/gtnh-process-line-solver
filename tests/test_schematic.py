@@ -731,6 +731,32 @@ def test_the_chemical_plant_exports_with_the_casings_its_node_needs() -> None:
     assert not [name for name, _ in box if "blockspecialcasings" in name]
 
 
+def test_a_multiblock_controller_is_exported_with_its_maintenance_done() -> None:
+    """A pasted line formed, then waited for every Maintenance Hatch to be taped again: a controller
+    with no maintenance flags loads with all six problems. Written fixed, it runs once it forms; no
+    other block carries the flags."""
+    docs = load_multiblock_docs(_COMMITTED_MULTIBLOCKS)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        problem = adapt_file(
+            str(_EXAMPLES / "gtnh-nitrobenzene.json"),
+            physical=load_physical_dataset(_COMMITTED_MULTIBLOCKS),
+        )
+        root = build_schematic(
+            problem, solve(problem, optimize=False), manifest=_manifest(), docs=docs
+        )
+    flags = schematic_core._MAINTENANCE_FLAGS
+    tiles = root["TileEntities"]
+    controllers = [t for t in tiles if f"{schematic_core._GT_MACHINES}@{int(t['mID'])}" in docs]
+    others = [t for t in tiles if f"{schematic_core._GT_MACHINES}@{int(t['mID'])}" not in docs]
+
+    assert {int(t["mID"]) for t in controllers} >= {998}  # the Chemical Plant, at least
+    for controller in controllers:
+        assert {flag: controller[flag] for flag in flags} == dict.fromkeys(flags, 1)
+        assert all(isinstance(controller[flag], nbt.Byte) for flag in flags)  # GT's setBoolean
+    assert not [t for t in others if "mWrench" in t], "only a controller keeps maintenance flags"
+
+
 def test_a_tier_the_dump_never_places_exports() -> None:
     """The converted shadow plant's Bronze pipe casing (meta 12) is valid in game and absent from
     every dump; the committed manifest must still name it, or the export refuses the block. Only
