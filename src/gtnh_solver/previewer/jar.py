@@ -9,10 +9,12 @@ stays an injected dependency the test suite never triggers.
 
 Two providers, one per need::
 
-    jar_png_provider(gt5u_version=...)       one jar, GT5-Unofficial, every path to it: today's
-                                             preview, at the version the manifest was read at
+    jar_png_provider(gt5u_version=...)       one jar, GT5-Unofficial, every path to it, at the
+                                             version the manifest was read at
 
-    multi_jar_png_provider(primary, extras)  several jars, routed by asset namespace:
+    multi_jar_png_provider(primary, extras)  several jars, routed by asset namespace; what
+                                             write_preview reads with: GT primary, AE2 and FC extra
+                                             (an ME network's art, #338):
         {icon: "assets/<modid>/..."}
           |  group by modid: an extra jar claims its own modid (AE2 appliedenergistics2,
           |  FC ae2fc), and the primary takes every path no extra claims. GT's jar carries

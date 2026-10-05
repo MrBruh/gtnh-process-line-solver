@@ -161,6 +161,9 @@ doc as intent and reconcile.
   drawn as. The previewer draws those blocks, and `route_block_counts` tallies them into what a
   bill of materials counts (the previewer's, #202). The mask used to be JavaScript inside the
   viewer template, where the one rule in it that is a real build instruction was pinned by nothing.
+  `previewer/me_blocks.py` makes the same trade for an ME network (#338): the connections, channel
+  counts and boxes AE2's renderer would draw each cable bus with, from AE2's own render data, so
+  the shape is a tested derivation rather than template code.
 - **validator/** - independent geometric + rule checks (shares rule *data* with the router,
   not its *logic*). The only automated correctness gate. Its ME gate (`validator/me.py`, #333)
   rebuilds the AE2 graph from the blocks a layout places (AE cables join every compatible

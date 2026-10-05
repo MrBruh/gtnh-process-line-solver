@@ -48,6 +48,7 @@ from gtnh_solver.previewer.scene import (
 )
 from gtnh_solver.solver import solve
 from tests._helpers import at, consumer, layered_tower, machine, net, producer
+from tests._me_fixtures import gt_hatch_line
 
 _SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
 
@@ -388,6 +389,7 @@ def test_scene_reports_system_io() -> None:
             "rate": pytest.approx(0.1),
             "unit": "items",
             "me": False,
+            "network": None,  # a chest of the line's own, on no ME network
         }
     ]
     # the power feed per tier: the FULL LV tier voltage (32, not the hammers' 16 EU/t draw) x the
@@ -403,18 +405,22 @@ def test_scene_reports_system_io() -> None:
 
 def test_scene_says_a_flow_left_to_me_arrives_over_me() -> None:
     """With items on ME (``--me items``) the sand line routes no item pipe and auto-outputs nothing
-    between machines; its items ride an ME network the solve lays (#335) but the preview does not
-    draw yet (#338). Its stone comes from the network's storage and its sand goes back there, so
-    no Super Chest stands at either end, and the panel lists both, flagged ``me`` to say how they
-    get there. Power is still cabled, and says nothing of the sort.
+    between machines; its items ride an ME network the solve lays (#335) and the preview draws
+    (#338). Its stone comes from the network's storage and its sand goes back there, so no Super
+    Chest stands at either end, and the panel lists both, flagged ``me`` with the network whose
+    storage it is. Power is still cabled, and says nothing of the sort.
     """
     scene = _sand_scene(Commodity.ITEM, optimize=True)
     assert scene["status"] == "valid"
     assert [r["commodity"] for r in scene["routes"]] == ["power"]
     assert scene["autoConnections"] == []
     io = scene["io"]
-    assert [(f["resource"], f["me"]) for f in io["inputs"]] == [("minecraft:stone", True)]
-    assert [(f["resource"], f["me"]) for f in io["outputs"]] == [("minecraft:sand", True)]
+    assert [(f["resource"], f["me"], f["network"]) for f in io["inputs"]] == [
+        ("minecraft:stone", True, "main")
+    ]
+    assert [(f["resource"], f["me"], f["network"]) for f in io["outputs"]] == [
+        ("minecraft:sand", True, "main")
+    ]
     assert io["power"]["me"] is False
     assert not any(m["type"].startswith("Super ") for m in scene["machines"])
 
@@ -430,6 +436,22 @@ def test_scene_says_power_left_to_me_arrives_over_me() -> None:
     assert io["power"]["me"] is True
     assert io["power"]["byTier"] == {"LV": {"volts": 32, "amps": 2}}
     assert not any(f["me"] for f in io["inputs"] + io["outputs"])
+
+
+def test_scene_names_a_gt_me_hatch_by_its_mid() -> None:
+    """GT's ME hatch is listed among the hatches by the slot kind it fills; its device says which
+    ME hatch it is, and the scene carries that mID for the texture pass and its name for the hover
+    (#338). A normal hatch with an interface in front of it stays a normal hatch."""
+    problem, layout = gt_hatch_line()
+    (hatch,) = next(m for m in build_scene(problem, layout)["machines"] if m["id"] == "mb")[
+        "hatches"
+    ]
+    assert (hatch["kind"], hatch["gtMid"], hatch["label"]) == ("OutputBus", 2710, "Output Bus (ME)")
+    problem, layout = gt_hatch_line(normal=True)
+    (hatch,) = next(m for m in build_scene(problem, layout)["machines"] if m["id"] == "mb")[
+        "hatches"
+    ]
+    assert (hatch["gtMid"], hatch["label"]) == (None, "Output Bus")
 
 
 def _hatched(

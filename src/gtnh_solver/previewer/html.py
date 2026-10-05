@@ -42,12 +42,24 @@ its box colour; materials footnoted as stand-ins where they are), an inventory o
 every other route, which is how one run reads end to end through a bundle the hover tag can only
 identify a block at a time (#240, keyed on ``netId``: a power route names no resource) - plus the
 system's boundary inputs, outputs, and power (``scene.io``), with a per-tick / per-second rate
-toggle; a flow whose net rides ME (``--me-plan``) is marked "via ME" there and in a storage's
-hover tag, because no pipe and no ME block is drawn for it, and an unconnected chest otherwise
-reads as a missing pipe. Each of the panel's sections (machines, routes, nets, materials, system
-i/o) is a native ``<details>`` its heading folds, and a folded section stays folded when the legend
-is rebuilt for a rate toggle or a solo. The view frames the layout's *actual* extent
-(``scene.bounds``), not the solver's oversized search region.
+toggle; a flow whose net rides ME (``--me-plan``) is marked "via ME" there, with the network whose
+storage it is, and so is a storage's hover tag. Each of the panel's sections (machines, routes,
+nets, ME networks, materials, system i/o) is a native ``<details>`` its heading folds, and a folded
+section stays folded when the legend is rebuilt for a rate toggle or a solo. The view frames the
+layout's *actual* extent (``scene.bounds``), not the solver's oversized search region.
+
+**An ME network is drawn as AE2 draws it** (#338): every cable block, part, controller and
+acceptor as the boxes ``previewer.me_blocks`` derived (``scene.me``), each face skinned with its
+AE2 or AE2FluidCraft icon from the same atlas, through a cutout copy of its material (AE2 renders
+the cable bus in Minecraft's cutout pass, so glass cable shows through where its sprite is clear),
+or in a flat colour where the icon did not arrive. A smart or dense cable's channel lights are two
+fullbright passes of a white mask tinted by the cable's colour, nudged in front of the faces they
+light (``polygonOffset``) and showing each side's count; a part's status box and a controller light
+up the same way. Hovering a cable says its load against its capacity, a part what it is, its cards
+and what it serves, an attach stub where the main network enters; the legend lists each network
+(mode, colour, channels against its budget, what its storage must supply and takes in). A page that
+embeds AE2 or FC art carries AE2's credit and licence link in the HUD (``scene.credit``), since
+that art may be shared only for non-commercial purposes.
 
 **The page is built for a phone as well as a desktop** (#237), because the preview is what a
 builder opens while standing at the build. The side panel is a *drawer* behind ``#legendToggle``,
@@ -113,7 +125,7 @@ _TEMPLATE = """<!doctype html>
 <style>__STYLE__</style>
 </head>
 <body>
-<div id="hud"><button id="hintToggle" aria-controls="hint" aria-expanded="true" title="show / hide the gesture hint">?</button><span id="status">loading...</span><div id="hint">drag: rotate &middot; right-drag / arrows: pan &middot; scroll: zoom &middot; hover: name / contents</div></div>
+<div id="hud"><button id="hintToggle" aria-controls="hint" aria-expanded="true" title="show / hide the gesture hint">?</button><span id="status">loading...</span><div id="credit"></div><div id="hint">drag: rotate &middot; right-drag / arrows: pan &middot; scroll: zoom &middot; hover: name / contents</div></div>
 <button id="legendToggle" aria-controls="legend" aria-expanded="true" title="show / hide the legend and system i/o">legend</button>
 <div id="legend"></div>
 <div id="controls">
@@ -158,7 +170,12 @@ _STYLE = """
                border: 1px solid #333a44; border-radius: 6px; padding: 8px 10px; }
   #hud { top: var(--edge-t); left: var(--edge-l); }
   #hint { color: #8b94a0; margin-top: 4px; }
-  #standin, #menote { color: #8b94a0; }
+  #standin { color: #8b94a0; }
+  /* AE2's credit (#338): small and quiet, but on the HUD, which no fold hides, because the licence
+     asks for it on every page that carries AE2's art. */
+  #credit { color: #8b94a0; font-size: 11px; margin-top: 3px; max-width: 46ch; }
+  #credit:empty { display: none; }
+  #credit a, .credit a { color: #aab2bd; }
   body.hint-hidden #hint { display: none; }
   #hintToggle { float: right; margin-left: 12px; padding: 0 7px; }
   /* The legend is a DRAWER: it slides off the right edge under its own toggle, which sits above
@@ -609,6 +626,11 @@ function flatMaterial(m) {
   return mm;
 }
 
+// The ME networks (#338), or null for a layout with none (or a scene from before version 2).
+const ME = SCENE.me || null;
+// The machines the ME layer draws in place of a placeholder box: stubs and links are cable blocks,
+// controllers and acceptors whole AE2 blocks.
+const ME_DRAWN = new Set(ME ? [...ME.cells, ...ME.blocks].map((e) => e.machine).filter((id) => id) : []);
 const centerById = {}, sizeById = {}, expandedById = {};
 // Hover identification (#): every machine box, block AND route block is a raycast target that says
 // what it is (a merged mesh through the owner of the triangle hit, see Batch), so hovering any of
@@ -632,8 +654,9 @@ for (const m of SCENE.machines) {
   const minY = m.cell[1], maxY = m.cell[1] + sy - 1;
 
   // Expanded machines are drawn below as per-block cubes; skip the box + name-plate for them so a
-  // textured multiblock shows its real structure instead of a smeared placeholder shell.
-  if (m.expanded) continue;
+  // textured multiblock shows its real structure instead of a smeared placeholder shell. An ME
+  // stub, link, controller or acceptor is an AE2 block the ME layer draws (#338).
+  if (m.expanded || ME_DRAWN.has(m.id)) continue;
 
   const geo = new THREE.BoxGeometry(sx * 0.92, sy * 0.92, sz * 0.92);
   const box = new THREE.Mesh(geo, flatMaterial(m));
@@ -751,6 +774,80 @@ for (const [netId, byLayer] of routeBatches) {
     routeMeshes.push(mesh);
     track(mesh, y, y);
   }
+}
+
+// The ME networks (#338): every AE2 cable block, part, controller and acceptor, as the boxes
+// previewer.me_blocks derived from AE2's own render data, none of them overlapping. Nothing about
+// the shape is decided here, as for the routes; this only draws scene.me.
+//
+// A face wears its AE2 or FC icon from the one atlas, through a CUTOUT copy of the atlas material:
+// AE2 renders the cable bus in Minecraft's cutout pass, so a glass cable shows through where its
+// sprite is clear rather than drawing that part black. A face whose icon did not arrive (an AE2 jar
+// that failed, or no texture pass at all) is drawn in its box's flat colour, as a route keeps its
+// coloured bar. The UVs are re-derived from each vertex's place in its block (gtBlockUVs), as
+// Minecraft does, so a cable's sprite and its lights run on from the core into each arm.
+//
+// The channel lights are AE2's: two passes of a white mask over a lit box, fullbright and tinted
+// with the cable colour's dark and light variants, each mask showing that side's channel count.
+// MeshBasicMaterial is unlit, which is what fullbright means here, and polygonOffset draws a pass in
+// front of the face it lies on instead of fighting it for the same depth. A part's status box and a
+// controller light up the same way. The masks are their own images (scene.me.lights), not atlas
+// tiles: a channel mask is 64 pixels across and its lines would vanish at sixteen.
+//
+// Merged like the blocks, one Batch per layer for the boxes and one for the lights.
+const aeMaterial = atlasMaterial ? atlasMaterial.clone() : null;
+if (aeMaterial) aeMaterial.alphaTest = 0.1;   // Minecraft's own cutout threshold
+const ME_LIGHTS = ME ? ME.lights || {} : {};
+const _lightTex = new Map(), _lightMats = new Map();
+function lightMaterial(icon, tint) {
+  const key = icon + '|' + tint;
+  if (!_lightMats.has(key)) {
+    const uri = ME_LIGHTS[icon];
+    let mat = null;
+    if (uri) {
+      if (!_lightTex.has(icon)) _lightTex.set(icon, loadTex(uri));
+      mat = new THREE.MeshBasicMaterial({
+        map: _lightTex.get(icon), color: new THREE.Color(tint), alphaTest: 0.1,
+        polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 });
+    }
+    _lightMats.set(key, mat);
+  }
+  return _lightMats.get(key);
+}
+const ME_NETS = new Map((ME ? ME.networks : []).map((n) => [n.id, n]));
+const meLayers = new Map();   // y -> { main: Batch, lights: Batch }
+for (const [entries, block] of [[ME ? ME.cells : [], false], [ME ? ME.blocks : [], true]]) {
+  for (const e of entries) {
+    const y = e.cell[1];
+    if (!meLayers.has(y)) meLayers.set(y, { main: new Batch(), lights: new Batch() });
+    const layerBatch = meLayers.get(y);
+    // Hover -> what this block is; a part's boxes name the part instead.
+    const whole = { me: e, block };
+    for (const b of e.boxes) {
+      const owner = b.part != null ? { me: e, block, part: e.parts[b.part] } : whole;
+      const geo = new THREE.BoxGeometry(b.size[0], b.size[1], b.size[2]);
+      gtBlockUVs(geo, b.center, e.cell);
+      for (let f = 0; f < 6; f++) {
+        const icon = b.faces[f];
+        if (icon == null) continue;   // a face AE2 leaves open, or one lying against another box
+        // An empty icon is a face drawn with none: a plain cube, when the render data was unusable.
+        if (icon && ATLAS && icon in ATLAS.tiles) layerBatch.main.face(geo, f, b.center, aeMaterial, owner, tileUV(icon));
+        else layerBatch.main.face(geo, f, b.center, routeFlat(b.color), owner);
+      }
+      for (const light of b.lights || []) {
+        const mat = lightMaterial(light.icon, light.tint);
+        if (!mat) continue;   // its mask did not arrive: the box keeps its own look, unlit
+        for (let f = 0; f < 6; f++) if (light.faces[f]) layerBatch.lights.face(geo, f, b.center, mat, owner);
+      }
+      geo.dispose();
+    }
+  }
+}
+for (const [y, layerBatch] of meLayers) {
+  const mesh = layerBatch.main.mesh();
+  if (mesh) { hoverables.push(mesh); track(mesh, y, y); }
+  const lit = layerBatch.lights.mesh();
+  if (lit) track(lit, y, y);
 }
 
 // Output markers (#249): every single block shows how its outputs leave it, read from the scene's
@@ -929,7 +1026,20 @@ if (TOUCH)
 document.getElementById('status').textContent =
   'status: ' + SCENE.status + '   seed: ' + SCENE.seed +
   '   build ' + (bmax.x - bmin.x) + 'x' + (bmax.y - bmin.y) + 'x' + (bmax.z - bmin.z) +
-  '   machines ' + SCENE.machines.length;
+  '   machines ' + SCENE.machines.length +
+  (ME ? '   ME cables ' + ME.cells.length : '');
+// AE2's credit (#338), on the HUD where no fold hides it: present exactly when the page embeds AE2 or
+// AE2FluidCraft art, whose licence asks for it. Text nodes and a link to a URL the previewer itself
+// wrote (previewer.me_textures), never markup out of the scene.
+function creditNodes(credit, words) {
+  const link = el('a', credit.licence);
+  link.href = credit.url;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  return [words + ' ', link];
+}
+const CREDIT = SCENE.credit || null;
+if (CREDIT) document.getElementById('credit').append(...creditNodes(CREDIT, CREDIT.short));
 
 // System-I/O rates are stored per tick; the toggle re-renders them as per second (x20). Cable
 // amperage (byTier) is a steady value, so it never scales with the time unit.
@@ -1039,9 +1149,10 @@ function tagLine(line) {
   div.append(...partNodes(parts.filter((p) => !pictured.includes(p))));
   return div;
 }
-// The suffix for a flow whose commodity rides ME (scene.io, a storage's contents): see #menote.
+// The suffix for a flow whose commodity rides ME (scene.io, a storage's contents), naming the
+// network whose storage it comes from or lands in where the scene says (#338).
 function viaMe(flow) {
-  return flow.me ? ' via ME' : '';
+  return flow.me ? ' via ME' + (flow.network ? ' (' + flow.network + ')' : '') : '';
 }
 // The nets, each a row that solos it (#240). Sorted by commodity then resource rather than left in
 // solver order, because the list is how you FIND a net - ev-nitrobenzene has 31 of them - and
@@ -1118,6 +1229,38 @@ function renderLegend() {
     }
     for (const r of netsByReadingOrder()) nets.append(netRow(r));
   }
+  // The ME networks (#338): each one's mode and colour, its channels against what it may spend, and
+  // what its storage must hold and takes in (system_io's ME section, the same the CLI prints). For
+  // an attached or link network that storage is the player's main network, outside the build.
+  if (ME && ME.networks.length) {
+    const nets = section(panel, 'ME networks'), sfx = perSecond ? '/s' : '/t';
+    for (const n of ME.networks) {
+      row(nets, swatch(n.swatch), n.id + ': ' + (n.mode === 'attached'
+        ? 'attached to your main network (' + n.colourName + ')'
+        : 'subnet, ' + n.colourName));
+      if (n.mode === 'attached') {
+        row(nets, '  channels: ' + n.mainChannels + ' of ' + n.budget + ' free on your main network');
+      } else {
+        row(nets, '  ' + n.devices + ' channel device(s), ' + (n.adhocLimit != null
+          ? 'ad hoc (at most ' + n.adhocLimit + ')' : n.controllers + ' controller(s)'));
+        if (n.mainChannels) row(nets, '  spends ' + n.mainChannels + ' channel(s) of your main network');
+      }
+      const store = n.mode === 'attached' || n.storage === 'link' ? 'your main network' : 'its chests';
+      const flow = (word, f) => row(nets, ...partNodes(['  ' + word + ' ' + store + ': ',
+        ...resourceParts(f.resources), ' (' + rateText(f.rate) + ' ' + f.unit + sfx + ')']));
+      for (const f of n.supplies) flow('stock in', f);
+      for (const f of n.absorbs) flow('lands in', f);
+      if (n.power !== 'acceptor') row(nets, '  power it yourself (a quartz fiber or your main network)');
+    }
+  }
+  // The credit in full, wherever AE2's or FC's art is on the page: on an ME network, on a GT block
+  // that wears it (the Large Molecular Assembler's quartz lamp), or as an AE2 or FC item's icon.
+  if (CREDIT) {
+    const credit = el('span');
+    credit.className = 'credit';
+    credit.append(...creditNodes(CREDIT, CREDIT.text));
+    row(section(panel, 'credits'), credit);
+  }
   // Which cable/pipe material the routes above are DRAWN as, and - the point of the line - that the
   // choice is representative. GT ships several cables per voltage tier and the solver sizes by
   // gauge, never by material, so a preview that shows Tin without saying so reads as a spec
@@ -1150,14 +1293,9 @@ function renderLegend() {
     // the breakdown, e.g. 'power: 96 EU/t (LV 32V x 3A)' where 96 = 32 x 3.
     const tiers = Object.keys(io.power.byTier);
     const feed = tiers.map((t) => t + ' ' + io.power.byTier[t].volts + 'V x ' + io.power.byTier[t].amps + 'A').join(', ');
-    row(sys, 'power: ' + rateText(io.power.total) + ' EU' + sfx + (tiers.length ? ' (' + feed + ')' : '') + viaMe(io.power));
-    // A commodity left to ME (--me) is routed by nothing here and its ME interface is not placed
-    // yet, so say that once rather than let the missing pipes read as a broken layout.
-    if ([...io.inputs, ...io.outputs, io.power].some((f) => f.me)) {
-      const note = el('span', 'via ME: no ME interface is drawn; add it in game');
-      note.id = 'menote';
-      row(sys, note);
-    }
+    // Power left to the builder (--me power, #225) has no source or cable in the build at all.
+    row(sys, 'power: ' + rateText(io.power.total) + ' EU' + sfx + (tiers.length ? ' (' + feed + ')' : '') +
+      (io.power.me ? ', supplied by you (--me power)' : ''));
   }
   document.getElementById('legend').replaceChildren(panel);
 }
@@ -1258,6 +1396,35 @@ function coverHover(what, at) {
     anchor: [at.x, at.y + 0.25, at.z],
   };
 }
+// An ME block's tag (#338). A part: what it is with its cards, the machine it serves and which way it
+// moves what. A cable: its kind and colour, and its load against what it carries; an attach stub
+// says where the main network enters it, a link what its storage bus faces. A controller or an
+// acceptor: what it is. Each names its network last.
+function meHover(what) {
+  const e = what.me, part = what.part, net = ME_NETS.get(e.network);
+  const lines = [];
+  if (part) {
+    lines.push(part.label);
+    if (part.machineRole === 'link') {
+      lines.push('on the link: faces the ME Interface you place on your main network');
+    } else {
+      // An interface receives what a machine pushes into it; a bus pulls or feeds on its own.
+      const receives = part.kind === 'interface' || part.kind === 'dual_interface';
+      const verb = part.flow === 'in' ? 'feeds ' :
+        (part.flow === 'out' ? (receives ? 'receives from ' : 'pulls from ') : 'serves ');
+      lines.push(verb + part.machineType + ' (on the ' + part.side + ' side of the cable)');
+    }
+    if (part.resources.length) lines.push(resourceParts(part.resources));
+  } else if (what.block) {
+    lines.push(e.label);
+  } else {
+    lines.push(e.roleLabel ? e.roleLabel + ': ' + e.label : e.label);
+    lines.push(e.channels + ' of ' + e.capacity + ' channels');
+    if (e.role === 'attach') lines.push('your main network enters here, ' + e.outside.join(', ') + ' side');
+  }
+  lines.push('ME network ' + e.network + (net ? ' (' + net.mode + ', ' + net.colourName + ')' : ''));
+  return { lines: () => lines, anchor: [e.cell[0] + 0.5, e.cell[1] + 1 + 0.15, e.cell[2] + 0.5] };
+}
 function routeHover(r, cell) {
   return { lines: () => routeLines(r), anchor: [cell[0] + 0.5, cell[1] + 1 + 0.15, cell[2] + 0.5] };
 }
@@ -1291,6 +1458,7 @@ function pickAt(ev) {
   if (!what) return null;
   if (what.cover) return coverHover(what, hit.object.position);
   if (what.hatch) return hatchHover(what);
+  if (what.me) return meHover(what);
   return what.route ? routeHover(what.route, what.cell) : machineHover(what.machineId);
 }
 // Mouse only: a touch 'pointermove' is a finger dragging the camera, and picking along it would

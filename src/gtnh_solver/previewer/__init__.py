@@ -10,6 +10,10 @@ committed dataset + manifest resolve one (``textures.py``), degrading to the fla
 otherwise, and packs every baked face into the one image the viewer draws from (``atlas.py``).
 Beside it an icon pass embeds a picture of each fluid and item the line moves, from a local icon
 index where one exists (``icons.py``, #297); without one the page draws the plan's own colours.
+An ME network is drawn block by block from AE2's own render data (``me_blocks.py``, #338), its
+icons read from the AE2 and AE2FluidCraft jars in the same texture pass (``me_textures.py``); a
+page that embeds that art carries AE2's credit and licence, which ask that it be shared only for
+non-commercial purposes.
 
 Stated v1 scope is "build-assist": boxes coloured + labelled by type, region wireframe, pipes
 coloured by commodity, power cables sized by thickness, source markers, a legend. The congestion
@@ -19,19 +23,22 @@ heatmap + multi-seed compare and offline (vendored three.js) are follow-ups (doc
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from gtnh_solver.dataset.icons import IconPack, resolve_icon_index
+from gtnh_solver.dataset.mod_jars import ME_JARS, gt5u_jar
 from gtnh_solver.dataset.roots import resolve_dataset_path
-from gtnh_solver.ir import InputIR, LayoutResult
+from gtnh_solver.ir import Commodity, InputIR, LayoutResult
 
 from .atlas import pack_atlas
 from .html import render_html
-from .icons import resource_art
-from .jar import JAR_VERSION, gt5u_version_from_manifest, jar_png_provider
+from .icons import carried_kinds, resource_art
+from .jar import JAR_VERSION, asset_modid, gt5u_version_from_manifest, multi_jar_png_provider
+from .me_textures import credit, me_icons, texturize_me
 from .scene import SCENE_VERSION, build_scene
-from .textures import TextureSummary, texturize_scene
+from .textures import PngProvider, TextureSummary, texturize_scene
 
 __all__ = [
     "SCENE_VERSION",
@@ -72,25 +79,81 @@ def write_preview(
     The icon pass is local only and as best-effort as the texture pass: it draws from the icon index
     of ``version`` (else of the plan's own pack, else of the newest pack that has one, since icons
     are display only), and a missing or unusable index leaves the page with the plan's colours.
+
+    An ME network's icons come from the AE2 and AE2FluidCraft jars (``dataset.mod_jars.ME_JARS``),
+    fetched only when the layout has one, through the same provider as GT's. That provider absorbs
+    a failed AE2 or FC jar (:func:`~gtnh_solver.previewer.jar.multi_jar_png_provider`): it costs
+    only that jar's icons, whose faces keep their flat colours, never the GT textures; and the ME
+    pass runs in a try of its own, so even a jar member that is not a PNG strips only the ME art.
+
+    Once any of AE2's or FC's art is embedded the page carries AE2's credit (``me_textures.credit``)
+    in ``scene["credit"]``, wherever the art came from: the ME pass, the GT pass (a GT block can wear
+    AE2 art, the Large Molecular Assembler's quartz lamp, and the provider routes every
+    ``assets/appliedenergistics2/`` path to AE2's jar whichever pass asks), or the item icons (an
+    AE2 or FC item the line moves, known by its id's namespace; fluid ids carry none, so a fluid's
+    icon is never counted).
     """
     names, icons = _resource_art(problem, version or problem.pack_version)
     scene = build_scene(problem, layout, extra_names=names)
     scene["icons"] = icons
+    gt_art: set[str] = set()  # the asset namespaces the GT pass's art came from
+    me_art: frozenset[str] = frozenset()
     if textures:
         try:
             manifest_path = resolve_dataset_path("textures/manifest.json", version=version)
             gt5u = gt5u_version_from_manifest(manifest_path) or JAR_VERSION
-            texturize_scene(
-                scene, version=version, png_provider=jar_png_provider(gt5u_version=gt5u)
-            )
+            provider = multi_jar_png_provider(gt5u_jar(gt5u), ME_JARS)
+            texturize_scene(scene, version=version, png_provider=_noting(provider, gt_art))
+            me_art = _me_art(scene, provider)  # after the GT pass, whose texture pool it adds to
             pack_atlas(scene)  # the viewer draws every face from one image (previewer.atlas)
         except Exception as exc:  # never let a texture fetch/parse issue block a preview
             _log.warning("texture pass skipped, using placeholder boxes: %s", exc)
             _untextured(scene)
+            gt_art.clear()
+            me_art = frozenset()
+    scene["credit"] = credit(frozenset(gt_art | me_art | _item_icon_mods(problem, icons)))
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(render_html(scene), encoding="utf-8")
     return out
+
+
+def _me_art(scene: dict[str, Any], provider: PngProvider) -> frozenset[str]:
+    """``texturize_me``, and on any failure nothing: the ME tiles and light masks it may have added
+    go, logged, and the ME boxes keep their flat colours. The GT art is not touched."""
+    try:
+        return texturize_me(scene, provider)
+    except Exception as exc:  # a jar member that is not a PNG, say: never cost the GT art
+        _log.warning("ME texture pass skipped, the ME blocks keep their flat colours: %s", exc)
+        faces, _ = me_icons(scene)
+        pool = scene.get("textures") or {}
+        for icon in faces:
+            pool.pop(icon, None)
+        if scene.get("me"):
+            scene["me"]["lights"] = {}
+        return frozenset()
+
+
+def _item_icon_mods(problem: InputIR, icons: Mapping[str, str]) -> frozenset[str]:
+    """The mod namespaces of the item icons the page embeds: an item id is ``mod:name``, so an AE2
+    or FC item's icon (certus quartz, a fluix crystal) is that mod's art. A fluid id names no mod."""
+    return frozenset(
+        resource.partition(":")[0]
+        for resource, kind in carried_kinds(problem).items()
+        if kind is Commodity.ITEM and resource in icons and ":" in resource
+    )
+
+
+def _noting(provider: PngProvider, served: set[str]) -> PngProvider:
+    """``provider``, adding to ``served`` the asset namespace of every icon it hands back: which
+    mods' art the page carries, and so which credit it owes (``me_textures.credit``)."""
+
+    def noted(paths: Mapping[str, str]) -> dict[str, bytes]:
+        found = provider(paths)
+        served.update(modid for icon in found if (modid := asset_modid(paths[icon])) is not None)
+        return found
+
+    return noted
 
 
 #: Where a missing icon index sends the reader: how to export one and derive the index from it.
@@ -130,6 +193,8 @@ def _untextured(scene: dict[str, Any]) -> None:
             cell["tex"] = None
     for entry in scene.get("legend", []):
         entry.pop("tile", None)  # the legend falls back to each type's colour swatch
+    if scene.get("me"):  # the ME boxes fall back to their flat colours
+        scene["me"]["lights"] = {}
     scene["blocks"] = []
     scene.pop("textures", None)
     scene.pop("texturesActive", None)

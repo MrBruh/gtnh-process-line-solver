@@ -7,6 +7,28 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **The preview draws ME networks (#338).** Every AE2 block a line on ME is built with is drawn as
+  AE2 draws it: each cable block (smart, dense, ...) with an arm toward each side it joins, a plug
+  where it meets a controller or a GT ME hatch, and a straight bar where AE2 draws one; each bus,
+  interface and Dual Interface on its side of the cable; the attach stubs, links and any controller
+  or acceptor. Faces wear AE2's and AE2FluidCraft's own textures, read from their jars at preview
+  time like GT's (a jar that fails costs only its icons, which fall back to flat colours), glass
+  cable shows through where its sprite is clear, and smart and dense cable light up with the
+  channels each side carries. Hovering a cable says its load against its capacity, a part what it
+  is, its cards and which machine it feeds, receives from or pulls from, and a stub where your main
+  network enters. The legend lists each ME network: attached or a subnet, its colour, the channels
+  it spends against its budget, and what its storage must hold and takes in. AE2's textures are
+  CC BY-NC-SA 3.0, so a preview that embeds AE2 or AE2FluidCraft art (on an ME network, a GT block
+  or an item icon) credits it with the licence link, and may be shared only for non-commercial
+  purposes (NOTICE). The machine legend and the texture log no longer list an ME block as a
+  machine. The `.schematic` export's size and origin now take in the ME cables, so the ghost keeps
+  room for the network you place by hand.
+- **The preview draws GT's own ME hatches (#338).** A multiblock's Output Bus (ME), Output Hatch
+  (ME) or Stocking Input Bus or Hatch (ME) is drawn as that block, in its multiblock's casing like
+  any formed hatch, with its name on the hover. It is found by its mID, the only thing that tells
+  two of them apart (the stocking buses 2718 and 2711 share a class), never by the slot kind it
+  fills, so an ME hatch the manifest lacks keeps its casing cell rather than drawing as a plain
+  bus. The committed texture manifest now carries all six.
 - **An ME subnet can be powered by an Energy Acceptor on the line's own EU (#336).** Set an
   `MEPlan` subnet's `power` to `acceptor` and the solve places an AE2 Energy Acceptor for it on
   the line's highest powered tier, cabled into that tier's power like any machine and touched once
@@ -38,10 +60,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   needs of its own (dense attach stubs on the edge where your main network enters, links, a
   controller). Every layout is held to AE2's rules by the validator. The run says, per network,
   what its storage must hold, what lands there, and how many of your main network's channels it
-  spends; the preview's I/O panel lists the same. Not yet: the preview draws no ME block (#338),
-  and the schematic export leaves them out, with a warning that counts what to place by hand
-  (#339). `--fast` cannot lay a line on ME (its touching row leaves no face for the devices), so
-  it returns an explicit partial layout; use the default solve.
+  spends; the preview's I/O panel lists the same. Not yet: the schematic export leaves the ME
+  blocks out, with a warning that counts what to place by hand (#339). `--fast` cannot lay a line
+  on ME (its touching row leaves no face for the devices), so it returns an explicit partial
+  layout; use the default solve.
 - **The `.schematic` export can write each conveyor and pump cover, so the ghost shows where it
   goes.** Pass `--world` with the save folder (or `level.dat`) of the world the build goes in. GT
   names a cover's item by the world's numeric item id, which FML assigns per world (two worlds of

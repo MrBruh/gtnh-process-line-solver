@@ -135,8 +135,8 @@ and it is almost entirely one block (see the `IC2` row).
 
 The first three groups are work that has not been done; the `IC2` row is not. Closing it means
 fetching a second mod's assets, which is a declared non-goal of
-[#98](https://github.com/MrBruh/gtnh-process-line-solver/issues/98) along with the vanilla and AE2
-sprites below.
+[#98](https://github.com/MrBruh/gtnh-process-line-solver/issues/98) along with the vanilla sprites
+below. (AE2's sprites were one too, until the ME preview brought AE2's jar in, #338.)
 
 **That 37 is worth reading carefully, because the obvious reading is wrong in both directions.**
 `IC2:blockAlloyGlass` sits in the block list of **4** controllers (the Lapotronic Supercapacitor,
@@ -170,16 +170,17 @@ problems wearing one symptom.
 | Group | Paths | Multiblocks | Standing |
 |---|---|---|---|
 | vanilla Minecraft (`water_still`, `lava_still`, `iron_block`, `brick`, `planks`, `hardened_clay`, `farmland`, `redstone_lamp_off`, `glass`) | 10 | 11 | non-goal, see below |
-| `appliedenergistics2:BlockQuartzLamp` (Large Molecular Assembler) | 1 | 1 | non-goal, see below |
+| `appliedenergistics2:BlockQuartzLamp` (Large Molecular Assembler) | 1 | 1 | resolved from AE2's jar since #338 |
 | `gregtech:`-prefixed paths that are not gregtech's | 5 | 2 | **a fixable domain bug** |
 
-The first two are **declared non-goals of [#98](https://github.com/MrBruh/gtnh-process-line-solver/issues/98)**,
-for the same reason as `IC2:blockAlloyGlass` in the table above: closing them means fetching a second
-asset source. For AE2 and IC2 that is another mod jar; for vanilla it is the Minecraft client jar,
-which this project neither downloads nor could redistribute the way it handles GT's LGPL sprites
-(read from the cached jar at preview time, embedded in the emitted HTML, never committed). A literal
-reading of "no block renders as a placeholder" cannot be met without that decision, so #98's
-acceptance is scoped to blocks reachable from the GT5-Unofficial jar.
+The vanilla row is a **declared non-goal of [#98](https://github.com/MrBruh/gtnh-process-line-solver/issues/98)**,
+for the same reason as `IC2:blockAlloyGlass` in the table above: closing it means fetching a second
+asset source, here the Minecraft client jar, which this project neither downloads nor could
+redistribute the way it handles GT's LGPL sprites (read from the cached jar at preview time,
+embedded in the emitted HTML, never committed). A literal reading of "no block renders as a
+placeholder" cannot be met without that decision, so #98's acceptance is scoped to blocks reachable
+from the mod jars the previewer reads. The AE2 row was a non-goal on the same grounds, and is not
+any more (below).
 
 **AE2 and AE2FluidCraft now have that second source, outside this manifest (#337).** An ME
 network's cables, buses and interfaces are not GT blocks and get no manifest entry: their geometry
@@ -187,10 +188,12 @@ and texture names are derived from the two mods' source into `data/ae2/<AE2 vers
 (`tools/derive_ae_render.py`), and their PNGs come from the mods' own jars, pinned in
 `dataset/mod_jars.py` and fetched at preview time like GT's. `previewer/jar.py`'s
 `multi_jar_png_provider` sends each asset path to the jar that owns its `assets/<modid>/`
-namespace, and downloads a jar only once one of its icons is asked for. AE2's textures are
-CC BY-NC-SA 3.0, not LGPL, so a preview that embeds them carries the credit in `NOTICE`. Until the
-previewer draws ME networks (#338) it still fetches only the GT jar, so the `BlockQuartzLamp` row
-above still draws as a placeholder.
+namespace, and downloads a jar only once one of its icons is asked for. **The previewer draws ME
+networks with it (#338)**: `write_preview` reads every texture through that provider, so an ME
+network's cables and parts wear their own sprites, and so does any GT block whose manifest entry
+names an AE2 or FC sprite, the `BlockQuartzLamp` row above included. AE2's textures are
+CC BY-NC-SA 3.0, not LGPL, so a preview that embeds any of them shows AE2's credit and the licence
+link on the page itself, and `NOTICE` says it may be shared only for non-commercial purposes.
 
 The third is **not** a non-goal and should not be written off with them. It is the **domain** mode
 from the table at the top of this file, caught here rather than at name resolution: the four

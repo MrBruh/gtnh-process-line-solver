@@ -62,8 +62,9 @@ DEFAULT_MANIFEST_PATH = _DATA / "textures" / "manifest.json"
 
 #: A ``png_provider``: given ``{icon_name: asset_path_in_jar}`` it returns ``{icon_name: bytes}``
 #: for the icons it could supply (missing icons are simply omitted, never an error). The real one
-#: reads the GT5-Unofficial jar (:func:`gtnh_solver.previewer.jar.jar_png_provider`); tests inject a
-#: fake so no network runs in the suite.
+#: reads the GT5-Unofficial jar, and the AE2 and AE2FluidCraft jars for an ME network's icons
+#: (:func:`gtnh_solver.previewer.jar.multi_jar_png_provider`); tests inject a fake so no network runs
+#: in the suite.
 PngProvider = Callable[[Mapping[str, str]], dict[str, bytes]]
 
 #: GT/Minecraft ForgeDirection face order: 0 down (-Y), 1 up (+Y), 2 north (-Z), 3 south (+Z),
@@ -123,8 +124,14 @@ _GT_TIER = {name: number for number, name in enumerate(VOLTAGE_BY_TIER)}
 
 #: The GT class behind each ``HatchElement`` kind the solver places, from that enum's own
 #: ``mteClasses()``. Joining on the class rather than the display name is what makes the lookup
-#: robust: GT names these two different ways ("Input Bus (LV)" against "LV Energy Hatch"), and a
-#: subclass (an ME stocking bus, a GT++ hatch) keeps its parent's kind exactly as GT's adders do.
+#: robust: GT names these two different ways ("Input Bus (LV)" against "LV Energy Hatch").
+#:
+#: **The join is on the exact class**, so a subclass is NOT indexed under its parent's kind, though
+#: GT's adders accept it in that kind's slot. That is what keeps an ME hatch out of
+#: :meth:`TextureManifest.hatch_block`: GT's Stocking Input Bus (ME) is an ``MTEHatchInputBusME``,
+#: which extends the input bus, and if it were indexed as one an ``InputBus`` at EV could draw as
+#: it. An ME hatch is drawn by its mID instead (:meth:`TextureManifest.me_hatch`, #338), the only
+#: identity two of them have (spike 5.1). A GT++ hatch subclass is likewise never drawn by kind.
 HATCH_KIND_BY_CLASS = {
     "gregtech.api.metatileentity.implementations.MTEHatchInputBus": "InputBus",
     "gregtech.api.metatileentity.implementations.MTEHatchOutputBus": "OutputBus",
@@ -135,6 +142,9 @@ HATCH_KIND_BY_CLASS = {
     "gregtech.api.metatileentity.implementations.MTEHatchMaintenance": "Maintenance",
     "gregtech.api.metatileentity.implementations.MTEHatchMuffler": "Muffler",
 }
+
+#: The block every GT machine, hatch included, is a meta of: its meta is the machine's mID.
+_GT_MACHINES = "gregtech:gt.blockmachines"
 
 #: The voltage ladder as it appears inside a hatch's display name, low to high. Longest-first in
 #: the pattern so ``LuV`` is never read as ``L`` + ``uV``; ``\b`` keeps ``LV`` out of ``ULV``.
@@ -486,6 +496,21 @@ class TextureManifest:
         wanted = _TIER_LADDER.index(tier) if tier in _TIER_LADDER else len(_TIER_LADDER)
         below = [t for t in ladder if _TIER_LADDER.index(t) <= wanted]
         return self._hatches[(kind, below[-1] if below else ladder[0])]
+
+    def me_hatch(self, mid: int) -> tuple[str, int] | None:
+        """The ``(block, meta)`` of GT's ME hatch with meta id ``mid``, or ``None`` if not dumped.
+
+        GT's ME hatches are drawn by mID (#338), never by kind: two pairs share a class (the
+        Stocking Input Bus (ME) 2718 and its advanced form 2711, the hatches 2717 and 2712), so the
+        mID the layout records (``MEPlacedDevice.gt_mid``) is the only thing that names the block,
+        and :data:`HATCH_KIND_BY_CLASS` deliberately leaves them out. An mID the manifest does not
+        carry, or carries as something other than a machine, answers ``None``, and the hatch's cell
+        keeps its casing rather than drawing as a normal hatch of its kind.
+        """
+        entry = self._blocks.get(f"{_GT_MACHINES}|{mid}")
+        if entry is None or entry.get("kind") != "mte":
+            return None
+        return (_GT_MACHINES, mid)
 
     def pipe_layers(self, block: str, meta: int, role: str) -> list[dict[str, Any]]:
         """The layer stack for one look of a cable or pipe, or ``[]`` - an EXACT lookup.
@@ -1027,7 +1052,8 @@ def _substitute_hatches(
 
     A hatch whose block cannot be resolved is left as plain casing rather than dropped: the cell is
     genuinely occupied either way, and losing the cube would open a hole in the structure. That is
-    the same graceful-degradation contract the rest of the module keeps.
+    the same graceful-degradation contract the rest of the module keeps. A GT ME hatch (a scene
+    hatch with a ``gtMid``) resolves by that mID or not at all, never to a normal hatch of its kind.
 
     Every hatch also carries the machine's casing (:func:`_hatch_casing`), because GT re-skins it to
     that casing once the multiblock forms - see :func:`_hatch_layers`.
@@ -1040,7 +1066,13 @@ def _substitute_hatches(
     casing = _hatch_casing(variant, manifest, at_cell, hatches)
     replacement: dict[tuple[int, int, int], BlockCube] = {}
     for hatch in hatches:
-        found = manifest.hatch_block(str(hatch["kind"]), tier if isinstance(tier, str) else None)
+        # GT's own ME hatch is named by its mID, never by its slot kind (TextureManifest.me_hatch).
+        mid = hatch.get("gtMid")
+        found = (
+            manifest.me_hatch(int(mid))
+            if mid is not None
+            else manifest.hatch_block(str(hatch["kind"]), tier if isinstance(tier, str) else None)
+        )
         if found is None:
             continue
         block, meta = found
@@ -1476,7 +1508,9 @@ def texturize_scene(
     toggle reuses the one image and the embedded page never bloats for faces that look the same at
     rest and running. The default display stays idle.
     """
-    all_types = tuple(sorted({m["type"] for m in scene["machines"]}))
+    # An ME stub, link, controller or acceptor is drawn by the ME layer (#338), not as a GT block,
+    # so it is neither expanded here nor reported as a placeholder.
+    all_types = tuple(sorted({m["type"] for m in scene["machines"] if not m.get("meRole")}))
     mb_dir = (
         resolve_dataset_path("multiblocks", version=version)
         if multiblocks_dir is None
@@ -1539,6 +1573,8 @@ def texturize_scene(
     # Which of its faces marks the type waits for the sprites, because a blank one is not art.
     legend_cubes: dict[str, BlockCube] = {}
     for machine in scene["machines"]:
+        if machine.get("meRole"):
+            continue  # an ME stub, link, controller or acceptor: an AE2 block the ME pass draws
         # NOT `cubes`: that name is the output accumulator this loop appends scene blocks to.
         expanded = machine_cubes(machine, docs, manifest, auto_out_face)
         if not expanded:
