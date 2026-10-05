@@ -239,8 +239,8 @@ def build_parser() -> argparse.ArgumentParser:
             "move COMMODITY over ME (AE2) instead of pipes and cables: one of "
             f"{', '.join(_ME_COMMODITIES)}; repeat for more than one. items and fluids put every "
             "net of that kind on one network attached to your main ME network (not with "
-            "--me-plan); power leaves the line's EU supply to you. Nothing is routed for a net on "
-            "ME, and no ME device is placed or drawn yet, so the builder supplies that"
+            "--me-plan); power leaves the line's EU supply to you. A net on ME gets its ME devices "
+            "and AE2 cable instead of a pipe (the preview does not draw them yet)"
         ),
     )
     parser.add_argument(
