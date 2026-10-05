@@ -34,20 +34,23 @@ from gtnh_solver.ir import (
     CellBox,
     CellCoord,
     Commodity,
+    Facing,
     InputIR,
     LayoutResult,
     LayoutStatus,
+    Machine,
     MECableCell,
     MECableKind,
     MEDeviceKind,
     MEMode,
+    MERole,
 )
 from gtnh_solver.previewer import SCENE_VERSION, build_scene, render_html, write_preview
 from gtnh_solver.previewer.me_textures import credit, me_icons, texturize_me
 from gtnh_solver.previewer.textures import DEFAULT_MANIFEST_PATH, texturize_scene
 from gtnh_solver.solver import solve
 from tests._helpers import at, machine
-from tests._me_fixtures import attached_line, comb, gt_hatch_line
+from tests._me_fixtures import SUB, attached_line, comb, device, endpoint, gt_hatch_line
 
 _REPO = Path(__file__).resolve().parents[1]
 
@@ -166,6 +169,46 @@ def test_lights_carry_their_mask_tint_and_faces() -> None:
         for light in box["lights"]:
             assert light["tint"].startswith("#")
             assert light["faces"] == [face is not None for face in box["faces"]]
+
+
+def test_a_link_is_a_cable_with_a_storage_bus_on_its_front() -> None:
+    # A link subnet reaches the player's storage through a storage bus on the region's edge, facing
+    # the ME Interface the player places on their main network: a cable block placed as a machine.
+    problem, layout = comb(2, mode=MEMode.SUBNET)
+    bus = endpoint("link", (), MEDeviceKind.STORAGE_BUS, network=SUB)
+    link = Machine(
+        id="link",
+        type="ME Storage Bus",
+        voltage_tier="LV",
+        orientation_options=[Facing.WEST],
+        me_role=MERole.LINK,
+        me_network=SUB,
+        outside_front=True,
+        me_endpoints=(bus,),
+    )
+    network = layout.me_networks[0]
+    built = network.model_copy(
+        update={"devices": [*network.devices, device("link", bus, (0, 0, 1), Facing.WEST)]}
+    )
+    problem = problem.model_copy(update={"machines": [*problem.machines, link]})
+    layout = layout.model_copy(
+        update={"placements": [*layout.placements, at("link", 0, 0, 1, orientation=Facing.WEST)]}
+    )
+    layout = layout.model_copy(update={"me_networks": [built]})
+    scene = build_scene(problem, layout)
+    cell = _cell(scene, [0, 0, 1])
+    assert (cell["role"], cell["roleLabel"], cell["machine"]) == ("link", "link", "link")
+    (part,) = cell["parts"]
+    assert (part["label"], part["side"], part["machineRole"], part["flow"]) == (
+        "ME Storage Bus",
+        "west",
+        "link",
+        None,
+    )
+    (net,) = _me(scene)["networks"]
+    assert (net["links"], net["mainChannels"]) == (1, 1)  # a link costs the main network one
+    assert "link" not in {e["label"] for e in scene["legend"]}
+    assert "ME Storage Bus" not in {e["label"] for e in scene["legend"]}
 
 
 def test_a_controller_is_a_block_in_the_scene_and_its_machine_says_so() -> None:
