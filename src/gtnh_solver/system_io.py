@@ -301,21 +301,26 @@ def system_io(problem: InputIR, layout: LayoutResult) -> SystemIO:
 def _me_io(
     problem: InputIR, port_dir: Mapping[tuple[str, str], IODirection]
 ) -> tuple[MENetworkIO, ...]:
-    """Each ME network's ask of the player (module docstring)."""
+    """Each ME network's ask of the player (module docstring). Several nets moving one resource
+    the same way (water fed to three machines) are one flow, their rates summed."""
     out: list[MENetworkIO] = []
     for spec in problem.me.networks:
-        supplies: list[MEFlow] = []
-        absorbs: list[MEFlow] = []
+        supplies: dict[tuple[tuple[str, ...], Commodity], MEFlow] = {}
+        absorbs: dict[tuple[tuple[str, ...], Commodity], MEFlow] = {}
         for net in problem.nets:
             if net.me_network != spec.id:
                 continue
             directions = {port_dir.get((e.machine_id, e.port_id)) for e in net.endpoints}
-            resource = net_resource(net) or net.id
-            flow = MEFlow(resource, net.resources or (resource,), net.commodity, net.throughput)
             if IODirection.OUTPUT not in directions:
-                supplies.append(flow)  # nothing in the line makes it: the network's storage does
+                flows = supplies  # nothing in the line makes it: the network's storage does
             elif IODirection.INPUT not in directions:
-                absorbs.append(flow)  # nothing in the line takes it: the network's storage does
+                flows = absorbs  # nothing in the line takes it: the network's storage does
+            else:
+                continue
+            resource = net_resource(net) or net.id
+            key = (net.resources or (resource,), net.commodity)
+            rate = net.throughput + (flows[key].rate if key in flows else 0.0)
+            flows[key] = MEFlow(resource, key[0], net.commodity, rate)
         devices = sum(1 for m in problem.machines for e in m.me_endpoints if e.network == spec.id)
         links = sum(
             1 for m in problem.machines if m.me_role is MERole.LINK and m.me_network == spec.id
@@ -324,8 +329,8 @@ def _me_io(
             MENetworkIO(
                 network=spec.id,
                 mode=spec.mode,
-                supplies=tuple(supplies),
-                absorbs=tuple(absorbs),
+                supplies=tuple(supplies.values()),
+                absorbs=tuple(absorbs.values()),
                 devices=devices,
                 main_channels=devices if spec.mode is MEMode.ATTACHED else links,
             )

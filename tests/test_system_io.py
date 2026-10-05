@@ -583,3 +583,12 @@ def test_a_line_with_no_me_network_asks_nothing() -> None:
     problem, layout = attached_line()
     plain = problem.model_copy(update={"me": MEConfig()})
     assert system_io(plain, layout).me == ()
+
+
+def test_nets_moving_one_resource_the_same_way_are_one_flow() -> None:
+    # Water fed from storage to two machines over two nets is one thing to stock, at their sum.
+    problem, layout = comb(2, mode=MEMode.SUBNET)
+    water = [n.model_copy(update={"fluid_or_item": "water"}) for n in problem.nets]
+    problem = problem.model_copy(update={"nets": water})
+    (network,) = system_io(problem, layout).me
+    assert network.supplies == (MEFlow("water", ("water",), Commodity.ITEM, 2.0),)
