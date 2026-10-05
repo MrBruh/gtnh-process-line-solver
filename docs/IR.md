@@ -501,7 +501,8 @@ result carries no infeasibility; `infeasible`/`partial_invalid` must carry one.
 - An item bus whose `config` names an item at any damage (`registry@32767`) carries a Fuzzy Card
   (`MECards.fuzzy`, #353): AE2 matches a bus's config exactly without one, and no real stack is at
   damage 32767, so the bus would move nothing. The validator reads it off each placed bus
-  (`ME_FUZZY_CARD_MISSING`).
+  (`ME_FUZZY_CARD_MISSING`). Nor does a GT Stocking Input Bus (ME) serve a port moving such an
+  item, since it matches only the exact stacks set in it (`ME_STOCKING_WILDCARD`).
 - A network whose `MENetworkSpec.power` is `acceptor` has an Energy Acceptor machine
   (`Machine.me_role` `acceptor`, #336) whose `eut` is what it is rated to draw. The validator holds
   it to what the laid network draws, and its store to one GT ME output flush

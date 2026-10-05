@@ -544,7 +544,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   starve its machine in game is no longer called VALID. With `--world`, the `.schematic` export
   writes the card in the bus's upgrade slots and the wildcard as its filter, where it had left the
   slot unset and warned; `--inspect-schematic` names the card. No in-game save holds a Fuzzy Card
-  yet, so its tags are read from AE2's source.
+  yet, so its tags are read from AE2's source. A multiblock's input of such an item no longer gets
+  GT's Stocking Input Bus (ME) under the `always` hatch policy or at EV and up: it extracts only
+  the exact stacks set in it and takes no card, so it too would have fed nothing. It gets a normal
+  input bus fed by a carded export bus, and the validator refuses a stocking bus on such a port
+  (`me_stocking_wildcard`).
 - **The exported power source produces.** The `.schematic` export stands a Debug Power Generator in
   for the adapter's synthesized power source, but wrote it with no settings, and TecTech loads a
   generator with no settings as a consumer of 0 V x 0 A. Pasted into a world, it drew power instead

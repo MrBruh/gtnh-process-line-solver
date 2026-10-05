@@ -21,7 +21,7 @@ import pytest
 
 import gtnh_solver.cli as cli_module
 from gtnh_solver.cli import main
-from gtnh_solver.dataset.me import me_devices_for
+from gtnh_solver.dataset.me import me_devices_for, needs_fuzzy_card
 from gtnh_solver.ir import (
     Commodity,
     InputIR,
@@ -149,6 +149,7 @@ def test_nitrobenzene_with_items_and_fluids_on_one_attached_network(
                 machine_tier=machine.voltage_tier,
                 line_tier=listed.line_tier,
                 hatches=policy,
+                fuzzy=needs_fuzzy_card(port),
             )
             assert isinstance(chosen, tuple), chosen
             device = endpoint.device
@@ -171,7 +172,16 @@ def test_nitrobenzene_with_items_and_fluids_on_one_attached_network(
     gt_laid = {(d.machine_id, d.endpoint_id) for d in laid.devices if d.gt_mid is not None}
     assert gt_laid == expected_gt
     if policy is MEHatchPolicy.ALWAYS:
-        assert len(gt_laid) == len(laid.devices) == 28
+        # Every connection is a GT ME hatch but the Coke Oven's feed of any log: a stocking bus
+        # matches only the exact stacks set in it, so a normal input bus takes it, fed by an export
+        # bus with a Fuzzy Card (#353).
+        assert (len(gt_laid), len(laid.devices)) == (27, 28)
+        (fed,) = [d for d in laid.devices if d.gt_mid is None]
+        assert (fed.kind, fed.config, fed.cards.fuzzy) == (
+            MEDeviceKind.EXPORT_BUS,
+            ("minecraft:log@32767",),
+            1,
+        )
     else:
         # `never` by definition, and `tier_aware` because nitrobenzene is an HV line.
         assert listed.line_tier == "HV"

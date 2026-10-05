@@ -17,6 +17,7 @@ rebuilt here from the blocks the layout places, and AE's own channel pathing is 
         |-- rates         each device keeps up with its share                ME_DEVICE_RATE_SHORT
         |                                                                     ME_UPGRADE_SLOTS
         |                 a bus set to an item at any damage has a Fuzzy Card ME_FUZZY_CARD_MISSING
+        |                 no GT stocking bus serves an item at any damage     ME_STOCKING_WILDCARD
         |-- ground        cables in the region, on nothing else              ROUTE_* (as pipes)
         |                 a stub or link is a cable of its network           ME_INFRASTRUCTURE
         v
@@ -257,7 +258,7 @@ def check_me(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> ME
     devices = _check_endpoints(problem, layout, machines, out)
     _check_placement(problem, layout, machines, placements, devices, out)
     _check_rates(problem, machines, devices, out)
-    _check_fuzzy(devices, out)
+    _check_wildcards(machines, devices, out)
     _check_ground(problem, layout, machines, placements, out)
     graph = _build_graph(problem, layout, machines, placements, built)
     grids = _check_channels(problem, graph, out)
@@ -576,15 +577,39 @@ def _check_rates(
                 )
 
 
-def _check_fuzzy(
+def _check_wildcards(
+    machines: Mapping[str, Machine],
     devices: Mapping[tuple[str, str], tuple[MEPlacedDevice, MEEndpoint, str]],
     out: list[Violation],
 ) -> None:
-    """Rule 4, the filter's half: a bus set to an item at any damage carries a Fuzzy Card (spike
-    4.2, #353). Read off the device as built, its own config and cards: AE2 matches a bus's filter
-    or partition exactly unless the card is fitted, and no stack is ever at damage 32767, so such a
-    bus moves nothing, or a storage bus stores nothing, however fast its cards are."""
-    for device, _, _ in devices.values():
+    """Rule 4, the filter's half: an item at any damage reaches the network only through a device
+    that can match it (spike 4.2, 5.4, #353). No stack is ever at damage 32767, so:
+
+    - a bus set to one carries a Fuzzy Card, read off the bus as built, its own config and cards:
+      AE2 matches a bus's filter or partition exactly without it, so such a bus moves nothing, or a
+      storage bus stores nothing, however fast its cards are;
+    - no GT Stocking Input Bus (ME) serves a port moving one: it extracts exactly the stacks set in
+      it and takes no card, so it would feed the machine nothing, or one variant at most.
+    """
+    for device, endpoint, _ in devices.values():
+        if device.kind is MEDeviceKind.GT_STOCKING_INPUT_BUS_ME:
+            wild = [
+                p.id
+                for p in _ports(machines.get(device.machine_id), endpoint)
+                if p.commodity is Commodity.ITEM and _any_damage(p.id.partition(":")[2])
+            ]
+            if wild:
+                out.append(
+                    Violation(
+                        ViolationCode.ME_STOCKING_WILDCARD,
+                        f"{device.kind.value} for {device.endpoint_id!r} of "
+                        f"{device.machine_id!r} serves {', '.join(wild)}, an item at any damage, "
+                        f"but it extracts only the exact stacks set in it and takes no Fuzzy "
+                        f"Card; a normal input bus fed by an export bus with one must serve it",
+                        machine_id=device.machine_id,
+                    )
+                )
+            continue
         if device.kind not in FUZZY_BUSES or device.cards.fuzzy:
             continue
         wild = [r for r in device.config if _any_damage(r)]

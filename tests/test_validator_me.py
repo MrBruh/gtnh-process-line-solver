@@ -14,8 +14,10 @@ from hypothesis import strategies as st
 
 from gtnh_solver.ir import (
     AEColor,
+    Commodity,
     Facing,
     InputIR,
+    IODirection,
     LayoutResult,
     MECableCell,
     MECableKind,
@@ -27,6 +29,7 @@ from gtnh_solver.ir import (
     MENetworkSpec,
     MEPower,
     Placement,
+    Port,
 )
 from gtnh_solver.validator import me as vme
 from gtnh_solver.validator import validate
@@ -44,6 +47,7 @@ from tests._me_fixtures import (
     device,
     endpoint,
     gt_hatch_line,
+    single,
 )
 
 _ME_CODES = {c for c in ViolationCode if c.value.startswith("me_")}
@@ -323,12 +327,40 @@ def test_the_fuzzy_rule_reads_each_bus_by_its_own_config(
 ) -> None:
     built = device("m", endpoint("e", ("p",), kind, config=config), (0, 0, 0), Facing.NORTH)
     out: list[Violation] = []
-    vme._check_fuzzy({("m", "e"): (built, endpoint("e", ("p",), kind), MAIN)}, out)
+    vme._check_wildcards({}, {("m", "e"): (built, endpoint("e", ("p",), kind), MAIN)}, out)
     assert [v.code for v in out] == ([ViolationCode.ME_FUZZY_CARD_MISSING] if missing else [])
     carded = built.model_copy(update={"cards": MECards(fuzzy=1)})
     out.clear()
-    vme._check_fuzzy({("m", "e"): (carded, endpoint("e", ("p",), kind), MAIN)}, out)
+    vme._check_wildcards({}, {("m", "e"): (carded, endpoint("e", ("p",), kind), MAIN)}, out)
     assert out == []
+
+
+@pytest.mark.parametrize(
+    ("port_id", "commodity", "refused"),
+    [
+        (f"input:{_ANY_LOG}", Commodity.ITEM, True),
+        ("input:minecraft:log@1", Commodity.ITEM, False),
+        ("input:water", Commodity.FLUID, False),
+    ],
+)
+def test_a_stocking_input_bus_never_serves_an_item_at_any_damage(
+    port_id: str, commodity: Commodity, refused: bool
+) -> None:
+    """#353: GT's Stocking Input Bus (ME) extracts only the exact stacks set in it and takes no
+    Fuzzy Card, so one serving a port that moves any log feeds the machine nothing. Read off the
+    port the bus serves, since a stocking bus is set in game, not in the layout."""
+    kind = MEDeviceKind.GT_STOCKING_INPUT_BUS_ME
+    built_for = endpoint("e", (port_id,), kind, gt_mid=2718, hatch_kind="InputBus")
+    machine = single(
+        "mb", [Port(id=port_id, commodity=commodity, direction=IODirection.INPUT)], [built_for]
+    )
+    built = device("mb", built_for, (0, 0, 0), Facing.NORTH)
+    out: list[Violation] = []
+    vme._check_wildcards({"mb": machine}, {("mb", "e"): (built, built_for, MAIN)}, out)
+    assert [v.code for v in out] == ([ViolationCode.ME_STOCKING_WILDCARD] if refused else [])
+    if refused:
+        assert out[0].machine_id == "mb"
+        assert port_id in out[0].message
 
 
 def test_a_gt_me_output_bus_flushes_39_items_a_tick() -> None:

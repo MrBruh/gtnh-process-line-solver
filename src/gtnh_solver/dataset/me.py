@@ -26,7 +26,9 @@ rate, one device and then two::
 
 A bus set to an item at any damage (``registry@32767``, :func:`wildcard_item`) takes a Fuzzy Card
 first (:data:`FUZZY_BUSES`), so its speed cards share the three slots left, and such a port splits
-across two buses sooner (spike 4.2).
+across two buses sooner (spike 4.2). Such a port on a multiblock never gets GT's Stocking Input Bus
+(ME), whatever the policy: it pulls exactly the stacks set in its slots and has no fuzzy path, so
+it would move nothing (spike 5.4); the normal input bus with a carded export bus serves it.
 
 **Rates** come from three places, never from the interface itself: an ME interface takes a GT push
 straight into the network (spike 4.5), so what an interface moves is what GT pushes into it.
@@ -767,8 +769,12 @@ def me_devices_for(
 
     ``fuzzy`` says the port moves an item at any damage (:func:`wildcard_item`), which a bus moves
     only with a Fuzzy Card: each bus of :data:`FUZZY_BUSES` chosen for it is fitted one, and keeps
-    up with the speed cards that fit in the slots left. An interface or a GT ME hatch is set to
-    nothing, so it needs none.
+    up with the speed cards that fit in the slots left. An interface or a GT ME output hatch is set
+    to nothing and takes whatever it is given, so it needs none. A GT Stocking Input Bus (ME) is
+    never chosen for such a port, under any policy: it extracts exactly the stack set in each slot
+    (``MTEHatchInputBusME``) and takes no card, so set to the wildcard it moves nothing, and set by
+    the player to one log it moves only that log. The multiblock gets a normal input bus fed by a
+    carded export bus instead.
 
     Devices are tried in the order the module docstring draws, one device and then
     :data:`MAX_DEVICES_PER_PORT`; the first that keeps up is returned, as that many equal devices
@@ -787,6 +793,7 @@ def me_devices_for(
         hatches=hatches,
         auto_output=auto_output,
         push_rate=push_rate,
+        fuzzy=fuzzy,
     )
     for group in groups:
         for count in range(1, MAX_DEVICES_PER_PORT + 1):
@@ -810,11 +817,14 @@ def _option_groups(
     hatches: MEHatchPolicy,
     auto_output: bool,
     push_rate: float | None,
+    fuzzy: bool,
 ) -> list[list[_Option]]:
     """The ways to serve a port, in groups tried in turn; within a group, one device each is tried
     before two of any."""
     if multiblock:
-        return _multiblock_groups(commodity, direction, machine_tier, line_tier, hatches)
+        return _multiblock_groups(
+            commodity, direction, machine_tier, line_tier, hatches, fuzzy=fuzzy
+        )
     if direction is IODirection.INPUT:
         bus = (
             MEDeviceKind.EXPORT_BUS
@@ -841,9 +851,13 @@ def _multiblock_groups(
     machine_tier: str,
     line_tier: str,
     hatches: MEHatchPolicy,
+    *,
+    fuzzy: bool,
 ) -> list[list[_Option]]:
     """A multiblock port's ways: its GT ME hatch where the policy allows it, and a normal hatch with
-    the AE2 part in front of it (spike 4.8)."""
+    the AE2 part in front of it (spike 4.8). An item at any damage (``fuzzy``) is never given the
+    Stocking Input Bus (ME), which matches only the exact stacks set in it (:func:`me_devices_for`).
+    """
     hatch_kind, part = _NORMAL_HATCH_PART[(commodity, direction)]
     if part in _BUS_COMMODITY:
         normal = _bus(commodity, part, hatch_kind=hatch_kind)
@@ -857,6 +871,8 @@ def _multiblock_groups(
             max_count=MAX_DEVICES_PER_PORT,
         )
     gt = GT_ME_HATCHES[_GT_ME_HATCH_FOR[(commodity, direction)]]
+    if fuzzy and gt.kind is MEDeviceKind.GT_STOCKING_INPUT_BUS_ME:
+        return [[normal]]
     gt_option = _Option(
         commodity,
         MEDeviceChoice(kind=gt.kind, gt_mid=gt.mid, hatch_kind=gt.hatch_kind, per_tick=gt.per_tick),

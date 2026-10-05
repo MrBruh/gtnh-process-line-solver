@@ -673,7 +673,10 @@ hatches by mID, AE2's power figures, and which device serves a machine's port. I
   storage bus whose config names such an item gets one, and keeps the wildcard as its filter. The
   card takes one of the bus's four slots, so its speed cards get three, and a port faster than
   three move is split across two buses, each with its own card. Fluid buses take none: a fluid has
-  no damage.
+  no damage. A multiblock's input of such an item never gets GT's Stocking Input Bus (ME), whatever
+  the hatch policy: it pulls exactly the stacks set in it and takes no card, so it would move
+  nothing; a normal input bus fed by a carded export bus takes its place. The output side needs
+  nothing: an interface or a GT ME output bus takes whatever the machine makes.
 
 ### What a valid ME build is (#333)
 
@@ -702,7 +705,10 @@ blocks too, a dense and a smart one, at their own cell.
    by that bus's push (spike 4.8); a bus takes four cards at most, a Fuzzy Card among them. And
    **a bus set to an item at any damage carries a Fuzzy Card** (`ME_FUZZY_CARD_MISSING`, #353):
    read off the bus as built, an item import, export or storage bus whose filter or partition
-   names a `registry@32767` item and has no card moves nothing, however fast its cards are.
+   names a `registry@32767` item and has no card moves nothing, however fast its cards are. Nor
+   does **a GT Stocking Input Bus (ME) serve such an item** (`ME_STOCKING_WILDCARD`): it extracts
+   exactly the stacks set in it and takes no card (spike 5.4), so the adapter gives that port a
+   normal input bus fed by a carded export bus under every hatch policy.
 
 **Which blocks join which network** is AE's to decide, not the layout's (spike 3): a cable block
 joins every compatible neighbour (Fluix joins every colour) on a side no part takes; a part joins

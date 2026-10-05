@@ -661,19 +661,51 @@ def test_a_fuzzy_bus_splits_across_two_buses_sooner() -> None:
 
 
 def test_a_device_with_no_filter_takes_no_fuzzy_card() -> None:
-    """An interface and a GT ME hatch are set to nothing, and a fluid bus takes no Fuzzy Card (a
-    fluid has no damage), so ``fuzzy`` leaves each as it was."""
+    """An interface and a GT ME output bus take whatever the machine makes, and a fluid device takes
+    no Fuzzy Card (a fluid has no damage), so ``fuzzy`` leaves each as it was."""
     (interface,) = _choose(
         Commodity.ITEM, IODirection.OUTPUT, 3.0, multiblock=False, auto_output=True, fuzzy=True
     )
     assert (interface.kind, interface.cards) == (MEDeviceKind.INTERFACE, MECards())
-    (hatch,) = _choose(
-        Commodity.ITEM, IODirection.INPUT, 3.0, hatches=MEHatchPolicy.ALWAYS, fuzzy=True
+    (output,) = _choose(
+        Commodity.ITEM, IODirection.OUTPUT, 3.0, hatches=MEHatchPolicy.ALWAYS, fuzzy=True
     )
-    assert (hatch.gt_mid, hatch.cards) == (2718, MECards())
+    assert (output.gt_mid, output.cards) == (2710, MECards())
     (fluid,) = _choose(Commodity.FLUID, IODirection.INPUT, 100.0, multiblock=False, fuzzy=True)
     assert fluid.kind is MEDeviceKind.FLUID_EXPORT_BUS
     assert fluid.cards.fuzzy == 0
+    (stocking,) = _choose(
+        Commodity.FLUID, IODirection.INPUT, 100.0, hatches=MEHatchPolicy.ALWAYS, fuzzy=True
+    )
+    assert (stocking.gt_mid, stocking.cards) == (2717, MECards())
+
+
+@pytest.mark.parametrize(
+    ("hatches", "line_tier"),
+    [(MEHatchPolicy.ALWAYS, "LV"), (MEHatchPolicy.ALWAYS, "UV"), (MEHatchPolicy.TIER_AWARE, "EV")],
+)
+def test_an_item_at_any_damage_never_gets_a_stocking_input_bus(
+    hatches: MEHatchPolicy, line_tier: str
+) -> None:
+    """#353: GT's Stocking Input Bus (ME) extracts exactly the stacks set in it and takes no card,
+    so it cannot feed an item at any damage; under every policy that would choose it, the port
+    gets a normal input bus fed by an export bus with a Fuzzy Card."""
+    (plain,) = _choose(Commodity.ITEM, IODirection.INPUT, 3.0, hatches=hatches, line_tier=line_tier)
+    assert plain.gt_mid == 2718
+    (fed,) = _choose(
+        Commodity.ITEM, IODirection.INPUT, 3.0, hatches=hatches, line_tier=line_tier, fuzzy=True
+    )
+    assert (fed.kind, fed.gt_mid, fed.hatch_kind, fed.cards.fuzzy) == (
+        MEDeviceKind.EXPORT_BUS,
+        None,
+        "InputBus",
+        1,
+    )
+    # Its speed cards are the fewest that keep up in the three slots the Fuzzy Card leaves.
+    allowed = super_speed_allowed(line_tier)
+    speed = bus_cards_for(Commodity.ITEM, 3.0, super_speed=allowed, slots=me.UPGRADE_SLOTS - 1)
+    assert speed is not None
+    assert fed.cards == speed.model_copy(update={"fuzzy": 1})
 
 
 def test_an_auto_output_goes_into_an_interface() -> None:
@@ -794,6 +826,9 @@ def test_every_choice_keeps_up_or_is_a_real_shortfall(
     # A Fuzzy Card on exactly the buses asked for one, and every card in the bus's four slots.
     assert device.cards.fuzzy == int(fuzzy and device.kind in me.FUZZY_BUSES)
     assert device.cards.count <= me.UPGRADE_SLOTS
+    # An item at any damage never reaches a machine through a stocking bus, which matches exactly.
+    if fuzzy and commodity is Commodity.ITEM:
+        assert device.kind is not MEDeviceKind.GT_STOCKING_INPUT_BUS_ME
     # A multiblock's every connection takes a hatch slot; a single block's none.
     assert (device.hatch_kind is not None) is multiblock
     if hatches is MEHatchPolicy.NEVER:
