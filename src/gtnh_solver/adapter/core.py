@@ -708,8 +708,9 @@ def _close(mapped: _MappedPlan, me: MEConfig, chosen: Mapping[str, str]) -> Inpu
         multiblock_ids=mapped.multiblock_ids,
         line_tier=line_tier(mapped.machines, mapped.storage_ids),
         recipe_ticks=mapped.recipe_ticks,
-        # The region is sized for real once every block is in (below); this is its first reading.
-        region_side=_bounding_region([m.footprint for m in machines]).sx,
+        # The region is sized for real once every block is in (below); this is its first reading,
+        # whose Manhattan diameter an acceptor's rating takes as the longest channel path.
+        cable_hops=_diameter(_bounding_region([m.footprint for m in machines])),
     )
     # The export has no power source; invent it. ``single_block_ids`` is what lets the synthesis
     # state a basic machine's own intake ceiling without guessing at a multiblock's.
@@ -2448,6 +2449,11 @@ _REGION_AREA_SLACK = 4
 #: Cells of clear headroom above the tallest machine for routing runs over the top of the stack.
 #: Tuned so an all-1x1x1 line (max height 1) keeps the historical region height of 4.
 _REGION_HEIGHT_HEADROOM = 3
+
+
+def _diameter(region: CellBox) -> int:
+    """The most cable blocks a shortest path between two cells of ``region`` crosses."""
+    return region.sx + region.sy + region.sz
 
 
 def _bounding_region(footprints: list[CellBox]) -> CellBox:

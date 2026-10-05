@@ -44,6 +44,7 @@ from gtnh_solver.validator import validate
 from tests._helpers import consumer, net, producer
 from tests._me_fixtures import (
     MAIN,
+    SUB,
     acceptor_comb,
     attached_line,
     coord,
@@ -99,14 +100,14 @@ def test_a_line_with_no_me_network_lays_none() -> None:
 def test_an_acceptor_network_solves_with_its_acceptor_on_the_lines_power() -> None:
     # The fixture's line, given room to lay it in: the acceptor is placed and cabled like any
     # machine drawing EU, and the layout reports what the network it feeds draws (#336).
-    problem, _ = acceptor_comb(eut=20.0)
+    problem, _ = acceptor_comb()
     problem = problem.model_copy(update={"bounding_region": CellBox(sx=8, sy=2, sz=8)})
     layout = solve(problem, seed=0)
     assert layout.status is LayoutStatus.VALID, layout.infeasibility
     assert validate(problem, layout).ok
     (metrics,) = layout.metrics.me
-    assert (metrics.id, metrics.power) == (MAIN, MEPower.ACCEPTOR)
-    assert 0 < metrics.eu_per_tick <= 20.0
+    assert (metrics.id, metrics.power) == (SUB, MEPower.ACCEPTOR)
+    assert 0 < metrics.eu_per_tick <= 30.0
     (cable,) = [r for r in layout.routes if r.net_id == "power:LV"]
     assert "acc" in {t.machine_id for t in cable.terminals}
 

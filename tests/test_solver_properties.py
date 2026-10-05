@@ -619,17 +619,16 @@ def _me_networks(draw: st.DrawFn) -> list[MENetworkSpec]:
     """One or two ME networks: at most one attached (the player has one main network), with a
     budget drawn low enough to be overrun; the rest subnets, storing through a link or in chests.
     Every hatch policy, so a multiblock's connection is sometimes one of GT's own ME hatches, and
-    either power, so a network is sometimes fed by an Energy Acceptor on the line's cable (#336)."""
+    a subnet either power, so one is sometimes fed by an Energy Acceptor on the line's cable (#336;
+    an attached network is the player's base's to power, and refused an acceptor)."""
     specs: list[MENetworkSpec] = []
     for i in range(draw(st.integers(min_value=1, max_value=2))):
         hatches = draw(st.sampled_from(list(MEHatchPolicy)))
-        power = draw(st.sampled_from(list(MEPower)))
         if not any(s.mode is MEMode.ATTACHED for s in specs) and draw(st.booleans()):
             spec = MENetworkSpec(
                 id=f"me{i}",
                 mode=MEMode.ATTACHED,
                 hatches=hatches,
-                power=power,
                 me_channel_budget=draw(st.integers(min_value=1, max_value=12)),
             )
         else:
@@ -638,7 +637,7 @@ def _me_networks(draw: st.DrawFn) -> list[MENetworkSpec]:
                 mode=MEMode.SUBNET,
                 storage=draw(st.sampled_from(list(MEStorage))),
                 hatches=hatches,
-                power=power,
+                power=draw(st.sampled_from(list(MEPower))),
             )
         specs.append(spec)
     return specs

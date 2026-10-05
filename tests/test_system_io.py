@@ -611,22 +611,22 @@ def test_nets_moving_one_resource_the_same_way_are_one_flow() -> None:
 
 
 @pytest.mark.parametrize(
-    ("mode", "ae", "budget"),
-    [(MEMode.ATTACHED, 22.9375, 32), (MEMode.SUBNET, 23.40625, 8)],
+    ("with_controller", "ae", "budget"),
+    [(True, 52.9375, None), (False, 23.40625, 8)],
     ids=["tree", "adhoc"],
 )
 def test_an_me_network_draws_what_its_laid_cable_costs(
-    mode: MEMode, ae: float, budget: int
+    with_controller: bool, ae: float, budget: int | None
 ) -> None:
     # The fixture's hand trace (acceptor_comb), from the cables' channel counts.
-    problem, layout = acceptor_comb(mode=mode)
+    problem, layout = acceptor_comb(with_controller=with_controller)
     io = system_io(problem, layout)
     (network,) = io.me
     assert (network.ae_per_tick, network.eu_per_tick) == (ae, ae / 2)
     assert network.power is MEPower.ACCEPTOR
     assert network.channel_budget == budget
-    # Its acceptor is rated 12 EU/t and draws on src, which feeds the whole amp it sums to.
-    assert (network.acceptor_eu_per_tick, network.acceptor_source) == (12.0, "src")
+    # Its acceptor is rated 30 EU/t and draws on src, which feeds the whole amp it sums to.
+    assert (network.acceptor_eu_per_tick, network.acceptor_source) == (30.0, "src")
     assert io.power_amps_by_source == {"src": 1}
 
 
@@ -655,7 +655,7 @@ def test_an_output_bus_flush_is_the_most_a_network_spends_at_once() -> None:
 
 
 def test_the_layout_carries_each_networks_figures() -> None:
-    problem, layout = acceptor_comb(mode=MEMode.SUBNET)
+    problem, layout = acceptor_comb()
     (io,) = system_io(problem, layout).me
     (metrics,) = me_network_metrics(problem, layout.me_networks)
     assert (metrics.id, metrics.mode, metrics.colour, metrics.power) == (

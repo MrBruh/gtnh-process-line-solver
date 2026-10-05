@@ -18,11 +18,11 @@ both sides agree. A test breaks one rule at a time on top of them and expects it
 - :func:`gt_hatch_line`: a multiblock whose product leaves through GT's Output Bus (ME), front
   facing a cable from the stub; or, with ``normal=True``, a normal output bus with an interface part
   in front of it.
-- :func:`acceptor_comb`: a two-machine :func:`comb` powered by an Energy Acceptor on the row's east
-  end, fed by a power source through two blocks of cable (#336)::
+- :func:`acceptor_comb`: a two-machine subnet :func:`comb` powered by an Energy Acceptor on the
+  row's east end, fed by a power source through two blocks of cable (#336)::
 
-      z=0    .   m0    .    .    .    .    .
-      z=1    s  c(2)  c(0) c(0) c(0) c(0)  ACC      s: the stub (attached) or a smart cable (ad hoc)
+      z=0   (C)  m0    .    .    .    .    .        C: the controller, with ``with_controller``
+      z=1    c  c(2)  c(0) c(0) c(0) c(0)  ACC      c: a smart cable carrying both channels
       z=2    .   m1    .    .    .    .    #        #: LV cable, from the source's east face to the
       z=3    .    .    .    .   SRC   #    #           acceptor's south face; SRC's front faces south
 """
@@ -343,18 +343,20 @@ def gt_hatch_line(*, normal: bool = False) -> tuple[InputIR, LayoutResult]:
 
 
 def acceptor_comb(
-    *, mode: MEMode = MEMode.ATTACHED, eut: float = 12.0
+    *, with_controller: bool = False, eut: float = 30.0
 ) -> tuple[InputIR, LayoutResult]:
-    """:func:`comb` of two machines with its network powered by an Energy Acceptor rated ``eut``
-    EU/t (module docstring), its cables carrying the channels AE routes through them.
+    """A subnet :func:`comb` of two machines powered by an Energy Acceptor rated ``eut`` EU/t
+    (module docstring), its cables carrying the channels AE routes through them. Only a subnet
+    takes an acceptor: an attached network is the player's base's to power.
 
     What the network draws, by hand (spike 6): two export buses idle at 1 AE/t each and extract
-    0.1 items/t each. Attached, the channel term is twice the channels through every node, the stub
-    and the cable holding both buses 2 each, the buses 1 each: 2 x 6 = 12, so (2 + 12/128 + 0.2) x
-    10 = 22.9375 AE/t, 11.46875 EU/t. Ad hoc, every node (six cables, two buses, the acceptor)
-    pays for both channels: 9 x 2 = 18, so (2 + 18/128 + 0.2) x 10 = 23.40625 AE/t, 11.703125 EU/t.
+    0.1 items/t each. Ad hoc, every node (six cables, two buses, the acceptor) pays for both
+    channels: 9 x 2 = 18, so (2 + 18/128 + 0.2) x 10 = 23.40625 AE/t, 11.703125 EU/t. With the
+    controller (3 AE/t idle), the channel term is twice the channels through every node, the root
+    cable and the cable holding both buses 2 each, the buses 1 each: 2 x 6 = 12, so (5 + 12/128 +
+    0.2) x 10 = 52.9375 AE/t, 26.46875 EU/t.
     """
-    problem, layout = comb(2, mode=mode)
+    problem, layout = comb(2, mode=MEMode.SUBNET, with_controller=with_controller)
     (network,) = layout.me_networks
     spec = problem.me.networks[0].model_copy(update={"power": MEPower.ACCEPTOR})
     power_in = Port(id="power:in", commodity=Commodity.POWER, direction=IODirection.INPUT)

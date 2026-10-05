@@ -539,7 +539,6 @@ def _power_note(problem: InputIR, layout: LayoutResult, capsys: pytest.CaptureFi
 def test_an_attached_network_says_what_it_adds_to_the_main_networks_draw(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    assert _power_note(*acceptor_comb(), capsys).startswith("note: ME network main (attached): ")
     # Two buses idle, extracting 0.2 items/t, and their own channels twice over (the comb's cables
     # state none): (2 + 4/128 + 0.2) x 10 AE/t.
     assert _power_note(*comb(2), capsys) == (
@@ -551,10 +550,10 @@ def test_an_attached_network_says_what_it_adds_to_the_main_networks_draw(
 def test_an_acceptor_network_states_its_draw_and_that_its_cable_takes_the_sources_whole_output(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # The fixture's hand trace: 22.9375 AE/t, on an acceptor rated 12 EU/t that src feeds 1 A.
+    # The fixture's hand trace: 23.4062 AE/t, on an acceptor rated 30 EU/t that src feeds 1 A.
     assert _power_note(*acceptor_comb(), capsys) == (
-        "note: ME network main (attached): its Energy Acceptor draws 22.9375 AE/t (11.4688 EU/t), "
-        "rated 12 EU/t, on src; it takes every amp offered until it stores 80,000 AE, so its cable "
+        "note: ME network sub (subnet): its Energy Acceptor draws 23.4062 AE/t (11.7031 EU/t), "
+        "rated 30 EU/t, on src; it takes every amp offered until it stores 80,000 AE, so its cable "
         "is sized for src's full 1 A: feed src no more than that"
     )
 
@@ -569,7 +568,7 @@ def test_an_acceptor_says_where_its_power_comes_from_when_no_source_feeds_it(
         update={"me": problem.me.model_copy(update={"power_external": True})}
     )
     assert _power_note(external, layout, capsys).endswith(
-        "rated 12 EU/t, from your own power supply"
+        "rated 30 EU/t, from your own power supply"
     )
 
 

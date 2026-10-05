@@ -7,15 +7,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
-- **An ME network can be powered by an Energy Acceptor on the line's own EU (#336).** Set an
-  `MEPlan` network's `power` to `acceptor` and the solve places an AE2 Energy Acceptor for it on
-  the line's lowest powered tier, cabled into that tier's power like any machine and touched once
-  by the network's cable. Its draw is rated before any cable is laid from the network's devices,
-  what they move and the channels they spend (AE2's own formula, channels counted through every
-  block and connection as AE2 counts them), each channel assumed to cross the line's region. An
-  acceptor takes every amp its source offers until its network is full, so the cable from the
-  source to it is sized for the source's whole output rather than the acceptor's steady draw, and
-  no cable for more than its source puts out; feed that source no more than the run says.
+- **An ME subnet can be powered by an Energy Acceptor on the line's own EU (#336).** Set an
+  `MEPlan` subnet's `power` to `acceptor` and the solve places an AE2 Energy Acceptor for it on
+  the line's highest powered tier, cabled into that tier's power like any machine and touched once
+  by the network's cable. An attached network is refused one (exit 2): your base powers your main
+  network. The acceptor's draw is rated before any cable is laid, as an upper bound, from the
+  network's devices, what they move and the channels they spend (AE2's own formula, channels
+  counted through every block and connection as AE2 counts them), each channel assumed to cross
+  the line's whole region. An acceptor takes every amp its source offers until its network is
+  full, so the cable from the source to it is sized for the source's whole output rather than the
+  acceptor's steady draw, never through the source's own cable block, and no cable for more than
+  its source puts out; feed that source no more than the run says.
   The validator holds every layout to it: a new `me_power_insufficient` violation for an acceptor
   network with no acceptor, none on a power cable, or one rated under what the laid network
   draws, and for a network that cannot store one flush of its GT ME output buses (16,000 AE for an

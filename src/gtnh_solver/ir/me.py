@@ -183,7 +183,8 @@ class MEPower(str, Enum):
 
     - ``external`` (the default): the builder supplies it (a quartz fiber, the main network); the
       run reports what it draws;
-    - ``acceptor``: an Energy Acceptor on the line's own EU supply.
+    - ``acceptor``: an Energy Acceptor on the line's own EU supply. A subnet's choice only: the
+      adapter refuses it on an attached network, which the player's base already powers.
     """
 
     EXTERNAL = "external"

@@ -21,12 +21,19 @@ validator checks (docs/DOMAIN.md, "What a valid ME build is")::
 
 **An acceptor network's Energy Acceptor** is a machine drawing EU like any other, so the power
 synthesis that runs next gives it a power port and puts it on the shared-amperage tree of the line's
-lowest tier. Its ``eut`` must be known before any cable is laid, so it is an ESTIMATE of the
-network's draw (``dataset.me``, spike 6): its devices' idle draws, a controller's, what they move,
-and a channel term over cable it assumes, each device's channel crossing the line's region from
-side to side (``estimated_channel_load``). The layout reports the figure its laid cable really
-costs, and the validator holds the acceptor's ``eut`` to that, so the estimate errs high: too high
-only thickens a power cable, too low fails the layout.
+highest tier: an acceptor takes any voltage (spike 6.3), and the highest draws the fewest amps on
+the thinnest cable. Only a subnet takes one: an attached network is part of the player's main
+network, which their base already powers, and an acceptor there would power the whole base and keep
+filling its storage from the line's supply, so that choice is refused (:class:`MEPlanError`).
+
+Its ``eut`` must be known before any cable is laid, so it is an UPPER BOUND on the network's draw
+(``dataset.me``, spike 6): its devices' idle draws, a controller's, what they move, and the channel
+term of a network whose every device's channel crosses as many cable blocks as the line's region
+is wide, high and deep together (its Manhattan diameter, never under ``ESTIMATED_CABLE_HOPS``). The
+router lays each device's cable as a shortest path from the cable already laid, so only a detour
+the halo forces takes a channel further than that; the validator holds the rating to what the laid
+network really draws, so such a layout is caught. Too high a rating only thickens a power cable,
+and on the highest tier barely that.
 
 **Ports on ME are never shared with a pipe.** Every net on one machine port must ride the same
 network: a port's device takes all of its output, or feeds all of its input, so a port half piped
@@ -100,7 +107,7 @@ _LINK_BUS = {
 _BUFFER_TYPE = {Commodity.ITEM: "Super Chest", Commodity.FLUID: "Super Tank"}
 _ACCEPTOR_TYPE = "ME Energy Acceptor"
 #: The tier an infrastructure block is listed at. None of them draws power but an acceptor, which
-#: takes the line's lowest powered tier and never one below this (:func:`_acceptor_tier`).
+#: takes the line's highest powered tier and never one below this (:func:`_acceptor_tier`).
 _INFRA_TIER = "LV"
 
 
@@ -113,13 +120,13 @@ def build_me(
     multiblock_ids: Collection[str],
     line_tier: str,
     recipe_ticks: Mapping[str, float],
-    region_side: int = 0,
+    cable_hops: int = 0,
 ) -> tuple[list[Machine], list[Net]]:
     """``machines`` and ``nets`` with the ME side the choice stamped on ``nets`` needs (module
     docstring). ``storage_ids`` are the boundary storages and output buffers; ``recipe_ticks`` the
-    shortest recipe each machine runs, which bounds a single block's fluid push; ``region_side``
-    the side of the region the line will be laid in, which an Energy Acceptor's rating assumes each
-    device's channel crosses in cable (and never fewer than ``ESTIMATED_CABLE_HOPS``). Raises
+    shortest recipe each machine runs, which bounds a single block's fluid push; ``cable_hops``
+    the most cable blocks an Energy Acceptor's rating assumes each device's channel crosses, the
+    region's Manhattan diameter (never fewer than ``ESTIMATED_CABLE_HOPS``). Raises
     :class:`MEPlanError` for a port shared by a pipe and ME or by two networks, and
     :class:`InfeasiblePlanError` for a port no device keeps up with or a network over its budget."""
     if not any(net.rides_me for net in nets):
@@ -145,7 +152,7 @@ def build_me(
         m.model_copy(update={"me_endpoints": tuple(endpoints[m.id])}) if endpoints.get(m.id) else m
         for m in machines
     ]
-    hops = max(ESTIMATED_CABLE_HOPS, region_side)
+    hops = max(ESTIMATED_CABLE_HOPS, cable_hops)
     return machines + _infrastructure(machines, nets, me, hops), nets
 
 
@@ -437,6 +444,13 @@ def _infrastructure(
             continue
         blocks = _network_blocks(spec, count, carried.get(spec.id, set()))
         if spec.power is MEPower.ACCEPTOR:
+            if spec.mode is MEMode.ATTACHED:
+                raise MEPlanError(
+                    f"ME network {spec.id!r} is attached to your main network, which your base "
+                    f"already powers: an Energy Acceptor there would power your whole base and "
+                    f"keep filling its storage from this line's supply. Leave its power external, "
+                    f"or make it a subnet to give it an acceptor of its own"
+                )
             blocks.append(_acceptor(spec, [*machines, *blocks], hops))
         out.extend(blocks)
     return out
@@ -513,10 +527,10 @@ def _acceptor(spec: MENetworkSpec, machines: Sequence[Machine], hops: int) -> Ma
 
 
 def _acceptor_tier(machines: Sequence[Machine]) -> str:
-    """The tier an Energy Acceptor is supplied at: the lowest any powered machine of the line runs
-    at, so it rides the cheapest cable the line already lays. An acceptor takes any voltage (spike
-    6.3), so never ULV, whose 8 V the 16-block design run spends; :data:`_INFRA_TIER` for a line
-    with no powered machine on the ladder."""
+    """The tier an Energy Acceptor is supplied at: the highest any powered machine of the line runs
+    at. An acceptor takes any voltage (spike 6.3), and the highest tier carries its draw in the
+    fewest amps on the thinnest cable the line already lays (a maintainer decision on #336);
+    :data:`_INFRA_TIER` for a line with no powered machine above it on the ladder."""
     ladder = list(VOLTAGE_BY_TIER)
     floor = ladder.index(_INFRA_TIER)
     tiers = [
@@ -524,7 +538,7 @@ def _acceptor_tier(machines: Sequence[Machine]) -> str:
         for m in machines
         if m.eut > 0 and m.me_role is None and m.voltage_tier in VOLTAGE_BY_TIER
     ]
-    return ladder[max(floor, min(tiers, default=floor))]
+    return ladder[max([floor, *tiers])]
 
 
 def _stub(spec: MENetworkSpec, index: int) -> Machine:

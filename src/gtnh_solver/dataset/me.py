@@ -566,9 +566,9 @@ def flush_ae(hatch: GTMEHatch) -> float:
 
 #: The fewest cable blocks the adapter assumes between each ME device and its channel source when
 #: it rates an Energy Acceptor before any cable is laid (:func:`estimated_channel_load`; the adapter
-#: assumes the region's side when that is longer). Generous on purpose: the validator holds the
-#: acceptor's draw to the figure the laid network really costs, so an estimate under it fails the
-#: layout, while one over it only sizes the power cable a little up.
+#: assumes the region's Manhattan diameter when that is longer). Generous on purpose: the validator
+#: holds the acceptor's draw to the figure the laid network really costs, so an estimate under it
+#: fails the layout, while one over it only sizes the power cable a little up.
 ESTIMATED_CABLE_HOPS = 16
 
 
@@ -576,12 +576,13 @@ def estimated_channel_load(
     devices: int, *, adhoc: bool, blocks: int = 0, hops: int = ESTIMATED_CABLE_HOPS
 ) -> int:
     """The ``channelsByBlocks`` a network of ``devices`` channel devices is rated for before its
-    cable is laid: each device's channel crossing ``hops`` cable blocks.
+    cable is laid: an upper bound for any network whose every device's channel crosses at most
+    ``hops`` cable blocks.
 
     With a controller that is :func:`tree_channel_load` over each device's node and the blocks on its
-    path; ad hoc, :func:`adhoc_channel_load` over the devices, as many cables as their paths, and
-    ``blocks`` block devices (an Energy Acceptor), times every device's channel. An ESTIMATE: the
-    layout's own figure is computed from the cable it lays.
+    path, each carrying at most every channel; ad hoc, :func:`adhoc_channel_load` over the devices,
+    at most as many cables as their paths, and ``blocks`` block devices (an Energy Acceptor), times
+    every device's channel. The layout's own figure is computed from the cable it lays.
     """
     paths = devices * hops
     if adhoc:

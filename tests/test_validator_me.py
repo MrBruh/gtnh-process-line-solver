@@ -79,7 +79,7 @@ def _cables(layout: LayoutResult, cables: list[MECableCell]) -> LayoutResult:
         gt_hatch_line,
         lambda: gt_hatch_line(normal=True),
         acceptor_comb,
-        lambda: acceptor_comb(mode=MEMode.SUBNET),
+        lambda: acceptor_comb(with_controller=True),
     ],
     ids=[
         "attached",
@@ -88,8 +88,8 @@ def _cables(layout: LayoutResult, cables: list[MECableCell]) -> LayoutResult:
         "controller8",
         "gt_hatch",
         "normal_hatch",
-        "acceptor",
         "adhoc_acceptor",
+        "controller_acceptor",
     ],
 )
 def test_a_build_by_the_rules_validates(build: object) -> None:
@@ -561,16 +561,16 @@ def test_the_me_gate_reports_but_never_raises(
 
 
 @pytest.mark.parametrize(
-    ("mode", "draw"),
-    [(MEMode.ATTACHED, 11.46875), (MEMode.SUBNET, 11.703125)],
+    ("with_controller", "draw"),
+    [(True, 26.46875), (False, 11.703125)],
     ids=["tree", "adhoc"],
 )
 def test_an_acceptor_rated_for_what_its_network_draws_passes_and_under_it_is_starved(
-    mode: MEMode, draw: float
+    with_controller: bool, draw: float
 ) -> None:
     # The fixture's hand trace: the network draws exactly ``draw`` EU/t (acceptor_comb).
-    assert validate(*acceptor_comb(mode=mode, eut=draw)).ok
-    problem, layout = acceptor_comb(mode=mode, eut=draw - 0.01)
+    assert validate(*acceptor_comb(with_controller=with_controller, eut=draw)).ok
+    problem, layout = acceptor_comb(with_controller=with_controller, eut=draw - 0.01)
     (violation,) = validate(problem, layout).violations
     assert violation.code is ViolationCode.ME_POWER_INSUFFICIENT
     assert violation.machine_id == "acc"  # a placement laying less cable mends it
@@ -579,12 +579,12 @@ def test_an_acceptor_rated_for_what_its_network_draws_passes_and_under_it_is_sta
 
 def test_the_power_gate_counts_channels_from_the_blocks_not_the_routers_count() -> None:
     # The cables' ``me_channels`` are the router's bookkeeping; the gate runs AE's own pathing.
-    problem, layout = acceptor_comb(eut=11.46875)
-    network = _network(layout)
-    zeroed = [c.model_copy(update={"me_channels": 0}) for c in network.cables]
-    assert validate(problem, _cables(layout, zeroed)).ok
-    inflated = [c.model_copy(update={"me_channels": 8}) for c in network.cables]
-    assert validate(problem, _cables(layout, inflated)).ok
+    problem, layout = acceptor_comb(with_controller=True, eut=26.46875)
+    network = _network(layout, SUB)
+    for channels in (0, 8):
+        counted = [c.model_copy(update={"me_channels": channels}) for c in network.cables]
+        recounted = _with_network(layout, network.model_copy(update={"cables": counted}))
+        assert validate(problem, recounted).ok
 
 
 def test_an_acceptor_no_power_cable_reaches_is_starved() -> None:

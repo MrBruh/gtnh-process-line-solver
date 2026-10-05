@@ -756,18 +756,26 @@ An AE2 network draws AE every tick, and the pack converts 1 EU into 2 AE (spike 
 
 **How a network is powered** is the user's choice (`MENetworkSpec.power`). `external` leaves it to
 the builder: an attached network adds its draw to the main network's, and a subnet is fed through
-a quartz fiber from a network with power. `acceptor` gives it an Energy Acceptor on the line's own
-EU: the adapter adds one per such network, at the line's lowest powered tier (never ULV, which 16
-blocks of cable spend; an acceptor takes any voltage), before the power synthesis, so it joins that
-tier's shared-amperage tree and is cabled for its source's whole output (above, "Power"). It is
-also a leaf of its network's tree, touched by one cable.
+a quartz fiber from a network with power. `acceptor` gives a subnet an Energy Acceptor on the
+line's own EU: the adapter adds one per such network, at the line's highest powered tier (an
+acceptor takes any voltage, and the highest carries its draw in the fewest amps on the thinnest
+cable; never below LV), before the power synthesis, so it joins that tier's shared-amperage tree
+and is cabled for its source's whole output (above, "Power"). It is also a leaf of its network's
+tree, touched by one cable. **An attached network is refused an acceptor** (`MEPlanError`, exit
+2): it is part of the player's main network, which their base already powers, and an acceptor
+there would power the whole base and keep filling its storage from this line's supply.
 
 **The acceptor is rated before any cable is laid**, since the power synthesis sizes its draw then.
-Its `eut` is an estimate: its network's devices idle and moving what their ports state, a
-controller's idle, and a channel term over cable it assumes, each device's channel crossing the
-line's region from side to side and never fewer than 16 blocks (`estimated_channel_load`). The
-estimate errs high on purpose: the validator holds the rating to what the laid network really
-draws, so an estimate under it fails the layout, while one over it only thickens a power cable.
+Its `eut` is an upper bound on what the network draws: its devices idle and moving what their
+ports state, a controller's idle, and the channel term of a network in which every device's
+channel crosses as many cable blocks as the line's region is wide, high and deep together (its
+Manhattan diameter as the adapter first sizes it, never fewer than 16; `estimated_channel_load`).
+The router lays each device's cable as a shortest path from the cable already laid, so a channel
+goes further only where the halo forces a detour, and the validator holds the rating to what the
+laid network really draws, so that case fails the layout rather than passing it. The rating is
+not re-made from the laid network: the problem the caller holds would then disagree with the
+layout it was solved for. A generous rating costs little, since the highest tier carries it in
+few amps.
 
 **What a run reports is the laid figure**, from the cable the layout lays (each cable's channels,
 each device's one; `system_io.laid_me_ae_per_tick`). The CLI says it per network the way the

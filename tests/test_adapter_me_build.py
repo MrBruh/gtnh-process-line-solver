@@ -282,27 +282,41 @@ def test_an_acceptor_network_gets_an_energy_acceptor_on_the_lines_power() -> Non
         "ME Energy Acceptor",
         "line",
     )
-    # A machine drawing EU like any other: the synthesis wired it into sand's LV trunk.
+    # A machine drawing EU like any other: the synthesis wired it into sand's one trunk, LV.
     assert acceptor.voltage_tier == "LV"
     assert [p.id for p in acceptor.power_input_ports] == ["power:in"]
     (trunk,) = [n for n in ir.nets if n.commodity is Commodity.POWER]
     assert MachineFaceRef(machine_id=acceptor.id, port_id="power:in") in trunk.endpoints
-    # Rated for the estimate: seven devices (six on the hammers, the link's storage bus) idle and
-    # moving what their ports state, ad hoc, each channel assumed to cross 16 cable blocks.
+    # Rated for an upper bound: seven devices (six on the hammers, the link's storage bus) idle and
+    # moving what their ports state, ad hoc, each channel assumed to cross the region's Manhattan
+    # diameter as first sized, at least 16 blocks and at most the final region's.
     devices = [(m, e) for m in ir.machines for e in m.me_endpoints if e.network == "line"]
     assert len(devices) == 7
     moved = [endpoint_moves(e, {p.id: p for p in m.faces.ports}) for m, e in devices]
-    ae = network_ae_per_tick(
-        idle=7,
-        channel_load=estimated_channel_load(7, adhoc=True, blocks=1),
-        items_per_tick=sum(items for items, _ in moved),
-        fluid_operations_per_tick=sum(fluid for _, fluid in moved),
-    )
-    assert acceptor.eut == pytest.approx(ae / 2)
+
+    def rated(hops: int) -> float:
+        return (
+            network_ae_per_tick(
+                idle=7,
+                channel_load=estimated_channel_load(7, adhoc=True, blocks=1, hops=hops),
+                items_per_tick=sum(items for items, _ in moved),
+                fluid_operations_per_tick=sum(fluid for _, fluid in moved),
+            )
+            / 2
+        )
+
+    region = ir.bounding_region
+    assert rated(16) < acceptor.eut <= rated(region.sx + region.sy + region.sz)
 
 
-def test_an_attached_or_externally_powered_network_gets_no_acceptor_of_its_own() -> None:
-    assert [m for m in _acceptor_ir(MEMode.ATTACHED).machines if m.me_role is MERole.ACCEPTOR]
+def test_an_attached_network_is_refused_an_acceptor() -> None:
+    # An attached network is the player's main network, which their base already powers: an
+    # acceptor there would power the whole base and keep filling its storage from this line.
+    with pytest.raises(MEPlanError, match="make it a subnet"):
+        _acceptor_ir(MEMode.ATTACHED)
+
+
+def test_an_externally_powered_network_gets_no_acceptor() -> None:
     nets = {n.id: "line" for n in list_nets(_SAND).nets}
     external = _plan(_SAND, [MENetworkSpec(id="line", mode=MEMode.SUBNET)], nets)
     assert not [m for m in _adapt(_SAND, me_plan=external).machines if m.me_role is MERole.ACCEPTOR]
@@ -335,12 +349,13 @@ def _powered(mid: str, tier: str, eut: float) -> Machine:
 @pytest.mark.parametrize(
     ("tiers", "expected"),
     [
-        ((("HV", 128.0), ("MV", 32.0), ("LV", 0.0)), "MV"),  # an unpowered block sets no tier
-        ((("ULV", 8.0), ("HV", 128.0)), "LV"),  # 16 blocks of cable spend ULV's 8 V
+        ((("MV", 32.0), ("HV", 128.0), ("EV", 0.0)), "HV"),  # an unpowered block sets no tier
+        ((("ULV", 8.0), ("LV", 16.0)), "LV"),
+        ((("ULV", 8.0),), "LV"),  # 16 blocks of cable spend ULV's 8 V
         ((("EV", 0.0),), "LV"),  # nothing powered: the infrastructure tier
     ],
 )
-def test_an_acceptor_rides_the_lowest_powered_tier_and_never_ulv(
+def test_an_acceptor_rides_the_highest_powered_tier_and_never_ulv(
     tiers: tuple[tuple[str, float], ...], expected: str
 ) -> None:
     machines = [_powered(f"m{i}", tier, eut) for i, (tier, eut) in enumerate(tiers)]
@@ -370,8 +385,8 @@ def test_an_acceptor_rides_the_lowest_powered_tier_and_never_ulv(
 
 
 def test_an_acceptor_is_rated_for_cable_across_a_larger_region() -> None:
-    # The region's side, when longer than the 16-block floor, is the cable each channel is assumed
-    # to cross: a bigger line rates its acceptor higher, never lower.
+    # The region's diameter, when longer than the 16-block floor, is the cable each channel is
+    # assumed to cross: a bigger line rates its acceptor higher, never lower.
     machines = [_powered("m0", "LV", 16.0)]
     nets = [
         Net(
@@ -380,12 +395,12 @@ def test_an_acceptor_is_rated_for_cable_across_a_larger_region() -> None:
             fluid_or_item="x",
             throughput=1.0,
             endpoints=[MachineFaceRef(machine_id="m0", port_id="input:x")],
-            me_network="main",
+            me_network="sub",
         )
     ]
-    me = MEConfig(networks=[MENetworkSpec(id="main", mode=MEMode.ATTACHED, power=MEPower.ACCEPTOR)])
+    me = MEConfig(networks=[MENetworkSpec(id="sub", mode=MEMode.SUBNET, power=MEPower.ACCEPTOR)])
 
-    def rating(side: int) -> float:
+    def rating(hops: int) -> float:
         built, _ = build_me(
             machines,
             nets,
@@ -394,10 +409,11 @@ def test_an_acceptor_is_rated_for_cable_across_a_larger_region() -> None:
             multiblock_ids=(),
             line_tier="LV",
             recipe_ticks={},
-            region_side=side,
+            cable_hops=hops,
         )
         return next(m.eut for m in built if m.me_role is MERole.ACCEPTOR)
 
     assert rating(0) == rating(16)
-    # One export bus moving 1 item/t, its channel crossing 40 blocks of cable: 2 x (1 + 40).
-    assert rating(40) == pytest.approx((1 + 2 * 41 / 128 + 1) * 10 / 2)
+    # An export bus moving 1 item/t and the link's storage bus, ad hoc: the two devices, 80 cables
+    # for their two 40-block paths and the acceptor each pay for both channels, 83 x 2.
+    assert rating(40) == pytest.approx((2 + 83 * 2 / 128 + 1) * 10 / 2)
