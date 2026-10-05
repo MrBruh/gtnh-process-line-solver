@@ -389,6 +389,7 @@ def test_scene_reports_system_io() -> None:
             "rate": pytest.approx(0.1),
             "unit": "items",
             "me": False,
+            "network": None,  # a chest of the line's own, on no ME network
         }
     ]
     # the power feed per tier: the FULL LV tier voltage (32, not the hammers' 16 EU/t draw) x the
@@ -404,18 +405,22 @@ def test_scene_reports_system_io() -> None:
 
 def test_scene_says_a_flow_left_to_me_arrives_over_me() -> None:
     """With items on ME (``--me items``) the sand line routes no item pipe and auto-outputs nothing
-    between machines; its items ride an ME network the solve lays (#335) but the preview does not
-    draw yet (#338). Its stone comes from the network's storage and its sand goes back there, so
-    no Super Chest stands at either end, and the panel lists both, flagged ``me`` to say how they
-    get there. Power is still cabled, and says nothing of the sort.
+    between machines; its items ride an ME network the solve lays (#335) and the preview draws
+    (#338). Its stone comes from the network's storage and its sand goes back there, so no Super
+    Chest stands at either end, and the panel lists both, flagged ``me`` with the network whose
+    storage it is. Power is still cabled, and says nothing of the sort.
     """
     scene = _sand_scene(Commodity.ITEM, optimize=True)
     assert scene["status"] == "valid"
     assert [r["commodity"] for r in scene["routes"]] == ["power"]
     assert scene["autoConnections"] == []
     io = scene["io"]
-    assert [(f["resource"], f["me"]) for f in io["inputs"]] == [("minecraft:stone", True)]
-    assert [(f["resource"], f["me"]) for f in io["outputs"]] == [("minecraft:sand", True)]
+    assert [(f["resource"], f["me"], f["network"]) for f in io["inputs"]] == [
+        ("minecraft:stone", True, "main")
+    ]
+    assert [(f["resource"], f["me"], f["network"]) for f in io["outputs"]] == [
+        ("minecraft:sand", True, "main")
+    ]
     assert io["power"]["me"] is False
     assert not any(m["type"].startswith("Super ") for m in scene["machines"])
 

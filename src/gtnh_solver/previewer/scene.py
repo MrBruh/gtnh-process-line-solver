@@ -10,7 +10,11 @@ are built from - each cell with the sides that connect, its gauge and GT's real 
 segments and terminals behind them, auto-output links, how each single block's outputs leave it
 (``output_faces``: the one face it auto-outputs through and the faces that need a cover), the
 region, a legend, and the ``io`` boundary summary - inputs to load, outputs to collect, summed
-power, each flagged ``me`` when its commodity rides ME, since nothing is drawn for it). Every
+power, each flagged ``me`` when it arrives over or leaves through an ME network rather than a
+chest). ``me`` holds every ME network the layout builds (#338): per network its mode, colour,
+channels and what its storage supplies and takes in (``system_io``), and per cable block and
+controller or acceptor the boxes AE2 draws it as (``me_blocks``), each face naming the AE2 icon it
+wears and each light pass its mask and tint; the texture pass embeds those (``me_textures``). Every
 surface that names resources also lists them one by one as ``resources``, so the viewer can put a
 picture beside each: ``icons`` (filled by ``write_preview`` from a local icon index, #297) and the
 plan's own ``resourceColors`` where there is none. This
@@ -21,12 +25,16 @@ WebGL last mile stays a thin static template while the mapping here is pure and 
 from __future__ import annotations
 
 import re
+from collections import Counter
 from collections.abc import Collection, Iterable, Mapping
+from functools import cache
 from typing import Any
 
-from gtnh_solver.dataset import GT_ME_HATCHES, tier_voltage
+from gtnh_solver.dataset import ADHOC_MAX_DEVICES, GT_ME_HATCHES, MEDeviceChoice, tier_voltage
+from gtnh_solver.dataset.ae_render import AERender, load_ae_render
 from gtnh_solver.hatch_locks import LOCK_SLOT, hatch_layers, hatch_locks
 from gtnh_solver.ir import (
+    AEColor,
     CellBox,
     Commodity,
     Facing,
@@ -34,6 +42,9 @@ from gtnh_solver.ir import (
     IODirection,
     LayoutResult,
     Machine,
+    MECableKind,
+    MEMode,
+    MERole,
     Route,
 )
 from gtnh_solver.ir.geometry import Cell, rotated_footprint
@@ -41,6 +52,7 @@ from gtnh_solver.output_faces import BlockOutputs, output_faces
 from gtnh_solver.route_blocks import route_cells
 from gtnh_solver.system_io import (
     RATE_STEM,
+    SystemIO,
     is_boundary_storage,
     net_label,
     net_resource,
@@ -49,8 +61,12 @@ from gtnh_solver.system_io import (
     system_io,
 )
 
-#: Bump if the scene shape the viewer template expects changes.
-SCENE_VERSION = 1
+from .me_blocks import RGB, SIDE_ORDER, MEBox, MEPart, me_blocks
+
+#: Bump if the scene shape the viewer template expects changes. 2: ``me`` (the ME networks a
+#: layout builds, #338), each machine's ``meRole``, each hatch's ``gtMid``, and each I/O row's
+#: ``network``. Every field version 1 had is still there.
+SCENE_VERSION = 2
 
 #: Distinct, readable-on-dark machine box colours, assigned per machine type (sorted, so the
 #: same line always colours the same way).
@@ -257,6 +273,10 @@ def build_scene(
                 for channel, chosen in sorted(machines[pl.machine_id].structure_blocks.items())
             },
             "role": _role(machines[pl.machine_id]),
+            # The ME infrastructure block this machine is (an attach stub, a link, a controller,
+            # an acceptor), or None. The ME layer draws it (``me``), so the viewer gives it no
+            # placeholder box and the texture pass looks for no GT block for it (#338).
+            "meRole": _me_role(machines[pl.machine_id]),
             # What a boundary storage holds, so a hover can tell four identical Super Tanks apart
             # (GitHub #155). Empty for every other machine - a machine's ports are its recipe, not
             # its contents. Resource ids verbatim, exactly as the plan carries them, each with the
@@ -391,11 +411,11 @@ def build_scene(
     me_storages = {machine_id for machine_id, _ in me_ports}
     scene_io = {
         # ``rate`` is per-tick; ``unit`` is the stem (items/mB/EU) so the viewer can append /t or
-        # /s for its toggle. ``me`` says the flow rides ME (#332): no ME block is drawn yet (#338),
-        # so the panel has to say how the flow gets there, or a chest with no pipe reads as a line
-        # that forgot one. What an ME network's storage supplies or takes in (#335) has no chest
-        # in the build at all, so it is listed here too, always ``me``. ``label`` is the resource
-        # as the panel prints it (``system_io.resource_label``, #296).
+        # /s for its toggle. ``me`` says the flow rides ME (#332): a chest an ME network's storage
+        # bus reads, or what an ME network's storage supplies or takes in (#335), which has no
+        # chest in the build at all, so it is listed here too, always ``me``, with the ``network``
+        # it rides. Without the row a line fed over ME would read as one with no input. ``label``
+        # is the resource as the panel prints it (``system_io.resource_label``, #296).
         "inputs": [
             *(
                 _flow_entry(
@@ -404,7 +424,9 @@ def build_scene(
                 for f in sysio.inputs
             ),
             *(
-                _flow_entry(f.resource, f.resources, f.commodity, f.rate, True, names)
+                _flow_entry(
+                    f.resource, f.resources, f.commodity, f.rate, True, names, network.network
+                )
                 for network in sysio.me
                 for f in network.supplies
             ),
@@ -417,7 +439,9 @@ def build_scene(
                 for f in sysio.outputs
             ),
             *(
-                _flow_entry(f.resource, f.resources, f.commodity, f.rate, True, names)
+                _flow_entry(
+                    f.resource, f.resources, f.commodity, f.rate, True, names, network.network
+                )
                 for network in sysio.me
                 for f in network.absorbs
             ),
@@ -441,6 +465,8 @@ def build_scene(
         "routes": scene_routes,
         "autoConnections": scene_autos,
         "io": scene_io,
+        # Every ME network the layout builds, drawn block by block (#338); None without one.
+        "me": _me_scene(problem, layout, sysio, names),
         "legend": [{"label": t, "color": color_for_type[t]} for t in types],
         # The route-commodity legend swatches, so the viewer reads the colours from here instead of
         # keeping a second hard-coded copy (one source: ``_COMMODITY_COLOR``).
@@ -468,8 +494,11 @@ def _flow_entry(
     rate: float | None,
     me: bool,
     names: Mapping[str, str],
+    network: str | None = None,
 ) -> dict[str, Any]:
-    """One row of the scene's I/O panel (``scene_io`` in :func:`build_scene`)."""
+    """One row of the scene's I/O panel (``scene_io`` in :func:`build_scene`), and of an ME
+    network's supplies and intake (``me.networks``). ``network`` names the ME network whose storage
+    it comes from or goes to, where it is that network's rather than a chest's."""
     return {
         "resource": resource,
         "label": ", ".join(resource_label(r, names) for r in resources),
@@ -477,6 +506,7 @@ def _flow_entry(
         "rate": rate,
         "unit": RATE_STEM[commodity],
         "me": me,
+        "network": network,
     }
 
 
@@ -507,7 +537,8 @@ def _scene_material(route: Route) -> dict[str, Any] | None:
 def _content_bounds(
     problem: InputIR, layout: LayoutResult, machines: dict[str, Machine]
 ) -> dict[str, list[int]]:
-    """The tight axis-aligned extent the layout actually occupies (machine bodies + route cells).
+    """The tight axis-aligned extent the layout actually occupies (machine bodies, route cells and
+    ME cables).
 
     The solver's ``bounding_region`` is deliberately oversized scratch space; the previewer frames
     on what is *built*, so the build area shown matches the structure, not the search box. Falls
@@ -531,6 +562,9 @@ def _content_bounds(
         grow(cell, [cell[i] + size[i] for i in range(3)])
     for route in layout.routes:
         for x, y, z in route.cells():  # a one-block pipe has a block and no segment
+            grow([x, y, z], [x + 1, y + 1, z + 1])
+    for network in layout.me_networks:  # an ME cable is as much the build as a pipe (#338)
+        for x, y, z in network.cells():
             grow([x, y, z], [x + 1, y + 1, z + 1])
 
     if lo[0] is None:  # nothing placed or routed - frame the whole region instead
@@ -590,6 +624,11 @@ def _outputs_entry(block: BlockOutputs | None) -> dict[str, Any] | None:
     }
 
 
+def _me_role(machine: Machine) -> str | None:
+    """The ME infrastructure role of ``machine`` (``Machine.me_role``), by name, or ``None``."""
+    return machine.me_role.value if machine.me_role is not None else None
+
+
 def _role(machine: Machine) -> str:
     """Coarse render role: a power source, a boundary storage, an Item Filter, or a plain machine.
     Reuses the shared predicates (``Machine.is_power_source``, ``system_io.is_boundary_storage``)
@@ -602,3 +641,239 @@ def _role(machine: Machine) -> str:
     if machine.filter_items:  # an Item Filter the adapter placed to sort a merged run (#249)
         return "filter"
     return "machine"
+
+
+# --- the ME networks (#338) -------------------------------------------------------------------------
+
+
+@cache
+def _ae_render() -> AERender:
+    """The committed AE2 render data, read and validated once a process."""
+    return load_ae_render()
+
+
+#: The sides in three.js ``BoxGeometry`` face order (``_THREE_SLOT_NORMALS``), and where each sits
+#: in ``me_blocks``' own side order, so a box's faces land on the right slots.
+_THREE_SLOT_SIDES = (Facing.EAST, Facing.WEST, Facing.UP, Facing.DOWN, Facing.SOUTH, Facing.NORTH)
+_SLOT_OF = tuple(SIDE_ORDER.index(side) for side in _THREE_SLOT_SIDES)
+
+#: The colour a part (or an acceptor) is painted where its icon did not arrive: a neutral grey, so
+#: a part reads as a part rather than as more of the cable it sits on.
+_ME_PART_COLOR = "#9aa0a8"
+
+#: How a builder names each cable kind (AE2's own item names).
+_CABLE_NAMES = {
+    MECableKind.GLASS: "ME Glass Cable",
+    MECableKind.COVERED: "ME Covered Cable",
+    MECableKind.SMART: "ME Smart Cable",
+    MECableKind.DENSE: "ME Dense Smart Cable",
+    MECableKind.DENSE_COVERED: "ME Dense Covered Cable",
+}
+
+#: How a builder names each block an ME network needs of its own.
+_ROLE_NAMES = {
+    MERole.ATTACH: "attach stub",
+    MERole.LINK: "link",
+    MERole.CONTROLLER: "ME Controller",
+    MERole.ACCEPTOR: "Energy Acceptor",
+}
+
+
+def _hex(rgb: RGB) -> str:
+    return "#{:02x}{:02x}{:02x}".format(*rgb)
+
+
+def _colour_name(colour: AEColor) -> str:
+    """An AE colour as a person names it: ``light_blue`` -> ``Light Blue``, Fluix as Fluix."""
+    return colour.value.replace("_", " ").title()
+
+
+def _me_scene(
+    problem: InputIR, layout: LayoutResult, sysio: SystemIO, names: Mapping[str, str]
+) -> dict[str, Any] | None:
+    """The scene's ``me``: each ME network, its cable blocks and its controller and acceptor
+    blocks, as ``me_blocks`` derives them; ``None`` for a layout with no ME network.
+
+    ``lights`` and ``credit`` are left for ``write_preview`` to fill (the light masks the texture
+    pass embeds, and the credit AE2's licence asks for once its art is on the page), which keeps
+    this a pure function of its arguments and the committed render data.
+    """
+    if not layout.me_networks:
+        return None
+    render = _ae_render()
+    blocks = me_blocks(problem, layout, render)
+    machines = {m.id: m for m in problem.machines}
+    return {
+        "networks": _me_networks(problem, layout, sysio, names, render),
+        "cells": [
+            {
+                "cell": list(cable.cell),
+                "network": cable.network,
+                "kind": cable.kind.value,
+                "label": f"{_CABLE_NAMES[cable.kind]} ({_colour_name(cable.colour)})",
+                "channels": cable.channels,
+                "capacity": cable.capacity,
+                # A stub or a link is a cable block placed as a machine: its role and its machine.
+                "role": cable.role.value if cable.role is not None else None,
+                "roleLabel": _ROLE_NAMES[cable.role] if cable.role is not None else None,
+                "machine": cable.machine_id,
+                # Where the main network meets a stub, which the hover names.
+                "outside": [c.side.value for c in cable.connections if c.to == "outside"],
+                "parts": [_me_part(part, machines, names) for part in cable.parts],
+                "boxes": [_me_box(box, cable.cell, render) for box in cable.boxes],
+            }
+            for cable in blocks.cables
+        ],
+        "blocks": [
+            {
+                "cell": list(device.cell),
+                "network": device.network,
+                "machine": device.machine_id,
+                "role": device.role.value,
+                "label": _ROLE_NAMES[device.role],
+                "look": device.look,
+                "boxes": [
+                    _me_box(
+                        box,
+                        device.cell,
+                        render,
+                        color=(
+                            _hex(render.colours[device.colour].medium_variant)
+                            if device.role is MERole.CONTROLLER
+                            else _ME_PART_COLOR
+                        ),
+                    )
+                    for box in device.boxes
+                ],
+            }
+            for device in blocks.devices
+        ],
+        "lights": {},
+        "credit": None,
+    }
+
+
+def _me_networks(
+    problem: InputIR,
+    layout: LayoutResult,
+    sysio: SystemIO,
+    names: Mapping[str, str],
+    render: AERender,
+) -> list[dict[str, Any]]:
+    """The legend's entry for each ME network: what it is, its channels, and what it asks of the
+    player's storage (``system_io``'s ME section, so the legend and the CLI say the same)."""
+    asks = {n.network: n for n in sysio.me}
+    specs = {n.id: n for n in problem.me.networks}
+    out: list[dict[str, Any]] = []
+    for built in layout.me_networks:
+        spec = specs.get(built.id)
+        ask = asks.get(built.id)
+        roles = Counter(
+            m.me_role for m in problem.machines if m.me_network == built.id and m.me_role
+        )
+        subnet = spec is not None and spec.mode is MEMode.SUBNET
+        out.append(
+            {
+                "id": built.id,
+                "mode": spec.mode.value if spec is not None else None,
+                "colour": built.colour.value,
+                "colourName": _colour_name(built.colour),
+                "swatch": _hex(render.colours[built.colour].medium_variant),
+                "storage": spec.storage.value if spec is not None else None,
+                "power": spec.power.value if spec is not None else None,
+                # An attached network spends the main network's free channels, up to its budget;
+                # a subnet hands out its own, from a controller, or ad hoc to at most 8 devices.
+                "budget": (
+                    spec.me_channel_budget
+                    if spec is not None and spec.mode is MEMode.ATTACHED
+                    else None
+                ),
+                "adhocLimit": (
+                    ADHOC_MAX_DEVICES if subnet and not roles[MERole.CONTROLLER] else None
+                ),
+                "devices": ask.devices if ask is not None else len(built.devices),
+                "mainChannels": ask.main_channels if ask is not None else 0,
+                "cables": len(built.cables),
+                "stubs": roles[MERole.ATTACH],
+                "links": roles[MERole.LINK],
+                "controllers": roles[MERole.CONTROLLER],
+                "acceptors": roles[MERole.ACCEPTOR],
+                "supplies": [
+                    _flow_entry(f.resource, f.resources, f.commodity, f.rate, True, names, built.id)
+                    for f in (ask.supplies if ask is not None else ())
+                ],
+                "absorbs": [
+                    _flow_entry(f.resource, f.resources, f.commodity, f.rate, True, names, built.id)
+                    for f in (ask.absorbs if ask is not None else ())
+                ],
+            }
+        )
+    return out
+
+
+def _me_box(
+    box: MEBox, cell: Cell, render: AERender, *, color: str | None = None
+) -> dict[str, Any]:
+    """One ME box as the viewer draws it: its centre and size in blocks, the icon on each face in
+    three.js slot order (``None``: not drawn), the colour it falls back to where an icon did not
+    arrive, its light passes and the part of its cell it belongs to."""
+    x0, y0, z0, x1, y1, z1 = box.box
+    if color is None:
+        color = (
+            _ME_PART_COLOR
+            if box.part is not None
+            else _hex(render.colours[box.colour].medium_variant)
+        )
+    return {
+        "center": [
+            cell[0] + (x0 + x1) / 32,
+            cell[1] + (y0 + y1) / 32,
+            cell[2] + (z0 + z1) / 32,
+        ],
+        "size": [(x1 - x0) / 16, (y1 - y0) / 16, (z1 - z0) / 16],
+        "faces": [box.faces[i] for i in _SLOT_OF],
+        "color": color,
+        "lights": [
+            {
+                "icon": light.icon,
+                "tint": _hex(light.tint),
+                "faces": [light.faces[i] for i in _SLOT_OF],
+            }
+            for light in box.lights
+        ],
+        "part": box.part,
+    }
+
+
+def _me_part(
+    part: MEPart, machines: Mapping[str, Machine], names: Mapping[str, str]
+) -> dict[str, Any]:
+    """What a part's hover says: the device and its cards, the machine it serves, which way it
+    moves what, and the resources: its config where it is set to some (a bus's filter, a storage
+    bus's partition), else what the ports it serves carry."""
+    device = part.device
+    machine = machines.get(device.machine_id)
+    endpoint = (
+        next((e for e in machine.me_endpoints if e.id == device.endpoint_id), None)
+        if machine is not None
+        else None
+    )
+    ports = {p.id: p for p in machine.faces.ports} if machine is not None else {}
+    served = [ports[p] for p in endpoint.ports if p in ports] if endpoint is not None else []
+    flows = {_HATCH_FLOW[p.direction] for p in served if p.commodity is not Commodity.POWER}
+    resources = list(device.config) or [
+        port_resource(p) for p in served if p.commodity is not Commodity.POWER
+    ]
+    return {
+        "side": part.side.value,
+        "kind": device.kind.value,
+        "label": MEDeviceChoice(kind=device.kind, cards=device.cards, gt_mid=device.gt_mid).label,
+        "machine": device.machine_id,
+        "machineType": machine.type if machine is not None else device.machine_id,
+        "machineRole": (machine.me_role.value if machine is not None and machine.me_role else None),
+        "endpoint": device.endpoint_id,
+        "ports": [p.id for p in served],
+        # "in": it feeds the machine; "out": it takes from it; None: neither (a link's storage bus).
+        "flow": flows.pop() if len(flows) == 1 else None,
+        "resources": _resource_entries(dict.fromkeys(resources), names),
+    }

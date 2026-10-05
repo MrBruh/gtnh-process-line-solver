@@ -1570,6 +1570,8 @@ def texturize_scene(
     # Which of its faces marks the type waits for the sprites, because a blank one is not art.
     legend_cubes: dict[str, BlockCube] = {}
     for machine in scene["machines"]:
+        if machine.get("meRole"):
+            continue  # an ME stub, link, controller or acceptor: an AE2 block the ME pass draws
         # NOT `cubes`: that name is the output accumulator this loop appends scene blocks to.
         expanded = machine_cubes(machine, docs, manifest, auto_out_face)
         if not expanded:
