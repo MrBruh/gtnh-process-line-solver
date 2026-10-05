@@ -25,6 +25,7 @@ from pydantic import (
 from ._base import StrictModel, check_contract_version
 from .enums import Commodity, Facing, LayoutStatus, PipeFamily, PipeSize
 from .geometry import Cell, CellCoord
+from .me import MENetworkLayout
 
 #: Bump on any breaking change to the output contract; record it in ``ir/__init__.py``.
 #: v1 added ``LayoutResult.hatches``. Additive, and yet a bump: a consumer that ignores it
@@ -39,7 +40,10 @@ from .geometry import Cell, CellCoord
 #: net's one consumer auto-outputs, and the route's terminals leave it out. Unchanged in shape, and
 #: a bump for what an existing field means: a v3 consumer reads a net as either routed or
 #: auto-connected and can drop the half it does not expect.
-LAYOUT_RESULT_VERSION = 4
+#: v5 adds ``LayoutResult.me_networks``, the ME blocks a build needs (#333). Additive in shape and a
+#: bump by omission, like ``hatches``: a consumer that ignores it builds a line whose ME nets have no
+#: cable and no device.
+LAYOUT_RESULT_VERSION = 5
 
 #: Allowed GT cable thicknesses, smallest first (1x/2x/4x/8x/12x/16x; docs/DOMAIN.md). The single
 #: source: this contract enforces membership on every power route, and ``dataset`` re-exports the
@@ -278,6 +282,9 @@ class LayoutResult(StrictModel):
     #: Every hatch and bus the build needs, routed and upkeep alike (v1). Empty until the
     #: assignment stage fills it; a machine with no structural record never gets one.
     hatches: list[PlacedHatch] = Field(default_factory=list)
+    #: The ME blocks the build needs, one record per ME network (v5, #333): its cables and its
+    #: devices. Empty for a line with no net on ME, and until the end-to-end build lays them (#335).
+    me_networks: list[MENetworkLayout] = Field(default_factory=list)
     metrics: LayoutMetrics = Field(default_factory=LayoutMetrics)
     seed: int  # the RNG seed that produced this layout (for the seed-compare workflow)
 
@@ -293,4 +300,7 @@ class LayoutResult(StrictModel):
                 raise ValueError("a valid layout must not carry an infeasibility")
         elif self.infeasibility is None:
             raise ValueError(f"status={self.status.value} requires an infeasibility")
+        ids = [n.id for n in self.me_networks]
+        if len(ids) != len(set(ids)):
+            raise ValueError("a layout lists an ME network twice")
         return self

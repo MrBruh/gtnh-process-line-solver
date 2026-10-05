@@ -153,7 +153,11 @@ doc as intent and reconcile.
   bill of materials counts (the previewer's, #202). The mask used to be JavaScript inside the
   viewer template, where the one rule in it that is a real build instruction was pinned by nothing.
 - **validator/** - independent geometric + rule checks (shares rule *data* with the router,
-  not its *logic*). The only automated correctness gate.
+  not its *logic*). The only automated correctness gate. Its ME gate (`validator/me.py`, #333)
+  rebuilds the AE2 graph from the blocks a layout places (AE cables join every compatible
+  neighbour, unlike GT pipes, so what the router meant to join is not what AE builds) and runs AE's
+  own three-queue channel pathing on it: exact on a tree, and sound on a cycle by charging every
+  block every device AE could route through it (docs/DOMAIN.md, "What a valid ME build is").
 - **previewer/**, **schematic/**, **cli.py** - outputs and entry point. `--preview` writes the
   three.js page, `--schematic` the Schematica ghost; asked for neither, the CLI prints the output
   IR itself as JSON on stdout (decision 12). Both outputs expand a multiblock through one function

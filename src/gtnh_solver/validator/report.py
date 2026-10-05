@@ -133,6 +133,26 @@ class ViolationCode(str, Enum):
     # a filter pushes out of its back into whatever is there (MTEBuffer.moveItems, no toggle), so
     # that cell may hold only its own output's pipe or the machine it auto-outputs into
     FILTER_BACK_NOT_ITS_OUTPUT = "filter_back_not_its_output"
+    # ME (AE2) networks (#333, validator/me.py; docs/DOMAIN.md "What a valid ME build is"). An ME
+    # cable on ground it may not take reuses the route codes (out of bounds, reserved, through a
+    # machine, a collision), since it is a block like a pipe is.
+    ME_UNKNOWN_NETWORK = "me_unknown_network"  # the layout builds a network the problem lacks
+    ME_NETWORK_COLOUR = "me_network_colour"  # built in another colour than the problem's
+    ME_ENDPOINT_MISSING = "me_endpoint_missing"  # an ME endpoint the problem asks for is not built
+    ME_DEVICE_MISMATCH = "me_device_mismatch"  # a device builds no endpoint, or not as specified
+    ME_DEVICE_PLACEMENT = "me_device_placement"  # a device is not where its job is
+    ME_PART_ON_DENSE = "me_part_on_dense"  # a part on a dense cable, which takes none
+    ME_AUTO_OUTPUT_FACES = "me_auto_output_faces"  # a single block auto-outputs through two faces
+    ME_DEVICE_RATE_SHORT = "me_device_rate_short"  # a device moves less than its share needs
+    ME_UPGRADE_SLOTS = "me_upgrade_slots"  # more cards than a bus has slots
+    ME_INFRASTRUCTURE = "me_infrastructure"  # an attach stub or link is not the cable it must be
+    ME_NETWORK_MERGE = "me_network_merge"  # two networks touch, so AE joins them
+    ME_NETWORK_SPLIT = "me_network_split"  # a network in pieces AE runs apart
+    ME_CONTROLLER_CONFLICT = "me_controller_conflict"  # controllers AE refuses: 0 channels for all
+    ME_CHANNEL_STARVED = "me_channel_starved"  # a device with no path to a channel source
+    ME_CABLE_OVERLOAD = "me_cable_overload"  # a block AE would route more channels through
+    ME_ATTACH_BUDGET = "me_attach_budget"  # an attached network over the main network's budget
+    ME_ADHOC_OVERFLOW = "me_adhoc_overflow"  # a controller-less network over 8 channel devices
 
 
 @dataclass(frozen=True)
@@ -171,6 +191,15 @@ class ValidationReport:
     #: the gate actually covered rather than reading silence as a pass (#114). The CLI prints a
     #: count; :attr:`ok` is untouched.
     unverified_power_intake: tuple[str, ...] = ()
+    #: Nets riding ME with a machine port no ME endpoint serves, so nothing in the layout says how
+    #: that port reaches its network (#333). An abstention, like the one above: until the
+    #: end-to-end build (#335) emits endpoints, every net on ME lands here, and failing them would
+    #: fail every layout a user moved a net to ME on.
+    unbuilt_me_nets: tuple[str, ...] = ()
+    #: A subnet's cable cells on the region's edge, sorted (#333). An AE block the player builds
+    #: just outside would join them, and nothing in the layout can rule that out, so it is said
+    #: rather than refused.
+    me_boundary_exposure: tuple[tuple[int, int, int], ...] = ()
 
     @property
     def ok(self) -> bool:

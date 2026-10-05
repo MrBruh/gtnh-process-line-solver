@@ -101,7 +101,12 @@ during the Assignment - v1's only contact with actual GT behavior.
   skip + endpoint placement, unroutable → infeasibility.
 - **solver** - the place→route→retry loop converges or gives up with a report; anytime budget
   returns best-valid-so-far.
-- **validator** - geometric + rule checks; partial-invalid layouts reported, never passed.
+- **validator** - geometric + rule checks; partial-invalid layouts reported, never passed. The
+  ME gate is held to hand-built builds (`tests/_me_fixtures.py`: an attached line, a comb of
+  machines along one cable row, a multiblock with a GT ME hatch or a normal hatch), each valid as
+  built and broken one rule at a time per violation code (`tests/test_validator_me.py`); its
+  channel pathing is tested on its own against the hand trace in `docs/spikes/329-me-ae2.md`
+  section 2.7 and on graphs with cycles, tied and not.
 - **cli** - parse an export, solve, print the layout as JSON that round-trips through
   `LayoutResult` (valid and infeasible runs alike, and nothing on stdout but that JSON, whatever
   the run warns about), or with `--preview` / `--schematic` write the artifact and keep stdout

@@ -57,6 +57,10 @@ What is checked now (needs only the IR):
   an off-ladder (unknown) tier cannot be verified and is reported as such. A power source's front face
   is its reserved external-feed face and must lie flush on the region boundary (power enters
   from outside the structure; the front-face rule already keeps internal cables off it).
+  ME (AE2) networks - ``validator.me``: each ME endpoint built once as specified, every device
+  where its job is and keeping up, every ME cable on free ground, and AE's own graph rebuilt from
+  the blocks: one network a piece, a channel source for each, and AE's channel pathing within every
+  block's capacity, the attach budget and the ad-hoc limit (#333).
   item throughput - every item pipe block makes at least as many insertions per service interval
   as the deliveries GT charges it for (``_check_item_pipe_throughput``): the route's streams are
   re-derived from its own geometry by GT's nearest-first rule, each charged to the blocks GT's
@@ -126,6 +130,7 @@ from ._geometry import (
     placed_slots,
     usable_faces,
 )
+from .me import check_me
 from .report import ValidationReport, Violation, ViolationCode
 
 
@@ -153,7 +158,14 @@ def validate(problem: InputIR, layout: LayoutResult) -> ValidationReport:
     _check_route_materials(problem, layout, out)
     _check_item_pipe_throughput(problem, layout, out)
     _check_pinned(problem, layout, out)
-    return ValidationReport(tuple(out), unverified_power_intake=unverified_intake)
+    # The ME gate: its own module, since it rebuilds AE's graph and runs AE's pathing (#333).
+    me = check_me(problem, layout, out)
+    return ValidationReport(
+        tuple(out),
+        unverified_power_intake=unverified_intake,
+        unbuilt_me_nets=me.unbuilt_me_nets,
+        me_boundary_exposure=me.boundary_exposure,
+    )
 
 
 def _check_route_materials(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> None:
@@ -1134,6 +1146,11 @@ def _check_filter_backs(problem: InputIR, layout: LayoutResult, out: list[Violat
     for route in layout.routes:
         for cell in route.cells():
             route_nets[cell].add(route.net_id)
+    for network in layout.me_networks:
+        # A filter's outputs are always piped (an output on ME never joins its trunk, #332), so an
+        # ME cable behind one takes what it pushes and is never its own.
+        for cell in network.cells():
+            route_nets[cell].add(f"ME network {network.id}")
     feeds: dict[str, set[str]] = defaultdict(set)  # filter -> the nets its outputs source
     for net in problem.nets:
         for endpoint in net.endpoints:
@@ -1439,6 +1456,8 @@ def _check_upkeep_hatches(problem: InputIR, layout: LayoutResult, out: list[Viol
             occupied |= body_cells(placement.cell, machine.footprint, placement.orientation)
     for route in layout.routes:
         occupied |= route.cells()
+    for network in layout.me_networks:
+        occupied |= network.cells()  # an ME cable is a block like a pipe (#333)
 
     for hatch in layout.hatches:
         if hatch.kind != "Muffler":

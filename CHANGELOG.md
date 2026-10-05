@@ -992,6 +992,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **The layout JSON is `LayoutResult` v5, and the problem `InputIR` v9 (#333).** A layout lists the
+  ME blocks it builds per network (`me_networks`: AE2 cables and devices), and a problem the ME
+  devices each machine needs (`Machine.me_endpoints`) and its ME infrastructure (`Machine.me_role`:
+  attach stub, link, controller, acceptor). The validator holds every ME network to AE2's own
+  rules: each device where its job is and fast enough, one network a piece, a channel source for
+  each, and AE's channel pathing within every cable's capacity (8, or 32 dense), the attach budget
+  and the ad-hoc limit. Nothing emits ME blocks yet (#335); older payloads are refused on parse.
 - **`--me items` / `--me fluids` put every net of that kind on one attached ME network, `main`**
   (#332), the shorthand for the `MEPlan` saying so; they cannot be given with `--me-plan`.
   `--me power` still leaves power to you and combines with either. `InputIR` v8 replaces the

@@ -16,7 +16,9 @@ validator lanes. Only the value types (``CellCoord``, ``CellBox``) surface here.
 - ``me``         - the ME (AE2) vocabulary (AEColor, MECableKind, MEDeviceKind, MEHatchPolicy,
                    MECards), a problem's ME networks (MEMode, MEStorage, MEPower, MENetworkSpec,
                    MEConfig), and the two contracts that choose them per net (NetKind, NetEnd,
-                   NetEntry, NetList, MEPlan; + NETLIST_VERSION, ME_PLAN_VERSION)
+                   NetEntry, NetList, MEPlan; + NETLIST_VERSION, ME_PLAN_VERSION); what a problem
+                   asks the ME side for (MERole, MEDeviceSpec, MEEndpoint) and what a layout
+                   builds (MECableCell, MEPlacedDevice, MENetworkLayout)
 - ``nets``       - net helpers shared by the router and the system-IO summary
 - ``output``     - Placement, PlacedHatch, Segment, Terminal, Route, RouteMaterial,
                    LayoutMetrics, Infeasibility, LayoutResult  (+ LAYOUT_RESULT_VERSION)
@@ -54,15 +56,21 @@ from .me import (
     ME_PLAN_VERSION,
     NETLIST_VERSION,
     AEColor,
+    MECableCell,
     MECableKind,
     MECards,
     MEConfig,
     MEDeviceKind,
+    MEDeviceSpec,
+    MEEndpoint,
     MEHatchPolicy,
     MEMode,
+    MENetworkLayout,
     MENetworkSpec,
+    MEPlacedDevice,
     MEPlan,
     MEPower,
+    MERole,
     MEStorage,
     NetEnd,
     NetEntry,
@@ -126,6 +134,12 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
     "NetEntry",
     "NetList",
     "MEPlan",
+    "MERole",
+    "MEDeviceSpec",
+    "MEEndpoint",
+    "MECableCell",
+    "MEPlacedDevice",
+    "MENetworkLayout",
     # output schema
     "Placement",
     "PlacedHatch",
@@ -463,5 +477,23 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   Breaking by removal: a v7 payload names `me_toggles`, which this build refuses, and a v7
 #   consumer reading it finds nothing. Re-adapt the plan. ME nets are still only SKIPPED, as toggled
 #   commodities were: nothing places an ME device for them until the end-to-end build (#335).
+#
+# InputIR v9 (BREAKING) - a problem says what its ME side must build (#333):
+#   - `Machine.me_endpoints: tuple[MEEndpoint, ...]`, one per ME device the machine needs: the
+#     ports it serves (on nets riding its network), the device (`MEDeviceSpec`: kind, a GT ME
+#     hatch's mID, cards, config), on a multiblock the hatch slot kind it takes, and its share of
+#     a port too fast for one device;
+#   - `Machine.me_role: MERole | None` and `Machine.me_network`, for an infrastructure block (an
+#     attach stub, a link, a controller, an acceptor); a stub and a link face outside the build.
+#   Breaking by omission: a v8 consumer that ignores the endpoints builds a line whose ME nets
+#   have no device, and one that ignores the roles builds a controller as a machine of the line.
+#   The adapter emits neither until the end-to-end build (#335). A v8 payload is refused on parse.
+#
+# LayoutResult v5 (BREAKING) - added `LayoutResult.me_networks: list[MENetworkLayout]` (#333), each
+#   network's cable blocks (`MECableCell`: cell, kind, the channels the solver routed through it)
+#   and devices (`MEPlacedDevice`: an AE2 part on a cable side, or a GT ME hatch, with its cards
+#   and config). Breaking by omission, the rule `hatches` set. The validator rebuilds which blocks
+#   join which network in game from the blocks themselves, and runs AE2's channel pathing on it
+#   (`validator.me`). A v4 layout is refused on parse; re-solve its plan.
 #
 # ---------------------------------------------------------------------------
