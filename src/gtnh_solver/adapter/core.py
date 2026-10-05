@@ -187,6 +187,7 @@ from gtnh_solver.ir import (
     MachineFaceRef,
     MEConfig,
     MEPlan,
+    MERole,
     Net,
     NetList,
     Port,
@@ -707,6 +708,8 @@ def _close(mapped: _MappedPlan, me: MEConfig, chosen: Mapping[str, str]) -> Inpu
         multiblock_ids=mapped.multiblock_ids,
         line_tier=line_tier(mapped.machines, mapped.storage_ids),
         recipe_ticks=mapped.recipe_ticks,
+        # The region is sized for real once every block is in (below); this is its first reading.
+        region_side=_bounding_region([m.footprint for m in machines]).sx,
     )
     # The export has no power source; invent it. ``single_block_ids`` is what lets the synthesis
     # state a basic machine's own intake ceiling without guessing at a multiblock's.
@@ -723,7 +726,10 @@ def _close(mapped: _MappedPlan, me: MEConfig, chosen: Mapping[str, str]) -> Inpu
         single_block_ids=mapped.single_block_ids,
         allow_retier=mapped.producer not in (PlanProducer.ARODOID_V1, PlanProducer.SHADOW_V1),
     )
-    _check_resolved_power(mapped.plan, nets)
+    # An Energy Acceptor's draw is the ME network's, which the plan never balanced.
+    _check_resolved_power(
+        mapped.plan, nets, not_in_plan=sum(m.eut for m in machines if m.me_role is MERole.ACCEPTOR)
+    )
     # The tier a machine is supplied at is final only now (_supply_tier can raise it), and the
     # hatches the export places follow it, so the machine casing a Chemical Plant needs to form, and
     # the heat an EBF's hatches add to its coil's, are read from it here rather than from the plan's
@@ -1204,19 +1210,23 @@ def _check_dataset_version(plan: Plan, physical: PhysicalDataset | None) -> None
     )
 
 
-def _check_resolved_power(plan: Plan, nets: list[Net]) -> None:
+def _check_resolved_power(plan: Plan, nets: list[Net], *, not_in_plan: float = 0.0) -> None:
     """Cross-check a v2 export's ``resolved.power`` total against the synthesized power nets.
 
     Each per-tier power net carries the summed EU/t draw of its machines
     (``power.synthesize_power``), so across tiers the nets must add up to
-    ``resolved.power.totalEut``. A mismatch beyond float tolerance means the resolved block is
-    internally inconsistent (its per-machine figures don't sum to its own total) or covers
-    machines the plan graph doesn't; warn and continue - amperage stays sized from the per-net
-    figures (#2). Silent for v1 plans and for a ``resolved`` block without ``power``.
+    ``resolved.power.totalEut``, less ``not_in_plan``, the draw of blocks the adapter added that
+    the plan never had (an ME network's Energy Acceptor, #336). A mismatch beyond float tolerance
+    means the resolved block is internally inconsistent (its per-machine figures don't sum to its
+    own total) or covers machines the plan graph doesn't; warn and continue - amperage stays sized
+    from the per-net figures (#2). Silent for v1 plans and for a ``resolved`` block without
+    ``power``.
     """
     if plan.resolved is None or plan.resolved.power is None:
         return
-    synthesized = sum(net.throughput for net in nets if net.commodity is Commodity.POWER)
+    synthesized = (
+        sum(net.throughput for net in nets if net.commodity is Commodity.POWER) - not_in_plan
+    )
     resolved_total = plan.resolved.power.total_eut
     if not math.isclose(
         resolved_total,

@@ -10,22 +10,30 @@ explicit infeasibility, and the routes it does emit validate.
 from __future__ import annotations
 
 from gtnh_solver.ir import (
+    AEColor,
     CellBox,
     CellCoord,
     Commodity,
     FaceSpec,
     Facing,
+    Infeasibility,
     InputIR,
     IODirection,
     LayoutResult,
     LayoutStatus,
     Machine,
     MachineFaceRef,
+    MEConfig,
+    MEMode,
+    MENetworkSpec,
+    MEPower,
+    MERole,
     Net,
     Port,
+    Route,
 )
 from gtnh_solver.router import route_power
-from gtnh_solver.router.power import _route_pass
+from gtnh_solver.router.power import _route_pass, _size_trunk
 from gtnh_solver.validator import validate
 from tests._helpers import at, on_me, power_source
 
@@ -688,3 +696,79 @@ def test_power_reports_every_still_failing_net_not_just_the_first() -> None:
     assert result.failed_nets == ("power:A", "power:B")  # ALL failing nets, in problem order
     assert result.infeasibility is not None
     assert result.infeasibility.constraint == "amperage"  # the first one's specific reason
+
+
+# ------------------------------------------------------------------ an Energy Acceptor's inrush (#336)
+
+
+def _acceptor(mid: str, eut: float) -> Machine:
+    """An Energy Acceptor drawing ``eut`` EU/t for ME network ``sub``."""
+    return _load(mid, eut).model_copy(
+        update={"type": "ME Energy Acceptor", "me_role": MERole.ACCEPTOR, "me_network": "sub"}
+    )
+
+
+_ACCEPTOR_ME = MEConfig(
+    networks=[
+        MENetworkSpec(id="sub", mode=MEMode.SUBNET, colour=AEColor.ORANGE, power=MEPower.ACCEPTOR)
+    ]
+)
+
+
+def _thickness_by_edge(route: Route) -> dict[frozenset[tuple[int, int, int]], int]:
+    assert route.thickness_per_segment is not None
+    return {
+        frozenset({s.start.as_tuple(), s.end.as_tuple()}): route.thickness_per_segment[i]
+        for i, s in enumerate(route.segments)
+    }
+
+
+def test_power_sizes_an_acceptors_branch_for_its_sources_full_output() -> None:
+    # The branched trunk above, with m1 an Energy Acceptor drawing 48 EU/t. Steady, m0 at depth 1
+    # loads 32/31 A and the acceptor at depth 5 48/27 A: 2.81 A, so the source puts out 3 A. An
+    # acceptor takes every whole amp offered until its network's storage is full (spike 6.3), so
+    # its branch carries all 3 (a 4x cable), where its own draw would size a 2x; m0's branch keeps
+    # its own 2x. The validator re-derives the same and passes it (test_validator holds it to the
+    # full output on its own arithmetic).
+    problem = InputIR(
+        bounding_region=CellBox(sx=10, sy=4, sz=10),
+        machines=[_src(), _load("m0", 32), _acceptor("m1", 48)],
+        nets=[_pnet("m0", "m1")],
+        me=_ACCEPTOR_ME,
+    )
+    placements = [at("src", 3, 0, 0), at("m0", 0, 0, 0), at("m1", 6, 0, 0)]
+    result = route_power(problem, placements)
+    assert result.ok, result.infeasibility
+    (route,) = result.routes
+    thickness = _thickness_by_edge(route)
+    assert thickness.pop(frozenset({(2, 0, 0), (1, 0, 0)})) == 2  # m0's branch: its own load
+    assert set(thickness.values()) == {4}  # every segment from the source to the acceptor: 3 A
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=placements, routes=[route])
+    assert validate(problem, layout).ok, str(validate(problem, layout))
+
+
+def test_power_no_segment_carries_more_than_its_source_puts_out() -> None:
+    # Two acceptors behind one shared segment each take the source's whole output, but the cable
+    # between them and the source carries at most that output, once: 2 x 1.5 A steady -> 3 A, not 6.
+    root, shared, a, b = (0, 0, 0), (1, 0, 0), (2, 0, 0), (1, 0, 1)
+    sized = _size_trunk(
+        "power:LV",
+        [[root, shared, a], [shared, b]],
+        {root: 0, shared: 1, a: 2, b: 2},
+        [a, b],
+        [(45.0, "LV"), (45.0, "LV")],
+        [True, True],
+    )
+    assert not isinstance(sized, Infeasibility)
+    _, thickness = sized
+    assert thickness == [4, 4, 4]  # every segment: the source's 3 A (45/30 + 45/30 = 3.0)
+    # Without the acceptors the same loads size each leg to its own sink and the shared one to both.
+    plain = _size_trunk(
+        "power:LV",
+        [[root, shared, a], [shared, b]],
+        {root: 0, shared: 1, a: 2, b: 2},
+        [a, b],
+        [(45.0, "LV"), (45.0, "LV")],
+    )
+    assert not isinstance(plain, Infeasibility)
+    assert plain[1] == [4, 2, 2]
