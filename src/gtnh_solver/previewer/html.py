@@ -58,7 +58,7 @@ light (``polygonOffset``) and showing each side's count; a part's status box and
 up the same way. Hovering a cable says its load against its capacity, a part what it is, its cards
 and what it serves, an attach stub where the main network enters; the legend lists each network
 (mode, colour, channels against its budget, what its storage must supply and takes in). A page that
-embeds AE2 or FC art carries AE2's credit and licence link in the HUD (``scene.me.credit``), since
+embeds AE2 or FC art carries AE2's credit and licence link in the HUD (``scene.credit``), since
 that art may be shared only for non-commercial purposes.
 
 **The page is built for a phone as well as a desktop** (#237), because the preview is what a
@@ -1037,7 +1037,8 @@ function creditNodes(credit, words) {
   link.rel = 'noopener noreferrer';
   return [words + ' ', link];
 }
-if (ME && ME.credit) document.getElementById('credit').append(...creditNodes(ME.credit, ME.credit.short));
+const CREDIT = SCENE.credit || null;
+if (CREDIT) document.getElementById('credit').append(...creditNodes(CREDIT, CREDIT.short));
 
 // System-I/O rates are stored per tick; the toggle re-renders them as per second (x20). Cable
 // amperage (byTier) is a steady value, so it never scales with the time unit.
@@ -1250,12 +1251,14 @@ function renderLegend() {
       for (const f of n.absorbs) flow('lands in', f);
       if (n.power !== 'acceptor') row(nets, '  power it yourself (a quartz fiber or your main network)');
     }
-    if (ME.credit) {
-      const credit = el('span');
-      credit.className = 'credit';
-      credit.append(...creditNodes(ME.credit, ME.credit.text));
-      row(nets, credit);
-    }
+  }
+  // The credit in full, wherever AE2's or FC's art is on the page: on an ME network, or on a GT block
+  // that wears it (the Large Molecular Assembler's quartz lamp).
+  if (CREDIT) {
+    const credit = el('span');
+    credit.className = 'credit';
+    credit.append(...creditNodes(CREDIT, CREDIT.text));
+    row(section(panel, 'credits'), credit);
   }
   // Which cable/pipe material the routes above are DRAWN as, and - the point of the line - that the
   // choice is representative. GT ships several cables per voltage tier and the solver sizes by

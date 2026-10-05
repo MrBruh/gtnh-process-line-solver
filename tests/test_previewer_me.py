@@ -345,6 +345,10 @@ def test_the_credit_names_the_mods_the_licence_and_the_terms() -> None:
 # --- write_preview, end to end, with the jars faked ----------------------------------------------------
 
 
+#: An AE2 sprite a GT block wears (the Large Molecular Assembler's lamp), not an ME network's.
+_QUARTZ_LAMP = "assets/appliedenergistics2/textures/blocks/BlockQuartzLamp.png"
+
+
 class _Nexus:
     """Serves a fake jar per URL holding every icon a preview could ask that jar for; ``failing``
     URLs raise as an outage would."""
@@ -359,6 +363,7 @@ class _Nexus:
             raise URLError("nexus unreachable")
         if url == AE2.url:
             entries = {asset_path(i) for i in load_ae_render().icon_names() if i.startswith("app")}
+            entries.add(_QUARTZ_LAMP)
         elif url == AE2FC.url:
             entries = {
                 asset_path(i) for i in load_ae_render().icon_names() if i.startswith("ae2fc")
@@ -405,10 +410,9 @@ def test_a_preview_embedding_ae2_art_carries_its_credit(
     tiles = set(scene["atlas"]["tiles"])
     assert any(key.startswith("appliedenergistics2:") for key in tiles)
     assert any(key.startswith("gregtech:") for key in tiles)
-    me = _me(scene)
-    assert me["lights"]
-    assert me["credit"]["licence"] == "CC BY-NC-SA 3.0"
-    assert "non-commercial" in me["credit"]["text"]
+    assert _me(scene)["lights"]
+    assert scene["credit"]["licence"] == "CC BY-NC-SA 3.0"
+    assert "non-commercial" in scene["credit"]["text"]
 
 
 def test_a_failing_ae2_jar_costs_only_the_me_icons_and_the_credit_with_them(
@@ -420,9 +424,8 @@ def test_a_failing_ae2_jar_costs_only_the_me_icons_and_the_credit_with_them(
     assert any(key.startswith("gregtech:") for key in tiles)  # the GT textures all arrived
     assert not any(key.startswith("appliedenergistics2:") for key in tiles)
     assert any(m.get("expanded") for m in scene["machines"])
-    me = _me(scene)
-    assert me["lights"] == {}
-    assert me["credit"] is None  # no AE2 art on the page, so nothing to credit
+    assert _me(scene)["lights"] == {}
+    assert scene["credit"] is None  # no AE2 art on the page, so nothing to credit
     assert AE2.url in nexus.calls
 
 
@@ -431,7 +434,7 @@ def test_a_preview_without_textures_embeds_no_art_and_no_credit(
 ) -> None:
     nexus = _Nexus()
     scene = _preview(tmp_path, monkeypatch, sand_on_me, nexus, textures=False)
-    assert _me(scene)["credit"] is None
+    assert scene["credit"] is None
     assert nexus.calls == []
 
 
@@ -441,8 +444,24 @@ def test_a_preview_with_no_me_network_never_fetches_the_me_jars(
     nexus = _Nexus()
     scene = _preview(tmp_path, monkeypatch, solved_sand, nexus)
     assert scene["me"] is None
+    assert scene["credit"] is None
     assert AE2.url not in nexus.calls
     assert AE2FC.url not in nexus.calls
+
+
+def test_a_gt_block_wearing_ae2_art_earns_the_credit_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, solved_sand: tuple[InputIR, LayoutResult]
+) -> None:
+    # The provider sends every assets/appliedenergistics2/ path to AE2's jar, whichever pass asks,
+    # so a GT block drawn with AE2's art (the quartz lamp) puts that art on the page too.
+    def texturized(scene: dict[str, Any], *, png_provider: Any, **_: Any) -> None:
+        png_provider({"appliedenergistics2:BlockQuartzLamp": _QUARTZ_LAMP})
+        scene.update({"textures": {}, "texturesActive": {}, "blocks": []})
+
+    monkeypatch.setattr(previewer_package, "texturize_scene", texturized)
+    scene = _preview(tmp_path, monkeypatch, solved_sand, _Nexus())
+    assert scene["me"] is None
+    assert scene["credit"]["licence"] == "CC BY-NC-SA 3.0"
 
 
 # --- the viewer ----------------------------------------------------------------------------------------
@@ -473,7 +492,8 @@ def test_the_viewer_draws_the_me_layer_from_the_scene() -> None:
         "n.mainChannels + ' of ' + n.budget",
         # AE2's credit, on the HUD and in the legend.
         '<div id="credit"></div>',
-        "document.getElementById('credit').append(...creditNodes(ME.credit, ME.credit.short))",
+        "if (CREDIT) document.getElementById('credit').append(...creditNodes(CREDIT, CREDIT.short))",
+        "row(section(panel, 'credits'), credit)",
     ):
         assert reads in page, reads
 

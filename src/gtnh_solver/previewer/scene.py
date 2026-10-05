@@ -484,6 +484,9 @@ def build_scene(
         # else a dot in the plan's own colour. Both keyed by the raw id, like ``resources`` above.
         "icons": {},
         "resourceColors": dict(problem.resource_colors),
+        # The credit the art of AE2 and AE2FluidCraft asks for (``me_textures.credit``), set by
+        # ``write_preview`` once the page embeds any of it (#338); None until then.
+        "credit": None,
         "metrics": {
             "footprint": metrics.footprint,
             "layers": metrics.layers,
@@ -700,9 +703,8 @@ def _me_scene(
     """The scene's ``me``: each ME network, its cable blocks and its controller and acceptor
     blocks, as ``me_blocks`` derives them; ``None`` for a layout with no ME network.
 
-    ``lights`` and ``credit`` are left for ``write_preview`` to fill (the light masks the texture
-    pass embeds, and the credit AE2's licence asks for once its art is on the page), which keeps
-    this a pure function of its arguments and the committed render data.
+    ``lights`` is left for ``write_preview`` to fill with the light masks the texture pass embeds,
+    which keeps this a pure function of its arguments and the committed render data.
     """
     if not layout.me_networks:
         return None
@@ -755,7 +757,6 @@ def _me_scene(
             for device in blocks.devices
         ],
         "lights": {},
-        "credit": None,
     }
 
 

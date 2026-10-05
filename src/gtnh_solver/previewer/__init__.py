@@ -23,6 +23,7 @@ heatmap + multi-seed compare and offline (vendored three.js) are follow-ups (doc
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -34,10 +35,10 @@ from gtnh_solver.ir import InputIR, LayoutResult
 from .atlas import pack_atlas
 from .html import render_html
 from .icons import resource_art
-from .jar import JAR_VERSION, gt5u_version_from_manifest, multi_jar_png_provider
+from .jar import JAR_VERSION, asset_modid, gt5u_version_from_manifest, multi_jar_png_provider
 from .me_textures import credit, texturize_me
 from .scene import SCENE_VERSION, build_scene
-from .textures import TextureSummary, texturize_scene
+from .textures import PngProvider, TextureSummary, texturize_scene
 
 __all__ = [
     "SCENE_VERSION",
@@ -83,31 +84,43 @@ def write_preview(
     fetched only when the layout has one, through the same provider as GT's. That provider absorbs
     a failed AE2 or FC jar (:func:`~gtnh_solver.previewer.jar.multi_jar_png_provider`): it costs
     only that jar's icons, whose faces keep their flat colours, never the GT textures. Once any of
-    their art is embedded the page carries AE2's credit (``me_textures.credit``), in
-    ``scene["me"]["credit"]``.
+    their art is embedded the page carries AE2's credit (``me_textures.credit``) in
+    ``scene["credit"]``: from either pass, since a GT block can wear AE2 art too (the Large Molecular
+    Assembler's quartz lamp), and the provider routes every ``assets/appliedenergistics2/`` path to
+    AE2's jar whichever pass asked for it.
     """
     names, icons = _resource_art(problem, version or problem.pack_version)
     scene = build_scene(problem, layout, extra_names=names)
     scene["icons"] = icons
     if textures:
-        art: frozenset[str] = frozenset()
+        served: set[str] = set()  # the asset namespaces the page's art came from
         try:
             manifest_path = resolve_dataset_path("textures/manifest.json", version=version)
             gt5u = gt5u_version_from_manifest(manifest_path) or JAR_VERSION
-            provider = multi_jar_png_provider(gt5u_jar(gt5u), ME_JARS)
+            provider = _noting(multi_jar_png_provider(gt5u_jar(gt5u), ME_JARS), served)
             texturize_scene(scene, version=version, png_provider=provider)
-            art = texturize_me(scene, provider)  # after the GT pass, which it adds faces to
+            texturize_me(scene, provider)  # after the GT pass, whose texture pool it adds to
             pack_atlas(scene)  # the viewer draws every face from one image (previewer.atlas)
+            scene["credit"] = credit(frozenset(served))
         except Exception as exc:  # never let a texture fetch/parse issue block a preview
             _log.warning("texture pass skipped, using placeholder boxes: %s", exc)
             _untextured(scene)
-            art = frozenset()
-        if scene.get("me") and art:
-            scene["me"]["credit"] = credit(art)
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(render_html(scene), encoding="utf-8")
     return out
+
+
+def _noting(provider: PngProvider, served: set[str]) -> PngProvider:
+    """``provider``, adding to ``served`` the asset namespace of every icon it hands back: which
+    mods' art the page carries, and so which credit it owes (``me_textures.credit``)."""
+
+    def noted(paths: Mapping[str, str]) -> dict[str, bytes]:
+        found = provider(paths)
+        served.update(modid for icon in found if (modid := asset_modid(paths[icon])) is not None)
+        return found
+
+    return noted
 
 
 #: Where a missing icon index sends the reader: how to export one and derive the index from it.
@@ -147,9 +160,9 @@ def _untextured(scene: dict[str, Any]) -> None:
             cell["tex"] = None
     for entry in scene.get("legend", []):
         entry.pop("tile", None)  # the legend falls back to each type's colour swatch
-    if scene.get("me"):  # the ME boxes fall back to their flat colours, and no AE2 art ships
+    if scene.get("me"):  # the ME boxes fall back to their flat colours
         scene["me"]["lights"] = {}
-        scene["me"]["credit"] = None
+    scene["credit"] = None  # and no AE2 art ships, so none is credited
     scene["blocks"] = []
     scene.pop("textures", None)
     scene.pop("texturesActive", None)
