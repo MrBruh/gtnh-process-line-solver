@@ -51,6 +51,7 @@ from gtnh_solver.schematic import (
 )
 from gtnh_solver.schematic import core as schematic_core
 from gtnh_solver.solver import solve
+from gtnh_solver.system_io import system_io
 from tests._helpers import at, consumer, net, producer
 
 _GOLDEN = Path(__file__).resolve().parents[1] / "tests" / "golden" / "schematic"
@@ -199,6 +200,49 @@ def test_the_mapping_names_every_block_the_file_uses() -> None:
     used = {b for b in root["Blocks"] if b != 0}
     assert used <= {int(v) for v in mapping.values()}
     assert mapping["minecraft:air"] == 0
+
+
+def test_the_stand_in_power_source_produces_the_feed_the_line_needs() -> None:
+    """A bare Debug Power Generator loads as a consumer of 0 V x 0 A, so a pasted one drew power.
+
+    The stand-in now carries its settings: producing, at the line's tier, at the amps ``system_io``
+    tells the builder to feed that source (LV 32 V x 2 A for the sand line), for 2.9 and for 2.8.
+    """
+    ir = adapt_file(str(_SAND))
+    layout = solve(ir, optimize=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", schematic_core.SchematicWarning)
+        root = build_schematic(ir, layout, manifest=_manifest())
+    (amps,) = system_io(ir, layout).power_amps_by_source.values()
+    (source,) = [t for t in root["TileEntities"] if int(t["mID"]) == 15498]
+
+    assert amps == 2
+    assert {k: int(v) for k, v in source.items() if k.startswith("e")} == {
+        "eProducing": 1,
+        "eUsingTiers": 1,
+        "eVoltageTier": 1,
+        "eVoltage": 32,
+        "eAmperage": amps,
+        "eLaser": 0,
+        "eEUT": 32,
+        "eAMP": amps,
+    }
+
+
+def test_the_power_source_settings_have_the_tag_types_a_29_save_writes() -> None:
+    """Against the generator in the maintainer's 2.9 save, which GT itself wrote."""
+    saved = next(
+        t
+        for t in read_schematic(_GOLDEN / "sand-parallel-29-gui.schematic").tile_entities
+        if t.mid == 15498
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", schematic_core.SchematicWarning)
+        root = _sand_schematic()
+    (source,) = [t for t in root["TileEntities"] if int(t["mID"]) == 15498]
+    keys_29 = ("eProducing", "eUsingTiers", "eVoltageTier", "eVoltage", "eAmperage", "eLaser")
+
+    assert {k: type(source[k]) for k in keys_29} == {k: type(saved.raw[k]) for k in keys_29}
 
 
 def test_a_pipe_is_wired_to_the_sides_its_route_connects() -> None:

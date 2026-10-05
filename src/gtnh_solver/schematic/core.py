@@ -80,6 +80,7 @@ from typing import Any, Final
 
 from gtnh_solver.dataset.covers import COVER_ITEM, CoverChoice, cover_for
 from gtnh_solver.dataset.pipes import manifest_names
+from gtnh_solver.dataset.voltage import VOLTAGE_BY_TIER, tier_voltage
 from gtnh_solver.ir import Facing, InputIR, LayoutResult
 from gtnh_solver.ir.geometry import OPPOSITE_FACE
 from gtnh_solver.output_faces import BlockOutputs, CoverFace, output_faces
@@ -91,6 +92,7 @@ from gtnh_solver.previewer.textures import (
     load_multiblock_docs,
     machine_cubes,
 )
+from gtnh_solver.system_io import system_io
 
 from . import nbt
 
@@ -406,6 +408,38 @@ def _single_block_tile(
     return Cell(cell.block, cell.data, tile)
 
 
+#: The most ``eVoltage`` (a TAG_Int) holds; GT's MAX tier is 2^31 by our ladder and Integer.MAX in GT.
+_INT_MAX: Final = 2**31 - 1
+
+
+def _power_source_tile(cell: Cell, tier: str, amps: int) -> Cell:
+    """The stand-in power source, set to feed its line: producing at the tier's voltage, ``amps`` A.
+
+    A Debug Power Generator whose settings are absent loads as a **consumer** of 0 V x 0 A: TecTech's
+    ``MTEDebugPowerGenerator.loadNBTData`` reads every key with no fallback (5.09.54.133 lines
+    130-138), so a paste of the bare tile drew power instead of supplying it. 2.9 reads the six keys
+    below, in the tag types the maintainer's own 2.9 save writes them
+    (``tests/golden/schematic/sand-parallel-29-gui.schematic``); 2.8 (5.09.51) reads ``eEUT`` and
+    ``eAMP`` instead, positive meaning produce, and each version ignores the other's keys. ``amps`` is
+    ``system_io``'s per-source figure, the one a builder is told to feed, so the file and the preview
+    agree. The hologram shows none of this; a paste applies it.
+    """
+    if cell.tile is None or tier not in VOLTAGE_BY_TIER:
+        return cell
+    volts = min(tier_voltage(tier), _INT_MAX)
+    amps = max(int(amps), 1)
+    tile = nbt.Compound(cell.tile)
+    tile["eProducing"] = nbt.Byte(1)
+    tile["eUsingTiers"] = nbt.Byte(1)
+    tile["eVoltageTier"] = nbt.Byte(list(VOLTAGE_BY_TIER).index(tier))
+    tile["eVoltage"] = nbt.Int(volts)
+    tile["eAmperage"] = nbt.Int(amps)
+    tile["eLaser"] = nbt.Byte(0)
+    tile["eEUT"] = nbt.Int(volts)
+    tile["eAMP"] = nbt.Int(amps)
+    return Cell(cell.block, cell.data, tile)
+
+
 def _route_cell(
     raw: dict[str, Any], manifest: TextureManifest, origin: tuple[int, int, int]
 ) -> Cell:
@@ -458,6 +492,7 @@ def lower(
     from .ae import lower_me, warn_about_me
 
     cover_item = _cover_item_id(item_ids)
+    amps_by_source = system_io(problem, layout).power_amps_by_source
     scene = build_scene(problem, layout)
     docs = docs if docs is not None else {}
     bounds = scene["bounds"]
@@ -487,6 +522,12 @@ def lower(
                 cell = _single_block_tile(
                     cell, manifest.source_class(cube.block, cube.meta), front, machine_outputs
                 )
+                if machine.get("role") == "source":
+                    cell = _power_source_tile(
+                        cell,
+                        str(machine.get("voltage_tier")),
+                        amps_by_source.get(str(machine["id"]), 1),
+                    )
                 name = manifest.display_name(cube.block, cube.meta) or str(machine["type"])
                 if machine_outputs is not None:
                     chosen = [

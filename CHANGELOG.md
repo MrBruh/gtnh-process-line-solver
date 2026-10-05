@@ -501,6 +501,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **The exported power source produces.** The `.schematic` export stands a Debug Power Generator in
+  for the adapter's synthesized power source, but wrote it with no settings, and TecTech loads a
+  generator with no settings as a consumer of 0 V x 0 A. Pasted into a world, it drew power instead
+  of supplying it. It is now written producing, at its tier's voltage and at the amps the line needs
+  from that source (`system_io`'s per-source figure, so the file and the preview agree; LV 32 V x
+  2 A for the sand line), with GT 2.9's keys in the tag types a 2.9 save writes and 2.8's `eEUT`
+  and `eAMP` alongside.
 - **`--fast` lays a line with nets on ME (#352).** Its one constructive placement is a touching
   row, so that neighbours auto-feed. Nothing on ME auto-feeds, so in that row a single block kept
   too few free faces for its ME devices, and ME blocks (a subnet's two links, a link and its
