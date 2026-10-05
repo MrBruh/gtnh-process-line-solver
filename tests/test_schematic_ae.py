@@ -5,6 +5,8 @@ the maintainer made in a 2.9.0-beta-3 world and saved twice, with ``/schematicaS
 GUI; ``ae2-golden-items.json`` is that world's FML item table, cut to the items they name. What the
 saves show is written up in ``docs/spikes/329-me-ae2.md`` 7.5, and every fact that section states is
 pinned here, so a reader change that misreads a cable bus fails against a file nobody here wrote.
+The export (:mod:`gtnh_solver.schematic.ae`) is then held to the same file: a layout of the
+golden's AE2 side exports its tile entities tag for tag.
 
 The golden, by cell (x, y, z), y up::
 
@@ -28,12 +30,51 @@ The golden, by cell (x, y, z), y up::
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 
 import pytest
 
-from gtnh_solver.schematic import nbt, read_schematic
+from gtnh_solver.adapter import adapt_file, load_plan, to_input_ir
+from gtnh_solver.dataset import CHEMICAL_PLANT, load_physical_dataset
+from gtnh_solver.dataset.me import CABLE_DAMAGE, PART_DAMAGE
+from gtnh_solver.ir import (
+    AEColor,
+    CellBox,
+    CellCoord,
+    Commodity,
+    Facing,
+    InputIR,
+    LayoutResult,
+    LayoutStatus,
+    Machine,
+    MECableKind,
+    MECards,
+    MEConfig,
+    MEDeviceKind,
+    MEMode,
+    MENetworkLayout,
+    MENetworkSpec,
+    MEPlacedDevice,
+    MERole,
+    PlacedHatch,
+)
+from gtnh_solver.ir.geometry import rotated_slot
+from gtnh_solver.previewer.scene import build_scene
+from gtnh_solver.previewer.textures import TextureManifest, load_multiblock_docs
+from gtnh_solver.schematic import (
+    SchematicError,
+    SchematicWarning,
+    build_schematic,
+    nbt,
+    read_schematic,
+    write_schematic,
+)
+from gtnh_solver.schematic.ae import _orientation, _settings, _WorldItems, gt_colour
+from gtnh_solver.schematic.core import FORGE_DIRECTION
 from gtnh_solver.schematic.read import AETile, ItemRef, Schematic
+from gtnh_solver.solver import solve
+from tests._me_fixtures import MAIN, at, cable, controller, coord
 
 _GOLDEN = Path(__file__).resolve().parents[1] / "tests" / "golden" / "schematic"
 _SAVES = ("ae2-golden-cmd", "ae2-golden-gui")
@@ -342,3 +383,423 @@ def test_a_cable_bus_with_a_malformed_part_reads_what_is_there() -> None:
     assert ae.cable is None
     assert ae.parts[3].extra == {}
     assert ae.parts[2].upgrades == (ItemRef(4630, 0, 0),)
+
+
+# ------------------------------------------------------------------------------------- exporting
+#
+# The export is checked against the golden it was written from: a layout that builds the golden's
+# cables, parts, controller and acceptor at the golden's own cells must export the very tile
+# entities Schematica saved, tag for tag and type for type.
+
+_COMMITTED_MANIFEST = Path(__file__).resolve().parents[1] / "data" / "textures" / "manifest.json"
+_COMMITTED_MULTIBLOCKS = Path(__file__).resolve().parents[1] / "data" / "multiblocks"
+_EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+_ORANGE, _GREEN = "orange", "green"
+
+
+def _typed(value: object) -> object:
+    """``value`` with every NBT tag's type kept beside it: Python's ``Short(4) == Int(4)``, so a
+    plain ``==`` would pass a tag written at the wrong width."""
+    if isinstance(value, dict):
+        return {key: _typed(item) for key, item in value.items()}
+    if isinstance(value, nbt.List):
+        return ("List", value.element_type, [_typed(item) for item in value])
+    return (type(value).__name__, value)
+
+
+def _manifest() -> TextureManifest:
+    return TextureManifest.load(_COMMITTED_MANIFEST)
+
+
+def _export(
+    problem: InputIR, layout: LayoutResult, item_ids: dict[str, int] | None = _ITEMS
+) -> Schematic:
+    root = build_schematic(problem, layout, manifest=_manifest(), item_ids=item_ids)
+    return read_schematic(nbt.dumps("Schematic", root))
+
+
+def _part(
+    kind: MEDeviceKind,
+    cell: tuple[int, int, int],
+    side: Facing,
+    *,
+    cards: MECards | None = None,
+    config: tuple[str, ...] = (),
+) -> MEPlacedDevice:
+    return MEPlacedDevice(
+        machine_id="m",
+        endpoint_id=f"{kind.value}@{cell}",
+        kind=kind,
+        cell=coord(*cell),
+        side=side,
+        cards=cards or MECards(),
+        config=config,
+    )
+
+
+def _golden_layout() -> tuple[InputIR, LayoutResult]:
+    """The golden's AE2 side as a layout (module docstring): its cables in three networks by
+    colour, its six buses with their cards and filters, its controller and its acceptor."""
+    acceptor = Machine(
+        id="acc",
+        type="ME Energy Acceptor",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        me_role=MERole.ACCEPTOR,
+        me_network=MAIN,
+    )
+    problem = InputIR(
+        bounding_region=CellBox(sx=8, sy=6, sz=4),
+        machines=[controller(network=MAIN), acceptor],
+        me=MEConfig(
+            networks=[
+                MENetworkSpec(id=MAIN, mode=MEMode.ATTACHED),
+                MENetworkSpec(id=_ORANGE, mode=MEMode.SUBNET, colour=AEColor.ORANGE),
+                MENetworkSpec(id=_GREEN, mode=MEMode.SUBNET, colour=AEColor.GREEN),
+            ]
+        ),
+    )
+    glass, smart = MECableKind.GLASS, MECableKind.SMART
+    main_cables = [
+        cable(0, 0, 0, MECableKind.DENSE),
+        cable(1, 0, 0, smart),
+        cable(2, 0, 0, MECableKind.COVERED),
+        *(cable(x, y, 0, glass) for x, y in ((3, 0), (4, 1), (4, 2), (4, 3), (4, 4))),
+    ]
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[at("ctrl", 4, 0, 0, Facing.NORTH), at("acc", 5, 0, 0, Facing.NORTH)],
+        me_networks=[
+            MENetworkLayout(
+                id=MAIN,
+                colour=AEColor.FLUIX,
+                cables=main_cables,
+                devices=[
+                    _part(MEDeviceKind.FLUID_IMPORT_BUS, (1, 0, 0), Facing.NORTH),
+                    _part(
+                        MEDeviceKind.FLUID_EXPORT_BUS,
+                        (2, 0, 0),
+                        Facing.NORTH,
+                        cards=MECards(acceleration=1),
+                        config=("water",),
+                    ),
+                ],
+            ),
+            MENetworkLayout(
+                id=_ORANGE,
+                colour=AEColor.ORANGE,
+                cables=[cable(4, 0, 1), cable(3, 0, 2), cable(4, 0, 2)],
+                devices=[
+                    _part(
+                        MEDeviceKind.EXPORT_BUS,
+                        (3, 0, 2),
+                        Facing.UP,
+                        cards=MECards(acceleration=1, super_speed=1),
+                        config=("minecraft:cobblestone",),
+                    ),
+                    _part(
+                        MEDeviceKind.IMPORT_BUS, (4, 0, 2), Facing.UP, cards=MECards(acceleration=1)
+                    ),
+                ],
+            ),
+            MENetworkLayout(
+                id=_GREEN,
+                colour=AEColor.GREEN,
+                cables=[cable(2, 0, 1), cable(2, 0, 2), cable(2, 0, 3), cable(2, 1, 3)],
+                devices=[
+                    _part(
+                        MEDeviceKind.STORAGE_BUS, (2, 0, 2), Facing.WEST, config=("minecraft:sand",)
+                    ),
+                    _part(MEDeviceKind.FLUID_STORAGE_BUS, (2, 0, 2), Facing.UP, config=("water",)),
+                ],
+            ),
+        ],
+    )
+    return problem, layout
+
+
+def test_a_layout_of_the_golden_exports_its_tile_entities_tag_for_tag() -> None:
+    """Every cable bus, the controller and the acceptor, against the GUI save, whose live state is
+    a fresh block's (``hasRedstone`` 2, no stored power). One tag differs, and is the slot's, not
+    the export's: the fluid export bus's water was set with 1000 mB, and the export writes 1 for
+    every filter, since no bus reads the amount (spike 7.5)."""
+    problem, layout = _golden_layout()
+    golden = _golden("ae2-golden-gui")
+    with pytest.warns(SchematicWarning, match=r"printer applies no tile-entity NBT"):
+        exported = _export(problem, layout)
+
+    cells = [*_CABLES, (4, 0, 0), (5, 0, 0)]
+    for pos in cells:
+        ours, theirs = exported.tile_at(*pos), golden.tile_at(*pos)
+        assert ours is not None, pos
+        assert theirs is not None, pos
+        expected = nbt.Compound(theirs.raw)
+        if pos == (2, 0, 0):
+            assert expected["extra:2"]["config"]["#0"]["Cnt"] == 1000
+            expected["extra:2"]["config"]["#0"]["Cnt"] = nbt.Long(1)
+        assert _typed(ours.raw) == _typed(expected), pos
+        assert exported.block_at(*pos)[0] == golden.block_at(*pos)[0], pos
+    # Block metadata: the golden's controller was online (1); a placed one starts offline.
+    assert golden.block_at(4, 0, 0)[1] == 1
+    assert all(exported.block_at(*pos)[1] == 0 for pos in cells)
+    assert {t.pos for t in exported.tile_entities} == set(cells)
+
+
+def test_a_subnet_controller_is_painted_its_networks_colour() -> None:
+    problem, layout = _golden_layout()
+    problem = problem.model_copy(
+        update={"machines": [controller(network=_GREEN), *problem.machines[1:]]}
+    )
+    with pytest.warns(SchematicWarning):
+        exported = _export(problem, layout)
+    assert _ae(exported, 4, 0, 0).painted == AEColor.GREEN.ordinal
+    acceptor = exported.tile_at(5, 0, 0)
+    assert acceptor is not None
+    assert "paintedColor" not in acceptor.raw  # uncoloured, so it joins any network
+
+
+def test_a_block_facing_up_takes_south_as_its_up() -> None:
+    assert _orientation(Facing.EAST) == ("EAST", "UP")
+    assert _orientation(Facing.UP) == ("UP", "SOUTH")
+    assert _orientation(Facing.DOWN) == ("DOWN", "SOUTH")
+
+
+def test_without_a_world_no_cable_bus_is_written_and_each_is_counted() -> None:
+    """A cable bus names its items by the world's ids, so no world, no cable bus; the controller
+    and the acceptor need none and are written all the same."""
+    problem, layout = _golden_layout()
+    with pytest.warns(
+        SchematicWarning, match=r"15 AE2 cable block\(s\) and the 6 part\(s\) on them are left out"
+    ) as caught:
+        exported = _export(problem, layout, item_ids=None)
+    (message,) = [str(w.message) for w in caught if "ME networks" in str(w.message)]
+    assert "--world" in message
+    assert "printer" not in message  # nothing of a cable bus was written for it to skip
+    assert exported.histogram() == {
+        "appliedenergistics2:tile.BlockController": 1,
+        "appliedenergistics2:tile.BlockEnergyAcceptor": 1,
+    }
+
+
+def test_a_world_without_ae2_is_refused_rather_than_exported_without_it() -> None:
+    """A GT:NH world without AE2 (it has GT's cover item, so the covers' check passes it)."""
+    problem, layout = _golden_layout()
+    no_ae2 = {
+        k: v for k, v in _ITEMS.items() if not k.startswith(("appliedenergistics2:", "ae2fc:"))
+    }
+    with pytest.raises(SchematicError, match=r"no appliedenergistics2:item.ItemMultiPart"):
+        _export(problem, layout, item_ids=no_ae2)
+
+
+def test_a_filter_item_the_world_lacks_is_refused_by_name() -> None:
+    problem, layout = _golden_layout()
+    no_sand = {k: v for k, v in _ITEMS.items() if k != "minecraft:sand"}
+    with pytest.raises(SchematicError, match=r"no minecraft:sand, so the export cannot name the"):
+        _export(problem, layout, item_ids=no_sand)
+
+
+def test_an_item_filter_keeps_its_meta() -> None:
+    """A resource ``registry@meta`` is that item at that damage: ``gt.metaitem.01@2299`` is the
+    dust in the golden's drive cell."""
+    stack = _WorldItems(_ITEMS).filter_stack("gregtech:gt.metaitem.01@2299", fluid=False)
+    assert (stack["id"], stack["Damage"]) == (_ITEMS["gregtech:gt.metaitem.01"], 2299)
+
+
+def test_an_interface_part_is_left_off_its_cable_and_listed() -> None:
+    """No golden has an Interface or a Dual Interface part, so neither is written; the cable still
+    is, and the warning says where each goes."""
+    problem, layout = _golden_layout()
+    main = layout.me_networks[0]
+    extra = [
+        _part(MEDeviceKind.INTERFACE, (3, 0, 0), Facing.SOUTH),
+        _part(MEDeviceKind.DUAL_INTERFACE, (4, 1, 0), Facing.WEST),
+    ]
+    layout = layout.model_copy(
+        update={
+            "me_networks": [
+                main.model_copy(update={"devices": [*main.devices, *extra]}),
+                *layout.me_networks[1:],
+            ]
+        }
+    )
+    with pytest.warns(SchematicWarning) as caught:
+        exported = _export(problem, layout)
+    (message,) = [str(w.message) for w in caught if "ME networks" in str(w.message)]
+    assert "2 part(s) are not written" in message
+    assert "ME Interface x1: south side of the cable at (3, 0, 0)" in message
+    assert "ME Dual Interface x1: west side of the cable at (4, 1, 0)" in message
+    assert "15 AE2 cable block(s) with 6 part(s) are written" in message
+    assert not _ae(exported, 3, 0, 0).parts
+    assert not _ae(exported, 4, 1, 0).parts
+
+
+def test_an_unverified_part_is_refused_if_it_ever_reaches_the_writer() -> None:
+    with pytest.raises(SchematicError, match=r"no golden shows what an AE2 interface writes"):
+        _settings(MEDeviceKind.INTERFACE)
+
+
+def _plant_with_an_me_hatch(colour: AEColor) -> tuple[InputIR, LayoutResult, tuple[int, int, int]]:
+    """gtnh-nitrobenzene's Chemical Plant alone, with a Stocking Input Bus (ME) in one of its input
+    bus slots, on a network of ``colour``; the hatch's cell is returned too."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        adapted = adapt_file(
+            str(_EXAMPLES / "gtnh-nitrobenzene.json"),
+            physical=load_physical_dataset(_COMMITTED_MULTIBLOCKS),
+        )
+    plant = next(m for m in adapted.machines if m.block_key == CHEMICAL_PLANT)
+    plant = plant.model_copy(update={"faces": plant.faces.model_copy(update={"ports": []})})
+    slot = next(s for s in plant.hatch_slots if "InputBus" in s.kinds)
+    cell = rotated_slot(slot.offset.as_tuple(), plant.footprint, Facing.NORTH)
+    attached = colour is AEColor.FLUIX
+    spec = (
+        MENetworkSpec(id=MAIN, mode=MEMode.ATTACHED)
+        if attached
+        else MENetworkSpec(id=MAIN, mode=MEMode.SUBNET, colour=colour)
+    )
+    problem = InputIR(
+        bounding_region=plant.footprint, machines=[plant], me=MEConfig(networks=[spec])
+    )
+    layout = LayoutResult(
+        status=LayoutStatus.VALID,
+        seed=0,
+        placements=[at(plant.id, 0, 0, 0, Facing.NORTH)],
+        hatches=[
+            PlacedHatch(machine_id=plant.id, kind="InputBus", cell=coord(*cell), facing=Facing.UP)
+        ],
+        me_networks=[
+            MENetworkLayout(
+                id=MAIN,
+                colour=colour,
+                devices=[
+                    MEPlacedDevice(
+                        machine_id=plant.id,
+                        endpoint_id="in",
+                        kind=MEDeviceKind.GT_STOCKING_INPUT_BUS_ME,
+                        cell=coord(*cell),
+                        side=Facing.UP,
+                        gt_mid=2718,
+                    )
+                ],
+            )
+        ],
+    )
+    return problem, layout, cell
+
+
+def _export_plant(problem: InputIR, layout: LayoutResult) -> Schematic:
+    docs = load_multiblock_docs(_COMMITTED_MULTIBLOCKS)
+    root = build_schematic(problem, layout, manifest=_manifest(), docs=docs)
+    return read_schematic(nbt.dumps("Schematic", root))
+
+
+def test_a_gt_me_hatch_is_written_by_its_mid_and_painted_as_the_golden_one_is() -> None:
+    """The golden's Stocking Input Bus (ME), painted black, carries ``mID`` 2718 and ``mColor`` 1
+    with ``mFacing`` onto its cable; a black subnet's hatch exports those same tags."""
+    problem, layout, cell = _plant_with_an_me_hatch(AEColor.BLACK)
+    ours = _export_plant(problem, layout).tile_at(*cell)
+    theirs = _golden("ae2-golden-cmd").tile_at(4, 5, 0)
+    assert ours is not None
+    assert theirs is not None
+    shared = ("id", "mID", "mColor")
+    assert _typed({k: ours.raw[k] for k in shared}) == _typed({k: theirs.raw[k] for k in shared})
+    assert _typed(ours.raw["mFacing"]) == _typed(nbt.Short(FORGE_DIRECTION[Facing.UP]))
+    assert type(theirs.raw["mFacing"]) is nbt.Short
+
+
+def test_a_gt_me_hatch_on_a_fluix_network_is_left_unpainted() -> None:
+    problem, layout, cell = _plant_with_an_me_hatch(AEColor.FLUIX)
+    ours = _export_plant(problem, layout).tile_at(*cell)
+    assert ours is not None
+    assert ours.mid == 2718
+    assert "mColor" not in ours.raw
+
+
+def test_gt_colour_is_the_dye_plus_one() -> None:
+    assert gt_colour(AEColor.FLUIX) == 0
+    assert gt_colour(AEColor.BLACK) == 1  # the golden's painted hatch
+    assert gt_colour(AEColor.WHITE) == 16
+
+
+def test_a_gt_me_hatch_the_manifest_cannot_name_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The texture pass keeps the casing where the manifest lacks the hatch; exporting that would
+    give a multiblock that forms without its ME hatch, so it is refused by name."""
+    problem, layout, _ = _plant_with_an_me_hatch(AEColor.BLACK)
+    monkeypatch.setattr(TextureManifest, "me_hatch", lambda self, mid: None)
+    with pytest.raises(SchematicError, match=r"Stocking Input Bus \(ME\) \(mID 2718\)"):
+        _export_plant(problem, layout)
+
+
+def test_sand_on_me_exports_every_cable_and_part_and_reads_them_back() -> None:
+    """``gtnh-solve examples/gtnh-sand.json --me items`` for a named world: every cable cell is a
+    cable bus of its kind and colour, every part on its side with its cards and filter, read back
+    through ``read_schematic``; the interfaces are the parts left off and listed."""
+    plan = load_plan(str(_EXAMPLES / "gtnh-sand.json"))
+    problem = to_input_ir(plan, me_commodities={Commodity.ITEM})
+    layout = solve(problem)
+    assert layout.status is LayoutStatus.VALID
+    (network,) = layout.me_networks
+    low = build_scene(problem, layout)["bounds"]["min"]
+
+    with pytest.warns(SchematicWarning) as caught:
+        exported = _export(problem, layout)
+
+    def rel(cell: CellCoord) -> tuple[int, int, int]:
+        return (cell.x - int(low[0]), cell.y - int(low[1]), cell.z - int(low[2]))
+
+    for built in network.cables:
+        ae = _ae(exported, *rel(built.cell))
+        assert ae.cable == ItemRef(_PART, CABLE_DAMAGE[built.kind] + network.colour.ordinal, 1)
+    interfaces = [d for d in network.devices if d.kind is MEDeviceKind.INTERFACE]
+    assert interfaces  # sand's machines push their products into interfaces
+    for device in network.devices:
+        parts = _ae(exported, *rel(device.cell)).parts
+        side = FORGE_DIRECTION[device.side]
+        if device.kind is MEDeviceKind.INTERFACE:
+            assert side not in parts
+            continue
+        part = parts[side]
+        assert part.item == ItemRef(_PART, PART_DAMAGE[device.kind], 1)
+        assert len(part.upgrades) == device.cards.count
+        assert [_item(s) for s in part.config] == [(_ITEMS[r], 0) for r in device.config]
+    (message,) = [str(w.message) for w in caught if "ME networks" in str(w.message)]
+    assert f"{len(interfaces)} part(s) are not written" in message
+    assert f"{len(network.cables)} AE2 cable block(s)" in message
+
+
+def test_a_line_with_no_me_gets_no_ae2_block_and_no_word_of_it(
+    solved_sand: tuple[InputIR, LayoutResult],
+) -> None:
+    """With a world or without, a line without ME exports no AE2 block and says nothing of ME (a
+    world adds its covers, which are #328's to check)."""
+    problem, layout = solved_sand
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        for item_ids in (None, _ITEMS):
+            root = build_schematic(problem, layout, manifest=_manifest(), item_ids=item_ids)
+            names = read_schematic(nbt.dumps("Schematic", root)).histogram()
+            assert not [n for n in names if n.startswith("appliedenergistics2:")]
+    assert not [w for w in caught if "ME networks" in str(w.message)]
+
+
+def test_write_schematic_passes_the_world_through(tmp_path: Path) -> None:
+    problem, layout = _golden_layout()
+    with pytest.warns(SchematicWarning):
+        path = write_schematic(problem, layout, tmp_path / "ae.schematic", item_ids=_ITEMS)
+    assert read_schematic(path).histogram()[_CABLE_BUS] == len(_CABLES)
+
+
+def test_two_networks_on_one_cell_write_the_first() -> None:
+    """A clash the validator reports; the export writes the cell once, as the first network has it."""
+    problem, layout = _golden_layout()
+    orange = layout.me_networks[1]
+    clash = orange.model_copy(update={"cables": [*orange.cables, cable(3, 0, 0)]})
+    layout = layout.model_copy(
+        update={"me_networks": [layout.me_networks[0], clash, layout.me_networks[2]]}
+    )
+    with pytest.warns(SchematicWarning, match=r"15 AE2 cable block"):
+        exported = _export(problem, layout)
+    assert _ae(exported, 3, 0, 0).cable == ItemRef(_PART, _CABLES[(3, 0, 0)], 1)

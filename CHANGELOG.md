@@ -7,6 +7,19 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **The `.schematic` export writes ME networks (#339).** Each controller and Energy Acceptor is
+  written as its AE2 block, facing as placed and a controller in its network's colour, and each GT
+  ME hatch by its own mID, painted its subnet's colour (the old warning that called it a plain bus
+  of its slot had been wrong since #338). For a named world, each AE2 cable block is written too,
+  with the cable's kind and colour and every bus on it, with its upgrade cards and its filter or
+  partition, exactly as AE2 saves one: checked tag for tag against an in-game build saved with
+  Schematica (`tests/golden/schematic/ae2-golden-*`). A cable block names its items by the world's
+  own item ids, so without a world it is left out and the warning counts it. Schematica's printer
+  places no cable or bus (it applies no tile data, and a cable block is nothing else), so the ghost
+  shows the network for you to build by hand, as the warning says. ME Interface and Dual Interface
+  parts are not written yet, since the in-game build has neither; the warning lists where each goes.
+  `read_schematic` reads AE2 tiles back (`TileEntity.ae`: a cable block's cable and its parts by
+  side, a block's orientation).
 - **The preview draws ME networks (#338).** Every AE2 block a line on ME is built with is drawn as
   AE2 draws it: each cable block (smart, dense, ...) with an arm toward each side it joins, a plug
   where it meets a controller or a GT ME hatch, and a straight bar where AE2 draws one; each bus,
@@ -60,8 +73,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   needs of its own (dense attach stubs on the edge where your main network enters, links, a
   controller). Every layout is held to AE2's rules by the validator. The run says, per network,
   what its storage must hold, what lands there, and how many of your main network's channels it
-  spends; the preview's I/O panel lists the same. Not yet: the schematic export leaves the ME
-  blocks out, with a warning that counts what to place by hand (#339). `--fast` cannot lay a line
+  spends; the preview's I/O panel lists the same. The schematic export writes the ME blocks since
+  #339 (above). `--fast` cannot lay a line
   on ME (its touching row leaves no face for the devices), so it returns an explicit partial
   layout; use the default solve.
 - **The `.schematic` export can write each conveyor and pump cover, so the ghost shows where it

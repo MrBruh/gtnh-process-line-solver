@@ -33,6 +33,7 @@ from typing import Any
 
 from gtnh_solver.dataset import ADHOC_MAX_DEVICES, GT_ME_HATCHES, MEDeviceChoice, tier_voltage
 from gtnh_solver.dataset.ae_render import AE_RENDER_PATH, AERender, load_ae_render
+from gtnh_solver.dataset.me import CABLE_NAMES
 from gtnh_solver.hatch_locks import LOCK_SLOT, hatch_layers, hatch_locks
 from gtnh_solver.ir import (
     AEColor,
@@ -43,7 +44,6 @@ from gtnh_solver.ir import (
     IODirection,
     LayoutResult,
     Machine,
-    MECableKind,
     MEMode,
     MERole,
     Route,
@@ -673,15 +673,6 @@ _SLOT_OF = tuple(SIDE_ORDER.index(side) for side in _THREE_SLOT_SIDES)
 #: a part reads as a part rather than as more of the cable it sits on.
 _ME_PART_COLOR = "#9aa0a8"
 
-#: How a builder names each cable kind (AE2's own item names).
-_CABLE_NAMES = {
-    MECableKind.GLASS: "ME Glass Cable",
-    MECableKind.COVERED: "ME Covered Cable",
-    MECableKind.SMART: "ME Smart Cable",
-    MECableKind.DENSE: "ME Dense Smart Cable",
-    MECableKind.DENSE_COVERED: "ME Dense Covered Cable",
-}
-
 #: How a builder names each block an ME network needs of its own.
 _ROLE_NAMES = {
     MERole.ATTACH: "attach stub",
@@ -744,7 +735,7 @@ def _me_scene(
                 "cell": list(cable.cell),
                 "network": cable.network,
                 "kind": cable.kind.value,
-                "label": f"{_CABLE_NAMES[cable.kind]} ({_colour_name(cable.colour)})",
+                "label": f"{CABLE_NAMES[cable.kind]} ({_colour_name(cable.colour)})",
                 "channels": cable.channels,
                 "capacity": cable.capacity,
                 # A stub or a link is a cable block placed as a machine: its role and its machine.
