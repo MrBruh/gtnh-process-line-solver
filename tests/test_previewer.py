@@ -52,11 +52,15 @@ from tests._helpers import at, consumer, layered_tower, machine, net, producer
 _SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
 
 
-def _sand_scene(*me_commodities: Commodity, me_power: bool = False) -> dict[str, Any]:
-    # The fast (constructive) solve: deterministic layout coordinates that the exact-cell
-    # assertions below can rely on; scene building does not care which placer produced them.
+def _sand_scene(
+    *me_commodities: Commodity, me_power: bool = False, optimize: bool = False
+) -> dict[str, Any]:
+    # The fast (constructive) solve by default: deterministic layout coordinates that the
+    # exact-cell assertions below can rely on; scene building does not care which placer produced
+    # them. A line on an ME network needs the optimizing solve, since the fast path's touching row
+    # leaves a block no face for its ME devices (#335).
     ir = adapt_file(_SAND, me_commodities=me_commodities, me_power=me_power)
-    return build_scene(ir, solve(ir, optimize=False))
+    return build_scene(ir, solve(ir, seed=0, optimize=optimize))
 
 
 def test_scene_has_machines_region_and_legend() -> None:
@@ -398,22 +402,21 @@ def test_scene_reports_system_io() -> None:
 
 
 def test_scene_says_a_flow_left_to_me_arrives_over_me() -> None:
-    """With items on ME (``--me items``) the sand line routes no item at all: no pipe, no
-    auto-output arrow, and no ME block drawn in their place yet (#222). Its two Super Chests would
-    then sit unconnected and read as a line that forgot its pipes, so every item flow at the
-    boundary, and what each chest holds, is flagged ``me`` for the panel and the hover to say so.
-    Power is still cabled, and says nothing of the sort.
+    """With items on ME (``--me items``) the sand line routes no item pipe and auto-outputs nothing
+    between machines; its items ride an ME network the solve lays (#335) but the preview does not
+    draw yet (#338). Its stone comes from the network's storage and its sand goes back there, so
+    no Super Chest stands at either end, and the panel lists both, flagged ``me`` to say how they
+    get there. Power is still cabled, and says nothing of the sort.
     """
-    scene = _sand_scene(Commodity.ITEM)
+    scene = _sand_scene(Commodity.ITEM, optimize=True)
+    assert scene["status"] == "valid"
     assert [r["commodity"] for r in scene["routes"]] == ["power"]
     assert scene["autoConnections"] == []
     io = scene["io"]
     assert [(f["resource"], f["me"]) for f in io["inputs"]] == [("minecraft:stone", True)]
     assert [(f["resource"], f["me"]) for f in io["outputs"]] == [("minecraft:sand", True)]
     assert io["power"]["me"] is False
-    held = [c for m in scene["machines"] for c in m["contents"]]
-    assert held
-    assert all(c["me"] for c in held)
+    assert not any(m["type"].startswith("Super ") for m in scene["machines"])
 
 
 def test_scene_says_power_left_to_me_arrives_over_me() -> None:

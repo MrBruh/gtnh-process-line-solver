@@ -459,11 +459,12 @@ result carries no infeasibility; `infeasible`/`partial_invalid` must carry one.
   that enough EU/t actually **arrives** once cable loss has shrunk every packet
   (`POWER_SUPPLY_INSUFFICIENT`), and that a machine is not wired more connections than its
   `hatch_cells` can host (`HATCH_CELLS_EXCEEDED`).
-- A net that rides ME (`InputIR.rides_me`) is removed from physical routing: no `Route` and no
-  `AutoConnection` for it today, it is simply skipped everywhere. Placing the ME device that
-  replaces it is the end-to-end build (#335). With `power_external` the adapter emits no power
-  source and no power net at all (#225); the powered machines keep their power ports, which state
-  the draw.
+- A net that rides ME (`InputIR.rides_me`) gets no `Route` and no `AutoConnection`. Each port on
+  it has an ME device instead (`Machine.me_endpoints`), and the layout carries the network that
+  joins them (`LayoutResult.me_networks`: its cable, each device where it stands, and, on a
+  multiblock, a `PlacedHatch` of the slot kind the endpoint names, #335). With `power_external`
+  the adapter emits no power source and no power net at all (#225); the powered machines keep
+  their power ports, which state the draw.
 
 ## Versioning
 

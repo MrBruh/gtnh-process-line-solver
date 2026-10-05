@@ -7,6 +7,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Nets on ME are built (#335).** A solve with nets on ME now lays each ME network: the ME
+  device each port needs (an export or import bus, an interface or Dual Interface, or one of GT's
+  ME hatches on a multiblock), the AE2 cable joining them as a tree, and the blocks the network
+  needs of its own (dense attach stubs on the edge where your main network enters, links, a
+  controller). Every layout is held to AE2's rules by the validator. The run says, per network,
+  what its storage must hold, what lands there, and how many of your main network's channels it
+  spends; the preview's I/O panel lists the same. Not yet: the preview draws no ME block (#338),
+  and the schematic export leaves them out, with a warning that counts what to place by hand
+  (#339). `--fast` cannot lay a line on ME (its touching row leaves no face for the devices), so
+  it returns an explicit partial layout; use the default solve.
 - **The `.schematic` export can write each conveyor and pump cover, so the ghost shows where it
   goes.** Pass `--world` with the save folder (or `level.dat`) of the world the build goes in. GT
   names a cover's item by the world's numeric item id, which FML assigns per world (two worlds of
@@ -22,10 +32,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fluid nets as JSON (the new `NetList` contract): each net's ends, its rate, and the ME device
   each end would get. Choose which nets ride which ME network, attached to your main network or a
   subnet of its own colour, in an `MEPlan` file and pass it with `--me-plan`. A plan made against
-  another plan or dataset is refused (exit 2), since a net id can then name another net. A net on
-  ME is still only skipped, as before: nothing is placed for it yet (#329). Splitting a single
-  block's outputs between ME and pipes works too: the piped ones are still sorted by Item Filters,
-  and the one on ME is left out of the trunk.
+  another plan or dataset is refused (exit 2), since a net id can then name another net.
+  Splitting a single block's outputs between ME and pipes works too: the piped ones are still
+  sorted by Item Filters, and the one on ME is left out of the trunk.
 - **A blast furnace is built with a coil hot enough for its recipes (#318).** GT refuses a recipe
   whose special value, its heat in kelvin, is above what the furnace reaches: its coil's heat
   (1801 K for Cupronickel, then 900 K a tier), plus, for the Electric Blast Furnace, the Mega

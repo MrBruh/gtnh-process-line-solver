@@ -428,6 +428,13 @@ def _check_placement(
                     out,
                     "a link's storage bus sits on its own cable, on its front, facing out",
                 )
+        elif endpoint.hatch_kind is not None and not machine.hatch_slots:
+            # No slot was recorded for this machine, so no hatch is placed on it (as for a pipe's
+            # terminal): its part only has to face the machine.
+            if target not in body:
+                _misplaced(
+                    device, out, f"it faces {target}, which is not a cell of {device.machine_id!r}"
+                )
         elif endpoint.hatch_kind is not None:
             hatch = hatches.get((machine.id, target))
             if (

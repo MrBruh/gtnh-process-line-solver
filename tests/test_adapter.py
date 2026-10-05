@@ -42,12 +42,15 @@ from gtnh_solver.ir import (
     IODirection,
     LayoutResult,
     LayoutStatus,
+    Machine,
     MEConfig,
+    MERole,
     Net,
     Port,
 )
 from gtnh_solver.ir.enums import HORIZONTAL_FACINGS_ORDERED
 from gtnh_solver.placement import place
+from gtnh_solver.system_io import is_boundary_storage
 from gtnh_solver.validator import validate
 from tests._helpers import PLACEMENT_CODES, hatched_dataset
 
@@ -196,22 +199,31 @@ def test_the_me_choice_reaches_the_input_ir() -> None:
         assert all(net.me_network == "main" for net in ir.nets if net.commodity is Commodity.ITEM)
 
 
-def test_items_and_fluids_on_me_change_nothing_else_the_mapping_produces() -> None:
-    # Leaving items or fluids to ME is a routing decision, not a different line: the machines, the
-    # storages and the synthesized power are the same, and only the choice differs. The stages
-    # downstream skip a net on ME themselves. Power is the exception: left to the builder it has no
-    # source at all (#225, pinned in test_cli_me).
+def test_items_and_fluids_on_me_change_only_the_me_side() -> None:
+    # Leaving items and fluids to the main network changes the build at the line's edge (#335):
+    # the boundary chests it replaces go, each port on ME gets its device and the network a stub.
+    # The machines that make things, and the power synthesized for them, are the same. Power left
+    # to the builder is the other exception: it has no source at all (#225, pinned in test_cli_me).
     plain = adapt_file(_SAND)
     on_me = adapt_file(_SAND, me_commodities={Commodity.ITEM, Commodity.FLUID})
-    assert (
-        on_me.model_copy(
-            update={
-                "me": MEConfig(),
-                "nets": [n.model_copy(update={"me_network": None}) for n in on_me.nets],
-            }
-        )
-        == plain
-    )
+
+    def making(ir: InputIR) -> dict[str, Machine]:
+        return {
+            m.id: m.model_copy(update={"me_endpoints": ()})
+            for m in ir.machines
+            if m.me_role is None and not is_boundary_storage(m.type)
+        }
+
+    def power(ir: InputIR) -> list[Net]:
+        return [n for n in ir.nets if n.commodity is Commodity.POWER]
+
+    assert making(on_me) == making(plain)
+    assert power(on_me) == power(plain)
+    assert not any(is_boundary_storage(m.type) for m in on_me.machines)
+    assert [m.me_role for m in on_me.machines if m.me_role is not None] == [MERole.ATTACH]
+    hammers = [m for m in on_me.machines if m.id in making(on_me) and not m.is_power_source]
+    assert hammers
+    assert all(m.me_endpoints for m in hammers)  # every port on ME has its device
 
 
 def test_throughput_is_positive_for_sand_material_nets() -> None:

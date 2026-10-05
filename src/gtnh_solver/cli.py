@@ -88,13 +88,22 @@ from gtnh_solver.adapter.core import _effective_handler, _recipe_map
 from gtnh_solver.dataset import PhysicalDataset, list_versions, load_physical_dataset
 from gtnh_solver.dataset.coverage import format_report, measure
 from gtnh_solver.dataset.roots import extractor_hint, resolve_dataset_path
-from gtnh_solver.ir import Commodity, Infeasibility, InputIR, LayoutResult, LayoutStatus, MEPlan
+from gtnh_solver.ir import (
+    Commodity,
+    Infeasibility,
+    InputIR,
+    LayoutResult,
+    LayoutStatus,
+    MEMode,
+    MEPlan,
+)
 from gtnh_solver.previewer import write_preview
 from gtnh_solver.previewer.jar import cached_jar
 from gtnh_solver.previewer.textures import TextureManifest
 from gtnh_solver.schematic import SchematicError, item_ids, read_schematic, write_schematic
 from gtnh_solver.schematic.read import Schematic
 from gtnh_solver.solver import Effort, solve
+from gtnh_solver.system_io import RATE_STEM, resource_label, system_io
 from gtnh_solver.validator import validate
 
 #: Every GT machine, cable and pipe is a meta of this one block; an mID IS its meta.
@@ -230,8 +239,8 @@ def build_parser() -> argparse.ArgumentParser:
             "move COMMODITY over ME (AE2) instead of pipes and cables: one of "
             f"{', '.join(_ME_COMMODITIES)}; repeat for more than one. items and fluids put every "
             "net of that kind on one network attached to your main ME network (not with "
-            "--me-plan); power leaves the line's EU supply to you. Nothing is routed for a net on "
-            "ME, and no ME device is placed or drawn yet, so the builder supplies that"
+            "--me-plan); power leaves the line's EU supply to you. A net on ME gets its ME devices "
+            "and AE2 cable instead of a pipe (the preview does not draw them yet)"
         ),
     )
     parser.add_argument(
@@ -343,28 +352,46 @@ def _read_me_plan(path: str | None) -> MEPlan | None:
 
 
 def _note_me(problem: InputIR) -> None:
-    """Say which nets were left to ME, and that nothing stands in for them in the build yet.
+    """Say that power is left to the builder (``--me power``, #225): no source or cable is laid
+    for it, so the layout reads as a line that forgot its power unless the run says so. Once, on
+    stderr beside the other notes, and the exit code is left alone."""
+    if problem.me.power_external:
+        print(
+            "note: power is left to you (--me power) - no source or cable is laid for it, so the "
+            "builder must supply it",
+            file=sys.stderr,
+        )
 
-    A net on ME is only skipped: the solver lays no pipe, cable or auto-output for it, and nothing
-    places the ME interface, bus or hatch that would carry it instead until the end-to-end build
-    (#335). Without this the layout reads as a line that forgot its pipes, so the run says so once,
-    on stderr beside the other notes, and leaves the exit code alone.
+
+def _note_me_networks(problem: InputIR, layout: LayoutResult) -> None:
+    """Say what each ME network asks of the player (``system_io.MENetworkIO``, #335).
+
+    What its storage must hold for the line to run and what lands there, and how many of the main
+    network's channels it spends: none of it is in the build, so a builder who reads only the
+    layout would not know to stock the main network or keep channels free for it. One line per
+    network, on stderr like the other notes.
     """
-    on_me = [net for net in problem.nets if problem.rides_me(net)]
-    power = problem.me.power_external
-    if not on_me and not power:
-        return
-    parts = []
-    if on_me:
-        networks = sorted({net.me_network for net in on_me if net.me_network is not None})
-        parts.append(f"{len(on_me)} net(s) ride ME network(s) {', '.join(networks)}")
-    if power:
-        parts.append("power is left to you (--me power)")
-    print(
-        f"note: {'; '.join(parts)} - nothing is routed for them, and no ME device is placed or "
-        f"drawn yet, so the builder must supply it",
-        file=sys.stderr,
-    )
+    names = problem.resource_names
+    for network in system_io(problem, layout).me:
+        if network.mode is MEMode.ATTACHED:
+            channels = f"{network.main_channels} channel(s) of your main network"
+        elif network.main_channels:
+            channels = f"{network.main_channels} channel(s) of your main network, one per link"
+        else:
+            channels = "none of your main network's channels"
+        parts = [f"{network.devices} device(s) on {channels}"]
+        for verb, flows in (("stock", network.supplies), ("it stores", network.absorbs)):
+            if flows:
+                listed = ", ".join(
+                    f"{', '.join(resource_label(r, names) for r in flow.resources)} "
+                    f"{flow.rate:g} {RATE_STEM[flow.commodity]}/t"
+                    for flow in flows
+                )
+                parts.append(f"{verb} {listed}")
+        print(
+            f"note: ME network {network.network} ({network.mode.value}): {'; '.join(parts)}",
+            file=sys.stderr,
+        )
 
 
 def _note_rounds(args: argparse.Namespace, layout: LayoutResult) -> None:
@@ -1003,6 +1030,7 @@ def main(argv: list[str] | None = None) -> int:
             rounds=args.rounds,
         )
         _note_rounds(args, layout)
+        _note_me_networks(problem, layout)
         _warn_unmeasured_power_intake(problem, layout)
         # Serialized inside the guard: a layout the contract cannot dump is a bug in this program,
         # not a verdict about the plan.

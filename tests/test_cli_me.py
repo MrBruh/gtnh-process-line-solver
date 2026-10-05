@@ -14,31 +14,38 @@ tests solve for real, the way ``test_cli.py`` splits the two.
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 
 import pytest
 
 import gtnh_solver.cli as cli_module
 from gtnh_solver.adapter import adapt_file, list_nets, load_plan, plan_digest, to_input_ir
-from gtnh_solver.cli import _me_commodities, _note_me, build_parser, main
+from gtnh_solver.cli import _me_commodities, _note_me, _note_me_networks, build_parser, main
 from gtnh_solver.ir import (
     AEColor,
     Commodity,
+    Facing,
     InputIR,
     LayoutResult,
     LayoutStatus,
+    Machine,
+    MEDeviceKind,
     MEMode,
     MENetworkSpec,
     MEPlan,
+    MERole,
     NetList,
 )
 from gtnh_solver.placement import Objective
 from gtnh_solver.previewer.textures import TextureManifest
 from gtnh_solver.schematic import read_schematic
-from gtnh_solver.schematic.core import POWER_SOURCE_STAND_IN
+from gtnh_solver.schematic.core import POWER_SOURCE_STAND_IN, SchematicWarning, _warn_about_me
 from gtnh_solver.solver import Effort, solve
 from gtnh_solver.validator import validate
 from tests._helpers import on_me
+from tests._me_fixtures import SUB, comb, gt_hatch_line
+from tests._me_fixtures import endpoint as me_endpoint
 
 _ROOT = Path(__file__).resolve().parents[1]
 _SAND = str(_ROOT / "examples" / "gtnh-sand.json")
@@ -47,10 +54,11 @@ _COMMITTED_MANIFEST = _ROOT / "data" / "textures" / "manifest.json"
 _EXAMPLES = sorted(str(p) for p in (_ROOT / "examples").glob("*.json"))
 
 #: The line the sand run prints with ``--me items``, verbatim: a builder reads it, so its wording
-#: is part of what is pinned, not only its presence.
+#: is part of what is pinned, not only its presence. Sand's stone comes from the main network and
+#: its sand goes back there, through six devices (#335).
 _ITEMS_NOTE = (
-    "note: 4 net(s) ride ME network(s) main - nothing is routed for them, and no ME device is "
-    "placed or drawn yet, so the builder must supply it"
+    "note: ME network main (attached): 6 device(s) on 6 channel(s) of your main network; "
+    "stock Stone (minecraft:stone) 0.1 items/t; it stores Sand (minecraft:sand) 0.1 items/t"
 )
 
 
@@ -375,7 +383,7 @@ def test_without_me_the_problem_keeps_every_net_physical(
 ) -> None:
     assert main([_SAND]) == 0
     assert _on_me(solved_problems[-1]) == {}
-    assert "ride ME" not in capsys.readouterr().err  # nothing to say, so nothing said
+    assert "ME network" not in capsys.readouterr().err  # nothing to say, so nothing said
 
 
 def test_a_net_on_me_prints_the_note_once_on_stderr_only(
@@ -386,17 +394,19 @@ def test_a_net_on_me_prints_the_note_once_on_stderr_only(
     assert main([_SAND, "--me", "items"]) == 0
     out, err = capsys.readouterr()
     assert err.splitlines().count(_ITEMS_NOTE) == 1
-    assert "ride ME" not in out
+    assert "ME network" not in out
 
 
-def test_the_note_names_the_networks_and_power(
+def test_power_left_to_the_builder_is_said_before_the_solve(
     capsys: pytest.CaptureFixture[str], solved_sand: tuple[InputIR, LayoutResult]
 ) -> None:
+    # The nets on ME are built now (#335), so only power, which nothing lays, needs saying up front.
     problem, _ = solved_sand
     _note_me(on_me(problem, Commodity.ITEM, power=True))
     (line,) = capsys.readouterr().err.splitlines()
-    assert line.startswith(
-        "note: 5 net(s) ride ME network(s) main; power is left to you (--me power) - "
+    assert line == (
+        "note: power is left to you (--me power) - no source or cable is laid for it, so the "
+        "builder must supply it"
     )
 
 
@@ -411,12 +421,13 @@ def test_the_note_is_silent_with_nothing_on_me(
 # ------------------------------------------------------------------ end to end
 
 
-def test_sand_with_items_on_me_solves_valid_with_no_item_routing(
+def test_sand_with_items_on_me_solves_valid_on_an_me_network(
     real_solves: list[tuple[InputIR, LayoutResult]], capsys: pytest.CaptureFixture[str]
 ) -> None:
     # The issue's acceptance run, for real: `gtnh-solve examples/gtnh-sand.json --me items`.
-    # Sand is items end to end, so every item net must be left unrouted (no pipe, no auto-output)
-    # while the power cable is still laid, and the layout must still be certified.
+    # Sand is items end to end, so every item net rides the network (no pipe, no auto-output) and
+    # its devices sit on AE2 cable from the stub (#335), while the power cable is still laid, and
+    # the layout must still be certified.
     assert main([_SAND, "--me", "items"]) == 0
     ((problem, layout),) = real_solves
     assert layout.status is LayoutStatus.VALID
@@ -425,6 +436,9 @@ def test_sand_with_items_on_me_solves_valid_with_no_item_routing(
     assert item_nets  # the line has item nets to skip, so the empties below mean something
     assert [r.commodity for r in layout.routes] == [Commodity.POWER]
     assert not [ac for ac in layout.auto_connections if ac.net_id in item_nets]
+    (network,) = layout.me_networks
+    built = {(d.machine_id, d.endpoint_id) for d in network.devices}
+    assert built == {(m.id, e.id) for m in problem.machines for e in m.me_endpoints}
     assert _ITEMS_NOTE in capsys.readouterr().err.splitlines()
 
 
@@ -479,3 +493,67 @@ def test_sand_with_power_left_to_the_builder_places_and_exports_no_power_source(
     mids = {t.mid for t in read_schematic(schematic).tile_entities}
     assert mids  # the hammers and chests are still exported
     assert stand_in[1] not in mids
+
+
+def test_a_subnet_says_whose_channels_it_spends(capsys: pytest.CaptureFixture[str]) -> None:
+    problem, layout = comb(2, mode=MEMode.SUBNET)
+    _note_me_networks(problem, layout)
+    assert capsys.readouterr().err.splitlines() == [
+        "note: ME network sub (subnet): 2 device(s) on none of your main network's channels; "
+        "stock n0 1 items/t, n1 1 items/t"
+    ]
+    linked = InputIR.model_validate(
+        {
+            **problem.model_dump(),
+            "machines": [
+                *(m.model_dump() for m in problem.machines),
+                Machine(
+                    id="link",
+                    type="ME Smart Cable",
+                    voltage_tier="LV",
+                    orientation_options=[Facing.WEST],
+                    me_role=MERole.LINK,
+                    me_network=SUB,
+                    outside_front=True,
+                    me_endpoints=(me_endpoint("bus", (), MEDeviceKind.STORAGE_BUS, network=SUB),),
+                ).model_dump(),
+            ],
+        }
+    )
+    _note_me_networks(linked, layout)
+    (line,) = capsys.readouterr().err.splitlines()
+    assert "3 device(s) on 1 channel(s) of your main network, one per link" in line
+
+
+def test_sand_with_items_on_me_exports_its_machines_and_counts_what_it_leaves_out(
+    real_solves: list[tuple[InputIR, LayoutResult]], tmp_path: Path
+) -> None:
+    # The export writes no AE2 block until #339, and must not choke on the stub: every machine of
+    # the line is still written, and one warning counts the ME blocks a builder places by hand.
+    schematic = tmp_path / "x.schematic"
+    with pytest.warns(SchematicWarning, match=r"writes no ME block yet") as caught:
+        assert main([_SAND, "--me", "items", "--schematic", str(schematic)]) == 0
+    ((problem, layout),) = real_solves
+    (network,) = layout.me_networks
+    (message,) = [str(w.message) for w in caught if "ME block" in str(w.message)]
+    assert f"{len(network.cables)} AE2 cable(s), {len(network.devices)} part(s) and 1 network " in (
+        message
+    )
+    machines = [m for m in problem.machines if m.me_role is None]  # the hammers and the source
+    written = [t for t in read_schematic(schematic).tile_entities if t.id == "BaseMetaTileEntity"]
+    assert len(written) == len(machines)
+
+
+def test_a_gt_me_hatch_is_counted_as_written_in_its_normal_slot() -> None:
+    _, layout = gt_hatch_line()
+    with pytest.warns(SchematicWarning, match=r"1 GT ME hatch\(es\) are written as the normal"):
+        _warn_about_me(layout, 1)
+
+
+def test_a_layout_with_no_me_network_says_nothing_of_it(
+    solved_sand: tuple[InputIR, LayoutResult],
+) -> None:
+    _, layout = solved_sand
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _warn_about_me(layout, 0)

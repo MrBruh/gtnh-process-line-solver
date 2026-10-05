@@ -70,9 +70,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from gtnh_solver.ir import Facing, InputIR, Machine, Placement
-from gtnh_solver.ir.geometry import Cell
-from gtnh_solver.ir.nets import SINGLE_BLOCK_IO_FACES, connection_counts, placement_index
+from gtnh_solver.ir import Facing, InputIR, Machine, MERole, Placement
+from gtnh_solver.ir.geometry import FACE_OFFSETS, Cell, occupied_cells
+from gtnh_solver.ir.nets import (
+    SINGLE_BLOCK_IO_FACES,
+    connection_counts,
+    me_device_ports,
+    placement_index,
+)
 from gtnh_solver.router._grid import dock_candidates, obstacle_cells
 from gtnh_solver.router.auto import assign_auto_outputs
 
@@ -94,7 +99,9 @@ def crowded_machines(problem: InputIR, placements: Sequence[Placement]) -> tuple
     proves shortfalls rather than deciding the question, and what it cannot see it does not
     report. It is also only about *docking*: whether a pipe can then be routed between the docks
     is the router's question, not this one. The verdict depends on the geometry alone, never on
-    the order the placements arrive in.
+    the order the placements arrive in. It also names ME network blocks placed where AE would join
+    them into a loop or merge two networks (:func:`_me_block_clashes`, #335), the one placement
+    defect the ME router refuses outright.
 
     Judged with the router's own :func:`dock_candidates`, so the cells counted here are the cells
     a hatch may really occupy (only faces ``Machine.allowed_faces`` grants the port, so the front
@@ -150,7 +157,41 @@ def crowded_machines(problem: InputIR, placements: Sequence[Placement]) -> tuple
             by_machine[placement.machine_id], _stand_ins(placement.machine_id, by_machine, reach)
         )
     ]
+    crowded += _me_block_clashes(problem, placements)
     return tuple(dict.fromkeys(crowded))  # de-duplicated, first occurrence order
+
+
+def _me_block_clashes(problem: InputIR, placements: Sequence[Placement]) -> list[str]:
+    """ME network blocks placed where the ME router must refuse their network, in placement order.
+
+    AE joins every block it can, so two attach stubs of one network side by side close a loop
+    through the main network, two of its links or acceptors close one through each other, and
+    blocks of two networks merge them; ``router.me`` refuses each (``me_infrastructure``). Placing
+    them a cell apart is the placer's job, so the gate names them and the anneal looks on. A link
+    or acceptor beside a stub or a controller is fine (it joins there), and so are controllers
+    side by side, which AE runs as one.
+    """
+    machines = {m.id: m for m in problem.machines}
+    blocks: list[tuple[str, Machine, set[Cell]]] = []
+    for placement in placements:
+        machine = machines.get(placement.machine_id)
+        if machine is None or machine.me_network is None:
+            continue
+        cells = set(occupied_cells(placement.cell, machine.footprint, placement.orientation))
+        blocks.append((placement.machine_id, machine, cells))
+    clashing: list[str] = []
+    for i, (a_id, a, a_cells) in enumerate(blocks):
+        around = {(x + dx, y + dy, z + dz) for x, y, z in a_cells for dx, dy, dz in FACE_OFFSETS}
+        for b_id, b, b_cells in blocks[i + 1 :]:
+            if around.isdisjoint(b_cells):
+                continue
+            joins = a.me_network == b.me_network and (
+                {a.me_role, b.me_role} != {MERole.ATTACH}
+                and not {a.me_role, b.me_role} <= {MERole.LINK, MERole.ACCEPTOR}
+            )
+            if not joins:
+                clashing += [a_id, b_id]
+    return clashing
 
 
 def single_block_shortfalls(problem: InputIR) -> dict[str, int]:
@@ -159,8 +200,10 @@ def single_block_shortfalls(problem: InputIR) -> dict[str, int]:
     Needs no placement, unlike :func:`crowded_machines`, and is exact under the solver's own rule:
     each connection of a machine takes a face of its own, whether a pipe or cable docks on it or an
     auto-output spends it touching its sink, so no placement hosts more than
-    :data:`SINGLE_BLOCK_IO_FACES` on a single block. A commodity riding the ME network docks nothing
-    and counts nothing. Machines come in problem order.
+    :data:`SINGLE_BLOCK_IO_FACES` on a single block. A net riding the ME network docks nothing; the
+    ME device serving its port takes the face instead, one per device (``ir.nets.me_device_ports``,
+    #335), so a Dual Interface carrying an item and a fluid output costs one. Machines come in
+    problem order.
 
     A single block here is any one-cell footprint, which is also what a multiblock falls back to
     when the dataset lacks its structure, the case this mostly catches. It states a limit of the
@@ -174,6 +217,10 @@ def single_block_shortfalls(problem: InputIR) -> dict[str, int]:
     every machine the adapter may still merge, all unpinned, is judged exactly as before.
     """
     connections = connection_counts(problem.nets, problem.rides_me)
+    for machine in problem.machines:
+        if devices := me_device_ports(machine):
+            # Each ME device takes a face of its own, like a pipe's terminal (#335).
+            connections[machine.id] = connections.get(machine.id, 0) + len(devices)
     pinned = {
         machine.id: machine
         for machine in problem.machines
@@ -186,6 +233,8 @@ def single_block_shortfalls(problem: InputIR) -> dict[str, int]:
         for endpoint in net.endpoints:
             if endpoint.machine_id in pinned:
                 ports_on.setdefault(endpoint.machine_id, []).append(endpoint.port_id)
+    for machine_id, machine in pinned.items():
+        ports_on.setdefault(machine_id, []).extend(port for port, _ in me_device_ports(machine))
     return {
         machine.id: connections[machine.id]
         for machine in problem.machines
@@ -214,7 +263,7 @@ def _faces_fit(machine: Machine, port_ids: Sequence[str]) -> bool:
 
 
 def _docked_connections(problem: InputIR, placements: Sequence[Placement]) -> list[_Connection]:
-    """Every net endpoint a router will dock, with the cells it could dock on."""
+    """Every net endpoint and ME device a router will dock, with the cells it could dock on."""
     machines = {m.id: m for m in problem.machines}
     placement_by_machine = placement_index(placements)
     obstacles = obstacle_cells(problem, placements, machines)
@@ -246,6 +295,27 @@ def _docked_connections(problem: InputIR, placements: Sequence[Placement]) -> li
                 )
             }
             connections.append(_Connection(endpoint.machine_id, net.id, tuple(sorted(cells))))
+    # Each ME device docks like a terminal: a part on the cable beside the face it works through, a
+    # GT ME hatch a cable in front of it (#335). Devices of one network may share a cable, as one
+    # pipe block serves several machines of a net, so they are grouped under their network.
+    for machine in problem.machines:
+        placement = placement_by_machine.get(machine.id)
+        if placement is None:
+            continue
+        for port_id, network in me_device_ports(machine):
+            cells = {
+                t.cell.as_tuple()
+                for t in dock_candidates(
+                    port_id,
+                    placement,
+                    machine,
+                    obstacles,
+                    set(),
+                    region,
+                    assignment.claimed.get(machine.id, ()),
+                )
+            }
+            connections.append(_Connection(machine.id, f"me:{network}", tuple(sorted(cells))))
     return connections
 
 

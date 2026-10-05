@@ -56,6 +56,9 @@ import pytest
 from hypothesis import HealthCheck, event, given, settings
 from hypothesis import strategies as st
 
+from gtnh_solver.adapter import InfeasiblePlanError
+from gtnh_solver.adapter.me import line_tier
+from gtnh_solver.adapter.me_build import build_me
 from gtnh_solver.adapter.power import synthesize_power
 from gtnh_solver.ir import (
     AutoConnection,
@@ -64,6 +67,7 @@ from gtnh_solver.ir import (
     Commodity,
     FaceSpec,
     Facing,
+    HatchSlot,
     Infeasibility,
     InputIR,
     IODirection,
@@ -73,8 +77,10 @@ from gtnh_solver.ir import (
     Machine,
     MachineFaceRef,
     MEConfig,
+    MEHatchPolicy,
     MEMode,
     MENetworkSpec,
+    MEStorage,
     Net,
     PinnedIO,
     PipeFamily,
@@ -520,6 +526,247 @@ def test_a_tower_that_fills_by_layer_is_valid_or_explicitly_infeasible(
     spares = sum(1 for h in layout.hatches if h.kind == "OutputHatch" and h.port_id is None)
     event(f"spares={spares}")
     _assert_valid_or_explained(problem, layout)
+
+
+#: A boundary storage's type by what it holds, as the adapter names one.
+_STORAGE_TYPES = {Commodity.ITEM: "Super Chest", Commodity.FLUID: "Super Tank"}
+
+#: Every hatch a generated multiblock's casing cell takes: the four I/O kinds and energy. No
+#: maintenance hatch, which would only spend a cell on upkeep no ME rule reads.
+_CASING_KINDS = ("Energy", "InputBus", "InputHatch", "OutputBus", "OutputHatch")
+
+#: An item rate past what two ME buses move below LuV (2 x 96 items a 5-tick operation), so the
+#: adapter refuses the port rather than build devices that cannot keep up.
+_PAST_TWO_BUSES = 50.0
+
+#: Why an ME plan may be refused before anything is placed (``adapter.me_build``): a network that
+#: needs more of the main network's channels than its budget, or a port no two devices keep up with.
+_ME_PLAN_REFUSALS = frozenset({"me_channel_budget", "me_device_rate"})
+
+
+@st.composite
+def _multiblock(draw: st.DrawFn, machine: Machine) -> Machine:
+    """``machine`` as a multiblock, which connects through a hatch per port.
+
+    Mostly as the physical dataset gives one: a casing of two to three cells a side, every cell
+    taking a hatch of any kind. Sometimes as a plan adapted with no record of it gives one (its
+    handler says multiblock, no dump has it): the machine as drawn, with no slots at all.
+    """
+    if draw(st.integers(min_value=0, max_value=3)) == 0:
+        return machine
+    footprint = CellBox(sx=draw(st.integers(2, 3)), sy=1, sz=draw(st.integers(2, 3)))
+    slots = tuple(
+        HatchSlot(offset=CellCoord(x=x, y=0, z=z), kinds=_CASING_KINDS)
+        for x in range(footprint.sx)
+        for z in range(footprint.sz)
+    )
+    return machine.model_copy(
+        update={"footprint": footprint, "hatch_slots": slots, "hatch_cells": len(slots)}
+    )
+
+
+def _boundary_storages(
+    draw: st.DrawFn, machines: list[Machine], nets: list[Net]
+) -> tuple[list[Machine], list[Net]]:
+    """A boundary Super Chest or Super Tank on some of the ports no net uses, the way the adapter
+    closes a line: one feeding a free input, or collecting a free output, each with a net of its
+    own. A line no net joins gets one on its first free port, so it has a net to put on ME."""
+    used = {(e.machine_id, e.port_id) for n in nets for e in n.endpoints}
+    free = [(m, p) for m in machines for p in m.faces.ports if (m.id, p.id) not in used]
+    stored = [draw(st.booleans()) for _ in free]
+    if free and not nets and not any(stored):
+        stored[0] = True
+    storages: list[Machine] = []
+    edges: list[Net] = []
+    for (machine, port), wanted in zip(free, stored, strict=True):
+        if not wanted:
+            continue
+        index = len(storages)
+        feeds = port.direction is IODirection.INPUT
+        held = Port(
+            id=f"{'output' if feeds else 'input'}:r{index}",
+            commodity=port.commodity,
+            direction=IODirection.OUTPUT if feeds else IODirection.INPUT,
+        )
+        storages.append(
+            Machine(
+                id=f"storage-{index}",
+                type=_STORAGE_TYPES[port.commodity],
+                voltage_tier="LV",
+                faces=FaceSpec(ports=[held]),
+                orientation_options=list(HORIZONTAL_FACINGS_ORDERED),
+            )
+        )
+        ends = [
+            MachineFaceRef(machine_id=f"storage-{index}", port_id=held.id),
+            MachineFaceRef(machine_id=machine.id, port_id=port.id),
+        ]
+        edges.append(
+            Net(
+                id=f"edge-{index}",
+                commodity=port.commodity,
+                fluid_or_item=f"r{index}",
+                throughput=draw(st.sampled_from((0.0, 1.0, 20.0))),
+                endpoints=ends if feeds else ends[::-1],
+            )
+        )
+    return machines + storages, nets + edges
+
+
+def _me_networks(draw: st.DrawFn) -> list[MENetworkSpec]:
+    """One or two ME networks: at most one attached (the player has one main network), with a
+    budget drawn low enough to be overrun; the rest subnets, storing through a link or in chests.
+    Every hatch policy, so a multiblock's connection is sometimes one of GT's own ME hatches."""
+    specs: list[MENetworkSpec] = []
+    for i in range(draw(st.integers(min_value=1, max_value=2))):
+        hatches = draw(st.sampled_from(list(MEHatchPolicy)))
+        if not any(s.mode is MEMode.ATTACHED for s in specs) and draw(st.booleans()):
+            spec = MENetworkSpec(
+                id=f"me{i}",
+                mode=MEMode.ATTACHED,
+                hatches=hatches,
+                me_channel_budget=draw(st.integers(min_value=1, max_value=12)),
+            )
+        else:
+            spec = MENetworkSpec(
+                id=f"me{i}",
+                mode=MEMode.SUBNET,
+                storage=draw(st.sampled_from(list(MEStorage))),
+                hatches=hatches,
+            )
+        specs.append(spec)
+    return specs
+
+
+def _choose_me(draw: st.DrawFn, nets: list[Net], networks: list[MENetworkSpec]) -> list[Net]:
+    """``nets`` with a random, non-empty subset put on ``networks``, one draw per net: the per-net
+    choice an MEPlan states. A net on ME sometimes carries more than two buses move, which is the
+    adapter's to refuse; a piped one never does, since that would test the pipe sizing instead."""
+    choices = st.sampled_from([None, *(s.id for s in networks)])
+    picked = [draw(choices) for _ in nets]
+    if nets and not any(picked):
+        picked[0] = networks[0].id
+    chosen: list[Net] = []
+    for net, network in zip(nets, picked, strict=True):
+        if network is None:
+            chosen.append(net)
+            continue
+        past = draw(st.integers(min_value=0, max_value=15)) == 0
+        rate = _PAST_TWO_BUSES if past else net.throughput
+        chosen.append(net.model_copy(update={"me_network": network, "throughput": rate}))
+    return chosen
+
+
+def _rated(machines: list[Machine], nets: list[Net]) -> list[Machine]:
+    """``machines`` with each port on a net given the net's rate, as an adapted plan's ports carry
+    theirs: what an ME device is sized to, and what the validator holds it to."""
+    rate = {(e.machine_id, e.port_id): n.throughput for n in nets for e in n.endpoints}
+    return [
+        m.model_copy(
+            update={
+                "faces": FaceSpec(
+                    ports=[
+                        p.model_copy(update={"rate": rate.get((m.id, p.id), p.rate)})
+                        for p in m.faces.ports
+                    ]
+                )
+            }
+        )
+        for m in machines
+    ]
+
+
+@st.composite
+def _me_plan_problems(draw: st.DrawFn) -> InputIR | Infeasibility:
+    """A small line of the general kind with a random MEPlan applied the way the adapter applies
+    one, or the infeasibility the adapter refuses that plan with.
+
+    One to four machines, a quarter of them multiblocks (:func:`_multiblock`) and the rest single
+    blocks; boundary storages on some free ports; one or two networks (:func:`_me_networks`) and a
+    random subset of the nets on them (:func:`_choose_me`). Then what ``adapter.core._close`` does,
+    in its order: ``build_me`` turns the choice into each port's ME device and each network's
+    stubs, links, controller and buffer chests, and only then is power synthesized. Each port
+    carries one net here, so none is half piped and half on ME (a user error the adapter refuses,
+    not an infeasibility). The region always fits the machines with some slack, since what is under
+    test is laying the networks; the general corpus covers lines too big for theirs.
+    """
+    machines = [
+        draw(_machines(f"m{i}")).model_copy(update={"hatch_cells": None})
+        for i in range(draw(st.integers(min_value=1, max_value=4)))
+    ]
+    multiblock_ids = frozenset(m.id for m in machines if draw(st.integers(0, 3)) == 0)
+    machines = [draw(_multiblock(m)) if m.id in multiblock_ids else m for m in machines]
+    nets = _nets_over(draw, machines)
+    line = {m.id for m in machines}
+    machines, nets = _boundary_storages(draw, machines, nets)
+    storage_ids = frozenset(m.id for m in machines if m.id not in line)
+    networks = _me_networks(draw)
+    nets = _choose_me(draw, nets, networks)
+    machines = _rated(machines, nets)
+    try:
+        machines, nets = build_me(
+            machines,
+            nets,
+            MEConfig(networks=networks),
+            storage_ids=storage_ids,
+            multiblock_ids=multiblock_ids,
+            line_tier=line_tier(machines, storage_ids),
+            recipe_ticks={},
+        )
+    except InfeasiblePlanError as exc:
+        return exc.infeasibility
+    machines, nets = synthesize_power(machines, nets)
+    floor = math.ceil(math.sqrt(sum(m.footprint.sx * m.footprint.sz for m in machines)))
+    side = st.integers(min_value=floor, max_value=floor + 3)
+    return InputIR(
+        bounding_region=CellBox(
+            sx=draw(side), sy=draw(st.integers(min_value=1, max_value=3)), sz=draw(side)
+        ),
+        machines=machines,
+        nets=nets,
+        me=MEConfig(networks=networks),
+    )
+
+
+def _me_shape(problem: InputIR) -> str:
+    """The networks a problem's nets ride, as ``attached``, ``link`` or ``chests``, for an event."""
+    riding = {n.me_network for n in problem.nets if n.me_network is not None}
+    shapes = (
+        "attached" if s.mode is MEMode.ATTACHED else s.storage.value
+        for s in problem.me.networks
+        if s.id in riding
+    )
+    return "+".join(sorted(shapes)) or "none"
+
+
+@pytest.mark.parametrize("optimize", [True, False])
+@settings(
+    max_examples=property_examples(100),
+    suppress_health_check=[HealthCheck.too_slow],
+)
+@given(drawn=_me_plan_problems(), seed=st.integers(min_value=0, max_value=3))
+def test_a_random_me_plan_is_valid_or_explicitly_infeasible(
+    drawn: InputIR | Infeasibility, seed: int, optimize: bool
+) -> None:
+    """The same promise on a line with nets on ME (#335): every network laid as AE2 cable and
+    devices the validator's ME gate passes, or an explicit reason why not, whether the adapter
+    refuses the plan before any solve or the solve cannot lay it. The events say which networks
+    the nets rode and whether a GT ME hatch was laid.
+
+    At the time of writing (CI budget) about 30% of the annealed path's examples are valid and 10%
+    of the fast path's, 40-60% partial_invalid (mostly an ME leaf the halo leaves no way to, at a
+    minimal effort), and 10-20% refused by the adapter, with every network shape and GT ME hatches
+    represented. A run that stops reaching ``status=valid`` with an ME network proves much less."""
+    if isinstance(drawn, Infeasibility):
+        event("status=refused by the adapter")
+        assert drawn.constraint in _ME_PLAN_REFUSALS, drawn
+        return
+    layout = solve(drawn, seed=seed, optimize=optimize)
+    event(f"status={layout.status.value}")
+    event(f"me={_me_shape(drawn)}")
+    gt_hatches = any(d.gt_mid is not None for n in layout.me_networks for d in n.devices)
+    event(f"gt_me_hatch={'laid' if gt_hatches else 'none'}")
+    _assert_valid_or_explained(drawn, layout)
 
 
 @st.composite

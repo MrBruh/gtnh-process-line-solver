@@ -84,6 +84,7 @@ def repair_power_sources(
     item_routes: Sequence[Route],
     claimed_cells: Mapping[str, Collection[Cell]],
     objective: Objective,
+    me_cells: Collection[Cell] = (),
 ) -> tuple[list[Placement], PowerRouteResult]:
     """Route power, relocating each power source to the best cell the routed cable can find.
 
@@ -91,10 +92,11 @@ def repair_power_sources(
     winning candidate's own result, not a re-route, so the caller assembles exactly the layout
     that was scored. ``item_routes`` are the pipes already laid: their cells are obstacles for the
     cable and forbidden ground for a relocated source, and they take part in the compactness
-    ranking. ``claimed_cells`` is the per-machine casing budget those pipes' hatches already spent
-    (:func:`router.claims_by_machine`), passed through to the power router unchanged.
+    ranking. ``me_cells`` are the AE2 cable laid before power (#335), held to all three the same
+    way. ``claimed_cells`` is the per-machine casing budget those pipes' and ME devices' hatches
+    already spent (:func:`router.claims_by_machine`), passed through to the power router unchanged.
     """
-    item_cells = {cell for r in item_routes for cell in r.cells()}
+    item_cells = {cell for r in item_routes for cell in r.cells()} | set(me_cells)
 
     def lay(candidate: Sequence[Placement]) -> PowerRouteResult:
         return route_power(
@@ -134,7 +136,7 @@ def repair_power_sources(
         # Ground the source may not stand on, once its own body is lifted out of the way. The
         # pipe cells are in there because a machine body over a route is a validator violation.
         blocked = (occupied - body) | reserved | item_cells
-        best_score = _score(problem, current, item_routes, best_result, objective)
+        best_score = _score(problem, current, item_routes, best_result, objective, me_cells)
         best_pose, moved = here, False
         poses = _candidate_poses(
             machine, load, here, current, machines, problem, best_result.routes, blocked
@@ -145,7 +147,7 @@ def repair_power_sources(
             candidate = list(current)
             candidate[index] = Placement(machine_id=machine.id, cell=origin, orientation=facing)
             result = lay(candidate)
-            score = _score(problem, candidate, item_routes, result, objective)
+            score = _score(problem, candidate, item_routes, result, objective, me_cells)
             if score < best_score:
                 best_score, best_pose, best_result, moved = score, candidate[index], result, True
         if moved:
@@ -162,15 +164,16 @@ def _score(
     item_routes: Sequence[Route],
     power: PowerRouteResult,
     objective: Objective,
+    me_cells: Collection[Cell],
 ) -> _Score:
     """Rank a candidate: fewest unroutable power nets first, then the loop's quality key over the
-    whole structure (machines + pipes + this candidate's cable). A stall that names no net still
-    counts as one failure, so a candidate that routes cleanly outranks it."""
+    whole structure (machines + pipes + ME cable + this candidate's cable). A stall that names no
+    net still counts as one failure, so a candidate that routes cleanly outranks it."""
     unroutable = len(power.failed_nets)
     if not unroutable and power.infeasibility is not None:
         unroutable = 1
     routes = [*item_routes, *power.routes]
-    return unroutable, structure_quality(problem, placements, routes, objective)
+    return unroutable, structure_quality(problem, placements, routes, objective, me_cells)
 
 
 def _power_loads_by_source(problem: InputIR) -> dict[str, _SourceLoad]:

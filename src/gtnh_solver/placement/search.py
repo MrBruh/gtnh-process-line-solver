@@ -133,6 +133,7 @@ from gtnh_solver.ir.geometry import (
     pose_of,
     rotated_footprint,
 )
+from gtnh_solver.ir.nets import me_device_ports, me_network_machines
 from gtnh_solver.router.auto import auto_candidates, auto_output_possible
 
 from .constructive import PlacementResult, _fit, place
@@ -286,9 +287,10 @@ class _Body:
     shells: Mapping[Facing, tuple[Cell, ...]]
     orientations: tuple[Facing, ...]
     fronts_outside: bool
-    #: The ports a router will dock: on some net whose commodity is not on the ME network. A port on
-    #: no net, or riding ME, is docked by nobody, so it asks for no cell - the rule the exact gate
-    #: (``placement.feasibility``) already applies, and the cheap term must not tax what it exempts.
+    #: The ports a router will dock: on some net whose commodity is not on the ME network, or the
+    #: first port an ME device serves (#335). Any other port is docked by nobody, so it asks for no
+    #: cell - the rule the exact gate (``placement.feasibility``) already applies, and the cheap
+    #: term must not tax what it exempts.
     port_ids: tuple[str, ...]
     #: Per facing, one shell per entry of :attr:`port_ids`, through that port's own faces only; None
     #: when no port is pinned (``Port.faces``), so an unpinned machine keeps the one shared shell.
@@ -298,7 +300,7 @@ class _Body:
 
 def _body(machine: Machine, docked: Collection[str] | None = None) -> _Body:
     """``machine`` as the search reads it. ``docked`` names the ports a router will dock (None:
-    all of them); :func:`optimize_placement` passes the ports on non-ME nets."""
+    all of them); :func:`optimize_placement` passes the ports :func:`_bodies` charges."""
     sizes: dict[Facing, Size] = {}
     for facing in Facing:
         box = rotated_footprint(machine.footprint, facing)
@@ -334,7 +336,9 @@ def _body(machine: Machine, docked: Collection[str] | None = None) -> _Body:
 def _bodies(problem: InputIR) -> dict[str, _Body]:
     """Every machine of ``problem`` as a :class:`_Body`, charged only for the ports a router docks.
 
-    A port docks when it sits on a net not left to ME (``InputIR.rides_me``). The exact gate
+    A port docks when it sits on a net not left to ME (``InputIR.rides_me``), or an ME device serves
+    it (``Machine.me_endpoints``, #335): a part needs a cable on the face it works through, and a GT
+    ME hatch a cable in front of it, just as a pipe needs its dock cell. The exact gate
     (``placement.feasibility.crowded_machines``) charges nothing for any other port, so neither may
     the face term that approximates it.
     """
@@ -343,6 +347,8 @@ def _bodies(problem: InputIR) -> dict[str, _Body]:
         if not problem.rides_me(n):
             for e in n.endpoints:
                 docked.setdefault(e.machine_id, set()).add(e.port_id)
+    for m in problem.machines:
+        docked[m.id].update(port for port, _ in me_device_ports(m))
     return {m.id: _body(m, docked[m.id]) for m in problem.machines}
 
 
@@ -549,6 +555,37 @@ class _SearchContext:
     unit_adjacency: dict[str, set[str]] | None = None
 
 
+def _cost_nets(
+    problem: InputIR, penalties: Mapping[str, float]
+) -> tuple[list[_WeightedNet], list[_WeightedNet]]:
+    """The nets the cost pulls on, as ``(wire nets, power nets)``, each ``(machine ids, weight)``.
+
+    Nets that are physically routed (those left to ME are skipped), where a penalized net weighs
+    more so the optimizer shortens it preferentially. Item/fluid nets pay HPWL. Power nets have NO
+    base term (module docstring says why) - one enters the cost, as an MST trunk-length pull, only
+    once the router fails it and the feedback penalizes it.
+
+    Each ME network is a cable tree like a power trunk, but unlike power it has no source to pull
+    toward on its own: its devices, stubs, links and controller are pulled together as one wire net
+    (#335), so the tree the router lays is short and the stub stays near what it feeds.
+    """
+    wire_nets: list[_WeightedNet] = []
+    power_nets: list[_WeightedNet] = []
+    for n in problem.nets:
+        if problem.rides_me(n):
+            continue
+        ids = [e.machine_id for e in n.endpoints]
+        if n.commodity is Commodity.POWER:
+            if penalties.get(n.id):
+                power_nets.append((ids, penalties[n.id]))
+        else:
+            wire_nets.append((ids, 1.0 + penalties.get(n.id, 0.0)))
+    for members in me_network_machines(problem).values():
+        if len(members) > 1:
+            wire_nets.append((members, 1.0))
+    return wire_nets, power_nets
+
+
 def optimize_placement(
     problem: InputIR,
     *,
@@ -591,22 +628,7 @@ def optimize_placement(
     region = problem.bounding_region
     bounds = (region.sx, region.sy, region.sz)
     reserved = {(c.x, c.y, c.z) for c in problem.reserved_cells}
-    penalties = net_penalties or {}
-    # Nets that are physically routed (skip those left to ME): each is (machine ids, weight), where a
-    # penalized net weighs more so the optimizer shortens it preferentially. Item/fluid nets pay
-    # HPWL. Power nets have NO base term (module docstring says why) - one enters the cost, as
-    # an MST trunk-length pull, only once the router fails it and the feedback penalizes it.
-    wire_nets: list[_WeightedNet] = []
-    power_nets: list[_WeightedNet] = []
-    for n in problem.nets:
-        if problem.rides_me(n):
-            continue
-        ids = [e.machine_id for e in n.endpoints]
-        if n.commodity is Commodity.POWER:
-            if penalties.get(n.id):
-                power_nets.append((ids, penalties[n.id]))
-        else:
-            wire_nets.append((ids, 1.0 + penalties.get(n.id, 0.0)))
+    wire_nets, power_nets = _cost_nets(problem, net_penalties or {})
     # Directed source->sink pairs that COULD auto-output (simple 1->1 item/fluid nets, like the
     # router's own rule): the cost rewards each pair the current placement+orientation makes
     # face-adjacent, so orientation has a gradient toward enabling the free connection.
@@ -757,8 +779,10 @@ def _apply_occupied_delta(
 def _net_adjacency(problem: InputIR) -> dict[str, set[str]]:
     """Machine -> the machines it shares a net with (any commodity), for LNS related removal."""
     adj: dict[str, set[str]] = {m.id: set() for m in problem.machines}
-    for net in problem.nets:
-        ids = [e.machine_id for e in net.endpoints if e.machine_id in adj]
+    groups = [[e.machine_id for e in net.endpoints] for net in problem.nets]
+    groups += list(me_network_machines(problem).values())  # an ME network relates its machines
+    for group in groups:
+        ids = [mid for mid in group if mid in adj]
         for a in ids:
             for b in ids:
                 if a != b:

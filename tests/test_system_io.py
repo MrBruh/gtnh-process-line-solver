@@ -24,6 +24,10 @@ from gtnh_solver.ir import (
     LayoutStatus,
     Machine,
     MachineFaceRef,
+    MEConfig,
+    MEDeviceKind,
+    MEMode,
+    MERole,
     Net,
     Placement,
     Port,
@@ -34,6 +38,8 @@ from gtnh_solver.ir import (
 from gtnh_solver.solver import solve
 from gtnh_solver.system_io import (
     BoundaryFlow,
+    MEFlow,
+    MENetworkIO,
     SystemIO,
     is_boundary_storage,
     net_label,
@@ -42,6 +48,16 @@ from gtnh_solver.system_io import (
     resource_label,
     system_io,
 )
+from tests._me_fixtures import (
+    MAIN,
+    SUB,
+    attached_line,
+    comb,
+    item_port,
+    me_net,
+    single,
+)
+from tests._me_fixtures import endpoint as me_endpoint
 
 _SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
 
@@ -507,3 +523,72 @@ def test_a_net_label_names_each_resource_in_the_pipe() -> None:
     names = {"a": "Alpha", "c": "Gamma"}
     assert net_label(merged, names) == "Alpha (a), b, Gamma (c)"
     assert net_label(power, names) is None
+
+
+# ------------------------------------------------------------------ what each ME network asks (#335)
+
+
+def test_an_attached_network_spends_a_main_channel_per_device_and_names_its_stock() -> None:
+    # ``stone`` feeds a from storage (nothing in the line makes it); ``mid`` runs a -> b inside.
+    problem, layout = attached_line()
+    (network,) = system_io(problem, layout).me
+    assert network == MENetworkIO(
+        network=MAIN,
+        mode=MEMode.ATTACHED,
+        supplies=(MEFlow("stone", ("stone",), Commodity.ITEM, 1.0),),
+        absorbs=(),
+        devices=3,
+        main_channels=3,
+    )
+
+
+def test_a_link_subnet_spends_a_main_channel_per_link_and_stores_what_it_makes() -> None:
+    problem, layout = comb(2, mode=MEMode.SUBNET)
+    link = Machine(
+        id="link",
+        type="ME Smart Cable",
+        voltage_tier="LV",
+        orientation_options=[Facing.WEST],
+        me_role=MERole.LINK,
+        me_network=SUB,
+        outside_front=True,
+        me_endpoints=(me_endpoint("bus", (), MEDeviceKind.STORAGE_BUS, network=SUB),),
+    )
+    made = single("maker", [item_port("out", IODirection.OUTPUT)], [])
+    problem = InputIR.model_validate(
+        {
+            **problem.model_dump(),
+            "machines": [m.model_dump() for m in (*problem.machines, link, made)],
+            "nets": [
+                *(n.model_dump() for n in problem.nets),
+                me_net("product", ("maker", "out"), network=SUB).model_dump(),
+            ],
+        }
+    )
+    (network,) = system_io(problem, layout).me
+    assert network.mode is MEMode.SUBNET
+    assert network.devices == 3  # two export buses and the link's storage bus
+    assert network.main_channels == 1
+    assert [f.resource for f in network.supplies] == ["n0", "n1"]
+    assert [f.resource for f in network.absorbs] == ["product"]
+
+
+def test_a_subnet_with_no_link_spends_no_main_channel() -> None:
+    problem, layout = comb(2, mode=MEMode.SUBNET)
+    (network,) = system_io(problem, layout).me
+    assert network.main_channels == 0
+
+
+def test_a_line_with_no_me_network_asks_nothing() -> None:
+    problem, layout = attached_line()
+    plain = problem.model_copy(update={"me": MEConfig()})
+    assert system_io(plain, layout).me == ()
+
+
+def test_nets_moving_one_resource_the_same_way_are_one_flow() -> None:
+    # Water fed from storage to two machines over two nets is one thing to stock, at their sum.
+    problem, layout = comb(2, mode=MEMode.SUBNET)
+    water = [n.model_copy(update={"fluid_or_item": "water"}) for n in problem.nets]
+    problem = problem.model_copy(update={"nets": water})
+    (network,) = system_io(problem, layout).me
+    assert network.supplies == (MEFlow("water", ("water",), Commodity.ITEM, 2.0),)

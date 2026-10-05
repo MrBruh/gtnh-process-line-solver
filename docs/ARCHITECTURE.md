@@ -92,8 +92,8 @@ doc as intent and reconcile.
   is the maintainer's parallel-sand build derived from the plan; the annealer's cost cannot see
   the shared run that makes it small, and measured on that line it ranked a flat row level with it.
 - **router/** - free-form routing on the **full-3D** cell grid (all six faces are neighbours);
-  single-channel capacity; ME-toggle skipping; the shared-amperage power primitive. It owns the
-  **auto-output vs pipe** decision (`router/auto.py`, `assign_auto_outputs`): adjacent
+  single-channel capacity; nets on ME left to the ME router; the shared-amperage power
+  primitive. It owns the **auto-output vs pipe** decision (`router/auto.py`, `assign_auto_outputs`): adjacent
   1-source-1-sink item/fluid nets take GT's free auto-output, and so does each producer standing
   against the single-block consumer of a net it shares with other producers (#270), whose pipe
   then serves only the rest; everything else is routed. Those
@@ -117,8 +117,8 @@ doc as intent and reconcile.
   another network's AE block, or its own but the cell it grows from, since an AE cable joins every
   neighbour on its own and an unlaid cycle would make AE's channel assignment order-dependent.
   Channels are counted per cell on the tree as AE counts them, so the validator's ME gate, which
-  rebuilds AE's graph from the blocks alone, finds the same counts; not wired into the solve until
-  #335. *(Phase 2, lane D: the
+  rebuilds AE's graph from the blocks alone, finds the same counts; the solver lays it between
+  the pipes and power (#335). *(Phase 2, lane D: the
   margin→channels-per-edge cap + cell→block realizability, and power optimization beyond
   size-or-reject.)*
 - **solver/** - orchestrates a multi-start of independent place↔route attempts (built: a
@@ -142,16 +142,17 @@ doc as intent and reconcile.
   placement-cost term, not a reversal of it - cable is judged where it is knowable, on a routed
   layout. The grid is deterministic and bounded, keyed off the seed; a caller with time to spare
   buys more rounds of it with a time budget (decision 6).
-  Within one attempt the order is fixed: hold one dock cell per power endpoint, lay the pipes,
-  lay power (through the repair pass), place hatches, validate. Power goes last, so every pipe
-  cell is a wall to it, and a held dock *cell* is not a held *path*: a pipe can detour around it
-  and seal it in. So when the power router cannot lay a net, the attempt gets a **power-first
-  recovery** (#226): those nets are routed alone against the machines and the pipes' dock cells,
-  their trunk is held from the pipes, and the attempt is laid again. The second pass is kept only
-  if it is VALID or fails strictly fewer nets, so it never makes an attempt worse, and an attempt
-  whose power routes never pays for it. It moves no machine, which is why `--fast` gets it too.
+  Within one attempt the order is fixed: lay the pipes (each power net negotiated with them as a
+  reserved tree, #164), lay the ME networks around the pipes (#335), lay power around both
+  (through the repair pass), place hatches, validate. ME goes before power because an AE2 tree
+  is the stricter to lay (a tree, a halo, a face of its own per device), but its cable can then
+  take the last free cell beside a machine's power face. Neither order always fits, so an attempt
+  where either fails also lays power first and ME around it, and keeps whichever order leaves
+  fewer nets unmoved; a line with no ME network lays once, exactly as before.
 - **system_io.py** - the single source of truth for the line's **boundary I/O** (what to feed in,
-  what to collect) and the **power-feed spec** (EU/t plus amperage per voltage tier). Pure over
+  what to collect), the **power-feed spec** (EU/t plus amperage per voltage tier), and what each
+  **ME network** asks of the player (its storage's supplies and products, the main network's
+  channels it spends, #335). Pure over
   the `InputIR` + `LayoutResult`; the previewer renders it rather than deriving its own, so no
   render surface can drift on what crosses the line's edge.
 - **route_blocks.py** - the same trade for the line's *routing*: a `Route` is a list of hops, a

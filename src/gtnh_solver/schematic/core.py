@@ -459,7 +459,10 @@ def lower(
     covers: list[tuple[str, tuple[int, int, int], CoverFace, CoverChoice]] = []
     filters: list[tuple[str, tuple[int, int, int], list[str]]] = []
     forbids: list[tuple[str, tuple[int, int, int], Facing]] = []
+    me_blocks = {m.id for m in problem.machines if m.me_role is not None}
     for machine in scene["machines"]:
+        if machine["id"] in me_blocks:
+            continue  # an ME block, which the export does not write yet (_warn_about_me)
         cubes = machine_cubes(machine, docs, manifest, auto_out)
         if not cubes:
             cubes = _stand_in_cubes(machine, manifest)
@@ -498,7 +501,31 @@ def lower(
     _warn_about_covers(covers, written=cover_item is not None)
     _warn_about_filters(filters)
     _warn_about_output_side(forbids)
+    _warn_about_me(layout, len(me_blocks))
     return size, grid  # type: ignore[return-value]
+
+
+def _warn_about_me(layout: LayoutResult, blocks: int) -> None:
+    """Say what of the ME networks the export leaves out, until it writes them (#339).
+
+    No AE2 block is written: not the cable, the parts on it, or the ``blocks`` the networks need of
+    their own (attach stubs, links, controllers, acceptors). A GT ME hatch stands in a multiblock's
+    casing, which needs a block there to form, so it is written as the normal hatch of its slot
+    and the builder swaps it. Counted, since the builder places each by hand from the layout.
+    """
+    cables = sum(len(n.cables) for n in layout.me_networks)
+    devices = [d for n in layout.me_networks for d in n.devices]
+    gt_hatches = sum(1 for d in devices if d.gt_mid is not None)
+    if not (cables or devices or blocks):
+        return
+    warnings.warn(
+        f"the export writes no ME block yet (GitHub #339): {cables} AE2 cable(s), "
+        f"{len(devices) - gt_hatches} part(s) and {blocks} network block(s) (stubs, links, "
+        f"controllers, acceptors) are left out, and {gt_hatches} GT ME hatch(es) are written as "
+        "the normal hatch of their slot. Place them by hand from the layout's me_networks.",
+        SchematicWarning,
+        stacklevel=3,
+    )
 
 
 def _warn_about_frames(grid: dict[tuple[int, int, int], Cell], manifest: TextureManifest) -> None:

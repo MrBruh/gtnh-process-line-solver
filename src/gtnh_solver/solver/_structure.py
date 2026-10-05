@@ -6,22 +6,31 @@ does it cost. They share these helpers rather than each re-deriving the extents,
 cannot rank attempts on one measure while the repair improves them toward another.
 
 The *structure* is every machine cell plus every route cell - a trunk sprawling outside the machine
-block is something the builder erects, so it counts against the layout.
+block is something the builder erects, so it counts against the layout. An ME network's AE2 cable
+(#335) is built like a pipe or a GT cable, so it counts exactly as a route cell does (``extra``).
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Iterable, Sequence
 
-from gtnh_solver.ir import InputIR, Placement, Route
+from gtnh_solver.ir import InputIR, MENetworkLayout, Placement, Route
 from gtnh_solver.ir.geometry import Cell, occupied_cells
 from gtnh_solver.placement import Objective
 
 
+def me_cable_cells(networks: Iterable[MENetworkLayout]) -> set[Cell]:
+    """Every cell of AE2 cable ``networks`` lay: the ``extra`` the helpers here take."""
+    return {cable.cell.as_tuple() for network in networks for cable in network.cables}
+
+
 def structure_cells(
-    problem: InputIR, placements: Sequence[Placement], routes: Sequence[Route]
+    problem: InputIR,
+    placements: Sequence[Placement],
+    routes: Sequence[Route],
+    extra: Collection[Cell] = (),
 ) -> set[Cell]:
-    """Every grid cell the build occupies - machine footprints plus route hops."""
+    """Every grid cell the build occupies - machine footprints, route hops, and ``extra`` cable."""
     machines = {m.id: m for m in problem.machines}
     cells: set[Cell] = set()
     for p in placements:
@@ -30,6 +39,7 @@ def structure_cells(
             cells.update(occupied_cells(p.cell, machine.footprint, p.orientation))
     for r in routes:
         cells.update(r.cells())
+    cells.update(extra)
     return cells
 
 
@@ -50,6 +60,7 @@ def structure_quality(
     placements: Sequence[Placement],
     routes: Sequence[Route],
     objective: Objective,
+    extra: Collection[Cell] = (),
 ) -> tuple[int, int, int]:
     """Rank an assembled structure; smaller-lexicographic is better.
 
@@ -71,10 +82,10 @@ def structure_quality(
     this key too, and there the pipes are the same for every candidate, so the blend weighs a
     source's cable against the floor it grows.
     """
-    cells = structure_cells(problem, placements, routes)
+    cells = structure_cells(problem, placements, routes, extra)
     if not cells:
         return (0, 0, 0)
-    route_cells: set[Cell] = set()
+    route_cells: set[Cell] = set(extra)
     for r in routes:
         route_cells.update(r.cells())
     footprint, layers = footprint_and_layers(cells)
