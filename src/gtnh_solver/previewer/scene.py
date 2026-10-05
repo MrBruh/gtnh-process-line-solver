@@ -24,7 +24,7 @@ import re
 from collections.abc import Collection, Iterable, Mapping
 from typing import Any
 
-from gtnh_solver.dataset import tier_voltage
+from gtnh_solver.dataset import GT_ME_HATCHES, tier_voltage
 from gtnh_solver.hatch_locks import LOCK_SLOT, hatch_layers, hatch_locks
 from gtnh_solver.ir import (
     CellBox,
@@ -176,18 +176,30 @@ def build_scene(
     ports = {(m.id, p.id): p for m in problem.machines for p in m.faces.ports}
     locks = hatch_locks(problem, layout)
     layers = hatch_layers(problem, layout)
+    # GT's own ME hatches by the casing cell they take (#338): such a hatch is listed in
+    # ``layout.hatches`` by the slot kind it fills, and only its device says which ME hatch it is.
+    me_hatches = {
+        (device.machine_id, device.cell.as_tuple()): device.gt_mid
+        for network in layout.me_networks
+        for device in network.devices
+        if device.gt_mid is not None
+    }
     hatches_by_machine: dict[str, list[dict[str, Any]]] = {}
     for hatch in layout.hatches:
         port = ports.get((hatch.machine_id, hatch.port_id)) if hatch.port_id else None
         # The port of a hatch that moves a fluid or item; an energy hatch's carries no resource.
         moved = port if port is not None and port.commodity is not Commodity.POWER else None
         lock = locks.get((hatch.machine_id, hatch.cell.as_tuple()))
+        gt_mid = me_hatches.get((hatch.machine_id, hatch.cell.as_tuple()))
         hatches_by_machine.setdefault(hatch.machine_id, []).append(
             {
                 "cell": [hatch.cell.x, hatch.cell.y, hatch.cell.z],
                 "kind": hatch.kind,
                 "facing": hatch.facing.value,
                 "port": hatch.port_id,
+                # The mID of GT's ME hatch built here, None for a normal hatch. The texture pass
+                # draws an ME hatch by it (``TextureManifest.me_hatch``), never by its kind.
+                "gtMid": gt_mid,
                 # What the hover says about it (#120): its name, which way what it moves goes
                 # (the hatch's own direction, unlike a storage's), the product it must be locked
                 # to (None when it needs no lock) and the slot GT sets that in. ``layer`` is the
@@ -195,8 +207,12 @@ def build_scene(
                 # tower's layers), and ``spare`` marks a tower's spare output hatch, which stands
                 # on a layer no product uses so the tower forms (#299). ``resourceLabel`` and
                 # ``lockLabel`` are the two resources as the hover prints them, the plan's name in
-                # front of the id (#296); ``label`` is the hatch's own name.
-                "label": _hatch_label(hatch.kind),
+                # front of the id (#296); ``label`` is the hatch's own name, an ME hatch's GT's.
+                "label": (
+                    GT_ME_HATCHES[gt_mid].name
+                    if gt_mid is not None and gt_mid in GT_ME_HATCHES
+                    else _hatch_label(hatch.kind)
+                ),
                 "flow": _HATCH_FLOW[moved.direction] if moved is not None else None,
                 "resource": port_resource(moved) if moved is not None else None,
                 "resourceLabel": (

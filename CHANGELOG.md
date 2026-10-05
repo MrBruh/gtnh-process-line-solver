@@ -7,6 +7,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **The preview draws GT's own ME hatches (#338).** A multiblock's Output Bus (ME), Output Hatch
+  (ME) or Stocking Input Bus or Hatch (ME) is drawn as that block, in its multiblock's casing like
+  any formed hatch, with its name on the hover. It is found by its mID, the only thing that tells
+  two of them apart (the stocking buses 2718 and 2711 share a class), never by the slot kind it
+  fills, so an ME hatch the manifest lacks keeps its casing cell rather than drawing as a plain
+  bus. The committed texture manifest now carries all six.
 - **An ME subnet can be powered by an Energy Acceptor on the line's own EU (#336).** Set an
   `MEPlan` subnet's `power` to `acceptor` and the solve places an AE2 Energy Acceptor for it on
   the line's highest powered tier, cabled into that tier's power like any machine and touched once

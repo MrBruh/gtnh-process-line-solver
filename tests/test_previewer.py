@@ -48,6 +48,7 @@ from gtnh_solver.previewer.scene import (
 )
 from gtnh_solver.solver import solve
 from tests._helpers import at, consumer, layered_tower, machine, net, producer
+from tests._me_fixtures import gt_hatch_line
 
 _SAND = Path(__file__).resolve().parents[1] / "examples" / "gtnh-sand.json"
 
@@ -430,6 +431,22 @@ def test_scene_says_power_left_to_me_arrives_over_me() -> None:
     assert io["power"]["me"] is True
     assert io["power"]["byTier"] == {"LV": {"volts": 32, "amps": 2}}
     assert not any(f["me"] for f in io["inputs"] + io["outputs"])
+
+
+def test_scene_names_a_gt_me_hatch_by_its_mid() -> None:
+    """GT's ME hatch is listed among the hatches by the slot kind it fills; its device says which
+    ME hatch it is, and the scene carries that mID for the texture pass and its name for the hover
+    (#338). A normal hatch with an interface in front of it stays a normal hatch."""
+    problem, layout = gt_hatch_line()
+    (hatch,) = next(m for m in build_scene(problem, layout)["machines"] if m["id"] == "mb")[
+        "hatches"
+    ]
+    assert (hatch["kind"], hatch["gtMid"], hatch["label"]) == ("OutputBus", 2710, "Output Bus (ME)")
+    problem, layout = gt_hatch_line(normal=True)
+    (hatch,) = next(m for m in build_scene(problem, layout)["machines"] if m["id"] == "mb")[
+        "hatches"
+    ]
+    assert (hatch["gtMid"], hatch["label"]) == (None, "Output Bus")
 
 
 def _hatched(

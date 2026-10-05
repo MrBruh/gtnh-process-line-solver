@@ -28,6 +28,11 @@ kind at every voltage tier the examples use, ask the previewer's own
 function the previewer will ask is what guarantees the committed manifest holds precisely what a
 preview looks up, rather than a hand-kept list that drifts from it.
 
+**GT's ME hatches are kept by mID** (#338). Any example can be solved with its nets on ME, and a
+multiblock then takes GT's own ME hatch, which the previewer draws by its mID
+(``TextureManifest.me_hatch``) since two pairs of them share a class. So every mID in
+``dataset.GT_ME_HATCHES`` is asked of that same lookup and kept, whatever tier the examples run at.
+
 **Single-block machines are kept by resolution too** (#232). A plan names one by its recipe map's
 localized name, which the machine's own name often lacks ("Ore Washer" runs in a "Basic Ore Washing
 Plant"), so the name rule alone drops it. For every example machine, the previewer's own
@@ -54,6 +59,7 @@ from gtnh_solver.adapter import adapt_file
 from gtnh_solver.dataset import (
     CABLE_MATERIAL_BY_TIER,
     CABLE_THICKNESSES,
+    GT_ME_HATCHES,
     PIPE_MATERIAL,
     ROUTED_PIPE_SIZES,
     cable_display_name,
@@ -166,6 +172,17 @@ def _hatch_keys(full: dict[str, Any], tiers: set[str]) -> set[str]:
             if found is not None:
                 keys.add(f"{found[0]}|{found[1]}")
     return keys
+
+
+def _me_hatch_keys(full: dict[str, Any]) -> set[str]:
+    """``"<block>|<meta>"`` for every GT ME hatch, by mID, resolved through the previewer's own
+    ``TextureManifest.me_hatch``; an mID the dump does not carry contributes nothing."""
+    manifest = TextureManifest(full)
+    return {
+        f"{found[0]}|{found[1]}"
+        for mid in sorted(GT_ME_HATCHES)
+        if (found := manifest.me_hatch(mid)) is not None
+    }
 
 
 def _route_keys(full: dict[str, Any], tiers: set[str]) -> set[str]:
@@ -291,7 +308,7 @@ def main() -> None:
     types, tiers = _example_types_and_tiers(machines)
     single_keys = _single_block_keys(full, machines)
     fixture_keys = _fixture_block_keys(_example_controllers())
-    hatch_keys = _hatch_keys(full, tiers)
+    hatch_keys = _hatch_keys(full, tiers) | _me_hatch_keys(full)
     route_keys = _route_keys(full, tiers)
     source_keys = _power_source_stand_in_keys(full)
     keep: dict[str, Any] = {}
@@ -323,7 +340,7 @@ def main() -> None:
             "note": (
                 "SMALL committed manifest: only the blocks the shipped example lines and the "
                 "multiblock fixtures they resolve to need - plus every hatch kind at the tiers "
-                "those lines use, "
+                "those lines use, GT's ME hatches by mID, "
                 "the cables and pipes those tiers route, and the block that stands in for a "
                 "synthesized power source, none of which matches a machine name - so "
                 "`gtnh-solve --preview examples/*.json` "

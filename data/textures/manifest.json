@@ -10,11 +10,11 @@
     },
     "generated_at": "2026-10-02T23:21:33.383Z",
     "extractor_sha": "31384c22d4e39bed7acbaa9ca218f461215d1280",
-    "note": "SMALL committed manifest: only the blocks the shipped example lines and the multiblock fixtures they resolve to need - plus every hatch kind at the tiers those lines use, the cables and pipes those tiers route, and the block that stands in for a synthesized power source, none of which matches a machine name - so `gtnh-solve --preview examples/*.json` skins out of the box. The full dump is local and version-namespaced (data/<version>/textures/manifest.json), never committed. Regenerate with tools/derive_small_manifest.py.",
+    "note": "SMALL committed manifest: only the blocks the shipped example lines and the multiblock fixtures they resolve to need - plus every hatch kind at the tiers those lines use, GT's ME hatches by mID, the cables and pipes those tiers route, and the block that stands in for a synthesized power source, none of which matches a machine name - so `gtnh-solve --preview examples/*.json` skins out of the box. The full dump is local and version-namespaced (data/<version>/textures/manifest.json), never committed. Regenerate with tools/derive_small_manifest.py.",
     "coverage": {
-      "blocks": 117,
-      "mte": 51,
-      "icons": 150,
+      "blocks": 123,
+      "mte": 57,
+      "icons": 158,
       "gaps": 0
     },
     "extractor_checks": {
@@ -10384,6 +10384,1122 @@
         }
       }
     },
+    "gregtech:gt.blockmachines|2710": {
+      "kind": "mte",
+      "display_name": "Output Bus (ME)",
+      "te_base_type": 1,
+      "source_class": "gregtech.common.tileentities.machines.outputme.MTEHatchOutputBusME",
+      "tier": 4,
+      "electric": true,
+      "sides": {
+        "DOWN": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "EAST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "NORTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ME_HATCH_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ME_HATCH",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "SOUTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "UP": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "WEST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      }
+    },
+    "gregtech:gt.blockmachines|2711": {
+      "kind": "mte",
+      "display_name": "Advanced Stocking Input Bus (ME)",
+      "te_base_type": 2,
+      "source_class": "gregtech.common.tileentities.machines.MTEHatchInputBusME",
+      "tier": 6,
+      "electric": true,
+      "sides": {
+        "DOWN": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_LuV_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_LuV_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "EAST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_LuV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_LuV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "NORTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_LuV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ME_INPUT_HATCH_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_LuV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ME_INPUT_HATCH",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "SOUTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_LuV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_LuV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "UP": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_LuV_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_LuV_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "WEST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_LuV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_LuV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      }
+    },
+    "gregtech:gt.blockmachines|2712": {
+      "kind": "mte",
+      "display_name": "Advanced Stocking Input Hatch (ME)",
+      "te_base_type": 3,
+      "source_class": "gregtech.common.tileentities.machines.MTEHatchInputME",
+      "tier": 9,
+      "electric": true,
+      "sides": {
+        "DOWN": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UHV_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UHV_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "EAST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UHV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UHV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "NORTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UHV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ME_INPUT_FLUID_HATCH_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UHV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ME_INPUT_FLUID_HATCH",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "SOUTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UHV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UHV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "UP": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UHV_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UHV_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "WEST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UHV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UHV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      }
+    },
+    "gregtech:gt.blockmachines|2713": {
+      "kind": "mte",
+      "display_name": "Output Hatch (ME)",
+      "te_base_type": 1,
+      "source_class": "gregtech.common.tileentities.machines.outputme.MTEHatchOutputME",
+      "tier": 4,
+      "electric": true,
+      "sides": {
+        "DOWN": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "EAST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "NORTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ME_FLUID_HATCH_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ME_FLUID_HATCH",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "SOUTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "UP": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "WEST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      }
+    },
+    "gregtech:gt.blockmachines|2717": {
+      "kind": "mte",
+      "display_name": "Stocking Input Hatch (ME)",
+      "te_base_type": 2,
+      "source_class": "gregtech.common.tileentities.machines.MTEHatchInputME",
+      "tier": 8,
+      "electric": true,
+      "sides": {
+        "DOWN": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UV_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UV_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "EAST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "NORTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ME_INPUT_FLUID_HATCH_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ME_INPUT_FLUID_HATCH",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "SOUTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "UP": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UV_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UV_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "WEST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_UV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      }
+    },
+    "gregtech:gt.blockmachines|2718": {
+      "kind": "mte",
+      "display_name": "Stocking Input Bus (ME)",
+      "te_base_type": 1,
+      "source_class": "gregtech.common.tileentities.machines.MTEHatchInputBusME",
+      "tier": 4,
+      "electric": true,
+      "sides": {
+        "DOWN": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_BOTTOM",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "EAST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "NORTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ME_INPUT_HATCH_ACTIVE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            },
+            {
+              "icon": "gregtech:iconsets/OVERLAY_ME_INPUT_HATCH",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "SOUTH": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "UP": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_TOP",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        },
+        "WEST": {
+          "active": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ],
+          "inactive": [
+            {
+              "icon": "gregtech:iconsets/MACHINE_EV_SIDE",
+              "rgba": [
+                255,
+                255,
+                255,
+                0
+              ],
+              "glow": false
+            }
+          ]
+        }
+      }
+    },
     "gregtech:gt.blockmachines|31": {
       "kind": "mte",
       "display_name": "LV Dynamo Hatch",
@@ -16615,6 +17731,14 @@
     "gregtech:iconsets/OVERLAY_FRONT_STEAM_HAMMER": "assets/gregtech/textures/blocks/iconsets/OVERLAY_FRONT_STEAM_HAMMER.png",
     "gregtech:iconsets/OVERLAY_FRONT_STEAM_HAMMER_ACTIVE": "assets/gregtech/textures/blocks/iconsets/OVERLAY_FRONT_STEAM_HAMMER_ACTIVE.png",
     "gregtech:iconsets/OVERLAY_MAINTENANCE": "assets/gregtech/textures/blocks/iconsets/OVERLAY_MAINTENANCE.png",
+    "gregtech:iconsets/OVERLAY_ME_FLUID_HATCH": "assets/gregtech/textures/blocks/iconsets/OVERLAY_ME_FLUID_HATCH.png",
+    "gregtech:iconsets/OVERLAY_ME_FLUID_HATCH_ACTIVE": "assets/gregtech/textures/blocks/iconsets/OVERLAY_ME_FLUID_HATCH_ACTIVE.png",
+    "gregtech:iconsets/OVERLAY_ME_HATCH": "assets/gregtech/textures/blocks/iconsets/OVERLAY_ME_HATCH.png",
+    "gregtech:iconsets/OVERLAY_ME_HATCH_ACTIVE": "assets/gregtech/textures/blocks/iconsets/OVERLAY_ME_HATCH_ACTIVE.png",
+    "gregtech:iconsets/OVERLAY_ME_INPUT_FLUID_HATCH": "assets/gregtech/textures/blocks/iconsets/OVERLAY_ME_INPUT_FLUID_HATCH.png",
+    "gregtech:iconsets/OVERLAY_ME_INPUT_FLUID_HATCH_ACTIVE": "assets/gregtech/textures/blocks/iconsets/OVERLAY_ME_INPUT_FLUID_HATCH_ACTIVE.png",
+    "gregtech:iconsets/OVERLAY_ME_INPUT_HATCH": "assets/gregtech/textures/blocks/iconsets/OVERLAY_ME_INPUT_HATCH.png",
+    "gregtech:iconsets/OVERLAY_ME_INPUT_HATCH_ACTIVE": "assets/gregtech/textures/blocks/iconsets/OVERLAY_ME_INPUT_HATCH_ACTIVE.png",
     "gregtech:iconsets/OVERLAY_MUFFLER": "assets/gregtech/textures/blocks/iconsets/OVERLAY_MUFFLER.png",
     "gregtech:iconsets/OVERLAY_PIPE": "assets/gregtech/textures/blocks/iconsets/OVERLAY_PIPE.png",
     "gregtech:iconsets/OVERLAY_PIPE_IN": "assets/gregtech/textures/blocks/iconsets/OVERLAY_PIPE_IN.png",

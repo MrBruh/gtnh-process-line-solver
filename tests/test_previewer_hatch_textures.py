@@ -679,3 +679,74 @@ def test_a_spare_output_hatch_becomes_the_same_block_as_a_ports_output_hatch() -
     assert (cubes[(0, 0, 0)].block, cubes[(0, 0, 0)].meta) == ("gregtech:gt.blockmachines", 63)
     assert (cubes[(1, 0, 0)].block, cubes[(1, 0, 0)].meta) == ("gregtech:gt.blockmachines", 63)
     assert cubes[(1, 0, 0)].facing == "EAST"
+
+
+# ------------------------------------------------------------------- GT's ME hatches, by mID (#338)
+
+_STOCKING_BUS = "gregtech.common.tileentities.machines.MTEHatchInputBusME"
+_ME_OVERLAY = "gregtech:iconsets/OVERLAY_ME_INPUT_HATCH"
+
+
+def _me_manifest() -> TextureManifest:
+    """The test manifest plus GT's two stocking input buses (ME), which share one class."""
+    raw = {
+        "schema": 2,
+        "blocks": {
+            "gregtech:gt.blockcasings|0": _casing_entry(_CASING),
+            "gregtech:gt.blockmachines|73": _hatch_entry(
+                "Input Bus (HV)", _INPUT_BUS, front=[_PIPE_IN, _ITEM_IN]
+            ),
+            "gregtech:gt.blockmachines|2718": _hatch_entry(
+                "Stocking Input Bus (ME)", _STOCKING_BUS, front=[_ME_OVERLAY]
+            ),
+            "gregtech:gt.blockmachines|2711": _hatch_entry(
+                "Advanced Stocking Input Bus (ME)", _STOCKING_BUS, front=[_ME_OVERLAY]
+            ),
+            "gregtech:gt.blockcasings|7": _casing_entry(_OTHER_CASING),
+        },
+        "icons": {},
+    }
+    return TextureManifest(raw)
+
+
+def test_an_me_hatch_resolves_by_its_mid_and_never_by_its_slot_kind() -> None:
+    # The two stocking buses share MTEHatchInputBusME, so only the mID tells them apart; and that
+    # class extends the input bus without being indexed as one, so an EV input bus slot never
+    # draws as an ME hatch (the HATCH_KIND_BY_CLASS join is on the exact class).
+    m = _me_manifest()
+    assert m.me_hatch(2718) == ("gregtech:gt.blockmachines", 2718)
+    assert m.me_hatch(2711) == ("gregtech:gt.blockmachines", 2711)
+    assert m.hatch_block("InputBus", "EV") == ("gregtech:gt.blockmachines", 73)
+    assert m.me_hatch(2710) is None  # not dumped
+    assert m.me_hatch(7) is None  # dumped, but a casing, not a machine
+
+
+def test_an_me_hatch_is_drawn_as_its_own_block_in_the_multiblocks_casing() -> None:
+    machine = _scene_machine(
+        [{"cell": [1, 0, 0], "kind": "InputBus", "facing": "east", "port": "in", "gtMid": 2711}]
+    )
+    cube = next(c for c in expand_machine(machine, _casing_doc(), _me_manifest()) if c.facing)
+    assert (cube.block, cube.meta) == ("gregtech:gt.blockmachines", 2711)
+    assert cube.casing == ("gregtech:gt.blockcasings", 0)  # re-skinned like any formed hatch
+    _, stacks = _face_icons(cube, _me_manifest())
+    by_side = {key.split("|")[2]: idle for key, (idle, _) in stacks.items()}
+    assert _icons(by_side["EAST"]) == ["MACHINE_CASING_CHEMICALLY_INERT", "OVERLAY_ME_INPUT_HATCH"]
+
+
+def test_an_me_hatch_the_manifest_lacks_keeps_the_casing_not_a_normal_hatch() -> None:
+    # Drawing it as a plain input bus would be a confident wrong block; the casing cell is honest.
+    machine = _scene_machine(
+        [{"cell": [1, 0, 0], "kind": "InputBus", "facing": "east", "port": "in", "gtMid": 2710}]
+    )
+    cubes = expand_machine(machine, _casing_doc(), _me_manifest())
+    assert all(c.block == "gregtech:gt.blockcasings" for c in cubes)
+
+
+def test_the_committed_manifest_draws_every_gt_me_hatch() -> None:
+    from gtnh_solver.dataset import GT_ME_HATCHES
+    from gtnh_solver.previewer.textures import DEFAULT_MANIFEST_PATH
+
+    committed = TextureManifest.load(DEFAULT_MANIFEST_PATH)
+    assert {mid: committed.me_hatch(mid) for mid in GT_ME_HATCHES} == {
+        mid: ("gregtech:gt.blockmachines", mid) for mid in GT_ME_HATCHES
+    }
