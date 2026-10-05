@@ -275,7 +275,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "what the optimizer treats as compact: minimum floor area (footprint, the default - "
             "stacks tall), minimum enclosing box (volume - stays flat/cubic), or both (balanced); "
-            "ignored with --fast"
+            "ignored with --fast, except on a line with an ME network, whose one short attempt "
+            "ranks by it"
         ),
     )
     parser.add_argument(
