@@ -87,7 +87,15 @@ def test_the_net_list_is_deterministic_and_names_the_problems_nets(name: str) ->
         warnings.simplefilter("ignore", AdapterWarning)
         first, second = list_nets(plan), list_nets(plan)
     assert first == second
-    unmerged = _adapt(plan, me_commodities={Commodity.ITEM, Commodity.FLUID})
+    # Every net on one network roomy enough for the line's devices (the EV nitrobenzene lines need
+    # more than the default budget's 32 channels, which the build refuses, #335).
+    roomy = MENetworkSpec(id="main", mode=MEMode.ATTACHED, me_channel_budget=1024)
+    every = MEPlan(
+        plan_digest=first.plan_digest,
+        networks=[roomy],
+        nets={e.id: "main" for e in first.nets},
+    )
+    unmerged = _adapt(plan, me_plan=every)
     # On ME, nothing merges, so the problem's item and fluid nets are exactly the listed ones.
     assert [e.id for e in first.nets] == [
         n.id

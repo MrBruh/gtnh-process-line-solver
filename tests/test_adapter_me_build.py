@@ -23,12 +23,18 @@ from gtnh_solver.adapter import (
     plan_digest,
     to_input_ir,
 )
+from gtnh_solver.adapter.me_build import build_me
 from gtnh_solver.dataset import load_physical_dataset
 from gtnh_solver.ir import (
     AEColor,
     Commodity,
+    FaceSpec,
+    Facing,
     InputIR,
+    IODirection,
     Machine,
+    MachineFaceRef,
+    MEConfig,
     MEDeviceKind,
     MEHatchPolicy,
     MEMode,
@@ -36,6 +42,8 @@ from gtnh_solver.ir import (
     MEPlan,
     MERole,
     MEStorage,
+    Net,
+    Port,
 )
 from tests.test_adapter_item_filters import _washer_plan
 
@@ -194,3 +202,61 @@ def test_a_multiblock_gets_gt_me_hatches_once_the_line_reaches_their_tier() -> N
         assert on_multiblocks
         assert all(e.hatch_kind is not None for e in on_multiblocks)
         assert all((e.device.gt_mid is not None) is expect_gt for e in on_multiblocks)
+
+
+def test_a_tank_feeding_one_machine_over_me_and_another_by_pipe_stays_for_the_pipe() -> None:
+    # The main network stands in for the tank only on the net that rides it; the piped net still
+    # draws from the tank, so the tank and its port stay (dropping them left that net naming a
+    # machine the problem no longer had).
+    tank = Machine(
+        id="s0",
+        type="Super Tank",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[Port(id="output:water", commodity=Commodity.FLUID, direction=IODirection.OUTPUT)]
+        ),
+    )
+    users = [
+        Machine(
+            id=f"m{i}",
+            type="t",
+            voltage_tier="LV",
+            orientation_options=[Facing.NORTH],
+            faces=FaceSpec(
+                ports=[
+                    Port(id="input:water", commodity=Commodity.FLUID, direction=IODirection.INPUT)
+                ]
+            ),
+        )
+        for i in (1, 2)
+    ]
+
+    def water(net_id: str, user: str, network: str | None) -> Net:
+        return Net(
+            id=net_id,
+            commodity=Commodity.FLUID,
+            fluid_or_item="water",
+            throughput=1.0,
+            me_network=network,
+            endpoints=[
+                MachineFaceRef(machine_id="s0", port_id="output:water"),
+                MachineFaceRef(machine_id=user, port_id="input:water"),
+            ],
+        )
+
+    me = MEConfig(networks=[MENetworkSpec(id="main", mode=MEMode.ATTACHED)])
+    machines, nets = build_me(
+        [tank, *users],
+        [water("on-me", "m1", "main"), water("piped", "m2", None)],
+        me,
+        storage_ids={"s0"},
+        multiblock_ids=set(),
+        line_tier="LV",
+        recipe_ticks={},
+    )
+    kept = next(m for m in machines if m.id == "s0")
+    assert [p.id for p in kept.faces.ports] == ["output:water"]
+    by_id = {n.id: n for n in nets}
+    assert [e.machine_id for e in by_id["on-me"].endpoints] == ["m1"]
+    assert [e.machine_id for e in by_id["piped"].endpoints] == ["s0", "m2"]

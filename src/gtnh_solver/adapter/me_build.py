@@ -180,6 +180,9 @@ def _storages(
                 }
             )
         )
+    # A storage port another net still pipes from stays: one tank can feed a machine over ME and
+    # another over a pipe, and only the net on ME stops reaching it.
+    dropped -= {(e.machine_id, e.port_id) for net in out_nets for e in net.endpoints}
     if dropped:
         machines = [
             m.model_copy(
