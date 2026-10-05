@@ -611,8 +611,9 @@ stubs, links, a controller over 8 devices, an Energy Acceptor when the line's ow
 pipe's terminal, and pulls each network's machines together, stub included. The solver lays each
 network's cable after the pipes and before power (the router below); the CLI then says, per
 network, what its storage must supply, what lands there, how many of the main network's channels
-it spends, and what it draws (`system_io`; "What an ME network draws" below). The preview draws no ME block yet (#338), and the schematic
-export leaves them out with a warning that counts them (#339).
+it spends, and what it draws (`system_io`; "What an ME network draws" below). The preview draws
+every ME block (#338, below), and the schematic export leaves them out with a warning that counts
+them (#339).
 
 A single block's outputs can be split: one product on ME and the rest piped. Its auto-output face
 still ejects every item, so the piped ones are merged and sorted by Item Filters as before (#249)
@@ -790,6 +791,36 @@ network the figure is what it adds, short of the main network's own cable betwee
 and the stub, which the layout cannot see. The layout carries the same per network in
 `LayoutMetrics.me` (docs/IR.md), since gtnh-solver-site reads only the layout: the draw, the
 store, and for an acceptor its rating, its source and the most amps to feed that source.
+
+### How the preview draws an ME network (#338)
+
+**AE2 decides what a cable bus looks like from what touches it**, in its renderer, so
+`previewer/me_blocks.py` makes the same decisions in Python from AE2's own numbers
+(`data/ae2/<AE2 version>/render.json`, spike section 8), and the viewer only draws the result.
+Per cable block: the sides AE2 joins (the connection rules of the validator's graph, restated
+there, plus an attach stub's front, where the main network enters), what each side carries, and
+the boxes. A cable with exactly two opposite connections is one straight bar when AE2's rule for
+its kind allows it (no part on a smart cable, dense on both sides of a dense one); any other is a
+core with an arm per connection, a plug where the arm meets a device block (a controller, an
+acceptor, a GT ME hatch's front), and per part the arm out to it and the part's own boxes. AE2
+itself overlaps a plug with its arm and runs a dense arm into the core; those are cut back where
+AE2 hides them anyway, so no two boxes of a cell share a volume (a property test).
+
+**A side's lights show what that connection carries.** A layout states one channel count per cable
+(`MECableCell.me_channels`, the router's tree count); a connection between two cables carries the
+count of the one farther from the root, the smaller on a tree, and a part or a GT ME hatch takes
+one. AE2 shows at most 8 a side, and in fours between two dense cables. The network is drawn
+powered: what powers it is reported, not built (`--me power`, an acceptor).
+
+**GT's ME hatches are GT blocks**, drawn by the texture pass like any hatch but found by mID
+(`TextureManifest.me_hatch`), since two pairs share a class; an ME hatch the manifest lacks keeps
+its casing rather than drawing as a normal hatch of its kind.
+
+**AE2's art is CC BY-NC-SA 3.0** (spike 9.2), unlike GT's LGPL sprites, and AE2FluidCraft's is
+treated the same. Both are read from the pinned jars at preview time and embedded only in the page,
+and a page that embeds any of it, from an ME network or from a GT block that wears AE2 art, shows
+AE2's credit and the licence link on its HUD: it may be shared only for non-commercial purposes
+(`NOTICE`).
 
 ## Multiblocks
 
