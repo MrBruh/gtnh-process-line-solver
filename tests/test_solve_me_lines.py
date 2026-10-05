@@ -39,6 +39,7 @@ from gtnh_solver.ir import (
 )
 from gtnh_solver.solver import solve
 from gtnh_solver.validator import validate
+from gtnh_solver.validator.report import ViolationCode
 
 _ROOT = Path(__file__).resolve().parents[1]
 _SAND = str(_ROOT / "examples" / "gtnh-sand.json")
@@ -185,6 +186,45 @@ def test_nitrobenzene_with_items_and_fluids_on_one_attached_network(
         line.startswith("note: ME network main (attached): 28 device(s) on 28 channel(s) ")
         for line in capsys.readouterr().err.splitlines()
     )
+
+
+def test_nitrobenzene_with_items_on_me_feeds_its_coke_oven_any_log_through_a_fuzzy_card(
+    solves: list[tuple[InputIR, LayoutResult]],
+) -> None:
+    """#353, as it was found: ``gtnh-nitrobenzene.json --me items``. The Coke Oven burns
+    ``minecraft:log@32767``, any log, which AE2 matches only through a Fuzzy Card. Its export bus is
+    laid with one, still set to the wildcard, and the layout is VALID; the same bus without the
+    card, the build this used to lay, is refused by the gate."""
+    assert main([_NITROBENZENE, "--me", "items"]) == 0
+    ((problem, layout),) = solves
+    _assert_laid_whole(problem, layout)
+    (laid,) = layout.me_networks
+    (logs,) = [d for d in laid.devices if d.config == ("minecraft:log@32767",)]
+    coke_oven = next(m for m in problem.machines if m.id == logs.machine_id)
+    assert (coke_oven.type, logs.kind, logs.cards.fuzzy) == (
+        "Coke Oven",
+        MEDeviceKind.EXPORT_BUS,
+        1,
+    )
+    assert [d for d in laid.devices if d.cards.fuzzy] == [logs]
+
+    # Strip the card from the endpoint and the bus alike: exactly the pre-#353 build.
+    bare = logs.cards.model_copy(update={"fuzzy": 0})
+    endpoints = tuple(
+        e.model_copy(update={"device": e.device.model_copy(update={"cards": bare})})
+        if e.id == logs.endpoint_id
+        else e
+        for e in coke_oven.me_endpoints
+    )
+    oven = coke_oven.model_copy(update={"me_endpoints": endpoints})
+    old_problem = problem.model_copy(
+        update={"machines": [oven if m.id == oven.id else m for m in problem.machines]}
+    )
+    devices = [d.model_copy(update={"cards": bare}) if d == logs else d for d in laid.devices]
+    old_layout = layout.model_copy(
+        update={"me_networks": [laid.model_copy(update={"devices": devices})]}
+    )
+    assert set(validate(old_problem, old_layout).codes()) == {ViolationCode.ME_FUZZY_CARD_MISSING}
 
 
 # ------------------------------------------------------------------ sand, on a subnet

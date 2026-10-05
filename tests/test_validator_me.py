@@ -250,17 +250,20 @@ def test_a_single_block_auto_outputs_through_one_face() -> None:
 # ------------------------------------------------------------------ rule 4: rates and cards
 
 
-def _recard(problem: InputIR, layout: LayoutResult, cards: MECards) -> tuple[InputIR, LayoutResult]:
-    """Fit ``a``'s export bus with ``cards``, in the problem and the layout alike."""
+def _recard(
+    problem: InputIR, layout: LayoutResult, cards: MECards, config: tuple[str, ...] = ()
+) -> tuple[InputIR, LayoutResult]:
+    """Fit ``a``'s export bus with ``cards`` and set it to ``config``, in the problem and the
+    layout alike."""
     a = next(m for m in problem.machines if m.id == "a")
-    feed = endpoint("feed", ("in",), MEDeviceKind.EXPORT_BUS, cards=cards)
+    feed = endpoint("feed", ("in",), MEDeviceKind.EXPORT_BUS, cards=cards, config=config)
     a2 = a.model_copy(update={"me_endpoints": (feed, a.me_endpoints[1])})
     problem = problem.model_copy(
         update={"machines": [a2 if m.id == "a" else m for m in problem.machines]}
     )
     network = _network(layout)
     devices = [
-        d.model_copy(update={"cards": cards})
+        d.model_copy(update={"cards": cards, "config": config})
         if (d.machine_id, d.endpoint_id) == ("a", "feed")
         else d
         for d in network.devices
@@ -277,6 +280,55 @@ def test_a_bus_too_slow_for_its_port_is_refused() -> None:
 def test_a_bus_takes_four_cards() -> None:
     problem, layout = _recard(*attached_line(), MECards(acceleration=4, capacity=1))
     assert ViolationCode.ME_UPGRADE_SLOTS in _codes(problem, layout)
+
+
+_ANY_LOG = "minecraft:log@32767"  # Forge's wildcard: any log
+
+
+def test_a_bus_set_to_an_item_at_any_damage_needs_a_fuzzy_card() -> None:
+    """#353: AE2 matches a bus's filter exactly unless a Fuzzy Card is fitted, and no stack is at
+    damage 32767, so a bus set to one with no card moves nothing. Read off the bus as built, so it
+    is refused even where the problem asked for exactly that bus."""
+    problem, layout = _recard(*attached_line(), MECards(acceleration=1), (_ANY_LOG,))
+    report = validate(problem, layout)
+    assert set(report.codes()) == {ViolationCode.ME_FUZZY_CARD_MISSING}
+    (missing,) = report.violations
+    assert missing.machine_id == "a"
+    assert _ANY_LOG in missing.message
+    # The card mends it, and a bus set to one exact log never needed it.
+    assert validate(*_recard(*attached_line(), MECards(acceleration=1, fuzzy=1), (_ANY_LOG,))).ok
+    assert validate(*_recard(*attached_line(), MECards(acceleration=1), ("minecraft:log@1",))).ok
+
+
+def test_a_fuzzy_card_takes_one_of_four_slots() -> None:
+    cards = MECards(acceleration=4, fuzzy=1)
+    problem, layout = _recard(*attached_line(), cards, (_ANY_LOG,))
+    assert ViolationCode.ME_UPGRADE_SLOTS in _codes(problem, layout)
+
+
+@pytest.mark.parametrize(
+    ("kind", "config", "missing"),
+    [
+        (MEDeviceKind.EXPORT_BUS, (_ANY_LOG,), True),
+        (MEDeviceKind.IMPORT_BUS, ("minecraft:sand", _ANY_LOG), True),
+        (MEDeviceKind.STORAGE_BUS, (_ANY_LOG,), True),  # a partition: it would store no log
+        (MEDeviceKind.EXPORT_BUS, ("minecraft:log@1", "minecraft:log"), False),
+        (MEDeviceKind.EXPORT_BUS, ("minecraft:log@327670", "minecraft:log@any"), False),
+        (MEDeviceKind.FLUID_EXPORT_BUS, ("water",), False),  # a fluid has no damage
+        (MEDeviceKind.INTERFACE, (), False),
+    ],
+)
+def test_the_fuzzy_rule_reads_each_bus_by_its_own_config(
+    kind: MEDeviceKind, config: tuple[str, ...], missing: bool
+) -> None:
+    built = device("m", endpoint("e", ("p",), kind, config=config), (0, 0, 0), Facing.NORTH)
+    out: list[Violation] = []
+    vme._check_fuzzy({("m", "e"): (built, endpoint("e", ("p",), kind), MAIN)}, out)
+    assert [v.code for v in out] == ([ViolationCode.ME_FUZZY_CARD_MISSING] if missing else [])
+    carded = built.model_copy(update={"cards": MECards(fuzzy=1)})
+    out.clear()
+    vme._check_fuzzy({("m", "e"): (carded, endpoint("e", ("p",), kind), MAIN)}, out)
+    assert out == []
 
 
 def test_a_gt_me_output_bus_flushes_39_items_a_tick() -> None:

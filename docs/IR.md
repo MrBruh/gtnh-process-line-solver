@@ -498,6 +498,10 @@ result carries no infeasibility; `infeasible`/`partial_invalid` must carry one.
   multiblock, a `PlacedHatch` of the slot kind the endpoint names, #335). With `power_external`
   the adapter emits no power source and no power net at all (#225); the powered machines keep
   their power ports, which state the draw.
+- An item bus whose `config` names an item at any damage (`registry@32767`) carries a Fuzzy Card
+  (`MECards.fuzzy`, #353): AE2 matches a bus's config exactly without one, and no real stack is at
+  damage 32767, so the bus would move nothing. The validator reads it off each placed bus
+  (`ME_FUZZY_CARD_MISSING`).
 - A network whose `MENetworkSpec.power` is `acceptor` has an Energy Acceptor machine
   (`Machine.me_role` `acceptor`, #336) whose `eut` is what it is rated to draw. The validator holds
   it to what the laid network draws, and its store to one GT ME output flush

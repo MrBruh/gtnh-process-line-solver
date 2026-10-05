@@ -699,7 +699,10 @@ blocks too, a dense and a smart one, at their own cell.
    Interface (spike 4.6).
 4. **Every device keeps up** with its share of its ports' rate: a bus by its cards (spike 4.2,
    4.3), a GT ME output hatch by its flush (spike 5.3), an interface in front of a normal output bus
-   by that bus's push (spike 4.8); a bus takes four cards at most.
+   by that bus's push (spike 4.8); a bus takes four cards at most, a Fuzzy Card among them. And
+   **a bus set to an item at any damage carries a Fuzzy Card** (`ME_FUZZY_CARD_MISSING`, #353):
+   read off the bus as built, an item import, export or storage bus whose filter or partition
+   names a `registry@32767` item and has no card moves nothing, however fast its cards are.
 
 **Which blocks join which network** is AE's to decide, not the layout's (spike 3): a cable block
 joins every compatible neighbour (Fluix joins every colour) on a side no part takes; a part joins

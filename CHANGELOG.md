@@ -538,7 +538,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Card, left at AE2's default of ignoring damage, and keeps the wildcard as its filter: the bus
   then moves every log the network holds. The card takes one of the bus's four upgrade slots, so
   such a port faster than three Acceleration Cards carry (12.8 items/t before LuV) gets two buses.
-  `--list-nets` and the preview's hover name the card with the others.
+  `--list-nets` and the preview's hover name the card with the others. The validator now refuses
+  a bus set to such an item without the card (`me_fuzzy_card_missing`), so a layout that would
+  starve its machine in game is no longer called VALID.
 - **The exported power source produces.** The `.schematic` export stands a Debug Power Generator in
   for the adapter's synthesized power source, but wrote it with no settings, and TecTech loads a
   generator with no settings as a consumer of 0 V x 0 A. Pasted into a world, it drew power instead

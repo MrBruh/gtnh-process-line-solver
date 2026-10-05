@@ -145,6 +145,9 @@ class ViolationCode(str, Enum):
     ME_AUTO_OUTPUT_FACES = "me_auto_output_faces"  # a single block auto-outputs through two faces
     ME_DEVICE_RATE_SHORT = "me_device_rate_short"  # a device moves less than its share needs
     ME_UPGRADE_SLOTS = "me_upgrade_slots"  # more cards than a bus has slots
+    # a bus set to an item at any damage (registry@32767) with no Fuzzy Card, so AE2 matches its
+    # filter exactly and it moves nothing (#353)
+    ME_FUZZY_CARD_MISSING = "me_fuzzy_card_missing"
     ME_INFRASTRUCTURE = "me_infrastructure"  # an attach stub or link is not the cable it must be
     ME_NETWORK_MERGE = "me_network_merge"  # two networks touch, so AE joins them
     ME_NETWORK_SPLIT = "me_network_split"  # a network in pieces AE runs apart

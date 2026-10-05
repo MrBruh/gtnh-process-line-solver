@@ -16,6 +16,7 @@ rebuilt here from the blocks the layout places, and AE's own channel pathing is 
         |                 a single block's interfaces on one face             ME_AUTO_OUTPUT_FACES
         |-- rates         each device keeps up with its share                ME_DEVICE_RATE_SHORT
         |                                                                     ME_UPGRADE_SLOTS
+        |                 a bus set to an item at any damage has a Fuzzy Card ME_FUZZY_CARD_MISSING
         |-- ground        cables in the region, on nothing else              ROUTE_* (as pipes)
         |                 a stub or link is a cable of its network           ME_INFRASTRUCTURE
         v
@@ -59,6 +60,7 @@ from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from gtnh_solver.dataset.icons import WILDCARD_DAMAGE
 from gtnh_solver.dataset.me import (
     ADHOC_MAX_DEVICES,
     AE_PER_EU,
@@ -75,6 +77,7 @@ from gtnh_solver.dataset.me import (
     FLUID_BASE_MB,
     FLUID_OPERATION_TICKS,
     FLUID_SUPER_SPEED,
+    FUZZY_BUSES,
     GT_ME_HATCHES,
     ITEM_ACCELERATION,
     ITEM_SUPER_SPEED,
@@ -254,6 +257,7 @@ def check_me(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> ME
     devices = _check_endpoints(problem, layout, machines, out)
     _check_placement(problem, layout, machines, placements, devices, out)
     _check_rates(problem, machines, devices, out)
+    _check_fuzzy(devices, out)
     _check_ground(problem, layout, machines, placements, out)
     graph = _build_graph(problem, layout, machines, placements, built)
     grids = _check_channels(problem, graph, out)
@@ -570,6 +574,36 @@ def _check_rates(
                         machine_id=machine.id,
                     )
                 )
+
+
+def _check_fuzzy(
+    devices: Mapping[tuple[str, str], tuple[MEPlacedDevice, MEEndpoint, str]],
+    out: list[Violation],
+) -> None:
+    """Rule 4, the filter's half: a bus set to an item at any damage carries a Fuzzy Card (spike
+    4.2, #353). Read off the device as built, its own config and cards: AE2 matches a bus's filter
+    or partition exactly unless the card is fitted, and no stack is ever at damage 32767, so such a
+    bus moves nothing, or a storage bus stores nothing, however fast its cards are."""
+    for device, _, _ in devices.values():
+        if device.kind not in FUZZY_BUSES or device.cards.fuzzy:
+            continue
+        wild = [r for r in device.config if _any_damage(r)]
+        if wild:
+            out.append(
+                Violation(
+                    ViolationCode.ME_FUZZY_CARD_MISSING,
+                    f"{device.kind.value} for {device.endpoint_id!r} of {device.machine_id!r} is "
+                    f"set to {', '.join(wild)}, an item at any damage, which AE2 matches only "
+                    f"with a Fuzzy Card fitted; it has none, so it moves nothing",
+                    machine_id=device.machine_id,
+                )
+            )
+
+
+def _any_damage(resource: str) -> bool:
+    """Whether ``resource`` (``registry@meta``) names an item at Forge's wildcard damage."""
+    _, at, meta = resource.rpartition("@")
+    return bool(at) and meta.isdigit() and int(meta) == WILDCARD_DAMAGE
 
 
 def _capacity(
