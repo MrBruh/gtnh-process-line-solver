@@ -21,6 +21,7 @@ from gtnh_solver.ir import (
     LayoutMetrics,
     LayoutResult,
     Machine,
+    MECards,
     MEConfig,
     MEDeviceKind,
     MEDeviceSpec,
@@ -205,7 +206,7 @@ def test_an_me_plan_round_trips_and_checks_what_it_names() -> None:
         MEPlan.model_validate(me_plan.model_dump() | {"version": 0})
 
 
-# ------------------------------------------------------------------ InputIR v9 and LayoutResult v5
+# ------------------------------------------------------------------ InputIR v9/v10 and LayoutResult v5/v6
 
 
 def test_a_gt_me_hatch_names_its_mid_and_nothing_else_does() -> None:
@@ -272,10 +273,36 @@ def test_the_contracts_round_trip_and_refuse_older_versions() -> None:
     problem, layout = attached_line()
     assert InputIR.model_validate_json(problem.model_dump_json()) == problem
     assert LayoutResult.model_validate_json(layout.model_dump_json()) == layout
-    with pytest.raises(ValidationError, match="contract version 8"):
-        InputIR.model_validate(problem.model_dump() | {"version": 8})
-    with pytest.raises(ValidationError, match="contract version 4"):
-        LayoutResult.model_validate(layout.model_dump() | {"version": 4})
+    # v9 and v5 came before the Fuzzy Card (#353): a consumer of either builds a bus set to an
+    # item at any damage without it, so neither payload is read as if it agreed.
+    for older in (8, 9):
+        with pytest.raises(ValidationError, match=f"contract version {older}"):
+            InputIR.model_validate(problem.model_dump() | {"version": older})
+    for older in (4, 5):
+        with pytest.raises(ValidationError, match=f"contract version {older}"):
+            LayoutResult.model_validate(layout.model_dump() | {"version": older})
+
+
+def test_a_bus_takes_one_fuzzy_card_and_counts_it_among_its_slots() -> None:
+    """The Fuzzy Card (#353): AE2 takes one a bus (``Registration.java:644``, ``:653``, ``:762``),
+    and it fills an upgrade slot like any card, so ``count`` counts it."""
+    assert MECards().fuzzy == 0
+    assert MECards(fuzzy=1, acceleration=3).count == 4
+    with pytest.raises(ValidationError, match="less than or equal to 1"):
+        MECards(fuzzy=2)
+    with pytest.raises(ValidationError, match="greater than or equal to 0"):
+        MECards(fuzzy=-1)
+    carded = MEDeviceSpec(
+        kind=MEDeviceKind.EXPORT_BUS, cards=MECards(fuzzy=1), config=("minecraft:log@32767",)
+    )
+    # Every field is written, the card's included, so a layout states it whatever it is.
+    assert carded.model_dump(mode="json")["cards"] == {
+        "acceleration": 0,
+        "super_speed": 0,
+        "capacity": 0,
+        "fuzzy": 1,
+    }
+    assert MEDeviceSpec.model_validate_json(carded.model_dump_json()) == carded
 
 
 def test_a_layout_reports_each_network_only_when_it_has_one() -> None:

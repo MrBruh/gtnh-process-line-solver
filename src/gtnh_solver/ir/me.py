@@ -140,16 +140,24 @@ class MECards(FrozenModel):
     Hyper-Acceleration Card (``CardSuperSpeed``), ``capacity`` the Capacity Card that opens more
     config slots. AE2 takes at most four of each, which is all this states; that they share a bus's
     four upgrade slots is a rule the validator checks (``dataset.me.UPGRADE_SLOTS``), not a shape.
+
+    ``fuzzy`` is the Fuzzy Card (``CardFuzzy``; InputIR v10, LayoutResult v6, #353), one at most.
+    It makes an item bus match its filter or partition AE2's fuzzy way, the only way AE2 reads an
+    item at any damage (``registry@32767``) as more than that one stack, so a bus set to one moves
+    nothing without it (spike 4.2). A fitted card is set to ignore damage (AE2's ``IGNORE_ALL``),
+    which is a fresh bus's own setting and the only one this solver uses, so nothing records it.
+    Which bus needs one is a rule too (``dataset.me.FUZZY_BUSES``), checked by the validator.
     """
 
     acceleration: int = Field(default=0, ge=0, le=4)
     super_speed: int = Field(default=0, ge=0, le=4)
     capacity: int = Field(default=0, ge=0, le=4)
+    fuzzy: int = Field(default=0, ge=0, le=1)
 
     @property
     def count(self) -> int:
         """How many upgrade slots these cards take."""
-        return self.acceleration + self.super_speed + self.capacity
+        return self.acceleration + self.super_speed + self.capacity + self.fuzzy
 
 
 class MEMode(str, Enum):

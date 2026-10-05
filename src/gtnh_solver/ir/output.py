@@ -43,7 +43,10 @@ from .me import MENetworkLayout, MENetworkMetrics
 #: v5 adds ``LayoutResult.me_networks``, the ME blocks a build needs (#333). Additive in shape and a
 #: bump by omission, like ``hatches``: a consumer that ignores it builds a line whose ME nets have no
 #: cable and no device.
-LAYOUT_RESULT_VERSION = 5
+#: v6 adds the Fuzzy Card to a device's cards (``MECards.fuzzy``, #353). Additive in shape and a
+#: bump by omission again: a consumer that ignores it builds a bus set to an item at any damage
+#: without the card, and that bus moves nothing.
+LAYOUT_RESULT_VERSION = 6
 
 #: Allowed GT cable thicknesses, smallest first (1x/2x/4x/8x/12x/16x; docs/DOMAIN.md). The single
 #: source: this contract enforces membership on every power route, and ``dataset`` re-exports the

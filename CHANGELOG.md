@@ -1116,6 +1116,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pinned to the committed manifest it is actually about.
 
 ### Changed
+- **The layout JSON is `LayoutResult` v6, and the problem `InputIR` v10 (#353).** An ME device's
+  cards now name the Fuzzy Card (`MECards.fuzzy`, 0 or 1), which a bus set to an item at any
+  damage needs to move anything in game; it takes one of the bus's four upgrade slots. Additive in
+  shape, but a consumer that ignored it would build that bus without the card, so the contract is
+  bumped: a v5 layout or a v9 problem is refused on parse (re-solve, or re-adapt the plan). A line
+  with no ME network lays exactly as before; only the `version` its layout states changes.
 - **The layout JSON is `LayoutResult` v5, and the problem `InputIR` v9 (#333).** A layout lists the
   ME blocks it builds per network (`me_networks`: AE2 cables and devices), and a problem the ME
   devices each machine needs (`Machine.me_endpoints`) and its ME infrastructure (`Machine.me_role`:
