@@ -173,7 +173,7 @@ def test_a_gt_me_hatch_joins_only_the_cable_its_front_faces() -> None:
     cable = _blocks(problem, layout)[(1, 0, 2)]
     hatch = next(c for c in cable.connections if c.to == "hatch")
     assert hatch.side is Facing.NORTH
-    assert hatch.reports is None
+    assert hatch.reports is MECableKind.SMART  # isOutputFacing ? SMART : NONE, in GT's ME hatches
     assert hatch.channels == 1
     # Turned to face west, its front meets no cable, and the cable draws nothing toward it.
     network = layout.me_networks[0]
@@ -276,6 +276,39 @@ def test_between_two_dense_cables_a_side_shows_its_channels_in_fours() -> None:
     assert arm.lights[0].icon == "appliedenergistics2:MECableSmart03"  # 12 channels, in fours
 
 
+def test_beside_a_controller_a_dense_cable_counts_in_fours_and_beside_an_acceptor_does_not() -> (
+    None
+):
+    # AE2 divides by four only where both nodes have DENSE_CAPACITY (PartCable.java:386-392). The
+    # controller sets it (TileController.java:55); an acceptor, which reports covered, does not.
+    controller = MEConnection(Facing.NORTH, "block", MECableKind.DENSE, AEColor.FLUIX, 12)
+    _, boxes = cable_boxes(MECableKind.DENSE, AEColor.FLUIX, (controller,), (), RENDER)
+    (arm,) = [b for b in boxes if b.lights]
+    assert arm.lights[0].icon == "appliedenergistics2:MECableSmart03"  # 12 in fours
+    acceptor = MEConnection(Facing.NORTH, "block", MECableKind.COVERED, AEColor.FLUIX, 12)
+    _, boxes = cable_boxes(MECableKind.DENSE, AEColor.FLUIX, (acceptor,), (), RENDER)
+    assert not any(b.lights for b in boxes)  # the covered arm and plug toward it show no lights
+    hatch = MEConnection(Facing.NORTH, "hatch", MECableKind.SMART, AEColor.FLUIX, 1)
+    _, boxes = cable_boxes(MECableKind.DENSE, AEColor.FLUIX, (hatch,), (), RENDER)
+    (plug,) = [b for b in boxes if b.lights]
+    assert plug.lights[0].icon == "appliedenergistics2:MECableSmart01"  # one, not in fours
+
+
+def test_a_dense_cable_meets_a_gt_me_hatch_with_its_smart_plug_lit() -> None:
+    # The hatch's front reports smart, so the dense cable draws the smart style toward it.
+    problem, layout = gt_hatch_line()
+    network = layout.me_networks[0]
+    dense = network.model_copy(
+        update={
+            "cables": [c.model_copy(update={"kind": MECableKind.DENSE}) for c in network.cables]
+        }
+    )
+    cable = _blocks(problem, layout.model_copy(update={"me_networks": [dense]}))[(1, 0, 2)]
+    plug = next(b for b in cable.boxes if _reaches(b.box, Facing.NORTH))
+    assert "appliedenergistics2:ItemPart.CableSmart" in plug.faces
+    assert plug.lights
+
+
 def test_a_part_arm_shows_the_one_channel_its_part_takes() -> None:
     blocks = _counted_attached_line()
     arm = next(
@@ -288,7 +321,7 @@ def test_a_part_arm_shows_the_one_channel_its_part_takes() -> None:
 
 
 def _conn(
-    side: Facing, to: ConnectionTo = "cable", reports: MECableKind | None = MECableKind.SMART
+    side: Facing, to: ConnectionTo = "cable", reports: MECableKind = MECableKind.SMART
 ) -> MEConnection:
     return MEConnection(side, to, reports, AEColor.FLUIX, 0)
 
@@ -421,6 +454,29 @@ def test_an_arm_toward_a_coloured_neighbour_borrows_its_colour() -> None:
     assert "appliedenergistics2:MESmart_Orange" in arm.faces
 
 
+@pytest.mark.parametrize(
+    ("kind", "neighbour", "ends_drawn"),
+    [
+        # Covered, smart and dense bars are wider than the arm they meet, so AE2 draws their ends
+        # (PartCableSmart.java:239-241); glass leaves them open (PartCable.java:335).
+        (MECableKind.SMART, MECableKind.SMART, True),
+        (MECableKind.COVERED, MECableKind.COVERED, True),
+        (MECableKind.DENSE, MECableKind.DENSE, True),
+        (MECableKind.GLASS, MECableKind.GLASS, False),
+    ],
+)
+def test_a_straight_bar_draws_its_ends_unless_it_is_glass(
+    kind: MECableKind, neighbour: MECableKind, ends_drawn: bool
+) -> None:
+    run = (_conn(Facing.DOWN, reports=neighbour), _conn(Facing.UP, reports=neighbour))
+    straight, (bar,) = cable_boxes(kind, AEColor.FLUIX, run, (), RENDER)
+    assert straight
+    faces = dict(zip(SIDE_ORDER, bar.faces, strict=True))
+    assert (faces[Facing.DOWN] is not None, faces[Facing.UP] is not None) == (ends_drawn,) * 2
+    for light in bar.lights:  # a lit bar lights its ends too
+        assert light.faces == tuple(face is not None for face in bar.faces)
+
+
 def test_a_stubs_outside_end_is_closed_and_a_run_end_is_open() -> None:
     blocks = _blocks(*attached_line())
     stub = blocks[(0, 0, 2)]
@@ -508,7 +564,8 @@ def _cable_sides(
             continue
         if what == "none":
             continue
-        reports = None if what == "hatch" else draw(st.sampled_from([*MECableKind]))
+        # A GT ME hatch's front reports a smart cable; anything else reports what it is.
+        reports = MECableKind.SMART if what == "hatch" else draw(st.sampled_from([*MECableKind]))
         connections.append(
             MEConnection(
                 side,
@@ -531,6 +588,35 @@ def test_no_two_boxes_of_a_cell_overlap(
     for i, a in enumerate(boxes):
         for b in boxes[i + 1 :]:
             assert _overlap(a.box, b.box) == 0, f"{kind.value}: {a.box} overlaps {b.box}"
+
+
+def _open_face_covered(face: Facing, box: Box, others: list[Box]) -> bool:
+    """Whether ``box``'s open face toward ``face`` lies against a box among ``others`` that covers
+    it: one starting where ``box`` ends along that axis, at least as wide across it."""
+    axis, ahead = next((i, d) for i, d in enumerate(FACE_DELTAS[face]) if d)
+    plane = box[axis + 3] if ahead > 0 else box[axis]
+    across = [i for i in range(3) if i != axis]
+    for other in others:
+        if (other[axis] if ahead > 0 else other[axis + 3]) != plane:
+            continue
+        if all(other[i] <= box[i] and box[i + 3] <= other[i + 3] for i in across):
+            return True
+    return False
+
+
+@given(_cable_sides())
+def test_an_open_face_inside_a_block_lies_against_a_box_that_covers_it(
+    sides: tuple[MECableKind, tuple[MEConnection, ...], tuple[MEPart, ...]],
+) -> None:
+    """No hole within a cell: a face left open on the inside (an arm's end at the core, a part arm's
+    at its part) is closed by the box it meets. Faces on the cell's surface are the neighbours'."""
+    kind, connections, parts = sides
+    _, boxes = cable_boxes(kind, AEColor.FLUIX, connections, parts, RENDER)
+    for box in boxes:
+        others = [b.box for b in boxes if b is not box]
+        for side, icon in zip(SIDE_ORDER, box.faces, strict=True):
+            if icon is None and not _reaches(box.box, side):
+                assert _open_face_covered(side, box.box, others), (kind, box.box, side)
 
 
 @given(_cable_sides())
@@ -626,3 +712,22 @@ def test_connections_are_mutual_and_never_through_a_part(
         for i, a in enumerate(block.boxes):
             for b in block.boxes[i + 1 :]:
                 assert _overlap(a.box, b.box) == 0
+
+
+@given(_networks())
+def test_a_run_has_no_hole_at_a_joint(built: tuple[InputIR, LayoutResult]) -> None:
+    """Every face a cable leaves open on its block's surface lies against a box of the next block
+    at least as wide: a smart bar (5..11) meeting an arm (6..10) with its end open would show a
+    see-through ring, which is why AE2 draws a covered, smart or dense bar's ends."""
+    blocks = {c.cell: c for c in me_blocks(*built, RENDER).cables}
+    for cell, block in blocks.items():
+        for box in block.boxes:
+            for side, icon in zip(SIDE_ORDER, box.faces, strict=True):
+                if icon is not None or not _reaches(box.box, side):
+                    continue
+                dx, dy, dz = FACE_DELTAS[side]
+                beyond = blocks.get((cell[0] + dx, cell[1] + dy, cell[2] + dz))
+                assert beyond is not None, (cell, box.box, side)
+                shift = (dx * 16, dy * 16, dz * 16)
+                moved = [tuple(b.box[i] + shift[i % 3] for i in range(6)) for b in beyond.boxes]
+                assert _open_face_covered(side, box.box, moved), (cell, box.box, side)  # type: ignore[arg-type]

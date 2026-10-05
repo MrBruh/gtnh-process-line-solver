@@ -33,12 +33,16 @@ channel devices routed through it, counted on the router's tree. A connection be
 carries the count of the one farther from the root, which on a tree is the smaller of the two; a
 connection to a controller, or out of a stub, carries the cable's own count (the channels arrive
 there); a part or a GT ME hatch takes one. What a side shows is :meth:`ChannelLights.shown_count`
-of that: capped at 8, and in fours between two dense cables. A network is drawn powered.
+of that: capped at 8, and in fours where both nodes have AE2's dense capacity (a dense cable and
+another, the main network's, or a controller; :func:`_dense_link`). A network is drawn powered.
 
-**No two boxes of a cell share a volume** (a property test). AE2 itself overlaps a few: a plug and
-the arm through it, and a dense cable's arms reaching two sixteenths into its core. Shared volume
-means coplanar faces that tear in a renderer, so those are cut back where AE2 hides them anyway:
-an arm starts at the plug's face, and nothing reaches into the core. What shows is unchanged.
+**No two boxes of a cell share a volume, and no shape has a hole** (two property tests). AE2 itself
+overlaps a few boxes: a plug and the arm through it, and a dense cable's arms reaching two sixteenths
+into its core. Shared volume means coplanar faces that tear in a renderer, so those are cut back
+where AE2 hides them anyway: an arm starts at the plug's face, and nothing reaches into the core.
+What shows is unchanged. A face AE2 leaves open (an arm's ends, a glass bar's) always lies against a
+box at least as wide beyond it, in its own block or the next; a covered, smart or dense bar is wider
+than the arm it meets, which is why AE2 draws its ends (``PartCableSmart.java:239-241``).
 
 **Not modelled.** UV rotations and offsets (a straight run's stripes), and the glass icon an arm
 takes toward a coloured glass neighbour: the router lays only smart and dense cable. An arm toward a
@@ -145,12 +149,14 @@ class MEBox:
 
 @dataclass(frozen=True, slots=True)
 class MEConnection:
-    """One connected side of a cable: what is there, the cable type it reports to AE2 (``None`` for
-    a GT ME hatch, which reports none), its colour, and the channels the connection carries."""
+    """One connected side of a cable: what is there, the cable type it reports to AE2 (a cable its
+    kind, a block its own: a controller dense, an acceptor covered; a GT ME hatch's front smart,
+    ``MTEHatchOutputBusME.java:315`` and its three siblings), its colour, and the channels the
+    connection carries."""
 
     side: Facing
     to: ConnectionTo
-    reports: MECableKind | None
+    reports: MECableKind
     colour: AEColor
     channels: int
 
@@ -438,7 +444,9 @@ def _connections(
         if hatch is not None:
             front, colour = hatch
             if front is back and colours_connect(network.colour, colour):
-                found.append(MEConnection(side, "hatch", None, colour, 1))
+                # GT's ME hatches report a smart cable through their front (``isOutputFacing ?
+                # SMART : NONE``), so a dense cable draws its smart arm and plug there, lit.
+                found.append(MEConnection(side, "hatch", MECableKind.SMART, colour, 1))
             continue
         if (
             infrastructure is not None
@@ -450,6 +458,15 @@ def _connections(
                 MEConnection(side, "outside", MECableKind.DENSE, AEColor.FLUIX, cable.me_channels)
             )
     return tuple(found)
+
+
+def _dense_link(kind: MECableKind, connection: MEConnection) -> bool:
+    """Whether a side shows its channels in fours: AE2 divides by four only where both nodes have
+    ``DENSE_CAPACITY`` (``PartCable.java:386-392``). A dense or dense covered cable has it
+    (``PartDenseCable.java:54``, ``PartDenseCableCovered.java:53``), and so does a controller
+    (``TileController.java:55``), the one block that reports a dense cable type; the main network's
+    cable out of a stub is taken to be dense. So both sides reporting a dense type is the test."""
+    return kind in _DENSE and connection.reports in _DENSE
 
 
 def _runs_straight(
@@ -524,13 +541,15 @@ def cable_boxes(
     straight = _runs_straight(kind, connections, parts)
     if straight:
         bar = style.straight
-        # A bar's end is open where the run goes on; out of a stub nothing visible does.
-        open_ends = [c.side for c in connections if c.to != "outside"]
+        # AE2 leaves a glass bar's ends open where the run goes on (``renderFacesExceptAxis``,
+        # PartCable.java:335): the glass beyond is as wide. Every other kind draws its ends
+        # (PartCableSmart.java:239-241), being wider than the arm it meets.
+        open_ends = (
+            [c.side for c in connections if c.to != "outside"] if kind is MECableKind.GLASS else []
+        )
         faces = _faces(render.cable_icon(bar.icons, colour), _except(*open_ends))
         first = connections[0]
-        count = render.channel_lights.shown_count(
-            first.channels, dense=kind in _DENSE and first.reports in _DENSE
-        )
+        count = render.channel_lights.shown_count(first.channels, dense=_dense_link(kind, first))
         lights = _channel_lights(render, colour, count, faces) if bar.lights else ()
         boxes.append(MEBox(toward(first.side, bar.box), faces, colour, lights))
         return True, tuple(boxes)
@@ -554,7 +573,7 @@ def _connection_boxes(
     side = connection.side
     style = render.cables[kind].connection(connection.reports)
     count = render.channel_lights.shown_count(
-        connection.channels, dense=kind in _DENSE and connection.reports in _DENSE
+        connection.channels, dense=_dense_link(kind, connection)
     )
     boxes: list[MEBox] = []
     plug_box: Box | None = None
