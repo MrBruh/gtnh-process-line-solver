@@ -139,6 +139,7 @@ from gtnh_solver.ir.geometry import Cell
 from gtnh_solver.placement import (
     SINGLE_BLOCK_IO_FACES,
     Objective,
+    _diag,
     bank_columns,
     crowded_machines,
     optimize_placement,
@@ -321,6 +322,8 @@ def _search(
     # space they save is invisible until routing). For the footprint objective the two coincide,
     # so all attempts go to its own weighting across more seeds. A budget smaller than one seed of
     # every mode (minimal's single attempt) keeps the requested objective's own weighting.
+    if seed == 0:
+        _diag_start(problem, objective, budget)
     sa_modes: tuple[Objective, ...] = (
         ("footprint",) if objective == "footprint" else (objective, "footprint")
     )
@@ -345,6 +348,7 @@ def _search(
                         seed=attempt.seed,
                         infeasibility=attempt.infeasibility,
                     )
+                    _diag_solve(problem, "infeasible", infeasible, objective)
                     return infeasible, done + 1
                 if attempt.layout is None:
                     gated = gated or attempt.gated
@@ -363,6 +367,7 @@ def _search(
                 break
 
     if best_valid is not None:
+        _diag_solve(problem, "valid", best_valid, objective)
         return best_valid, done
     # No attempt came out VALID. The fast path's layout is the constructive placement every attempt
     # anneals away from, assembled as it stands, and it can be VALID where none of them is: stacking
@@ -376,6 +381,7 @@ def _search(
     if constructive.ok and not crowded_machines(problem, constructive.placements):
         fast, _ = _assemble(problem, constructive.placements, seed, objective, repair=False)
         if fast.status is LayoutStatus.VALID:
+            _diag_solve(problem, "fast", fast, objective)
             return fast, done
     if best_partial is None:
         # Every attempt was turned away, so nothing was ever routed. Do NOT report the crowding as
@@ -386,7 +392,9 @@ def _search(
         # changed nothing else.
         assert gated is not None  # the only path that skips every attempt sets it
         layout, _ = _assemble(problem, gated, seed, objective, max_rounds=budget.negotiation_rounds)
+        _diag_solve(problem, "gated", layout, objective)
         return _with_shortfall_reason(problem, layout), done
+    _diag_solve(problem, "partial", best_partial, objective, failed=best_failures)
     return _with_shortfall_reason(problem, best_partial), done
 
 
@@ -476,7 +484,9 @@ def _attempt(
     # Can every machine dock every connection it carries? Checked before routing, naming a machine
     # only on proof: a crowded placement cannot route, and routing it only to watch an arbitrary
     # net lose the race for the last free face costs an attempt and reports the wrong machine (#76).
-    if crowded_machines(problem, placement.placements):
+    crowded = crowded_machines(problem, placement.placements)
+    if crowded:
+        _diag.emit("attempt", seed=attempt_seed, mode=sa_mode, gated=len(crowded))
         return _Attempt(attempt_seed, gated=placement.placements)
     layout, failed_nets = _assemble(
         problem,
@@ -485,7 +495,63 @@ def _attempt(
         objective,
         max_rounds=budget.negotiation_rounds,
     )
+    _diag.emit(
+        "attempt",
+        seed=attempt_seed,
+        mode=sa_mode,
+        gated=0,
+        status=layout.status.value,
+        failed=len(failed_nets),
+        key=_diag_key(problem, layout, objective),
+    )
     return _Attempt(attempt_seed, layout=layout, failed_nets=failed_nets)
+
+
+def _diag_key(problem: InputIR, layout: LayoutResult, objective: Objective) -> list[int] | None:
+    """SPIKE: a routed layout's quality key, or None when it has nothing placed."""
+    if not layout.placements:
+        return None
+    return list(_quality(problem, layout, objective))
+
+
+def _diag_start(problem: InputIR, objective: Objective, budget: _Budget) -> None:
+    """SPIKE: gate and route the annealer's start as it stands, as an attempt would."""
+    start = place(problem, lattice=True)
+    if not start.ok:
+        _diag.emit("start", ok=False)
+        return
+    crowded = crowded_machines(problem, start.placements)
+    if crowded:
+        _diag.emit("start", ok=True, gated=len(crowded))
+        return
+    layout, failed = _assemble(
+        problem, start.placements, 0, objective, max_rounds=budget.negotiation_rounds
+    )
+    _diag.emit(
+        "start",
+        ok=True,
+        gated=0,
+        status=layout.status.value,
+        failed=len(failed),
+        key=_diag_key(problem, layout, objective),
+    )
+
+
+def _diag_solve(
+    problem: InputIR,
+    path: str,
+    layout: LayoutResult,
+    objective: Objective,
+    failed: int | None = None,
+) -> None:
+    """SPIKE: which path the solve's result came from, and its key."""
+    _diag.emit(
+        "solve",
+        path=path,
+        status=layout.status.value,
+        failed=failed,
+        key=_diag_key(problem, layout, objective),
+    )
 
 
 class _Rounds:

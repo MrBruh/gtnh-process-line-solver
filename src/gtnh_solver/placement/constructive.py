@@ -78,6 +78,7 @@ from gtnh_solver.ir.geometry import (
     front_on_boundary,
     in_region,
     occupied_cells,
+    rotated_footprint,
 )
 from gtnh_solver.ir.nets import net_sources_sinks, port_direction_map
 
@@ -106,7 +107,7 @@ def place(problem: InputIR, *, lattice: bool = False) -> PlacementResult:
     """
     if lattice:
         groups = parallel_groups(problem)
-        if groups:
+        if groups or (_SHELF_MULTIBLOCKS and not _single_blocks_only(problem.machines)):
             grouped = _place_grouped(problem, groups)
             if grouped is not None:
                 return PlacementResult(placements=grouped)
@@ -141,6 +142,10 @@ _Window = tuple[int, int]
 _LATTICE_STRIDE_X = 2
 _LATTICE_STRIDE_Z = 3
 
+#: SPIKE knob (initial-placement sweep): seed a line with a multiblock on the shelf too, each machine
+#: a unit at its footprint, instead of the plain first-fit strip. False is main's behaviour.
+_SHELF_MULTIBLOCKS = False
+
 
 def _lattice_window(problem: InputIR) -> _Window | None:
     """The corner window a single-block line is seeded in, or None to scan plainly.
@@ -173,7 +178,7 @@ def _place_grouped(
     order = _flow_order(problem)
     units = _flow_units(order, groups)
     slotted: list[tuple[list[Machine], Cell | None]]
-    if _single_blocks_only(problem.machines):
+    if _single_blocks_only(problem.machines) or _SHELF_MULTIBLOCKS:
         shelf = [u for u in units if not u[0].fronts_outside]
         slots = _unit_slots([_unit_box(u) for u in shelf])
         slotted = [(u, (x, 0, z)) for u, (x, z) in zip(shelf, slots, strict=True)]
@@ -209,8 +214,12 @@ def _flow_units(order: list[Machine], groups: tuple[tuple[str, ...], ...]) -> li
 
 def _unit_box(unit: list[Machine]) -> tuple[int, int]:
     """A shelf unit's ``(x, z)`` extent: its column at its first legal facing, or one block."""
-    sx, _, sz = column_size(len(unit), unit[0].orientation_options[0])
-    return (sx, sz) if len(unit) > 1 else (1, 1)
+    head = unit[0]
+    if len(unit) > 1:
+        sx, _, sz = column_size(len(unit), head.orientation_options[0])
+        return sx, sz
+    box = rotated_footprint(head.footprint, head.orientation_options[0])
+    return box.sx, box.sz
 
 
 def _unit_slots(boxes: list[tuple[int, int]]) -> list[tuple[int, int]]:
@@ -270,7 +279,7 @@ def _lay_unit(
                 for m, (dx, dy, dz) in zip(unit, column_offsets(len(unit), facing), strict=True)
             ]
     elif slot is not None and _fits(head, _coord(slot), facing, region, occupied):
-        occupied.add(slot)
+        occupied.update(occupied_cells(_coord(slot), head.footprint, facing))
         return [Placement(machine_id=head.id, cell=_coord(slot), orientation=facing)]
     laid: list[Placement] = []
     for machine in unit:

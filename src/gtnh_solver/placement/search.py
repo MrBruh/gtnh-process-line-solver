@@ -136,6 +136,7 @@ from gtnh_solver.ir.geometry import (
 from gtnh_solver.ir.nets import me_device_ports, me_network_machines
 from gtnh_solver.router.auto import auto_candidates, auto_output_possible
 
+from . import _diag
 from .constructive import PlacementResult, _fit, place
 from .feasibility import crowded_machines
 from .groups import column_offsets, column_size, parallel_groups
@@ -682,7 +683,10 @@ def optimize_placement(
     if max_iterations is not None:
         iters = min(iters, max_iterations)
     temp = _T0
-    for _ in range(iters):
+    start, start_cost = current, current_cost
+    checkpoints = {max(1, iters * k // 10) for k in range(1, 11)}
+    trace: list[tuple[float, float]] = []
+    for it in range(iters):
         if rng.random() < _P_LNS:
             cand = _ruin_and_recreate(current, ctx, rng)
         else:
@@ -707,7 +711,26 @@ def optimize_placement(
                     best, best_cost = current, current_cost
                 accepted.append((current_cost, len(accepted), current))
         temp *= _ALPHA
+        if it + 1 in checkpoints:
+            trace.append((round(current_cost, 3), round(best_cost, 3)))
     chosen = _cheapest_uncrowded(problem, accepted, best)
+    chosen_cost = best_cost if chosen is best else next(c for c, _, st in accepted if st is chosen)
+    _diag.emit(
+        "anneal",
+        seed=seed,
+        objective=objective,
+        machines=len(start),
+        iters=iters,
+        accepted=len(accepted) - 1,
+        start_cost=round(start_cost, 3),
+        best_cost=round(best_cost, 3),
+        chosen_cost=round(chosen_cost, 3),
+        chosen_is_best=chosen is best,
+        start_extent=_diag.extent(_occupied(start, bodies)),
+        chosen_extent=_diag.extent(_occupied(chosen, bodies)),
+        trace=trace,
+        **_diag.movement(start, chosen, bodies),
+    )
     return PlacementResult(placements=tuple(_placement(p) for p in chosen))
 
 
