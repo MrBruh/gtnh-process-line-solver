@@ -80,9 +80,7 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   controller). Every layout is held to AE2's rules by the validator. The run says, per network,
   what its storage must hold, what lands there, and how many of your main network's channels it
   spends; the preview's I/O panel lists the same. The schematic export writes the ME blocks since
-  #339 (above). `--fast` cannot lay a line
-  on ME (its touching row leaves no face for the devices), so it returns an explicit partial
-  layout; use the default solve.
+  #339 (above).
 - **The `.schematic` export can write each conveyor and pump cover, so the ghost shows where it
   goes.** Pass `--world` with the save folder (or `level.dat`) of the world the build goes in. GT
   names a cover's item by the world's numeric item id, which FML assigns per world (two worlds of
@@ -503,6 +501,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **`--fast` lays a line with nets on ME (#352).** Its one constructive placement is a touching
+  row, so that neighbours auto-feed. Nothing on ME auto-feeds, so in that row a single block kept
+  too few free faces for its ME devices, and ME blocks (a subnet's two links, a link and its
+  acceptor, two networks' blocks) stood side by side where the ME router must refuse them: every
+  fast run with nets on ME came back an explicit partial layout with nothing ME laid. A fast solve
+  of a line with ME blocks to lay is now one short optimizing attempt instead, exactly the layout
+  `--effort minimal` lays for the same seed and objective, and the run says so on stderr (a time
+  budget or a round count is still ignored). With `--fast --me items`, sand, nitrobenzene and
+  parallel-sand now come back VALID in a few seconds each, where they were partial; so does sand
+  on an acceptor subnet. One short attempt is still a minimal effort: sand with one net on a subnet
+  beside the main network comes back partial at seed 0 (VALID on 4 of 16 seeds), and the default
+  solve lays it. Every caller of `solve(optimize=False)` gets it, gtnh-solver-site included, and
+  `solver.fast_falls_back(problem)` says beforehand which a fast solve will do. A line with no ME
+  block to lay (no network, or only one that nothing rides) keeps the constructive layout byte for
+  byte.
 - **Every shipped example exports on a fresh clone, the converted ShadowTheAge line included
   (#319).** `gtnh-solve examples/shadow-nitrobenzene.json --schematic` was refused on a fresh
   clone: the committed `data/textures/manifest.json` was cut from a 2.8.4 dump, which has no 2.9

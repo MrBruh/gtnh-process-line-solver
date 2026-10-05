@@ -445,6 +445,57 @@ def test_sand_with_items_on_me_solves_valid_on_an_me_network(
     assert _ITEMS_NOTE in capsys.readouterr().err.splitlines()
 
 
+# ------------------------------------------------------------------ --fast on ME (#352)
+
+#: What ``--fast`` says on a line with ME blocks to lay, verbatim: the run lays another layout than
+#: the constructive one asked for, and takes a second or two to, so it says why.
+_FAST_NOTE = (
+    "note: --fast lays one constructive placement, which leaves no room for ME devices, so this "
+    "line with an ME network gets one short optimizing attempt instead (--effort minimal)"
+)
+
+
+def test_fast_lays_sand_on_me_valid_as_its_minimal_attempt(
+    real_solves: list[tuple[InputIR, LayoutResult]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    # gtnh-solver-site's contract (its #22): a fast run of sand with its items on ME exits 0 with a
+    # VALID layout. It is the layout `--effort minimal` prints, and the run says once why it is not
+    # the constructive one.
+    assert main([_SAND, "--fast", "--me", "items"]) == 0
+    fast = capsys.readouterr()
+    ((problem, layout),) = real_solves
+    assert layout.status is LayoutStatus.VALID, layout.infeasibility
+    assert validate(problem, layout).ok
+    assert fast.err.splitlines().count(_FAST_NOTE) == 1
+    assert main([_SAND, "--effort", "minimal", "--me", "items"]) == 0
+    minimal = capsys.readouterr()
+    assert fast.out == minimal.out
+    assert "--fast" not in minimal.err
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [[], ["--me", "power"], ["--me", "fluids"]],
+    ids=["no-me", "power-left-to-you", "a-network-nothing-rides"],
+)
+def test_fast_says_nothing_of_me_on_a_line_with_no_me_block_to_lay(
+    flags: list[str], capsys: pytest.CaptureFixture[str], solved_problems: list[InputIR]
+) -> None:
+    # Sand has no fluid net, so its fluids on ME declare a network that lays no block.
+    assert main([_SAND, "--fast", *flags]) == 0
+    assert "--fast" not in capsys.readouterr().err
+
+
+def test_fast_on_me_with_a_budget_says_both_in_one_note(
+    capsys: pytest.CaptureFixture[str], solved_problems: list[InputIR]
+) -> None:
+    # The fast path's own budget note says it lays one constructive placement, which this line
+    # does not, so the budget is said at the end of the ME note instead: one line, never both.
+    assert main([_SAND, "--fast", "--me", "items", "--rounds", "2"]) == 0
+    said = [line for line in capsys.readouterr().err.splitlines() if "--fast" in line]
+    assert said == [_FAST_NOTE + "; --time-budget/--rounds ignored"]
+
+
 # ------------------------------------------------------------------ power left to the builder (#225)
 
 

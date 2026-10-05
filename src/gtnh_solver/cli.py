@@ -107,7 +107,7 @@ from gtnh_solver.previewer.textures import TextureManifest
 from gtnh_solver.schematic import SchematicError, item_ids, read_schematic, write_schematic
 from gtnh_solver.schematic.ae import describe_tile, part_item_id, table_part_item_id
 from gtnh_solver.schematic.read import Schematic
-from gtnh_solver.solver import Effort, solve
+from gtnh_solver.solver import Effort, fast_falls_back, solve
 from gtnh_solver.system_io import RATE_STEM, MENetworkIO, resource_label, system_io
 from gtnh_solver.validator import validate
 
@@ -192,7 +192,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--fast",
         action="store_true",
-        help="skip placement optimization: a near-instant constructive layout (no SA/LNS)",
+        help=(
+            "skip placement optimization: a near-instant constructive layout (no SA/LNS); a line "
+            "with nets on ME gets one short optimizing attempt instead (--effort minimal), since "
+            "that layout leaves no room for ME devices"
+        ),
     )
     parser.add_argument(
         "--effort",
@@ -440,6 +444,32 @@ def _me_power_note(problem: InputIR, network: MENetworkIO) -> str:
             f"network powering it must store that much"
         )
     return said
+
+
+def _note_fast(args: argparse.Namespace, problem: InputIR) -> None:
+    """Say what ``--fast`` does on this line, when that is not just one constructive placement.
+
+    On a line with ME blocks to lay it is one short optimizing attempt (``solver.fast_falls_back``,
+    #352), which takes a second or two where the user asked for instant, and lays a different
+    layout than the constructive row, so the run says so. A time budget or a round count buys no
+    more of either, which is said in the same line, or alone on a line without ME. Once, before
+    the solve, on stderr like the other notes.
+    """
+    if not args.fast:
+        return
+    ignored = args.time_budget is not None or args.rounds is not None
+    if fast_falls_back(problem):
+        print(
+            "note: --fast lays one constructive placement, which leaves no room for ME devices, so "
+            "this line with an ME network gets one short optimizing attempt instead (--effort "
+            "minimal)" + ("; --time-budget/--rounds ignored" if ignored else ""),
+            file=sys.stderr,
+        )
+    elif ignored:
+        print(
+            "note: --fast lays one constructive placement; --time-budget/--rounds ignored",
+            file=sys.stderr,
+        )
 
 
 def _note_rounds(args: argparse.Namespace, layout: LayoutResult) -> None:
@@ -1114,11 +1144,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     _warn_if_plan_pack_undumped(plan, dataset_version, physical, problem)
     _note_me(problem)
-    if args.fast and (args.time_budget is not None or args.rounds is not None):
-        print(
-            "note: --fast lays one constructive placement; --time-budget/--rounds ignored",
-            file=sys.stderr,
-        )
+    _note_fast(args, problem)
 
     try:
         layout = solve(
