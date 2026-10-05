@@ -46,6 +46,14 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
     `Frustrum`'s camera when it is built, so Schematica culls against its first frame's view.
     The maintainer's Schematica fork builds a new `Frustrum` each frame (branch
     `fix/hologram-frustum`), confirmed in game on 2026-10-04.
+  - Stock Schematica draws a GT controller that faces **north upside down** (and one facing east
+    mirrored), whatever the file holds. GT orients a controller's front texture from the tile
+    entity it finds in the player's *real* world at the hologram's local coordinates
+    (`GTRenderedTexture.getExtendedFacing`). There is none there, so it falls back to a flip table
+    meant for plain blocks, which flips a north face vertically. That is also why a file's
+    `eRotation` changed nothing in the hologram. The maintainer's Schematica fork adds a mixin that
+    reads the hologram's own tile entity instead (branch `fix/controller-facing`), confirmed in game
+    on 2026-10-05; with it, `eRotation` and `eFlip` take effect in the hologram too.
 - There is **no headless GT simulator**, so true correctness is only verifiable in-game.
 
 ## Machine faces

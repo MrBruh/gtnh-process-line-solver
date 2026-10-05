@@ -235,13 +235,16 @@ def _gt_tile(
     an absent tag returns 0. Every controller in ``tests/golden/schematic/`` carries 0/0 whatever
     way it faces, so there is nothing else to copy.
 
-    **Known Schematica quirk, not a defect here (measured 2026-09-18):** a NORTH-facing controller
-    draws upside down in Schematica's *ghost overlay*. It is the renderer, not the file: the
-    golden - which Schematica itself wrote from a working in-world build, and which records the
-    same ``mFacing=2, eRotation=0, eFlip=0`` we emit - renders the same way, while placing the
-    block for real at that spot is correct, and sweeping ``eRotation`` through all four values
-    changes nothing. EAST, WEST and SOUTH are unaffected. Do not "fix" it by perturbing the
-    facing: that would corrupt a file that is already right.
+    **A NORTH-facing controller draws upside down in stock Schematica's ghost, and the file is not
+    the cause** (seen 2026-09-18, explained 2026-10-04). The golden, which Schematica itself wrote
+    from a working in-world build with the same ``mFacing=2, eRotation=0, eFlip=0`` we emit,
+    renders the same way, and sweeping ``eRotation`` through all four values changes nothing. GT
+    orients a controller's front texture from ``GTRenderedTexture.getExtendedFacing``, which looks
+    the tile entity up in the player's *real* world at the ghost's local coordinates, finds none,
+    and falls back to a flip table for plain blocks that flips a north face vertically (and an east
+    one horizontally). The maintainer's Schematica fork reads the ghost's own tile entity instead
+    (a mixin, confirmed in game 2026-10-05), after which ``eRotation`` and ``eFlip`` take effect.
+    Do not "fix" it by perturbing the facing: that would corrupt a file that is already right.
     """
     tile = nbt.Compound(
         {
