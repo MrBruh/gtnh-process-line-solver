@@ -58,7 +58,7 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
     part's cards and filter included (#339). So the printer places at best an empty cable bus, and
     an exported ME network is in the hologram only; the builder places its cables and parts by
     hand from it. Every item in a cable bus is named by the world's numeric id as well, so the
-    export writes cable buses only for a named world, as it does covers (ME networks, below).
+    export writes cable buses only with `--world`, as it does covers (ME networks, below).
 - There is **no headless GT simulator**, so true correctness is only verifiable in-game.
 
 ## Machine faces
@@ -852,10 +852,12 @@ golden (`tests/golden/schematic/ae2-golden-*.schematic`, spike 7.5) and held to 
 - **A cable cell** is a `BlockCableBus` whose tile entity holds the cable (`def:6`, `ItemMultiPart`
   at kind plus colour) and each part on its side (`def:N` / `extra:N`): the bus's default settings,
   its cards one a slot, and its filter or partition (an item by the world's id and damage, a fluid
-  by name). A cable bus is written **only for a named world**: every item in it is numbered by the
-  world's FML table, which Schematica never remaps, so without one each cable cell is left out and
-  counted. Either way Schematica's printer places none of it (Platform, above): the ghost carries
-  the network, and the builder places it by hand.
+  by name). A cable bus is written **only for a named world** (`--world`, the save folder or its
+  `level.dat`, as for covers): every item in it is numbered by the world's FML table, which
+  Schematica never remaps, so without one each cable cell is left out and counted. Either way
+  Schematica's printer places none of it (Platform, above): the ghost carries the network, and the
+  builder places it by hand. `--inspect-schematic FILE --world <save>` names the items in a file's
+  cable buses by that world's table; without it only AE2's own cables and buses are named.
 - **The ME Interface part and FC's Dual Interface part are left off their cable**, and listed by
   cell and side: the golden has neither, so their NBT is unverified (spike 11).
 

@@ -1099,7 +1099,9 @@ def test_cli_world_without_a_schematic_exits_2(
 ) -> None:
     world = _world(tmp_path, {"gregtech:gt.metaitem.01": 7639})
     assert main([_SAND, "--world", str(world)]) == 2
-    assert "--world only applies with --schematic" in capsys.readouterr().err
+    assert "--world only applies with --schematic or --inspect-schematic" in (
+        capsys.readouterr().err
+    )
     assert not solve_calls
 
 

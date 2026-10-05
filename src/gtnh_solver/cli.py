@@ -8,8 +8,9 @@ ShadowTheAge calculator plan, ``.gtnh``, with the 'shadow' extra), the solved la
     gtnh-solve plan.json > layout.json            # ...which is how it goes to a file
     gtnh-solve plan.json --preview view.html      # write a double-clickable 3D preview
     gtnh-solve plan.json --schematic line.schematic  # write a Schematica build ghost
-    gtnh-solve plan.json --schematic line.schematic --world saves/MyWorld  # ...with its covers
+    gtnh-solve plan.json --schematic line.schematic --world saves/MyWorld  # ...with covers, AE2
     gtnh-solve --inspect-schematic line.schematic # ...and read one back: blocks + machines
+    gtnh-solve --inspect-schematic x.schematic --world saves/MyWorld  # ...its AE2 items named
     gtnh-solve --dataset-coverage                 # what the local dataset cannot draw, ranked
     gtnh-solve plan.json --seed 3                 # pick the solver seed
     gtnh-solve plan.json --fast                   # skip optimization (instant, constructive)
@@ -288,8 +289,10 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="DIR",
         help=(
             "with --schematic: the save folder (or level.dat) of the world the build goes in. Its "
-            "item ids let the export write each conveyor and pump cover, so the ghost shows them; "
-            "the ids differ per world, so the file is right only for that one"
+            "item ids let the export write each conveyor and pump cover and each AE2 cable and "
+            "part, so the ghost shows them; the ids differ per world, so the file is right only "
+            "for that one. With --inspect-schematic: the world the file was saved in, whose item "
+            "ids name the AE2 cables, parts, cards and filters in it"
         ),
     )
     parser.add_argument(
@@ -839,9 +842,9 @@ def _print_ae(schematic: Schematic, names: Mapping[int, str] | None = None) -> N
     side with their cards and filters (#339).
 
     A cable bus names its items by the saving world's numeric ids, so only that world's table
-    (``names``, id to registry name) names them all. Without it the AE2 cables and parts still
-    resolve, since every cable is ``ItemMultiPart`` and a cable bus's centre is always a cable,
-    which gives that item's id in the file; anything else prints as its raw ``id:damage``.
+    (``names``, id to registry name, from ``--world``) names them all. Without it the AE2 cables and
+    parts still resolve, since every cable is ``ItemMultiPart`` and a cable bus's centre is always a
+    cable, which gives that item's id in the file; anything else prints as its raw ``id:damage``.
     """
     tiles = [(t, t.ae) for t in schematic.tile_entities]
     found = sorted(((t, ae) for t, ae in tiles if ae is not None), key=lambda pair: pair[0].pos)
@@ -849,7 +852,7 @@ def _print_ae(schematic: Schematic, names: Mapping[int, str] | None = None) -> N
         return
     part_item = part_item_id([ae for _, ae in found], names)
     whose = (
-        "names from the saving world's item table"
+        "items named by --world's item table"
         if names is not None
         else "item ids are the saving world's; "
         + (f"its cables say ItemMultiPart is {part_item}" if part_item is not None else "no cable")
@@ -860,7 +863,7 @@ def _print_ae(schematic: Schematic, names: Mapping[int, str] | None = None) -> N
         print(f"  {tile.id:<20} at {tile.pos}: {line}")
 
 
-def _inspect_schematic(path: str, version: str | None) -> int:
+def _inspect_schematic(path: str, version: str | None, world: str | None = None) -> int:
     """Print what is in the ``.schematic`` at ``path``. Returns the process exit code.
 
     Reading is pure (:func:`~gtnh_solver.schematic.read.read_schematic`); the only thing the
@@ -868,13 +871,21 @@ def _inspect_schematic(path: str, version: str | None) -> int:
     to raw ids rather than failing. **Which manifest answered is printed**, because the committed
     one is example-scoped: against it most of a real build's machines resolve to nothing, and an
     unqualified "not in this manifest" reads like a corrupt file when it only means the small
-    manifest was asked.
+    manifest was asked. ``world``, the save the file was made in (``--world``), names the AE2 items
+    its cable buses hold by number (:func:`_print_ae`); one that cannot be read is exit 2.
     """
     try:
         schematic = read_schematic(path)
     except (OSError, SchematicError) as exc:
         print(f"error: could not read {path}: {exc}", file=sys.stderr)
         return 2
+    names: dict[int, str] | None = None
+    if world is not None:
+        try:
+            names = {number: name for name, number in item_ids(world).items()}
+        except SchematicError as exc:
+            print(f"error: cannot read --world: {exc}", file=sys.stderr)
+            return 2
 
     manifest_path = resolve_dataset_path("textures/manifest.json", version=version)
     manifest: TextureManifest | None = None
@@ -918,7 +929,7 @@ def _inspect_schematic(path: str, version: str | None) -> int:
         print(f"  {count:5d}  mID {mid!s:<6} {tile_id:<26} {label}")
 
     _print_basic_machine_facings(schematic)
-    _print_ae(schematic)
+    _print_ae(schematic, names)
 
     if unresolved:
         print(
@@ -992,7 +1003,7 @@ def main(argv: list[str] | None = None) -> int:
         return _dataset_coverage(args.dataset_version)
 
     if args.inspect_schematic:
-        return _inspect_schematic(args.inspect_schematic, args.dataset_version)
+        return _inspect_schematic(args.inspect_schematic, args.dataset_version, args.world)
 
     # `export` is nargs="?" with this manual check (not argparse `required`) so main([]) can be
     # unit-tested for the exit-2 path without argparse raising SystemExit.
@@ -1004,7 +1015,10 @@ def main(argv: list[str] | None = None) -> int:
     world_items: dict[str, int] | None = None
     if args.world is not None:
         if not args.schematic:
-            print("error: --world only applies with --schematic", file=sys.stderr)
+            print(
+                "error: --world only applies with --schematic or --inspect-schematic",
+                file=sys.stderr,
+            )
             return 2
         try:
             world_items = item_ids(args.world)

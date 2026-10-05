@@ -840,7 +840,7 @@ def test_with_the_worlds_table_every_item_is_named(capsys: pytest.CaptureFixture
 
     _print_ae(_golden("ae2-golden-gui"), _NAMES)
     lines = [line.strip() for line in capsys.readouterr().out.splitlines()]
-    assert lines[1] == "AE2 (names from the saving world's item table)"
+    assert lines[1] == "AE2 (items named by --world's item table)"
     assert (
         "BlockCableBus        at (1, 0, 0): ME Smart Cable (Fluix); north: ME Fluid Import Bus"
         in (lines)
@@ -886,3 +886,55 @@ def test_an_item_is_named_as_far_as_what_is_known_allows() -> None:
         has_redstone=2,
     )
     assert describe_tile(cableless, part_item=_PART) == "no cable; up: ME Import Bus"
+
+
+# ------------------------------------------------------------------------ --world on the CLI (#339)
+
+
+def _world(root: Path, items: dict[str, int]) -> Path:
+    """A save folder whose level.dat lists ``items`` the way FML does (``\x02`` before an item),
+    as ``tests/test_cli.py`` builds one."""
+    world = root / "MyWorld"
+    world.mkdir()
+    table = nbt.List(
+        nbt.TAG_COMPOUND,
+        [nbt.Compound({"K": nbt.String(f"\x02{k}"), "V": nbt.Int(v)}) for k, v in items.items()],
+    )
+    level = nbt.Compound({"FML": nbt.Compound({"ItemData": table})})
+    (world / "level.dat").write_bytes(nbt.dumps("", level))
+    return world
+
+
+def test_cli_inspect_with_the_saving_world_names_every_ae2_item(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from gtnh_solver.cli import main
+
+    world = _world(tmp_path, _ITEMS)
+    assert (
+        main(
+            [
+                "--inspect-schematic",
+                str(_GOLDEN / "ae2-golden-gui.schematic"),
+                "--world",
+                str(world),
+            ]
+        )
+        == 0
+    )
+    lines = [line.strip() for line in capsys.readouterr().out.splitlines()]
+    assert "AE2 (items named by --world's item table)" in lines
+    assert (
+        "BlockCableBus        at (2, 0, 0): ME Covered Cable (Fluix); north: ME Fluid Export Bus, "
+        "cards Acceleration Card, set to water"
+    ) in lines
+
+
+def test_cli_inspect_with_an_unreadable_world_exits_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from gtnh_solver.cli import main
+
+    golden = str(_GOLDEN / "ae2-golden-gui.schematic")
+    assert main(["--inspect-schematic", golden, "--world", str(tmp_path / "nope")]) == 2
+    assert "cannot read --world: no level.dat" in capsys.readouterr().err
