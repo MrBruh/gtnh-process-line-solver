@@ -17,12 +17,31 @@ Third-party components:
   dataset-extraction tool under tools/gtnh-extractor depends on these as unmodified
   library dependencies (pulled from the GTNH Nexus) to run a headless server and read
   back multiblock structure facts. No GT5-Unofficial or StructureLib source is vendored
-  or patched here. Extracted structure facts are committed to this repository; LGPL
-  assets (textures) are not vendored and are fetched from the mod jars at build time.
-  Specifically, the 3D previewer (src/gtnh_solver/previewer) fetches the pinned
-  GT5-Unofficial jar from the GTNH Nexus at preview time, caches it outside the
+  or patched here. Extracted structure facts are committed to this repository; GT's
+  textures (LGPL, like its code) are not vendored and are fetched from the mod jar at
+  build time. Specifically, the 3D previewer (src/gtnh_solver/previewer) fetches the
+  pinned GT5-Unofficial jar from the GTNH Nexus at preview time, caches it outside the
   repository, extracts the referenced iconset PNGs, and embeds them (as data: URIs) only
   in the generated preview HTML. No PNG is ever committed to this repository.
+
+- Applied Energistics 2 Unofficial
+  (https://github.com/GTNewHorizons/Applied-Energistics-2-Unofficial), GTNewHorizons' fork
+  of Applied Energistics 2, (c) 2013 - 2015 AlgorithmX2 et al. Its code is LGPL-3.0 and its
+  API MIT, but its textures and models are licensed under Creative Commons
+  Attribution-NonCommercial-ShareAlike 3.0 (CC BY-NC-SA 3.0,
+  https://creativecommons.org/licenses/by-nc-sa/3.0/). AE2FluidCraft-Rework
+  (https://github.com/GTNewHorizons/AE2FluidCraft-Rework), GTNewHorizons, LGPL-3.0.
+  data/ae2/<AE2 version>/render.json holds geometry numbers and texture names that
+  tools/derive_ae_render.py reads from both mods' source at the tags pinned in
+  src/gtnh_solver/dataset/mod_jars.py; no source, texture or model of either mod is vendored
+  here. The previewer can fetch both pinned jars from the GTNH Nexus at preview time, as it
+  does GT5-Unofficial's, cache them outside the repository and read the PNGs a preview
+  draws; no PNG is ever committed. A preview HTML that embeds AE2 textures redistributes CC
+  BY-NC-SA 3.0 art: it may be shared for non-commercial purposes only, with this attribution
+  and the licence link above, and an adaptation of that art must be shared under the same
+  licence. AE2FluidCraft declares LGPL-3.0 for all of its files, but whether any of its
+  textures derive from AE2's art has not been checked, so a preview that embeds AE2FluidCraft
+  textures is shared on the same CC BY-NC-SA 3.0 terms.
 
 - NESQL Exporter (https://github.com/ShadowTheAge/nesql-exporter, a fork of
   https://github.com/D-Cysteine/nesql-exporter), LGPL-3.0. tools/derive_icons.py reads the

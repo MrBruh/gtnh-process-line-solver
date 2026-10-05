@@ -54,6 +54,14 @@ out/
 !/data/multiblocks/gregtech_gt_blockmachines_998.json
 /data/textures/*
 !/data/textures/manifest.json
+# The ME render data: numbers and icon names tools/derive_ae_render.py reads out of AE2's source, never
+# a PNG. Keyed by AE2's version, one render.json per pin, and nothing else: a loose file in data/ae2/
+# or beside a render.json stays ignored.
+!/data/ae2/
+/data/ae2/*
+!/data/ae2/*/
+/data/ae2/*/*
+!/data/ae2/*/render.json
 
 # Test fixtures derived from a local dump are local-only too, for the same reason and with no
 # exception: dumper output never ships, not even a filtered slice of it. A test that needs one reads

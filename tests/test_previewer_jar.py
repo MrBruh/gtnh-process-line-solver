@@ -3,23 +3,35 @@
 The download itself is injected, so these prove the caching, extraction, and provider wiring without
 ever hitting the network: a fake jar (a real in-memory zip) stands in for the 135 MB GT5-Unofficial
 jar, and a fake downloader records calls and writes that zip to the requested path.
+
+The multi-jar provider (#337) is exercised the same way, with one fake jar per pinned mod, served by
+URL: that each icon reaches the jar its ``assets/<modid>/`` names, that a jar is fetched only when
+asked for and at most once, and that an optional jar failing costs only its own icons.
 """
 
 from __future__ import annotations
 
 import json
+import logging
+import struct
 import zipfile
 from pathlib import Path
+from urllib.error import URLError
 
 import pytest
 
+from gtnh_solver.dataset.mod_jars import AE2, AE2FC, gt5u_jar
 from gtnh_solver.previewer.jar import (
     JAR_NAME,
+    JAR_URL,
+    asset_modid,
+    cached_jar,
     default_cache_dir,
     extract_icons,
     fetch_jar,
     gt5u_version_from_manifest,
     jar_png_provider,
+    multi_jar_png_provider,
 )
 
 
@@ -136,3 +148,258 @@ def test_jar_png_provider_fetches_the_version_specific_jar(tmp_path: Path) -> No
     url, filename = seen[0]
     assert "GT5-Unofficial-9.9.9.jar" in url  # the version-specific URL
     assert filename.endswith("GT5-Unofficial-9.9.9.jar.part")  # cached per version
+
+
+# --- the GT path, unchanged by the move to JarSpec ------------------------------------------------
+
+
+def test_the_gt_jar_url_and_name_are_unchanged_by_jar_specs(tmp_path: Path) -> None:
+    # The literal URL the previewer fetched before JarSpec existed: the refactor must not move it.
+    assert JAR_URL == (
+        "https://nexus.gtnewhorizons.com/repository/public/com/github/GTNewHorizons/"
+        "GT5-Unofficial/5.09.51.482/GT5-Unofficial-5.09.51.482.jar"
+    )
+    assert JAR_NAME == "GT5-Unofficial-5.09.51.482.jar"
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps({"provenance": {"mod_versions": {"GT5-Unofficial": "5.09.54.133"}}}),
+        encoding="utf-8",
+    )
+    (tmp_path / "GT5-Unofficial-5.09.54.133.jar").write_bytes(b"")
+    assert cached_jar(manifest, cache_dir=tmp_path) == tmp_path / "GT5-Unofficial-5.09.54.133.jar"
+
+
+# --- the multi-jar provider -----------------------------------------------------------------------
+
+_GT = gt5u_jar("9.9.9")
+
+#: One fake jar per pinned mod, keyed by the URL the provider must fetch it from. Each carries only
+#: its own namespace, so an icon routed to the wrong jar comes back missing rather than wrong.
+_JARS: dict[str, dict[str, bytes]] = {
+    _GT.url: {
+        "assets/gregtech/textures/blocks/iconsets/OVERLAY_FRONT.png": b"gt-overlay",
+        "assets/miscutils/textures/blocks/TileEntities/Casing.png": b"gt-addon",
+    },
+    AE2.url: {"assets/appliedenergistics2/textures/blocks/MECable_Grey.png": b"ae2-grey"},
+    AE2FC.url: {"assets/ae2fc/textures/blocks/fluid_import_face.png": b"fc-import"},
+}
+
+_GT_ICON = {"gregtech:OVERLAY_FRONT": "assets/gregtech/textures/blocks/iconsets/OVERLAY_FRONT.png"}
+_ADDON_ICON = {"miscutils:Casing": "assets/miscutils/textures/blocks/TileEntities/Casing.png"}
+_AE2_ICON = {
+    "appliedenergistics2:MECable_Grey": "assets/appliedenergistics2/textures/blocks/MECable_Grey.png"
+}
+_FC_ICON = {"ae2fc:fluid_import_face": "assets/ae2fc/textures/blocks/fluid_import_face.png"}
+
+
+def _jar_with_a_corrupt_member(path: Path, entries: dict[str, bytes]) -> None:
+    """A zip that opens and lists its members, but none of them inflates.
+
+    Each member is deflated, then the first byte of its deflate stream is set to a block of the
+    reserved type 3, which zlib refuses outright (``zlib.error``), before any CRC is compared.
+    """
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, data in entries.items():
+            archive.writestr(name, data)
+    raw = bytearray(path.read_bytes())
+    with zipfile.ZipFile(path) as archive:
+        offsets = [info.header_offset for info in archive.infolist()]
+    for offset in offsets:
+        name_length, extra_length = struct.unpack_from("<HH", raw, offset + 26)
+        raw[offset + 30 + name_length + extra_length] = 0b111  # BFINAL = 1, BTYPE = 11 (reserved)
+    path.write_bytes(bytes(raw))
+
+
+class _Nexus:
+    """A fake downloader serving :data:`_JARS` by URL; ``failing`` URLs raise as an outage would,
+    ``garbage`` ones save a page that is not a zip, and ``corrupt`` ones a zip that will not inflate.
+    """
+
+    def __init__(
+        self,
+        failing: frozenset[str] = frozenset(),
+        garbage: frozenset[str] = frozenset(),
+        corrupt: frozenset[str] = frozenset(),
+    ):
+        self.calls: list[str] = []
+        self.failing = failing
+        self.garbage = garbage
+        self.corrupt = corrupt
+
+    def __call__(self, url: str, filename: str) -> None:
+        self.calls.append(url)
+        if url in self.failing:
+            raise URLError("nexus unreachable")
+        if url in self.garbage:
+            Path(filename).write_bytes(b"<html>Sign in to the cafe wifi</html>")
+            return
+        if url in self.corrupt:
+            _jar_with_a_corrupt_member(Path(filename), _JARS[url])
+            return
+        _fake_jar(Path(filename), _JARS[url])
+
+
+def test_asset_modid_reads_the_namespace_or_nothing() -> None:
+    assert asset_modid("assets/appliedenergistics2/textures/blocks/X.png") == "appliedenergistics2"
+    assert asset_modid("assets/ae2fc/x.png") == "ae2fc"
+    assert asset_modid("textures/blocks/X.png") is None
+    assert asset_modid("assets//X.png") is None
+    assert asset_modid("assets/gregtech") is None
+
+
+def test_each_icon_is_read_from_the_jar_its_namespace_names(tmp_path: Path) -> None:
+    nexus = _Nexus()
+    provider = multi_jar_png_provider(_GT, (AE2, AE2FC), cache_dir=tmp_path, download=nexus)
+
+    out = provider({**_GT_ICON, **_ADDON_ICON, **_AE2_ICON, **_FC_ICON})
+
+    assert out == {
+        "gregtech:OVERLAY_FRONT": b"gt-overlay",
+        "miscutils:Casing": b"gt-addon",  # an unclaimed namespace stays on the primary (GT) jar
+        "appliedenergistics2:MECable_Grey": b"ae2-grey",
+        "ae2fc:fluid_import_face": b"fc-import",
+    }
+    assert sorted(nexus.calls) == sorted([_GT.url, AE2.url, AE2FC.url])
+    assert (tmp_path / AE2.jar_name).is_file()  # each pin caches under its own name
+
+
+def test_a_gt_only_page_never_downloads_the_me_jars(tmp_path: Path) -> None:
+    nexus = _Nexus()
+    provider = multi_jar_png_provider(_GT, (AE2, AE2FC), cache_dir=tmp_path, download=nexus)
+
+    assert provider({**_GT_ICON, **_ADDON_ICON}) == {
+        "gregtech:OVERLAY_FRONT": b"gt-overlay",
+        "miscutils:Casing": b"gt-addon",
+    }
+    assert nexus.calls == [_GT.url]
+    assert provider({}) == {}
+    assert nexus.calls == [_GT.url], "an empty icon set fetches nothing"
+
+
+def test_a_jar_is_fetched_only_once_it_is_asked_for_and_at_most_once(tmp_path: Path) -> None:
+    nexus = _Nexus()
+    provider = multi_jar_png_provider(_GT, (AE2, AE2FC), cache_dir=tmp_path, download=nexus)
+
+    provider(_AE2_ICON)
+    provider(_AE2_ICON)
+    provider({**_AE2_ICON, **_GT_ICON})
+
+    assert nexus.calls == [AE2.url, _GT.url]
+
+
+def test_a_failed_me_download_costs_only_its_own_icons(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    nexus = _Nexus(failing=frozenset({AE2.url}))
+    provider = multi_jar_png_provider(_GT, (AE2, AE2FC), cache_dir=tmp_path, download=nexus)
+
+    with caplog.at_level(logging.WARNING, logger="gtnh_solver.previewer.jar"):
+        out = provider({**_GT_ICON, **_AE2_ICON, **_FC_ICON})
+
+    assert out == {"gregtech:OVERLAY_FRONT": b"gt-overlay", "ae2fc:fluid_import_face": b"fc-import"}
+    assert "appliedenergistics2" in caplog.text
+    assert "unskinned" in caplog.text
+    assert not (tmp_path / AE2.jar_name).exists(), "a failed download leaves no jar behind"
+    # The failure is remembered: asking again neither retries the download nor raises.
+    assert provider(_AE2_ICON) == {}
+    assert nexus.calls.count(AE2.url) == 1
+
+
+def test_an_me_jar_that_is_not_a_zip_is_logged_and_deleted_not_raised(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # A captive portal's sign-in page saved under the jar's name: cached, it would fail every
+    # preview from now on, so it is deleted and the next preview downloads the jar again.
+    nexus = _Nexus(garbage=frozenset({AE2FC.url}))
+    provider = multi_jar_png_provider(_GT, (AE2, AE2FC), cache_dir=tmp_path, download=nexus)
+    cached = tmp_path / AE2FC.jar_name
+
+    with caplog.at_level(logging.WARNING, logger="gtnh_solver.previewer.jar"):
+        out = provider({**_FC_ICON, **_AE2_ICON})
+
+    assert out == {"appliedenergistics2:MECable_Grey": b"ae2-grey"}
+    assert "ae2fc" in caplog.text
+    assert f"deleted the corrupt cached copy {cached}" in caplog.text
+    assert not cached.exists()
+    assert provider(_FC_ICON) == {}  # remembered as unusable for this page, never re-fetched
+    assert nexus.calls.count(AE2FC.url) == 1
+
+    next_page = multi_jar_png_provider(_GT, (AE2, AE2FC), cache_dir=tmp_path, download=_Nexus())
+    assert next_page(_FC_ICON) == {"ae2fc:fluid_import_face": b"fc-import"}
+
+
+def test_an_me_jar_whose_members_will_not_inflate_costs_only_its_own_icons(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # The zip opens, so the failure surfaces only on reading a member, as zlib.error rather than
+    # BadZipFile; it must not escape to write_preview, whose fallback would drop GT's textures too.
+    nexus = _Nexus(corrupt=frozenset({AE2.url}))
+    provider = multi_jar_png_provider(_GT, (AE2, AE2FC), cache_dir=tmp_path, download=nexus)
+    cached = tmp_path / AE2.jar_name
+
+    with caplog.at_level(logging.WARNING, logger="gtnh_solver.previewer.jar"):
+        out = provider({**_GT_ICON, **_AE2_ICON})
+
+    assert out == {"gregtech:OVERLAY_FRONT": b"gt-overlay"}
+    assert "appliedenergistics2" in caplog.text
+    assert f"deleted the corrupt cached copy {cached}" in caplog.text
+    assert not cached.exists()
+
+
+def test_a_corrupt_me_jar_that_cannot_be_deleted_is_still_only_logged(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def locked(self: Path, missing_ok: bool = False) -> None:
+        raise PermissionError("in use by another process")
+
+    monkeypatch.setattr(Path, "unlink", locked)
+    nexus = _Nexus(garbage=frozenset({AE2.url}))
+    provider = multi_jar_png_provider(_GT, (AE2,), cache_dir=tmp_path, download=nexus)
+
+    with caplog.at_level(logging.WARNING, logger="gtnh_solver.previewer.jar"):
+        assert provider({**_GT_ICON, **_AE2_ICON}) == {"gregtech:OVERLAY_FRONT": b"gt-overlay"}
+
+    cached = tmp_path / AE2.jar_name
+    assert f"the corrupt cached copy {cached} could not be deleted" in caplog.text
+    assert "delete it by hand" in caplog.text
+    assert cached.exists()
+
+
+def test_an_icon_its_jar_lacks_is_simply_missing(tmp_path: Path) -> None:
+    provider = multi_jar_png_provider(_GT, (AE2,), cache_dir=tmp_path, download=_Nexus())
+
+    out = provider(
+        {
+            **_AE2_ICON,
+            "appliedenergistics2:Absent": "assets/appliedenergistics2/textures/blocks/Absent.png",
+        }
+    )
+
+    assert out == {"appliedenergistics2:MECable_Grey": b"ae2-grey"}
+
+
+def test_the_primary_jar_still_fails_loudly(tmp_path: Path) -> None:
+    # As jar_png_provider does, so write_preview's own fallback (placeholder boxes) keeps owning it.
+    nexus = _Nexus(failing=frozenset({_GT.url}))
+    provider = multi_jar_png_provider(_GT, (AE2,), cache_dir=tmp_path, download=nexus)
+
+    with pytest.raises(URLError):
+        provider(_GT_ICON)
+
+
+def test_a_primary_only_provider_routes_like_the_single_jar_one(tmp_path: Path) -> None:
+    nexus = _Nexus()
+    provider = multi_jar_png_provider(_GT, cache_dir=tmp_path, download=nexus)
+
+    # Every namespace, and a path of no namespace at all, goes to the one jar.
+    out = provider({**_GT_ICON, **_AE2_ICON, "odd": "not/an/assets/path.png"})
+
+    assert out == {"gregtech:OVERLAY_FRONT": b"gt-overlay"}
+    assert nexus.calls == [_GT.url]
+
+
+def test_two_jars_claiming_one_namespace_is_refused() -> None:
+    with pytest.raises(ValueError, match="appliedenergistics2"):
+        multi_jar_png_provider(_GT, (AE2, AE2))
+    with pytest.raises(ValueError, match="gregtech"):
+        multi_jar_png_provider(_GT, (gt5u_jar("1.0"),))
