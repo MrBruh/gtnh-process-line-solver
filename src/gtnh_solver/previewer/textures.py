@@ -1508,7 +1508,9 @@ def texturize_scene(
     toggle reuses the one image and the embedded page never bloats for faces that look the same at
     rest and running. The default display stays idle.
     """
-    all_types = tuple(sorted({m["type"] for m in scene["machines"]}))
+    # An ME stub, link, controller or acceptor is drawn by the ME layer (#338), not as a GT block,
+    # so it is neither expanded here nor reported as a placeholder.
+    all_types = tuple(sorted({m["type"] for m in scene["machines"] if not m.get("meRole")}))
     mb_dir = (
         resolve_dataset_path("multiblocks", version=version)
         if multiblocks_dir is None

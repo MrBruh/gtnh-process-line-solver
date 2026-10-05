@@ -187,6 +187,10 @@ def build_scene(
         for ep in net.endpoints
     }
     types = sorted({m.type for m in problem.machines})
+    # The types only ME infrastructure has, which the legend's machine list leaves out (#338).
+    me_only = {m.type for m in problem.machines if m.me_role is not None} - {
+        m.type for m in problem.machines if m.me_role is None
+    }
     color_for_type = {t: _MACHINE_PALETTE[i % len(_MACHINE_PALETTE)] for i, t in enumerate(types)}
 
     ports = {(m.id, p.id): p for m in problem.machines for p in m.faces.ports}
@@ -467,7 +471,9 @@ def build_scene(
         "io": scene_io,
         # Every ME network the layout builds, drawn block by block (#338); None without one.
         "me": _me_scene(problem, layout, sysio, names),
-        "legend": [{"label": t, "color": color_for_type[t]} for t in types],
+        # The machine types, bar the ME infrastructure (stubs, links, controllers, acceptors),
+        # which the ME layer draws and the legend's ME section accounts for (#338).
+        "legend": [{"label": t, "color": color_for_type[t]} for t in types if t not in me_only],
         # The route-commodity legend swatches, so the viewer reads the colours from here instead of
         # keeping a second hard-coded copy (one source: ``_COMMODITY_COLOR``).
         "routeLegend": [

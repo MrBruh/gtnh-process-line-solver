@@ -122,14 +122,18 @@ def _first_frame(png: bytes) -> bytes:
 
 def credit(mods: frozenset[str]) -> dict[str, Any] | None:
     """What a page that embeds the art of ``mods`` must show (module docstring), or ``None`` when
-    it embeds none of AE2's or FC's. Read by the viewer as data; the text is this module's own."""
-    named = [_MOD_CREDITS[modid] for modid in sorted(mods) if modid in _MOD_CREDITS]
+    it embeds none of AE2's or FC's: ``text`` in full for the legend, ``short`` for the HUD, each
+    followed by the licence's name linked to ``url``. Read by the viewer as data; the words are this
+    module's own, never the scene's."""
+    named = [credit for modid, credit in _MOD_CREDITS.items() if modid in mods]
     if not named:
         return None
     return {
         "mods": named,
         "licence": AE2_LICENCE,
         "url": AE2_LICENCE_URL,
+        # The HUD's one line, which no fold hides; the legend carries ``text`` in full.
+        "short": "ME textures (c) AlgorithmX2 et al (AE2), non-commercial sharing only:",
         "text": (
             "ME textures from "
             + " and ".join(named)

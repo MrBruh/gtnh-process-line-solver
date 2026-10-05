@@ -13,6 +13,9 @@ from __future__ import annotations
 import base64
 import io
 import json
+import re
+import shutil
+import subprocess
 import zipfile
 from collections.abc import Mapping
 from pathlib import Path
@@ -39,7 +42,7 @@ from gtnh_solver.ir import (
     MEDeviceKind,
     MEMode,
 )
-from gtnh_solver.previewer import SCENE_VERSION, build_scene, write_preview
+from gtnh_solver.previewer import SCENE_VERSION, build_scene, render_html, write_preview
 from gtnh_solver.previewer.me_textures import credit, me_icons, texturize_me
 from gtnh_solver.previewer.textures import DEFAULT_MANIFEST_PATH, texturize_scene
 from gtnh_solver.solver import solve
@@ -219,6 +222,16 @@ def _sand_on_me() -> tuple[InputIR, LayoutResult]:
     return ir, solve(ir, seed=0, optimize=True)
 
 
+def test_the_texture_summary_does_not_call_an_me_block_a_placeholder() -> None:
+    summary = texturize_scene(
+        build_scene(*attached_line()),
+        multiblocks_dir=_REPO / "data" / "multiblocks",
+        manifest_path=DEFAULT_MANIFEST_PATH,
+        png_provider=lambda _: {},
+    )
+    assert summary.placeholder_types == ("t",)  # the stub is the ME layer's, not a missing block
+
+
 def test_a_sand_line_on_me_draws_its_network_and_names_it_in_the_io_panel() -> None:
     scene = build_scene(*_sand_on_me())
     me = _me(scene)
@@ -319,7 +332,11 @@ def test_the_credit_names_the_mods_the_licence_and_the_terms() -> None:
     assert both["url"] == "https://creativecommons.org/licenses/by-nc-sa/3.0/"
     assert "AlgorithmX2" in both["text"]
     assert "AE2FluidCraft" in both["text"]
+    assert both["text"].index("Applied Energistics 2") < both["text"].index("AE2FluidCraft")
     assert "non-commercial" in both["text"]
+    # The HUD's short form, which no fold hides, keeps the attribution and the terms.
+    assert "AlgorithmX2" in both["short"]
+    assert "non-commercial" in both["short"]
     only_ae2 = credit(frozenset({"appliedenergistics2"}))
     assert only_ae2 is not None
     assert "AE2FluidCraft" not in only_ae2["text"]
@@ -426,3 +443,67 @@ def test_a_preview_with_no_me_network_never_fetches_the_me_jars(
     assert scene["me"] is None
     assert AE2.url not in nexus.calls
     assert AE2FC.url not in nexus.calls
+
+
+# --- the viewer ----------------------------------------------------------------------------------------
+
+
+def test_the_machine_legend_leaves_the_me_blocks_to_the_me_section() -> None:
+    scene = build_scene(*attached_line())
+    assert [e["label"] for e in scene["legend"]] == ["t"]  # not the stub's "ME Dense Smart Cable"
+
+
+def test_the_viewer_draws_the_me_layer_from_the_scene() -> None:
+    page = render_html(build_scene(*attached_line()))
+    for reads in (
+        "const ME = SCENE.me || null",
+        # An ME block gets no placeholder box: the ME layer draws it.
+        "if (m.expanded || ME_DRAWN.has(m.id)) continue;",
+        # The AE2 faces share the atlas through a cutout copy of its material (glass cable).
+        "aeMaterial.alphaTest = 0.1",
+        "if (ATLAS && icon in ATLAS.tiles) layerBatch.main.face(geo, f, b.center, aeMaterial",
+        "else layerBatch.main.face(geo, f, b.center, routeFlat(b.color), owner)",
+        # Channel lights: an unlit (fullbright) tinted mask, drawn in front of the face it lights.
+        "new THREE.MeshBasicMaterial({",
+        "polygonOffset: true",
+        "const uri = ME_LIGHTS[icon];",
+        # Hovering an ME block, and the legend's section per network.
+        "if (what.me) return meHover(what);",
+        "section(panel, 'ME networks')",
+        "n.mainChannels + ' of ' + n.budget",
+        # AE2's credit, on the HUD and in the legend.
+        '<div id="credit"></div>',
+        "document.getElementById('credit').append(...creditNodes(ME.credit, ME.credit.short))",
+    ):
+        assert reads in page, reads
+
+
+def test_the_io_panel_no_longer_says_no_me_block_is_drawn() -> None:
+    page = render_html(build_scene(*attached_line()))
+    assert "no ME interface is drawn" not in page
+    assert "menote" not in page
+    # A flow on ME names its network, and power left to the builder says so.
+    assert "' via ME' + (flow.network ? ' (' + flow.network + ')' : '')" in page
+    assert "supplied by you (--me power)" in page
+
+
+def test_the_credit_is_built_from_text_nodes_and_its_own_link() -> None:
+    page = render_html(build_scene(*attached_line()))
+    assert "const link = el('a', credit.licence);" in page
+    assert "link.rel = 'noopener noreferrer';" in page
+    assert "innerHTML" not in page.split("function creditNodes", 1)[1].split("}", 1)[0]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_viewer_module_parses(tmp_path: Path) -> None:
+    """The one check on the template's JavaScript CI can run: it parses. A syntax error in it
+    blanks every preview, and no Python test would notice."""
+    page = render_html(build_scene(*comb(3, mode=MEMode.SUBNET, with_controller=True)))
+    module = re.search(r'<script type="module">(.*?)</script>', page, re.S)
+    assert module is not None
+    script = tmp_path / "viewer.mjs"
+    script.write_text(module.group(1), encoding="utf-8")
+    node = shutil.which("node")
+    assert node is not None
+    checked = subprocess.run([node, "--check", str(script)], capture_output=True, text=True)
+    assert checked.returncode == 0, checked.stderr
