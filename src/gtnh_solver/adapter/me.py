@@ -31,7 +31,7 @@ from collections.abc import Collection, Mapping, Sequence
 
 from gtnh_solver import __version__
 from gtnh_solver.dataset import VOLTAGE_BY_TIER, PhysicalDataset, me_devices_for
-from gtnh_solver.dataset.me import MEShortfall
+from gtnh_solver.dataset.me import MEShortfall, needs_fuzzy_card
 from gtnh_solver.ir import (
     Commodity,
     IODirection,
@@ -157,6 +157,7 @@ def _end(machine: Machine, port: Port, multiblock: bool, tier: str) -> NetEnd:
         machine_tier=machine.voltage_tier,
         line_tier=tier,
         auto_output=not multiblock and port.direction is IODirection.OUTPUT,
+        fuzzy=needs_fuzzy_card(port),
     )
     if isinstance(chosen, MEShortfall):
         suggested = f"none keeps up: {chosen.detail}"

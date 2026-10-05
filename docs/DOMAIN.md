@@ -664,6 +664,16 @@ hatches by mID, AE2's power figures, and which device serves a machine's port. I
   is drained by a fluid import bus instead.
 - **Cards**: the fewest Acceleration Cards that keep up, and Hyper-Acceleration Cards only on a line
   that has reached LuV, which their recipe needs.
+- **A bus set to an item at any damage takes a Fuzzy Card** (#353). A plan names such an item with
+  Forge's wildcard meta, `registry@32767` (a coke oven's `minecraft:log@32767`). AE2 matches a
+  bus's filter or partition exactly unless a Fuzzy Card is fitted, and no real stack is at damage
+  32767, so without the card the bus moves nothing. With it, set to ignore damage (`IGNORE_ALL`, a
+  fresh bus's own setting), AE2 matches through the ore dictionary: every log the network holds,
+  other mods' included, as a recipe taking any log does (spike 4.2). Every item import, export and
+  storage bus whose config names such an item gets one, and keeps the wildcard as its filter. The
+  card takes one of the bus's four slots, so its speed cards get three, and a port faster than
+  three move is split across two buses, each with its own card. Fluid buses take none: a fluid has
+  no damage.
 
 ### What a valid ME build is (#333)
 

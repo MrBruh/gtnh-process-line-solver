@@ -530,6 +530,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   "needs repair" look). Each controller is now written with all six problems fixed, so a pasted
   line runs once it forms. A line built by hand from the ghost still has its maintenance done by
   hand, as in game.
+- **An ME bus set to an item at any damage gets a Fuzzy Card (#353).** A recipe input like the coke
+  oven's `minecraft:log@32767` (any log) put on ME got an export bus filtered to exactly that
+  stack, which AE2 matches only at damage 32767, so in game it moved nothing while the layout
+  reported VALID. AE2 reads the wildcard as any damage only on its fuzzy path, so every item
+  import, export and storage bus whose filter or partition is such an item is now fitted a Fuzzy
+  Card, left at AE2's default of ignoring damage, and keeps the wildcard as its filter: the bus
+  then moves every log the network holds. The card takes one of the bus's four upgrade slots, so
+  such a port faster than three Acceleration Cards carry (12.8 items/t before LuV) gets two buses.
+  `--list-nets` and the preview's hover name the card with the others.
 - **The exported power source produces.** The `.schematic` export stands a Debug Power Generator in
   for the adapter's synthesized power source, but wrote it with no settings, and TecTech loads a
   generator with no settings as a consumer of 0 V x 0 A. Pasted into a world, it drew power instead

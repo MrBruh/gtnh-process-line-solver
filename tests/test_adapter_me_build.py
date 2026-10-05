@@ -35,6 +35,7 @@ from gtnh_solver.ir import (
     IODirection,
     Machine,
     MachineFaceRef,
+    MECards,
     MEConfig,
     MEDeviceKind,
     MEHatchPolicy,
@@ -262,6 +263,145 @@ def test_a_tank_feeding_one_machine_over_me_and_another_by_pipe_stays_for_the_pi
     by_id = {n.id: n for n in nets}
     assert [e.machine_id for e in by_id["on-me"].endpoints] == ["m1"]
     assert [e.machine_id for e in by_id["piped"].endpoints] == ["s0", "m2"]
+
+
+# ------------------------------------------------------------------ a wildcard meta (#353)
+
+_LOG = "minecraft:log@32767"  # Forge's wildcard: any log
+
+
+def _chest(commodity: Commodity, *resources: str) -> Machine:
+    """A boundary Super Chest (or Tank) giving each of ``resources``."""
+    return Machine(
+        id="s0",
+        type="Super Chest" if commodity is Commodity.ITEM else "Super Tank",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[
+                Port(id=f"output:{r}", commodity=commodity, direction=IODirection.OUTPUT)
+                for r in resources
+            ]
+        ),
+    )
+
+
+def _fed(rates: dict[str, float], network: str = "main", **spec: object) -> list[Machine]:
+    """A single block taking each item of ``rates`` from a boundary chest, every net on
+    ``network``; the machines :func:`build_me` makes of it."""
+    machine = Machine(
+        id="m",
+        type="t",
+        voltage_tier="LV",
+        orientation_options=[Facing.NORTH],
+        faces=FaceSpec(
+            ports=[
+                Port(
+                    id=f"input:{r}",
+                    commodity=Commodity.ITEM,
+                    direction=IODirection.INPUT,
+                    rate=rate,
+                )
+                for r, rate in rates.items()
+            ]
+        ),
+    )
+    nets = [
+        Net(
+            id=f"e-{r}",
+            commodity=Commodity.ITEM,
+            fluid_or_item=r,
+            throughput=rate,
+            me_network=network,
+            endpoints=[
+                MachineFaceRef(machine_id="s0", port_id=f"output:{r}"),
+                MachineFaceRef(machine_id="m", port_id=f"input:{r}"),
+            ],
+        )
+        for r, rate in rates.items()
+    ]
+    me = MEConfig(networks=[MENetworkSpec(id=network, **spec)])
+    machines, _ = build_me(
+        [_chest(Commodity.ITEM, *rates), machine],
+        nets,
+        me,
+        storage_ids={"s0"},
+        multiblock_ids=set(),
+        line_tier="LV",
+        recipe_ticks={},
+    )
+    return machines
+
+
+def test_a_bus_set_to_an_item_at_any_damage_gets_a_fuzzy_card() -> None:
+    """AE2 reads 32767 as any damage only on its fuzzy path, which a bus takes only with a Fuzzy
+    Card (#353), so the bus feeding any log gets one; the bus feeding sand does not."""
+    machines = _fed({_LOG: 0.5, "minecraft:sand": 0.5}, mode=MEMode.ATTACHED)
+    m = next(x for x in machines if x.id == "m")
+    by_port = {e.ports: e.device for e in m.me_endpoints}
+    log = by_port[(f"input:{_LOG}",)]
+    assert (log.kind, log.cards, log.config) == (
+        MEDeviceKind.EXPORT_BUS,
+        MECards(acceleration=1, fuzzy=1),
+        (_LOG,),  # the filter keeps the wildcard: the card reads it as any log
+    )
+    sand = by_port[("input:minecraft:sand",)]
+    assert (sand.cards, sand.config) == (MECards(acceleration=1), ("minecraft:sand",))
+
+
+def test_a_wildcard_port_too_fast_for_three_cards_gets_two_carded_buses() -> None:
+    """The Fuzzy Card takes one of four slots: 15 items/t needs four Acceleration Cards on one bus,
+    so a wildcard port that fast is split across two, each with its own Fuzzy Card."""
+    machines = _fed({_LOG: 15.0}, mode=MEMode.ATTACHED)
+    m = next(x for x in machines if x.id == "m")
+    assert [(e.id, e.device.cards, e.share) for e in m.me_endpoints] == [
+        (f"me:input:{_LOG}#1", MECards(acceleration=3, fuzzy=1), 0.5),
+        (f"me:input:{_LOG}#2", MECards(acceleration=3, fuzzy=1), 0.5),
+    ]
+
+
+def test_a_storage_bus_partitioned_to_a_wildcard_gets_a_fuzzy_card() -> None:
+    """A chests subnet reads its boundary chest through a storage bus partitioned to what it holds;
+    partitioned to any log, it needs the card too, or it refuses every log as not that one stack.
+    A link's storage bus is partitioned to nothing, so it never needs one."""
+    machines = _fed(
+        {_LOG: 0.5, "minecraft:sand": 0.5},
+        network="line",
+        mode=MEMode.SUBNET,
+        storage=MEStorage.CHESTS,
+    )
+    chest = next(x for x in machines if x.id == "s0")
+    (storage,) = chest.me_endpoints
+    assert (storage.device.kind, storage.device.cards, storage.device.config) == (
+        MEDeviceKind.STORAGE_BUS,
+        MECards(fuzzy=1),
+        tuple(sorted((_LOG, "minecraft:sand"))),
+    )
+    linked = _fed({_LOG: 0.5}, network="line", mode=MEMode.SUBNET)
+    (link,) = [x for x in linked if x.me_role is MERole.LINK]
+    assert [e.device.cards for e in link.me_endpoints] == [MECards()]
+
+
+def test_nitrobenzenes_coke_oven_takes_its_logs_through_a_fuzzy_card() -> None:
+    """The case #353 was found on: ``examples/gtnh-nitrobenzene.json --me items``, whose Coke Oven
+    burns ``minecraft:log@32767``. Its export bus is fitted a Fuzzy Card and still set to the
+    wildcard; no other device on the line is fitted one, and the NetList names the card."""
+    physical = load_physical_dataset()
+    ir = _adapt(_NITROBENZENE, physical=physical, me_commodities={Commodity.ITEM})
+    fuzzy = [
+        (m.type, e.id, e.device)
+        for m in ir.machines
+        for e in m.me_endpoints
+        if e.device.cards.fuzzy
+    ]
+    assert [(t, i, d.kind, d.config) for t, i, d in fuzzy] == [
+        ("Coke Oven", f"me:input:{_LOG}", MEDeviceKind.EXPORT_BUS, (_LOG,))
+    ]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", AdapterWarning)
+        listed = list_nets(_NITROBENZENE, physical=physical)
+    (logs,) = [n for n in listed.nets if n.resource == _LOG]
+    assert [e.suggested for e in logs.consumers] == ["Input Bus + ME Export Bus (1 x Fuzzy Card)"]
 
 
 # ------------------------------------------------------------------ an acceptor network's power (#336)
