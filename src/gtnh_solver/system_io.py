@@ -48,6 +48,7 @@ from gtnh_solver.dataset.me import (
     flush_ae,
     network_ae_per_tick,
     tree_channel_load,
+    wildcard_item,
 )
 from gtnh_solver.ir import (
     AEColor,
@@ -199,7 +200,13 @@ def resource_label(resource: str, names: Mapping[str, str]) -> str:
 
     The name is ``InputIR.resource_names``, the exporter's, never one authored here. The id stays in
     the label because it is what a builder searches NEI for, and a name alone can be ambiguous.
+
+    An item at any damage (``minecraft:log@32767``) reads ``"minecraft:log (any meta)"``: the plan
+    names it after one variant ("Oak Log"), which would tell the builder to stock oak alone, when
+    any log does (#353). The resource id itself is unchanged wherever a contract carries it.
     """
+    if wildcard_item(resource):
+        return f"{resource.rpartition('@')[0]} (any meta)"
     name = names.get(resource, "")
     return f"{name} ({resource})" if name and name != resource else resource
 

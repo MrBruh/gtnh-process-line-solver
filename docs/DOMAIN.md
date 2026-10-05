@@ -676,7 +676,9 @@ hatches by mID, AE2's power figures, and which device serves a machine's port. I
   no damage. A multiblock's input of such an item never gets GT's Stocking Input Bus (ME), whatever
   the hatch policy: it pulls exactly the stacks set in it and takes no card, so it would move
   nothing; a normal input bus fed by a carded export bus takes its place. The output side needs
-  nothing: an interface or a GT ME output bus takes whatever the machine makes.
+  nothing: an interface or a GT ME output bus takes whatever the machine makes. Wherever a run or
+  the preview names such an item it reads `minecraft:log (any meta)`, not the plan's name for one
+  variant of it.
 
 ### What a valid ME build is (#333)
 

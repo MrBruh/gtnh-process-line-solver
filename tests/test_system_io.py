@@ -518,6 +518,11 @@ def test_a_resource_is_labelled_by_its_plan_name_with_its_id_beside_it() -> None
     assert resource_label("benzene", names) == "benzene"  # the plan names it nothing
     assert resource_label("water", names) == "water"  # the name adds nothing to the id
     assert resource_label("liquid_toluene", {}) == "liquid_toluene"
+    # An item at any damage is every variant, not the one the plan names it after (#353).
+    logs = {"minecraft:log@32767": "Oak Log", "minecraft:log@1": "Spruce Wood"}
+    assert resource_label("minecraft:log@32767", logs) == "minecraft:log (any meta)"
+    assert resource_label("minecraft:log@32767", {}) == "minecraft:log (any meta)"
+    assert resource_label("minecraft:log@1", logs) == "Spruce Wood (minecraft:log@1)"
 
 
 def test_a_net_label_names_each_resource_in_the_pipe() -> None:

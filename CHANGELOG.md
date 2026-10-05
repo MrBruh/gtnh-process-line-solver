@@ -548,7 +548,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   GT's Stocking Input Bus (ME) under the `always` hatch policy or at EV and up: it extracts only
   the exact stacks set in it and takes no card, so it too would have fed nothing. It gets a normal
   input bus fed by a carded export bus, and the validator refuses a stocking bus on such a port
-  (`me_stocking_wildcard`).
+  (`me_stocking_wildcard`). The run's notes and the preview name such an item
+  `minecraft:log (any meta)` instead of the plan's name for one variant ("Oak Log"), which read
+  as though only oak would do; the resource ids in the layout are unchanged.
 - **The exported power source produces.** The `.schematic` export stands a Debug Power Generator in
   for the adapter's synthesized power source, but wrote it with no settings, and TecTech loads a
   generator with no settings as a consumer of 0 V x 0 A. Pasted into a world, it drew power instead
