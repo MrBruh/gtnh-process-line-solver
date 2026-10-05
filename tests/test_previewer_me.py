@@ -10,10 +10,23 @@ credit exactly when it embeds AE2 or FC art.
 
 from __future__ import annotations
 
+import base64
+import io
+import json
+import zipfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+from urllib.error import URLError
 
+import pytest
+from PIL import Image
+
+import gtnh_solver.previewer as previewer_package
+import gtnh_solver.previewer.jar as jar_module
 from gtnh_solver.adapter import adapt_file
+from gtnh_solver.dataset.ae_render import asset_path, load_ae_render
+from gtnh_solver.dataset.mod_jars import AE2, AE2FC
 from gtnh_solver.ir import (
     CellBox,
     CellCoord,
@@ -23,9 +36,11 @@ from gtnh_solver.ir import (
     LayoutStatus,
     MECableCell,
     MECableKind,
+    MEDeviceKind,
     MEMode,
 )
-from gtnh_solver.previewer import SCENE_VERSION, build_scene
+from gtnh_solver.previewer import SCENE_VERSION, build_scene, write_preview
+from gtnh_solver.previewer.me_textures import credit, me_icons, texturize_me
 from gtnh_solver.previewer.textures import DEFAULT_MANIFEST_PATH, texturize_scene
 from gtnh_solver.solver import solve
 from tests._helpers import at, machine
@@ -213,3 +228,201 @@ def test_a_sand_line_on_me_draws_its_network_and_names_it_in_the_io_panel() -> N
     assert [(f["resource"], f["network"]) for f in scene["io"]["inputs"]] == [
         ("minecraft:stone", "main")
     ]
+
+
+# --- the texture pass and the credit ------------------------------------------------------------------
+
+
+def _png(size: int = 16, height: int | None = None) -> bytes:
+    out = io.BytesIO()
+    Image.new("RGBA", (size, height or size), (200, 200, 200, 255)).save(out, format="PNG")
+    return out.getvalue()
+
+
+def _every_icon(paths: Mapping[str, str]) -> dict[str, bytes]:
+    """A provider holding every AE2 and FC icon: 16x16, the channel masks 64x64 as in the jar."""
+    return {icon: _png(64 if "MECableSmart" in icon else 16) for icon in paths}
+
+
+def _size(uri: str) -> tuple[int, int]:
+    image = Image.open(io.BytesIO(base64.b64decode(uri.split(",", 1)[1])))
+    return image.size
+
+
+def test_the_me_pass_embeds_each_face_icon_and_each_light_mask_at_its_own_size() -> None:
+    scene = build_scene(*attached_line())
+    faces, lights = me_icons(scene)
+    assert faces
+    assert lights
+    assert texturize_me(scene, _every_icon) == frozenset({"appliedenergistics2"})
+    assert faces <= set(scene["textures"])
+    assert all(_size(scene["textures"][icon]) == (16, 16) for icon in faces)
+    masks = _me(scene)["lights"]
+    assert set(masks) == lights
+    # A channel mask keeps its 64 pixels: squeezed into a 16 pixel tile its lines would vanish.
+    assert _size(masks["appliedenergistics2:MECableSmart00"]) == (64, 64)
+
+
+def test_an_animated_light_keeps_its_first_frame() -> None:
+    scene = build_scene(*comb(1, mode=MEMode.SUBNET, with_controller=True))
+
+    def strips(paths: Mapping[str, str]) -> dict[str, bytes]:
+        return {icon: _png(16, 192 if "Lights" in icon else 16) for icon in paths}
+
+    texturize_me(scene, strips)
+    assert _size(_me(scene)["lights"]["appliedenergistics2:BlockControllerLights"]) == (16, 16)
+
+
+def test_an_icon_that_does_not_arrive_costs_only_itself() -> None:
+    # FC's jar failed: its fronts stay flat, and AE2's art (and the GT pass) is untouched.
+    problem, layout = attached_line()
+    network = layout.me_networks[0]
+    fluid = [
+        d.model_copy(update={"kind": MEDeviceKind.FLUID_EXPORT_BUS})
+        if d.endpoint_id == "feed"
+        else d
+        for d in network.devices
+    ]
+    layout = layout.model_copy(
+        update={"me_networks": [network.model_copy(update={"devices": fluid})]}
+    )
+    scene = build_scene(problem, layout)
+    scene["textures"] = {"gregtech:gt.blockmachines|1|NORTH|inactive": "data:image/png;base64,"}
+
+    def no_fc(paths: Mapping[str, str]) -> dict[str, bytes]:
+        return {
+            icon: png for icon, png in _every_icon(paths).items() if not icon.startswith("ae2fc")
+        }
+
+    assert texturize_me(scene, no_fc) == frozenset({"appliedenergistics2"})
+    assert "ae2fc:fluid_export_face" not in scene["textures"]
+    assert "appliedenergistics2:PartExportSides" in scene["textures"]
+    assert "gregtech:gt.blockmachines|1|NORTH|inactive" in scene["textures"]
+    assert texturize_me(build_scene(problem, layout), lambda _: {}) == frozenset()
+
+
+def test_a_scene_with_no_me_network_asks_no_jar_for_anything() -> None:
+    def refuse(paths: Mapping[str, str]) -> dict[str, bytes]:
+        raise AssertionError(f"asked for {sorted(paths)}")
+
+    problem = InputIR(bounding_region=CellBox(sx=1, sy=1, sz=1), machines=[machine("a", [])])
+    layout = LayoutResult(status=LayoutStatus.VALID, seed=0, placements=[at("a", 0, 0, 0)])
+    assert texturize_me(build_scene(problem, layout), refuse) == frozenset()
+
+
+def test_the_credit_names_the_mods_the_licence_and_the_terms() -> None:
+    assert credit(frozenset()) is None
+    assert credit(frozenset({"gregtech"})) is None  # GT's art is LGPL and asks for no such line
+    both = credit(frozenset({"appliedenergistics2", "ae2fc"}))
+    assert both is not None
+    assert both["licence"] == "CC BY-NC-SA 3.0"
+    assert both["url"] == "https://creativecommons.org/licenses/by-nc-sa/3.0/"
+    assert "AlgorithmX2" in both["text"]
+    assert "AE2FluidCraft" in both["text"]
+    assert "non-commercial" in both["text"]
+    only_ae2 = credit(frozenset({"appliedenergistics2"}))
+    assert only_ae2 is not None
+    assert "AE2FluidCraft" not in only_ae2["text"]
+
+
+# --- write_preview, end to end, with the jars faked ----------------------------------------------------
+
+
+class _Nexus:
+    """Serves a fake jar per URL holding every icon a preview could ask that jar for; ``failing``
+    URLs raise as an outage would."""
+
+    def __init__(self, failing: frozenset[str] = frozenset()) -> None:
+        self.failing = failing
+        self.calls: list[str] = []
+
+    def __call__(self, url: str, filename: str) -> None:
+        self.calls.append(url)
+        if url in self.failing:
+            raise URLError("nexus unreachable")
+        if url == AE2.url:
+            entries = {asset_path(i) for i in load_ae_render().icon_names() if i.startswith("app")}
+        elif url == AE2FC.url:
+            entries = {
+                asset_path(i) for i in load_ae_render().icon_names() if i.startswith("ae2fc")
+            }
+        else:  # GT's jar: every sprite the committed manifest names
+            raw = json.loads(DEFAULT_MANIFEST_PATH.read_text(encoding="utf-8"))
+            entries = set(raw["icons"].values())
+        with zipfile.ZipFile(filename, "w") as archive:
+            for entry in sorted(entries):
+                archive.writestr(entry, _png(64 if "MECableSmart" in entry else 16))
+
+
+@pytest.fixture(scope="module")
+def sand_on_me() -> tuple[InputIR, LayoutResult]:
+    return _sand_on_me()
+
+
+def _preview(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    built: tuple[InputIR, LayoutResult],
+    nexus: _Nexus,
+    *,
+    textures: bool = True,
+) -> dict[str, Any]:
+    real = jar_module.multi_jar_png_provider
+
+    def faked(primary: Any, extras: Any) -> Any:
+        return real(primary, extras, cache_dir=tmp_path / "cache", download=nexus)
+
+    monkeypatch.setattr(previewer_package, "multi_jar_png_provider", faked)
+    page = write_preview(*built, tmp_path / "view.html", textures=textures).read_text(
+        encoding="utf-8"
+    )
+    line = next(ln for ln in page.splitlines() if ln.startswith("const SCENE = "))
+    scene: dict[str, Any] = json.loads(line[len("const SCENE = ") :].rstrip().removesuffix(";"))
+    return scene
+
+
+def test_a_preview_embedding_ae2_art_carries_its_credit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sand_on_me: tuple[InputIR, LayoutResult]
+) -> None:
+    scene = _preview(tmp_path, monkeypatch, sand_on_me, _Nexus())
+    tiles = set(scene["atlas"]["tiles"])
+    assert any(key.startswith("appliedenergistics2:") for key in tiles)
+    assert any(key.startswith("gregtech:") for key in tiles)
+    me = _me(scene)
+    assert me["lights"]
+    assert me["credit"]["licence"] == "CC BY-NC-SA 3.0"
+    assert "non-commercial" in me["credit"]["text"]
+
+
+def test_a_failing_ae2_jar_costs_only_the_me_icons_and_the_credit_with_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sand_on_me: tuple[InputIR, LayoutResult]
+) -> None:
+    nexus = _Nexus(failing=frozenset({AE2.url}))
+    scene = _preview(tmp_path, monkeypatch, sand_on_me, nexus)
+    tiles = set(scene["atlas"]["tiles"])
+    assert any(key.startswith("gregtech:") for key in tiles)  # the GT textures all arrived
+    assert not any(key.startswith("appliedenergistics2:") for key in tiles)
+    assert any(m.get("expanded") for m in scene["machines"])
+    me = _me(scene)
+    assert me["lights"] == {}
+    assert me["credit"] is None  # no AE2 art on the page, so nothing to credit
+    assert AE2.url in nexus.calls
+
+
+def test_a_preview_without_textures_embeds_no_art_and_no_credit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sand_on_me: tuple[InputIR, LayoutResult]
+) -> None:
+    nexus = _Nexus()
+    scene = _preview(tmp_path, monkeypatch, sand_on_me, nexus, textures=False)
+    assert _me(scene)["credit"] is None
+    assert nexus.calls == []
+
+
+def test_a_preview_with_no_me_network_never_fetches_the_me_jars(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, solved_sand: tuple[InputIR, LayoutResult]
+) -> None:
+    nexus = _Nexus()
+    scene = _preview(tmp_path, monkeypatch, solved_sand, nexus)
+    assert scene["me"] is None
+    assert AE2.url not in nexus.calls
+    assert AE2FC.url not in nexus.calls

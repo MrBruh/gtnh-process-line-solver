@@ -62,8 +62,9 @@ DEFAULT_MANIFEST_PATH = _DATA / "textures" / "manifest.json"
 
 #: A ``png_provider``: given ``{icon_name: asset_path_in_jar}`` it returns ``{icon_name: bytes}``
 #: for the icons it could supply (missing icons are simply omitted, never an error). The real one
-#: reads the GT5-Unofficial jar (:func:`gtnh_solver.previewer.jar.jar_png_provider`); tests inject a
-#: fake so no network runs in the suite.
+#: reads the GT5-Unofficial jar, and the AE2 and AE2FluidCraft jars for an ME network's icons
+#: (:func:`gtnh_solver.previewer.jar.multi_jar_png_provider`); tests inject a fake so no network runs
+#: in the suite.
 PngProvider = Callable[[Mapping[str, str]], dict[str, bytes]]
 
 #: GT/Minecraft ForgeDirection face order: 0 down (-Y), 1 up (+Y), 2 north (-Z), 3 south (+Z),
