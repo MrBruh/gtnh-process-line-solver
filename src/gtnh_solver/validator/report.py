@@ -203,11 +203,6 @@ class ValidationReport:
     #: just outside would join them, and nothing in the layout can rule that out, so it is said
     #: rather than refused.
     me_boundary_exposure: tuple[tuple[int, int, int], ...] = ()
-    #: ME networks powered from outside the build whose GT ME output buses or hatches flush more
-    #: at once than AE's 1,000 AE default buffer holds (#336). Their energy store is the main
-    #: network's, or behind a quartz fiber, which the layout cannot see, so they are taken as
-    #: buffered and named here rather than refused (spike 6.3).
-    me_external_buffers: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:

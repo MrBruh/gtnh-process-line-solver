@@ -30,8 +30,9 @@ rebuilt here from the blocks the layout places, and AE's own channel pathing is 
         |                 rated for what the laid network draws; a store
         |                 holding one GT ME output flush (spike 6, #336)
         v
-    violations, plus three abstentions: nets on ME nothing serves yet, subnet blocks on the edge,
-    and externally powered flushes whose store lies outside the build
+    violations, plus two abstentions: nets on ME nothing serves yet, subnet blocks on the edge
+    (an externally powered network's store lies outside the build: the gate does not judge it, and
+    the run tells the builder what it must hold, ``system_io.MENetworkIO.external_store_ae``)
 
 **What a network draws is the gate's own figure** (spike 6): idle draws and moves from the devices
 the layout places, and the channel term from the pathing below, twice the channels through every
@@ -175,15 +176,10 @@ class MEAbstentions:
     says how that port reaches the network (every net on ME until the end-to-end build, #335).
     ``boundary_exposure``: a subnet's AE blocks on the region's edge, which an AE block the player
     builds just outside would join; nothing in the layout can rule that out.
-    ``external_buffers``: networks powered from outside the build whose GT ME output buses or
-    hatches flush more at once than AE's default 1,000 AE buffer holds. Their storage is the main
-    network's (attached) or behind a quartz fiber (subnet), which the layout cannot see, so it is
-    taken as buffered rather than checked (spike 6.3).
     """
 
     unbuilt_me_nets: tuple[str, ...] = ()
     boundary_exposure: tuple[Cell, ...] = ()
-    external_buffers: tuple[str, ...] = ()
 
 
 # --- the AE graph -----------------------------------------------------------------------------------
@@ -261,11 +257,10 @@ def check_me(problem: InputIR, layout: LayoutResult, out: list[Violation]) -> ME
     _check_ground(problem, layout, machines, placements, out)
     graph = _build_graph(problem, layout, machines, placements, built)
     grids = _check_channels(problem, graph, out)
-    external = _check_power(problem, layout, machines, placements, devices, grids, out)
+    _check_power(problem, layout, machines, placements, devices, grids, out)
     return MEAbstentions(
         unbuilt_me_nets=_unbuilt(problem),
         boundary_exposure=_exposure(problem, layout, machines, placements),
-        external_buffers=external,
     )
 
 
@@ -1156,23 +1151,20 @@ def _check_power(
     devices: Mapping[tuple[str, str], tuple[MEPlacedDevice, MEEndpoint, str]],
     grids: Mapping[str, _Grid],
     out: list[Violation],
-) -> tuple[str, ...]:
-    """Rule 9: a network on an Energy Acceptor gets the power it draws, and every network can pay
-    for one flush of its GT ME output buses and hatches (spike 6). Returns the externally powered
-    networks whose flush the layout cannot judge (``MEAbstentions.external_buffers``)."""
+) -> None:
+    """Rule 9: a network on an Energy Acceptor gets the power it draws, and can pay for one flush
+    of its GT ME output buses and hatches (spike 6). An externally powered network draws on the
+    main network or through a quartz fiber, whose store the layout cannot see, so it is not judged
+    here; under ``--me power`` no rating is either, since the builder brings every machine's
+    power."""
     flush: dict[str, float] = defaultdict(float)
     for device, _, network_id in devices.values():
         flush[network_id] = max(flush[network_id], _flush_ae(device))
-    external: list[str] = []
     reached = _powered_machines(problem, layout)
     for spec in problem.me.networks:
         grid = grids.get(spec.id)
-        if grid is None:
-            continue  # not built, or merged with another network (already a violation)
-        if spec.power is MEPower.EXTERNAL:
-            if flush[spec.id] > DEFAULT_GRID_BUFFER_AE:
-                external.append(spec.id)
-            continue
+        if grid is None or spec.power is MEPower.EXTERNAL:
+            continue  # not built, merged with another network (already a violation), or external
         ae = _network_ae(problem, machines, devices, grid, spec.id)
         acceptors = [
             m
@@ -1197,7 +1189,7 @@ def _check_power(
                     )
         rated = math.fsum(a.eut for a in acceptors)
         needed = ae / AE_PER_EU
-        if acceptors and rated + _POWER_EPSILON < needed:
+        if acceptors and not problem.me.power_external and rated + _POWER_EPSILON < needed:
             _starved(
                 out,
                 f"ME network {spec.id!r} draws {ae:g} AE/t ({needed:g} EU/t), but its Energy "
@@ -1212,7 +1204,6 @@ def _check_power(
                 f"one flush of its GT ME output bus or hatch costs, so most of each flush stays "
                 f"cached",
             )
-    return tuple(external)
 
 
 #: Slack on comparing a rated draw to the figure the network needs, for float dust.

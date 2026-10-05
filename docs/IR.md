@@ -411,14 +411,22 @@ MENetworkLayout { id, colour: AEColor, cables: [MECableCell], devices: [MEPlaced
               # touch. MENetworkLayout.cells() is every cable block.
 MENetworkMetrics { id, mode: MEMode, colour: AEColor, power: MEPower, devices: int,
                    channel_budget: int | null, main_channels: int, ae_per_tick: float,
-                   eu_per_tick: float, flush_ae: float, supplies: [MEFlowMetrics],
-                   absorbs: [MEFlowMetrics] }
+                   eu_per_tick: float, external_store_ae: float,
+                   acceptor_eu_per_tick: float | null, acceptor_source: str | null,
+                   acceptor_source_amps: int | null,
+                   supplies: [MEFlowMetrics], absorbs: [MEFlowMetrics] }
               # what one ME network asks of the player, for a reader of the layout alone:
               # devices each spend a channel; channel_budget is an attached network's budget, an
               # ad-hoc subnet's 8, or null with a controller; main_channels the main network's
               # channels it spends. ae_per_tick / eu_per_tick are its draw from the cable laid
               # (spike 6: idle, channelsByBlocks / 128, a charge per item and per started 1000 mB,
-              # x 10; EU = AE / 2); flush_ae the most one GT ME output flush spends at once
+              # x 10; EU = AE / 2). external_store_ae: what the network powering it from outside
+              # must keep stored for one GT ME output flush (an external subnet with no
+              # controller), else 0. On an acceptor subnet: the acceptor's rating in EU/t, the
+              # power source feeding it, and that source's whole output in amps, which the
+              # acceptor's cable is sized for since it takes every amp offered: tell the builder
+              # to feed that source NO MORE than acceptor_source_amps (null with no acceptor or
+              # no cable to it)
 MEFlowMetrics { resources: [str], commodity: "item" | "fluid", rate: float }
               # one resource its storage supplies (supplies) or takes in (absorbs), summed over
               # the nets that move it the same way

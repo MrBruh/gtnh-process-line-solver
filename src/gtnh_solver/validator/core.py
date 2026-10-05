@@ -171,7 +171,6 @@ def validate(problem: InputIR, layout: LayoutResult) -> ValidationReport:
         unverified_power_intake=unverified_intake,
         unbuilt_me_nets=me.unbuilt_me_nets,
         me_boundary_exposure=me.boundary_exposure,
-        me_external_buffers=me.external_buffers,
     )
 
 

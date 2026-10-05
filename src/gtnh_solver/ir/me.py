@@ -552,10 +552,17 @@ class MENetworkMetrics(StrictModel):
     are the main network's channels it spends (an attached network one a device, a link subnet one
     a link). ``ae_per_tick`` is what it draws, computed from the cable the layout lays (spike 6),
     and ``eu_per_tick`` the same in EU: what an Energy Acceptor takes for it, or what the main
-    network (attached) or a quartz fiber (an external subnet) must carry. ``flush_ae`` is the most
-    one GT ME output bus or hatch of it spends in a single flush, which its energy store must hold
-    (0 with none). ``supplies`` must be in its storage for the line to run, and ``absorbs`` lands
-    there.
+    network (attached) or a quartz fiber (an external subnet) must carry. ``external_store_ae`` is
+    what the network powering it from outside must keep stored for one flush of its GT ME output
+    buses and hatches, 0 when its own blocks or the main network's controller hold it.
+
+    On an acceptor network, ``acceptor_eu_per_tick`` is what its Energy Acceptor is rated for (the
+    draw the line's power is sized for, at least ``eu_per_tick``), ``acceptor_source`` the power
+    source feeding it, and ``acceptor_source_amps`` that source's whole output: an acceptor takes
+    every amp offered until its network is full, so its cable is sized for exactly that, and the
+    builder must feed the source **no more** than ``acceptor_source_amps``. ``None`` where there is
+    no acceptor, or no cable reaches it. ``supplies`` must be in its storage for the line to run,
+    and ``absorbs`` lands there.
     """
 
     id: str = Field(min_length=1)
@@ -567,6 +574,9 @@ class MENetworkMetrics(StrictModel):
     main_channels: int = Field(ge=0)
     ae_per_tick: float = Field(ge=0.0)
     eu_per_tick: float = Field(ge=0.0)
-    flush_ae: float = Field(default=0.0, ge=0.0)
+    external_store_ae: float = Field(default=0.0, ge=0.0)
+    acceptor_eu_per_tick: float | None = Field(default=None, ge=0.0)
+    acceptor_source: str | None = Field(default=None, min_length=1)
+    acceptor_source_amps: int | None = Field(default=None, ge=1)
     supplies: list[MEFlowMetrics] = Field(default_factory=list)
     absorbs: list[MEFlowMetrics] = Field(default_factory=list)

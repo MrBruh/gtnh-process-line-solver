@@ -504,8 +504,10 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 # LayoutResult v5 (additive, no version bump) - added `LayoutMetrics.me: list[MENetworkMetrics]`
 #   (#336), what each ME network asks of the player: its mode, colour and power, its devices and
 #   channel budget, the main network's channels it spends, its draw in AE/t and EU/t computed from
-#   the cable the layout lays (spike 6), the most one GT ME output flush spends, and what its
-#   storage supplies and takes in (`MEFlowMetrics`). It is what the site, which reads only the
+#   the cable the layout lays (spike 6), the store an external subnet's power must hold for one
+#   GT ME output flush, an acceptor's rating, source and the most amps to feed that source (its
+#   cable is sized for exactly that), and what its storage supplies and takes in
+#   (`MEFlowMetrics`). It is what the site, which reads only the
 #   layout, shows per network. Metrics are advisory, and it is left out of the dump while empty, so
 #   a layout with no ME network serializes byte for byte as before and a consumer that ignores it
 #   builds nothing wrong. An acceptor network's Energy Acceptor is a placement (`Machine.me_role`),

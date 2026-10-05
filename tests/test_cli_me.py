@@ -572,15 +572,18 @@ def test_an_acceptor_says_where_its_power_comes_from_when_no_source_feeds_it(
     )
 
 
-def test_an_external_networks_flush_is_said_where_its_power_is_stored(
+def test_an_external_subnets_flush_is_said_where_its_power_is_stored(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # An Output Bus (ME) flushes 16,000 AE at once (spike 5.3), more than AE's default buffer.
-    assert _power_note(*gt_hatch_line(), capsys).endswith(
+    # An Output Bus (ME) flushes 16,000 AE at once (spike 5.3), more than AE's default buffer: an
+    # ad-hoc subnet fed through a quartz fiber leans on the network powering it for that.
+    assert _power_note(*gt_hatch_line(subnet=True), capsys).endswith(
         "; one GT ME output flush spends 16,000 AE at once, so the network powering it must store "
         "that much"
     )
-    assert "flush" not in _power_note(*gt_hatch_line(normal=True), capsys)
+    # The main network's controller stores it for an attached one, and a normal bus flushes none.
+    assert "flush" not in _power_note(*gt_hatch_line(), capsys)
+    assert "flush" not in _power_note(*gt_hatch_line(normal=True, subnet=True), capsys)
 
 
 def test_sand_with_items_on_me_exports_its_machines_and_counts_what_it_leaves_out(

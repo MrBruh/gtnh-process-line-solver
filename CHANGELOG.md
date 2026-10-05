@@ -21,14 +21,17 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The validator holds every layout to it: a new `me_power_insufficient` violation for an acceptor
   network with no acceptor, none on a power cable, or one rated under what the laid network
   draws, and for a network that cannot store one flush of its GT ME output buses (16,000 AE for an
-  Output Bus (ME), against the 1,000 AE a network with no acceptor or controller holds). An
-  externally powered network's flush is taken as stored by the network powering it, and said.
+  Output Bus (ME), against the 1,000 AE a network with no acceptor or controller holds); under
+  `--me power` the acceptor's cable and rating are yours. An externally powered network is not
+  judged: an ad-hoc subnet fed through a quartz fiber is told how much the network powering it must
+  store for one flush.
   Every run now says what each ME network draws, from the cable it lays: what an attached network
   adds to your main network's power draw, what to feed an external subnet through a quartz fiber,
   or what its acceptor draws. The layout carries the same per network in the new
   `metrics.me` (additive, no contract bump: absent on a line with no ME network), with its
-  devices, channel budget, main-network channels and what its storage supplies and takes in, for
-  readers of the layout alone such as gtnh-solver-site.
+  devices, channel budget, main-network channels, the store an external subnet needs, what its
+  storage supplies and takes in, and for an acceptor its rating, its power source and the most
+  amps to feed that source, for readers of the layout alone such as gtnh-solver-site.
 - **Nets on ME are built (#335).** A solve with nets on ME now lays each ME network: the ME
   device each port needs (an export or import bus, an interface or Dual Interface, or one of GT's
   ME hatches on a multiblock), the AE2 cable joining them as a tree, and the blocks the network

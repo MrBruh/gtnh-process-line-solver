@@ -87,7 +87,7 @@ from gtnh_solver.adapter import (
 from gtnh_solver.adapter.core import _effective_handler, _recipe_map
 from gtnh_solver.dataset import PhysicalDataset, list_versions, load_physical_dataset
 from gtnh_solver.dataset.coverage import format_report, measure
-from gtnh_solver.dataset.me import DEFAULT_GRID_BUFFER_AE, PROVIDER_BUFFER_AE
+from gtnh_solver.dataset.me import PROVIDER_BUFFER_AE
 from gtnh_solver.dataset.roots import extractor_hint, resolve_dataset_path
 from gtnh_solver.ir import (
     Commodity,
@@ -395,19 +395,19 @@ def _note_me_networks(problem: InputIR, layout: LayoutResult) -> None:
             f"note: ME network {network.network} ({network.mode.value}): {'; '.join(parts)}",
             file=sys.stderr,
         )
-        power = _me_power_note(problem, network, io.power_amps_by_source)
+        power = _me_power_note(problem, network)
         print(
             f"note: ME network {network.network} ({network.mode.value}): {power}", file=sys.stderr
         )
 
 
-def _me_power_note(problem: InputIR, network: MENetworkIO, amps_by_source: dict[str, int]) -> str:
+def _me_power_note(problem: InputIR, network: MENetworkIO) -> str:
     """What one ME network draws, said the way the builder supplies it (spike 6): an attached
     network adds to the main network's draw, an external subnet is fed through a quartz fiber, and
     an acceptor network's Energy Acceptor draws from the line's own power, taking every amp its
     source offers until it is full, which is why its cable is sized for that source's whole output.
-    An external network whose GT ME output flushes more at once than AE's default buffer holds is
-    told to keep that much stored where it draws its power."""
+    An external subnet that leans on the network powering it for a GT ME output flush is told to
+    keep that much stored there (``MENetworkIO.external_store_ae``)."""
     draw = f"{network.ae_per_tick:g} AE/t ({network.eu_per_tick:g} EU/t)"
     if network.power is MEPower.ACCEPTOR:
         rated = f"rated {network.acceptor_eu_per_tick or 0:g} EU/t"
@@ -418,7 +418,7 @@ def _me_power_note(problem: InputIR, network: MENetworkIO, amps_by_source: dict[
                 if problem.me.power_external
                 else f"its Energy Acceptor draws {draw}, {rated}, but no power cable reaches it"
             )
-        amps = amps_by_source.get(source)
+        amps = network.acceptor_source_amps
         full = f"{amps} A" if amps is not None else "output"
         return (
             f"its Energy Acceptor draws {draw}, {rated}, on {source}; it takes every amp offered "
@@ -429,10 +429,10 @@ def _me_power_note(problem: InputIR, network: MENetworkIO, amps_by_source: dict[
         said = f"adds {draw} to your main network's power draw"
     else:
         said = f"feed it {draw} through a quartz fiber from a powered network"
-    if network.flush_ae > DEFAULT_GRID_BUFFER_AE:
+    if network.external_store_ae:
         said += (
-            f"; one GT ME output flush spends {network.flush_ae:,.0f} AE at once, so the network "
-            f"powering it must store that much"
+            f"; one GT ME output flush spends {network.external_store_ae:,.0f} AE at once, so the "
+            f"network powering it must store that much"
         )
     return said
 

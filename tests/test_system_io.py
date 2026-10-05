@@ -57,6 +57,7 @@ from tests._me_fixtures import (
     acceptor_comb,
     attached_line,
     comb,
+    controller,
     gt_hatch_line,
     item_port,
     me_net,
@@ -625,9 +626,10 @@ def test_an_me_network_draws_what_its_laid_cable_costs(
     assert (network.ae_per_tick, network.eu_per_tick) == (ae, ae / 2)
     assert network.power is MEPower.ACCEPTOR
     assert network.channel_budget == budget
-    # Its acceptor is rated 30 EU/t and draws on src, which feeds the whole amp it sums to.
+    # Its acceptor is rated 30 EU/t and draws on src, whose whole output, the one amp its loads
+    # sum to, is what the acceptor's cable is sized for and the most src may be fed.
     assert (network.acceptor_eu_per_tick, network.acceptor_source) == (30.0, "src")
-    assert io.power_amps_by_source == {"src": 1}
+    assert network.acceptor_source_amps == io.power_amps_by_source["src"] == 1
 
 
 def test_a_subnet_with_a_controller_pays_its_idle_draw_and_has_no_single_budget() -> None:
@@ -647,17 +649,30 @@ def test_a_network_the_layout_does_not_lay_draws_for_no_device() -> None:
     assert network.devices == 2  # what the problem asks for is still said
 
 
-def test_an_output_bus_flush_is_the_most_a_network_spends_at_once() -> None:
-    (network,) = system_io(*gt_hatch_line()).me
-    assert network.flush_ae == 16_000
-    (normal,) = system_io(*gt_hatch_line(normal=True)).me
-    assert normal.flush_ae == 0
+def test_only_an_external_subnet_with_no_store_leans_on_its_power_for_a_flush() -> None:
+    # An Output Bus (ME) flushes 16,000 AE at once, more than AE's 1,000 AE default buffer: an ad-hoc
+    # subnet fed through a quartz fiber needs that much stored on the network powering it.
+    (subnet,) = system_io(*gt_hatch_line(subnet=True)).me
+    assert subnet.external_store_ae == 16_000
+    # An attached network draws on the main network's controller, which holds 80,000 AE.
+    (attached,) = system_io(*gt_hatch_line()).me
+    assert attached.external_store_ae == 0
+    # A normal output bus with an interface flushes nothing of its own.
+    (normal,) = system_io(*gt_hatch_line(normal=True, subnet=True)).me
+    assert normal.external_store_ae == 0
+    # Nor does a subnet with a controller, which stores 80,000 AE itself.
+    problem, layout = gt_hatch_line(subnet=True)
+    controlled = problem.model_copy(
+        update={"machines": [*problem.machines, controller(network=MAIN)]}
+    )
+    (own,) = system_io(controlled, layout).me
+    assert own.external_store_ae == 0
 
 
 def test_the_layout_carries_each_networks_figures() -> None:
     problem, layout = acceptor_comb()
     (io,) = system_io(problem, layout).me
-    (metrics,) = me_network_metrics(problem, layout.me_networks)
+    (metrics,) = me_network_metrics(problem, layout)
     assert (metrics.id, metrics.mode, metrics.colour, metrics.power) == (
         SUB,
         MEMode.SUBNET,
@@ -666,6 +681,18 @@ def test_the_layout_carries_each_networks_figures() -> None:
     )
     assert (metrics.devices, metrics.channel_budget, metrics.main_channels) == (2, 8, 0)
     assert (metrics.ae_per_tick, metrics.eu_per_tick) == (io.ae_per_tick, io.eu_per_tick)
+    # What the site needs to tell the builder about the acceptor: its rating, its source, and to
+    # feed that source no more than the amps the acceptor's cable is sized for.
+    assert (
+        metrics.acceptor_eu_per_tick,
+        metrics.acceptor_source,
+        metrics.acceptor_source_amps,
+    ) == (
+        30.0,
+        "src",
+        1,
+    )
+    assert metrics.external_store_ae == 0
     assert [(f.resources, f.commodity, f.rate) for f in metrics.supplies] == [
         (("n0",), Commodity.ITEM, 1.0),
         (("n1",), Commodity.ITEM, 1.0),

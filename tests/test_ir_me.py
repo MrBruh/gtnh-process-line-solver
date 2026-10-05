@@ -293,10 +293,14 @@ def test_a_layout_reports_each_network_only_when_it_has_one() -> None:
         main_channels=6,
         ae_per_tick=71.9,
         eu_per_tick=35.95,
+        acceptor_eu_per_tick=40.0,
+        acceptor_source="power-source:HV",
+        acceptor_source_amps=1,
         supplies=[stone],
     )
     metrics = LayoutMetrics(footprint=4, me=[network])
-    assert metrics.model_dump(mode="json")["me"][0]["power"] == "acceptor"
+    dumped = metrics.model_dump(mode="json")["me"][0]
+    assert (dumped["power"], dumped["acceptor_source_amps"]) == ("acceptor", 1)
     assert LayoutMetrics.model_validate_json(metrics.model_dump_json()) == metrics
 
 

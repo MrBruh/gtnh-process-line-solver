@@ -259,6 +259,11 @@ def test_sand_on_a_link_subnet_powered_by_an_energy_acceptor(
     (metrics,) = layout.metrics.me
     assert metrics.power is MEPower.ACCEPTOR
     assert 0 < metrics.eu_per_tick <= acceptor.eut
+    assert (metrics.acceptor_eu_per_tick, metrics.acceptor_source) == (
+        acceptor.eut,
+        "power-source:LV",
+    )
+    assert metrics.acceptor_source_amps
     printed = capsys.readouterr()
     assert LayoutResult.model_validate_json(printed.out).metrics.me == [metrics]
     assert any(

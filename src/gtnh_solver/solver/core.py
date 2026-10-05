@@ -622,7 +622,14 @@ def _assemble(
     # footprint/layers for every result, and what each ME network asks of the player (#336)
     metrics = _layout_metrics(problem, placement_list, routes, me_cells)
     if problem.me.networks:
-        metrics = metrics.model_copy(update={"me": me_network_metrics(problem, me.networks)})
+        drawn = LayoutResult(
+            status=LayoutStatus.VALID,
+            seed=seed,
+            placements=placement_list,
+            routes=routes,
+            me_networks=list(me.networks),
+        )
+        metrics = metrics.model_copy(update={"me": me_network_metrics(problem, drawn)})
 
     # Which casing cell each connection turns into a hatch, plus the maintenance hatch and muffler
     # that belong to no net. Last, because a muffler needs empty air in front of it and only a

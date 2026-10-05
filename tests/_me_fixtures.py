@@ -282,10 +282,12 @@ def comb(
     return problem, layout
 
 
-def gt_hatch_line(*, normal: bool = False) -> tuple[InputIR, LayoutResult]:
+def gt_hatch_line(*, normal: bool = False, subnet: bool = False) -> tuple[InputIR, LayoutResult]:
     """A 2x1x1 multiblock at (1, 0, 1) facing north, its product leaving through the casing cell at
     (1, 0, 1): GT's Output Bus (ME) with its front south onto a cable from the stub, or with
-    ``normal`` a normal output bus there and an interface part on that cable facing back at it."""
+    ``normal`` a normal output bus there and an interface part on that cable facing back at it.
+    With ``subnet`` the network is an orange ad-hoc subnet instead, its two cables smart and no
+    stub: nothing of its own stores energy for a flush."""
     if normal:
         out = endpoint("out", ("out",), MEDeviceKind.INTERFACE, hatch_kind="OutputBus")
     else:
@@ -306,11 +308,16 @@ def gt_hatch_line(*, normal: bool = False) -> tuple[InputIR, LayoutResult]:
         hatch_cells=2,
         me_endpoints=(out,),
     )
+    spec = (
+        MENetworkSpec(id=MAIN, mode=MEMode.SUBNET, colour=AEColor.ORANGE)
+        if subnet
+        else MENetworkSpec(id=MAIN, mode=MEMode.ATTACHED)
+    )
     problem = InputIR(
         bounding_region=CellBox(sx=5, sy=1, sz=4),
-        machines=[mb, stub()],
+        machines=[mb] if subnet else [mb, stub()],
         nets=[me_net("prod", ("mb", "out"))],
-        me=MEConfig(networks=[MENetworkSpec(id=MAIN, mode=MEMode.ATTACHED)]),
+        me=MEConfig(networks=[spec]),
     )
     built = (
         device("mb", out, (1, 0, 2), Facing.NORTH)
@@ -320,7 +327,10 @@ def gt_hatch_line(*, normal: bool = False) -> tuple[InputIR, LayoutResult]:
     layout = LayoutResult(
         status=LayoutStatus.VALID,
         seed=0,
-        placements=[at("stub", 0, 0, 2, Facing.WEST), at("mb", 1, 0, 1, Facing.NORTH)],
+        placements=[
+            *([] if subnet else [at("stub", 0, 0, 2, Facing.WEST)]),
+            at("mb", 1, 0, 1, Facing.NORTH),
+        ],
         hatches=[
             PlacedHatch(
                 machine_id="mb",
@@ -333,8 +343,11 @@ def gt_hatch_line(*, normal: bool = False) -> tuple[InputIR, LayoutResult]:
         me_networks=[
             MENetworkLayout(
                 id=MAIN,
-                colour=AEColor.FLUIX,
-                cables=[cable(0, 0, 2, MECableKind.DENSE), cable(1, 0, 2)],
+                colour=AEColor.ORANGE if subnet else AEColor.FLUIX,
+                cables=[
+                    cable(0, 0, 2, MECableKind.SMART if subnet else MECableKind.DENSE),
+                    cable(1, 0, 2),
+                ],
                 devices=[built],
             )
         ],

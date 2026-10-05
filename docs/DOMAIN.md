@@ -692,17 +692,17 @@ its front. The validator builds that graph from the blocks, and:
 **Power**, by what the laid network draws (spike 6; "What an ME network draws" below):
 
 9. **A network on an Energy Acceptor gets what it draws.** Its acceptor is placed, reached by a
-   power cable (unless `--me power` leaves every machine's power to the builder), and rated (its
-   `eut`) for at least the network's EU/t, which the validator computes on its own from the
-   blocks: the devices it places, and the channel term from its own pathing, never the router's
-   `me_channels`. And whatever powers it must store one flush of each GT ME output bus or hatch at
-   once, 16,000 AE for an Output Bus (ME), where a grid with no acceptor, controller or cell holds
-   only 1,000 (spike 5.3, 6.3); an acceptor or a controller holds 80,000. An externally powered
-   network draws on the main network or through a quartz fiber, whose store the layout cannot see,
-   so its flush is taken as stored and named (`ValidationReport.me_external_buffers`), not
-   refused. A rating under the laid figure names the acceptor: another placement, laying less
-   cable, can meet it, so the solver ranks that layout as one that left the acceptor's power net
-   unrouted rather than as a bug.
+   power cable, and rated (its `eut`) for at least the network's EU/t, which the validator computes
+   on its own from the blocks: the devices it places, and the channel term from its own pathing,
+   never the router's `me_channels`. Under `--me power` neither the cable nor the rating is
+   checked: the builder brings every machine's power, the acceptor's included. And its store must
+   hold one flush of each GT ME output bus or hatch at once, 16,000 AE for an Output Bus (ME),
+   where a grid with no acceptor, controller or cell holds only 1,000 (spike 5.3, 6.3); an
+   acceptor or a controller holds 80,000. An externally powered network is not judged: it draws on
+   the main network or through a quartz fiber, whose store the layout cannot see, and the run
+   tells the builder what that store must hold (below). A rating under the laid figure names the
+   acceptor: another placement, laying less cable, can meet it, so the solver ranks that layout as
+   one that left the acceptor's power net unrouted rather than as a bug.
 
 ### How the router lays an ME network (#334)
 
@@ -782,11 +782,14 @@ each device's one; `system_io.laid_me_ae_per_tick`). The CLI says it per network
 builder supplies it: an attached network "adds X AE/t (Y EU/t) to your main network's power
 draw", an external subnet is to be fed it "through a quartz fiber", and an acceptor network's
 note gives the acceptor's draw and rating and tells the builder to feed its source no more than
-the amps its cable is sized for. An external network whose GT ME output flushes more at once than
-AE's 1,000 AE default buffer is told the network powering it must store that much. For an attached
+the amps its cable is sized for. An external subnet with no controller of its own, whose GT ME
+output flushes more at once than AE's 1,000 AE default buffer, is told the network powering it
+must store that much (`external_store_ae`); an attached network draws on the main network's
+controller and a subnet with a controller on its own, each holding 80,000 AE. For an attached
 network the figure is what it adds, short of the main network's own cable between its controller
 and the stub, which the layout cannot see. The layout carries the same per network in
-`LayoutMetrics.me` (docs/IR.md), since gtnh-solver-site reads only the layout.
+`LayoutMetrics.me` (docs/IR.md), since gtnh-solver-site reads only the layout: the draw, the
+store, and for an acceptor its rating, its source and the most amps to feed that source.
 
 ## Multiblocks
 

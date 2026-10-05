@@ -607,10 +607,11 @@ def test_an_acceptor_network_with_no_acceptor_placed_is_starved() -> None:
     assert "none is placed" in starved[0].message
 
 
-def test_power_left_to_the_builder_reaches_every_acceptor() -> None:
+def test_power_left_to_the_builder_is_neither_cabled_nor_rated() -> None:
     # Under ``--me power`` no source or cable is laid for any machine: the acceptor is fed by
-    # whatever the builder brings, like the rest of the line, and only its rating is checked.
-    problem, layout = acceptor_comb()
+    # whatever the builder brings, like the rest of the line, so neither its cable nor its rating
+    # (here far under the network's 11.7 EU/t) means anything to check.
+    problem, layout = acceptor_comb(eut=1.0)
     external = problem.model_copy(
         update={
             "me": problem.me.model_copy(update={"power_external": True}),
@@ -630,7 +631,7 @@ def test_power_left_to_the_builder_reaches_every_acceptor() -> None:
 def test_an_output_bus_flush_needs_an_energy_store_on_an_acceptor_network() -> None:
     # An Output Bus (ME) flushes 16,000 AE at once (spike 5.3). With no acceptor or controller the
     # network holds only AE's 1,000 AE default buffer (spike 6.3), so most of every flush stays put.
-    problem, layout = gt_hatch_line()
+    problem, layout = gt_hatch_line(subnet=True)
     spec = problem.me.networks[0].model_copy(update={"power": MEPower.ACCEPTOR})
     starved = problem.model_copy(update={"me": MEConfig(networks=[spec])})
     messages = [
@@ -642,13 +643,11 @@ def test_an_output_bus_flush_needs_an_energy_store_on_an_acceptor_network() -> N
     assert any("stores 1000 AE, less than the 16000 AE" in m for m in messages)
 
 
-def test_an_externally_powered_flush_is_taken_as_buffered_and_said() -> None:
-    # The main network (or the network behind a quartz fiber) is the store, which the layout cannot
-    # see: an abstention, not a violation.
-    report = validate(*gt_hatch_line())
-    assert report.ok
-    assert report.me_external_buffers == (MAIN,)
-    assert validate(*gt_hatch_line(normal=True)).me_external_buffers == ()
+def test_an_externally_powered_flush_is_not_judged() -> None:
+    # The main network, or the network behind a quartz fiber, is the store, which the layout cannot
+    # see: no violation (the run tells the builder what it must hold, test_system_io).
+    assert validate(*gt_hatch_line()).ok
+    assert validate(*gt_hatch_line(subnet=True)).ok
 
 
 def test_the_channel_term_is_the_spike_trace() -> None:
