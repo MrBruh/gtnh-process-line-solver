@@ -18,7 +18,8 @@ validator lanes. Only the value types (``CellCoord``, ``CellBox``) surface here.
                    MEConfig), and the two contracts that choose them per net (NetKind, NetEnd,
                    NetEntry, NetList, MEPlan; + NETLIST_VERSION, ME_PLAN_VERSION); what a problem
                    asks the ME side for (MERole, MEDeviceSpec, MEEndpoint) and what a layout
-                   builds (MECableCell, MEPlacedDevice, MENetworkLayout)
+                   builds (MECableCell, MEPlacedDevice, MENetworkLayout) and reports per network
+                   (MEFlowMetrics, MENetworkMetrics)
 - ``nets``       - net helpers shared by the router and the system-IO summary
 - ``output``     - Placement, PlacedHatch, Segment, Terminal, Route, RouteMaterial,
                    LayoutMetrics, Infeasibility, LayoutResult  (+ LAYOUT_RESULT_VERSION)
@@ -63,9 +64,11 @@ from .me import (
     MEDeviceKind,
     MEDeviceSpec,
     MEEndpoint,
+    MEFlowMetrics,
     MEHatchPolicy,
     MEMode,
     MENetworkLayout,
+    MENetworkMetrics,
     MENetworkSpec,
     MEPlacedDevice,
     MEPlan,
@@ -140,6 +143,8 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
     "MECableCell",
     "MEPlacedDevice",
     "MENetworkLayout",
+    "MEFlowMetrics",
+    "MENetworkMetrics",
     # output schema
     "Placement",
     "PlacedHatch",
@@ -495,5 +500,15 @@ __all__ = [  # noqa: RUF022 - grouped by section (mirrors definition order), not
 #   and config). Breaking by omission, the rule `hatches` set. The validator rebuilds which blocks
 #   join which network in game from the blocks themselves, and runs AE2's channel pathing on it
 #   (`validator.me`). A v4 layout is refused on parse; re-solve its plan.
+#
+# LayoutResult v5 (additive, no version bump) - added `LayoutMetrics.me: list[MENetworkMetrics]`
+#   (#336), what each ME network asks of the player: its mode, colour and power, its devices and
+#   channel budget, the main network's channels it spends, its draw in AE/t and EU/t computed from
+#   the cable the layout lays (spike 6), the most one GT ME output flush spends, and what its
+#   storage supplies and takes in (`MEFlowMetrics`). It is what the site, which reads only the
+#   layout, shows per network. Metrics are advisory, and it is left out of the dump while empty, so
+#   a layout with no ME network serializes byte for byte as before and a consumer that ignores it
+#   builds nothing wrong. An acceptor network's Energy Acceptor is a placement (`Machine.me_role`),
+#   so building it needs no new field either.
 #
 # ---------------------------------------------------------------------------

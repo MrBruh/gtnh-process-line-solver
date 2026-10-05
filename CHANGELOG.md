@@ -21,6 +21,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   draws, and for a network that cannot store one flush of its GT ME output buses (16,000 AE for an
   Output Bus (ME), against the 1,000 AE a network with no acceptor or controller holds). An
   externally powered network's flush is taken as stored by the network powering it, and said.
+  Every run now says what each ME network draws, from the cable it lays: what an attached network
+  adds to your main network's power draw, what to feed an external subnet through a quartz fiber,
+  or what its acceptor draws. The layout carries the same per network in the new
+  `metrics.me` (additive, no contract bump: absent on a line with no ME network), with its
+  devices, channel budget, main-network channels and what its storage supplies and takes in, for
+  readers of the layout alone such as gtnh-solver-site.
 - **Nets on ME are built (#335).** A solve with nets on ME now lays each ME network: the ME
   device each port needs (an export or import bus, an interface or Dual Interface, or one of GT's
   ME hatches on a multiblock), the AE2 cable joining them as a tree, and the blocks the network

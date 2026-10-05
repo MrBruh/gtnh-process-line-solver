@@ -141,6 +141,7 @@ from gtnh_solver.router import (
     route_me,
     route_power,
 )
+from gtnh_solver.system_io import me_network_metrics
 from gtnh_solver.validator import ValidationReport, ViolationCode, validate
 
 from ._structure import footprint_and_layers, me_cable_cells, structure_cells, structure_quality
@@ -618,8 +619,10 @@ def _assemble(
     placement_list, power, me = laid.placements, laid.power, laid.me
     me_cells = me_cable_cells(me.networks)
     routes = [*routing.routes, *power.routes]
-    # footprint/layers for every result
+    # footprint/layers for every result, and what each ME network asks of the player (#336)
     metrics = _layout_metrics(problem, placement_list, routes, me_cells)
+    if problem.me.networks:
+        metrics = metrics.model_copy(update={"me": me_network_metrics(problem, me.networks)})
 
     # Which casing cell each connection turns into a hatch, plus the maintenance hatch and muffler
     # that belong to no net. Last, because a muffler needs empty air in front of it and only a

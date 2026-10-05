@@ -521,3 +521,51 @@ class MENetworkLayout(StrictModel):
         if len(cells) != len(set(cells)):
             raise ValueError(f"ME network {self.id!r} lists a cable cell twice")
         return self
+
+
+# --- what a layout reports about each network (LayoutResult v5, additive, #336) ---------------------
+
+
+class MEFlowMetrics(FrozenModel):
+    """One resource an ME network's storage must supply, or takes in: its ids (a merged run's
+    several), what kind it is, and the summed rate of the nets that move it (items/t, mB/t)."""
+
+    resources: tuple[str, ...] = Field(min_length=1)
+    commodity: Commodity
+    rate: float = Field(ge=0.0)
+
+    @field_validator("commodity")
+    @classmethod
+    def _check_commodity(cls, value: Commodity) -> Commodity:
+        if value is Commodity.POWER:
+            raise ValueError("ME stores items and fluids, never power")
+        return value
+
+
+class MENetworkMetrics(StrictModel):
+    """What one ME network of a layout asks of the player, for a reader of the layout alone.
+
+    ``devices`` are its channel devices, each spending one channel; ``channel_budget`` what they
+    may spend: an attached network's free channels on the main network, an ad-hoc subnet's 8, and
+    ``None`` for a subnet with a controller, whose cables each carry 32 from it. ``main_channels``
+    are the main network's channels it spends (an attached network one a device, a link subnet one
+    a link). ``ae_per_tick`` is what it draws, computed from the cable the layout lays (spike 6),
+    and ``eu_per_tick`` the same in EU: what an Energy Acceptor takes for it, or what the main
+    network (attached) or a quartz fiber (an external subnet) must carry. ``flush_ae`` is the most
+    one GT ME output bus or hatch of it spends in a single flush, which its energy store must hold
+    (0 with none). ``supplies`` must be in its storage for the line to run, and ``absorbs`` lands
+    there.
+    """
+
+    id: str = Field(min_length=1)
+    mode: MEMode
+    colour: AEColor
+    power: MEPower
+    devices: int = Field(ge=0)
+    channel_budget: int | None = Field(default=None, ge=0)
+    main_channels: int = Field(ge=0)
+    ae_per_tick: float = Field(ge=0.0)
+    eu_per_tick: float = Field(ge=0.0)
+    flush_ae: float = Field(default=0.0, ge=0.0)
+    supplies: list[MEFlowMetrics] = Field(default_factory=list)
+    absorbs: list[MEFlowMetrics] = Field(default_factory=list)

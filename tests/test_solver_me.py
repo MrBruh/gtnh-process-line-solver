@@ -31,6 +31,7 @@ from gtnh_solver.ir import (
     MEDeviceKind,
     MEMode,
     MENetworkSpec,
+    MEPower,
     Net,
     Placement,
     Terminal,
@@ -43,6 +44,7 @@ from gtnh_solver.validator import validate
 from tests._helpers import consumer, net, producer
 from tests._me_fixtures import (
     MAIN,
+    acceptor_comb,
     attached_line,
     coord,
     endpoint,
@@ -90,6 +92,23 @@ def test_a_line_with_no_me_network_lays_none() -> None:
     layout = solve(problem, seed=0)
     assert layout.status is LayoutStatus.VALID
     assert layout.me_networks == []
+    # Nor does it report one: the layout dumps exactly as before ME power (#336).
+    assert "me" not in layout.metrics.model_dump(mode="json")
+
+
+def test_an_acceptor_network_solves_with_its_acceptor_on_the_lines_power() -> None:
+    # The fixture's line, given room to lay it in: the acceptor is placed and cabled like any
+    # machine drawing EU, and the layout reports what the network it feeds draws (#336).
+    problem, _ = acceptor_comb(eut=20.0)
+    problem = problem.model_copy(update={"bounding_region": CellBox(sx=8, sy=2, sz=8)})
+    layout = solve(problem, seed=0)
+    assert layout.status is LayoutStatus.VALID, layout.infeasibility
+    assert validate(problem, layout).ok
+    (metrics,) = layout.metrics.me
+    assert (metrics.id, metrics.power) == (MAIN, MEPower.ACCEPTOR)
+    assert 0 < metrics.eu_per_tick <= 20.0
+    (cable,) = [r for r in layout.routes if r.net_id == "power:LV"]
+    assert "acc" in {t.machine_id for t in cable.terminals}
 
 
 # ------------------------------------------------------------------ the two orders

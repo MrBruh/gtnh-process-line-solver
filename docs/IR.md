@@ -371,10 +371,13 @@ LayoutResult
   auto_connections: [AutoConnection]     # nets connected by adjacency (no pipe)
   hatches: [PlacedHatch]                 # every hatch/bus the build needs (v1)
   me_networks: [MENetworkLayout]         # the ME blocks the build needs, per network (v5, #333)
-  metrics: { footprint, layers, buildability, congestion, rounds?, ... }
+  metrics: { footprint, layers, buildability, congestion, rounds?, me?, ... }
                                          # rounds: how many rounds of the multi-start ran, only on
                                          #  a solve given a time budget or a round count (absent,
                                          #  not null, otherwise); --rounds that many replays it
+                                         # me: [MENetworkMetrics], one per InputIR.me network in
+                                         #  problem order, absent (not []) on a line with none
+                                         #  (#336; additive, no LayoutResult bump)
   seed: int                              # for the seed-compare workflow
 
 Placement   { machine_id, cell: CellCoord, orientation: Facing }   # orientation horizontal only
@@ -406,6 +409,19 @@ MENetworkLayout { id, colour: AEColor, cables: [MECableCell], devices: [MEPlaced
               # too, so their cells are listed here. Which blocks join which network in game is
               # the validator's to rebuild from these blocks: AE joins whatever compatible blocks
               # touch. MENetworkLayout.cells() is every cable block.
+MENetworkMetrics { id, mode: MEMode, colour: AEColor, power: MEPower, devices: int,
+                   channel_budget: int | null, main_channels: int, ae_per_tick: float,
+                   eu_per_tick: float, flush_ae: float, supplies: [MEFlowMetrics],
+                   absorbs: [MEFlowMetrics] }
+              # what one ME network asks of the player, for a reader of the layout alone:
+              # devices each spend a channel; channel_budget is an attached network's budget, an
+              # ad-hoc subnet's 8, or null with a controller; main_channels the main network's
+              # channels it spends. ae_per_tick / eu_per_tick are its draw from the cable laid
+              # (spike 6: idle, channelsByBlocks / 128, a charge per item and per started 1000 mB,
+              # x 10; EU = AE / 2); flush_ae the most one GT ME output flush spends at once
+MEFlowMetrics { resources: [str], commodity: "item" | "fluid", rate: float }
+              # one resource its storage supplies (supplies) or takes in (absorbs), summed over
+              # the nets that move it the same way
 MECableCell { cell: CellCoord, kind: MECableKind, me_channels: int }
               # me_channels: the solver's own count of channel devices routed through it, which
               # the previewer lights; the validator never trusts it

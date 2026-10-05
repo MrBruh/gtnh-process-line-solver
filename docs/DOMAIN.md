@@ -607,8 +607,8 @@ stubs, links, a controller over 8 devices, an Energy Acceptor when the line's ow
 #336), and drops the boundary chests an attached or link network's storage replaces. Placement charges each device a face and a cell beside it, like a
 pipe's terminal, and pulls each network's machines together, stub included. The solver lays each
 network's cable after the pipes and before power (the router below); the CLI then says, per
-network, what its storage must supply, what lands there, and how many of the main network's
-channels it spends (`system_io`). The preview draws no ME block yet (#338), and the schematic
+network, what its storage must supply, what lands there, how many of the main network's channels
+it spends, and what it draws (`system_io`; "What an ME network draws" below). The preview draws no ME block yet (#338), and the schematic
 export leaves them out with a warning that counts them (#339).
 
 A single block's outputs can be split: one product on ME and the rest piped. Its auto-output face
@@ -765,6 +765,17 @@ controller's idle, and a channel term over cable it assumes, each device's chann
 line's region from side to side and never fewer than 16 blocks (`estimated_channel_load`). The
 estimate errs high on purpose: the validator holds the rating to what the laid network really
 draws, so an estimate under it fails the layout, while one over it only thickens a power cable.
+
+**What a run reports is the laid figure**, from the cable the layout lays (each cable's channels,
+each device's one; `system_io.laid_me_ae_per_tick`). The CLI says it per network the way the
+builder supplies it: an attached network "adds X AE/t (Y EU/t) to your main network's power
+draw", an external subnet is to be fed it "through a quartz fiber", and an acceptor network's
+note gives the acceptor's draw and rating and tells the builder to feed its source no more than
+the amps its cable is sized for. An external network whose GT ME output flushes more at once than
+AE's 1,000 AE default buffer is told the network powering it must store that much. For an attached
+network the figure is what it adds, short of the main network's own cable between its controller
+and the stub, which the layout cannot see. The layout carries the same per network in
+`LayoutMetrics.me` (docs/IR.md), since gtnh-solver-site reads only the layout.
 
 ## Multiblocks
 
