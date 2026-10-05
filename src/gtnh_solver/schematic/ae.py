@@ -68,7 +68,7 @@ from gtnh_solver.previewer.textures import TextureManifest
 
 from . import nbt
 from .core import FORGE_DIRECTION, Cell, SchematicError, SchematicWarning
-from .read import CABLE_SIDE
+from .read import CABLE_SIDE, AETile, ItemRef
 
 Key = tuple[int, int, int]
 
@@ -440,3 +440,85 @@ def warn_about_me(report: MELowering) -> None:
     if not said:
         return
     warnings.warn("ME networks: " + ". ".join(said) + ".", SchematicWarning, stacklevel=3)
+
+
+# --- naming what a file holds (--inspect-schematic) -----------------------------------------------
+#
+# A file's AE2 items are the saving world's numbers. ``names`` (that world's table turned round,
+# id -> registry name) names every one; without it, one item can still be named, because a cable
+# bus's centre is always a cable: its id is ItemMultiPart's in that world, and every AE2 cable and
+# AE2 part is a damage of it (spike 7.3).
+
+_CARD_NAMES: Final = {
+    CARD_DAMAGE["acceleration"]: "Acceleration Card",
+    CARD_DAMAGE["super_speed"]: "Hyper-Acceleration Card",
+    CARD_DAMAGE["capacity"]: "Capacity Card",
+}
+
+
+def part_item_id(tiles: Sequence[AETile], names: Mapping[int, str] | None = None) -> int | None:
+    """``ItemMultiPart``'s id in the world that saved ``tiles``: from ``names`` when given, else read
+    off a cable. ``None`` with neither."""
+    if names is not None:
+        found = next((item for item, name in names.items() if name == PART_ITEM), None)
+        if found is not None:
+            return found
+    return next((t.cable.id for t in tiles if t.cable is not None), None)
+
+
+def describe_item(
+    item: ItemRef, *, part_item: int | None, names: Mapping[int, str] | None = None
+) -> str:
+    """An AE2 cable or part by its in-game name when ``item`` is ``ItemMultiPart``, a card by its
+    name, any other item by its registry name from ``names``, else its raw ``id:damage``."""
+    named = names.get(item.id) if names is not None else None
+    if item.id == part_item:
+        for kind, base in CABLE_DAMAGE.items():
+            if base <= item.damage <= base + AEColor.FLUIX.ordinal:
+                colour = list(AEColor)[item.damage - base]
+                return f"{CABLE_NAMES[kind]} ({colour.value.replace('_', ' ').title()})"
+        for device, damage in PART_DAMAGE.items():
+            if item.damage == damage:
+                return DEVICE_NAMES[device]
+    if named == MATERIAL_ITEM and item.damage in _CARD_NAMES:
+        return _CARD_NAMES[item.damage]
+    for device, fc_item in FC_PART_ITEMS.items():
+        if named == fc_item:
+            return DEVICE_NAMES[device]
+    if named is not None:
+        return named if item.damage == 0 else f"{named}@{item.damage}"
+    return f"item {item.id}:{item.damage}"
+
+
+def describe_tile(
+    tile: AETile, *, part_item: int | None, names: Mapping[int, str] | None = None
+) -> str:
+    """One line for an AE2 tile: a block's orientation and colour, or a cable bus's cable and each
+    part by side with its cards and filter or partition."""
+    if tile.cable is None and not tile.parts:
+        said = [f"forward {tile.forward}, up {tile.up}".lower()] if tile.forward else []
+        if tile.painted is not None:
+            said.append(f"painted {list(AEColor)[tile.painted].value}")
+        return ", ".join(said) or "no AE2 tags"
+
+    def name(item: ItemRef) -> str:
+        return describe_item(item, part_item=part_item, names=names)
+
+    sides = {ordinal: face.value for face, ordinal in FORGE_DIRECTION.items()}
+    said = [name(tile.cable) if tile.cable is not None else "no cable"]
+    for side, part in sorted(tile.parts.items()):
+        bits = [f"{sides[side]}: {name(part.item)}"]
+        if part.upgrades:
+            bits.append("cards " + " + ".join(name(card) for card in part.upgrades))
+        if part.config:
+            bits.append(
+                "set to "
+                + " + ".join(
+                    str(s["FluidName"])
+                    if "FluidName" in s
+                    else name(ItemRef(int(s.get("id", 0)), int(s.get("Damage", 0)), 1))
+                    for s in part.config
+                )
+            )
+        said.append(", ".join(bits))
+    return "; ".join(said)

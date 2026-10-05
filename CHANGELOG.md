@@ -19,7 +19,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   shows the network for you to build by hand, as the warning says. ME Interface and Dual Interface
   parts are not written yet, since the in-game build has neither; the warning lists where each goes.
   `read_schematic` reads AE2 tiles back (`TileEntity.ae`: a cable block's cable and its parts by
-  side, a block's orientation).
+  side, a block's orientation), and `--inspect-schematic` lists them: each cable block's cable and
+  buses by side with their cards and filters, and each AE2 block's facing. Items only the saving
+  world can name print as its numeric ids, but AE2's cables and buses are named from the file
+  itself.
 - **The preview draws ME networks (#338).** Every AE2 block a line on ME is built with is drawn as
   AE2 draws it: each cable block (smart, dense, ...) with an arm toward each side it joins, a plug
   where it meets a controller or a GT ME hatch, and a straight bar where AE2 draws one; each bus,

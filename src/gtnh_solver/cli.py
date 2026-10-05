@@ -62,6 +62,7 @@ import os
 import sys
 import traceback
 import zipfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Final, get_args
 
@@ -103,6 +104,7 @@ from gtnh_solver.previewer import write_preview
 from gtnh_solver.previewer.jar import cached_jar
 from gtnh_solver.previewer.textures import TextureManifest
 from gtnh_solver.schematic import SchematicError, item_ids, read_schematic, write_schematic
+from gtnh_solver.schematic.ae import describe_tile, part_item_id
 from gtnh_solver.schematic.read import Schematic
 from gtnh_solver.solver import Effort, solve
 from gtnh_solver.system_io import RATE_STEM, MENetworkIO, resource_label, system_io
@@ -295,7 +297,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         help=(
             "decode an existing .schematic and print what is in it (blocks, machines, hatches, "
-            "routes), then exit; takes no plan"
+            "routes, AE2 cables and parts), then exit; takes no plan"
         ),
     )
     parser.add_argument(
@@ -832,6 +834,32 @@ def _print_basic_machine_facings(schematic: Schematic) -> None:
         )
 
 
+def _print_ae(schematic: Schematic, names: Mapping[int, str] | None = None) -> None:
+    """List every AE2 tile: a block's orientation and colour, a cable bus's cable and its parts by
+    side with their cards and filters (#339).
+
+    A cable bus names its items by the saving world's numeric ids, so only that world's table
+    (``names``, id to registry name) names them all. Without it the AE2 cables and parts still
+    resolve, since every cable is ``ItemMultiPart`` and a cable bus's centre is always a cable,
+    which gives that item's id in the file; anything else prints as its raw ``id:damage``.
+    """
+    tiles = [(t, t.ae) for t in schematic.tile_entities]
+    found = sorted(((t, ae) for t, ae in tiles if ae is not None), key=lambda pair: pair[0].pos)
+    if not found:
+        return
+    part_item = part_item_id([ae for _, ae in found], names)
+    whose = (
+        "names from the saving world's item table"
+        if names is not None
+        else "item ids are the saving world's; "
+        + (f"its cables say ItemMultiPart is {part_item}" if part_item is not None else "no cable")
+    )
+    print(f"\nAE2 ({whose})")
+    for tile, ae in found:
+        line = describe_tile(ae, part_item=part_item, names=names)
+        print(f"  {tile.id:<20} at {tile.pos}: {line}")
+
+
 def _inspect_schematic(path: str, version: str | None) -> int:
     """Print what is in the ``.schematic`` at ``path``. Returns the process exit code.
 
@@ -890,6 +918,7 @@ def _inspect_schematic(path: str, version: str | None) -> int:
         print(f"  {count:5d}  mID {mid!s:<6} {tile_id:<26} {label}")
 
     _print_basic_machine_facings(schematic)
+    _print_ae(schematic)
 
     if unresolved:
         print(

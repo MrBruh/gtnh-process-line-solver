@@ -72,7 +72,7 @@ from gtnh_solver.schematic import (
 )
 from gtnh_solver.schematic.ae import _orientation, _settings, _WorldItems, gt_colour
 from gtnh_solver.schematic.core import FORGE_DIRECTION
-from gtnh_solver.schematic.read import AETile, ItemRef, Schematic
+from gtnh_solver.schematic.read import AEPart, AETile, ItemRef, Schematic
 from gtnh_solver.solver import solve
 from tests._me_fixtures import MAIN, at, cable, controller, coord
 
@@ -803,3 +803,86 @@ def test_two_networks_on_one_cell_write_the_first() -> None:
     with pytest.warns(SchematicWarning, match=r"15 AE2 cable block"):
         exported = _export(problem, layout)
     assert _ae(exported, 3, 0, 0).cable == ItemRef(_PART, _CABLES[(3, 0, 0)], 1)
+
+
+# ---------------------------------------------------------------------- --inspect-schematic (#339)
+
+_NAMES = {number: name for name, number in _ITEMS.items()}
+
+
+def test_inspect_lists_every_ae2_tile_and_names_the_cables_without_a_world(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Without the world's table only ItemMultiPart can be named, read off a cable: the cables and
+    the AE2 buses resolve, and FC's buses and the cards print as the world's raw ids."""
+    from gtnh_solver.cli import main
+
+    assert main(["--inspect-schematic", str(_GOLDEN / "ae2-golden-cmd.schematic")]) == 0
+    out = capsys.readouterr().out
+    assert f"AE2 (item ids are the saving world's; its cables say ItemMultiPart is {_PART})" in out
+    lines = [line.strip() for line in out.splitlines()]
+    assert "BlockController      at (4, 0, 0): forward north, up up, painted fluix" in lines
+    assert "BlockEnergyAcceptor  at (5, 0, 0): forward north, up up" in lines
+    assert "BlockInterface       at (3, 1, 3): forward unknown, up unknown" in lines
+    assert "BlockCableBus        at (0, 0, 0): ME Dense Smart Cable (Fluix)" in lines
+    assert (
+        "BlockCableBus        at (2, 0, 2): ME Smart Cable (Green); up: item 4655:0, set to water; "
+        "west: ME Storage Bus, set to item 12:0"
+    ) in lines
+    assert (
+        "BlockCableBus        at (3, 0, 2): ME Smart Cable (Orange); up: ME Export Bus, cards item "
+        "4630:30 + item 4630:56, set to item 4:0"
+    ) in lines
+
+
+def test_with_the_worlds_table_every_item_is_named(capsys: pytest.CaptureFixture[str]) -> None:
+    from gtnh_solver.cli import _print_ae
+
+    _print_ae(_golden("ae2-golden-gui"), _NAMES)
+    lines = [line.strip() for line in capsys.readouterr().out.splitlines()]
+    assert lines[1] == "AE2 (names from the saving world's item table)"
+    assert (
+        "BlockCableBus        at (1, 0, 0): ME Smart Cable (Fluix); north: ME Fluid Import Bus"
+        in (lines)
+    )
+    assert (
+        "BlockCableBus        at (2, 0, 2): ME Smart Cable (Green); up: ME Fluid Storage Bus, set "
+        "to water; west: ME Storage Bus, set to minecraft:sand"
+    ) in lines
+    assert (
+        "BlockCableBus        at (3, 0, 2): ME Smart Cable (Orange); up: ME Export Bus, cards "
+        "Acceleration Card + Hyper-Acceleration Card, set to minecraft:cobblestone"
+    ) in lines
+
+
+def test_a_file_without_ae2_prints_no_ae2_section(capsys: pytest.CaptureFixture[str]) -> None:
+    from gtnh_solver.cli import _print_ae
+
+    _print_ae(read_schematic(_GOLDEN / "sand.schematic"))
+    assert capsys.readouterr().out == ""
+
+
+def test_an_item_is_named_as_far_as_what_is_known_allows() -> None:
+    from gtnh_solver.schematic.ae import describe_item, describe_tile, part_item_id
+
+    assert describe_item(ItemRef(7639, 2299, 1), part_item=_PART, names=_NAMES) == (
+        "gregtech:gt.metaitem.01@2299"
+    )
+    assert describe_item(ItemRef(9999, 0, 1), part_item=_PART, names=_NAMES) == "item 9999:0"
+    assert describe_item(ItemRef(_CARD, 30, 1), part_item=_PART) == f"item {_CARD}:30"
+    assert describe_item(ItemRef(_PART, 999, 1), part_item=_PART) == f"item {_PART}:999"
+    # The table names ItemMultiPart even with no cable to read it off, and without either nothing
+    # is ItemMultiPart.
+    assert part_item_id([], _NAMES) == _PART
+    assert part_item_id([], {}) is None
+    bare = AETile(cable=None, parts={}, forward=None, up=None, painted=None, has_redstone=None)
+    assert describe_tile(bare, part_item=None) == "no AE2 tags"
+    cableless = AETile(
+        cable=None,
+        parts={1: AEPart(1, ItemRef(_PART, 240, 1), nbt.Compound())},
+        forward=None,
+        up=None,
+        painted=None,
+        has_redstone=2,
+    )
+    assert describe_tile(cableless, part_item=_PART) == "no cable; up: ME Import Bus"
