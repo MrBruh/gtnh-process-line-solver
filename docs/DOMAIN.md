@@ -38,6 +38,22 @@ independent logic - see [`ARCHITECTURE.md`](ARCHITECTURE.md)).
     one 2.9 instance put `gt.metaitem.01` at 7639 and 7436), and each world's `level.dat` lists
     its own.
   - Block metadata is kept to **4 bits**, which loses a GT 2.9 frame's material (#212).
+  - Under Angelica (GT:NH 2.9) the **hologram vanishes at some view angles**, whatever the file
+    holds (a copy with its covers stripped vanished the same way). Schematica culls each
+    16x16x16 piece of the hologram with one `Frustrum` it keeps for the whole session
+    (`RendererSchematicGlobal`). Vanilla's `Frustrum` asks the clipping helper that
+    `EntityRenderer` refreshes every frame, but Angelica 2.2.10 (`MixinFrustrum`) freezes a
+    `Frustrum`'s camera when it is built, so Schematica culls against its first frame's view.
+    The maintainer's Schematica fork builds a new `Frustrum` each frame (branch
+    `fix/hologram-frustum`), confirmed in game on 2026-10-04.
+  - Stock Schematica draws a GT controller that faces **north upside down** (and one facing east
+    mirrored), whatever the file holds. GT orients a controller's front texture from the tile
+    entity it finds in the player's *real* world at the hologram's local coordinates
+    (`GTRenderedTexture.getExtendedFacing`). There is none there, so it falls back to a flip table
+    meant for plain blocks, which flips a north face vertically. That is also why a file's
+    `eRotation` changed nothing in the hologram. The maintainer's Schematica fork adds a mixin that
+    reads the hologram's own tile entity instead (branch `fix/controller-facing`), confirmed in game
+    on 2026-10-05; with it, `eRotation` and `eFlip` take effect in the hologram too.
 - There is **no headless GT simulator**, so true correctness is only verifiable in-game.
 
 ## Machine faces
