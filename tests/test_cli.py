@@ -1481,3 +1481,47 @@ def test_cli_offers_the_shadow_schema() -> None:
     action = next(a for a in cli_module.build_parser()._actions if a.dest == "plan_schema")
     assert action.choices is not None
     assert "shadow-v1" in action.choices
+
+
+# ----------------------------------------------------------------------------------- --trace
+
+
+def test_cli_trace_writes_the_solves_records_as_json_lines(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "attempts.jsonl"
+    assert main([_SAND, "--effort", "minimal", "--trace", str(out)]) == 0
+    traced = _published(capsys.readouterr().out)
+    records = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines()]
+    assert [r["kind"] for r in records] == ["start", "attempt", "solve"]
+    assert records[-1]["status"] == traced.status.value
+    # The trace reads the solve and never steers it: the same layout as an untraced run.
+    assert main([_SAND, "--effort", "minimal"]) == 0
+    assert _published(capsys.readouterr().out) == traced
+
+
+def test_cli_trace_to_a_dash_writes_to_stderr_and_keeps_stdout_the_layout(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main([_SAND, "--effort", "minimal", "--trace", "-"]) == 0
+    captured = capsys.readouterr()
+    _published(captured.out)  # stdout is still the layout and nothing else
+    kinds = [json.loads(line)["kind"] for line in captured.err.splitlines() if line.startswith("{")]
+    assert kinds == ["start", "attempt", "solve"]
+
+
+def test_cli_trace_to_a_file_it_cannot_write_is_an_unloadable_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    target = tmp_path / "no-such-folder" / "attempts.jsonl"
+    assert main([_SAND, "--trace", str(target)]) == 2
+    assert "could not write" in capsys.readouterr().err
+    assert not solve_calls
+
+
+def test_cli_without_trace_hands_the_solver_none(
+    capsys: pytest.CaptureFixture[str], solve_calls: list[dict[str, object]]
+) -> None:
+    assert main([_SAND]) == 0
+    _published(capsys.readouterr().out)
+    assert solve_calls[0]["trace"] is None

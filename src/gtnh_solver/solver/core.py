@@ -119,7 +119,7 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -139,6 +139,7 @@ from gtnh_solver.ir.geometry import Cell
 from gtnh_solver.placement import (
     SINGLE_BLOCK_IO_FACES,
     Objective,
+    PlacementResult,
     bank_columns,
     crowded_machines,
     optimize_placement,
@@ -160,6 +161,15 @@ from gtnh_solver.validator import ValidationReport, ViolationCode, validate
 
 from ._structure import footprint_and_layers, me_cable_cells, structure_cells, structure_quality
 from .repair import repair_power_sources
+from .trace import (
+    AttemptOutcome,
+    AttemptTrace,
+    QualityKey,
+    SolvePath,
+    SolveTrace,
+    StartTrace,
+    TraceRecord,
+)
 
 #: How hard the optimized path works (module docstring): ``full`` searches for the best layout,
 #: ``minimal`` checks that the line solves.
@@ -213,6 +223,7 @@ def solve(
     effort: Effort | None = None,
     time_budget: float | None = None,
     rounds: int | None = None,
+    trace: Callable[[TraceRecord], None] | None = None,
 ) -> LayoutResult:
     """Produce a layout for ``problem``; deterministic for a given ``problem`` + ``seed``.
 
@@ -251,6 +262,10 @@ def solve(
     how many rounds ran in ``metrics.rounds``, and ``rounds=`` that many replays a timed solve
     exactly; with neither, a solve is the one round it always was and ``metrics.rounds`` stays None.
     The fast path ignores both.
+
+    ``trace`` is called with a record of what the optimized path did (``solver.trace``): the start,
+    each attempt in grid order, then where the layout came from. For experiments on the search; it
+    never changes the layout. The fast path lays no attempts and calls it with nothing.
     """
     if time_budget is not None and rounds is not None:
         raise ValueError("give a time budget or a round count, not both")
@@ -265,7 +280,7 @@ def solve(
         # effort, time budget or round count the caller gave is ignored, as it is there.
         effort, time_budget, rounds = "minimal", None, None
     budget = _BUDGETS[effort or DEFAULT_EFFORT]
-    layout, done = _search(problem, seed, objective, jobs, budget, time_budget, rounds)
+    layout, done = _search(problem, seed, objective, jobs, budget, time_budget, rounds, trace)
     if time_budget is None and rounds is None:
         return layout
     return layout.model_copy(update={"metrics": layout.metrics.model_copy(update={"rounds": done})})
@@ -293,9 +308,19 @@ def _search(
     budget: _Budget,
     time_budget: float | None,
     rounds: int | None,
+    trace: Callable[[TraceRecord], None] | None = None,
 ) -> tuple[LayoutResult, int]:
     """The optimized path: the bank-column candidate, then the grid round by round, ranked (module
-    docstring). Returns the layout and how many rounds ran."""
+    docstring). Returns the layout and how many rounds ran, and hands ``trace`` its records."""
+
+    def finish(
+        path: SolvePath, layout: LayoutResult, done: int, failed: int | None = None
+    ) -> tuple[LayoutResult, int]:
+        if trace is not None:
+            key = _traced_key(problem, layout, objective)
+            trace(SolveTrace(path, layout.status.value, done, failed, key))
+        return layout, done
+
     started = _now()
     # The first placement the gate turned away, kept as a parachute. The gate is a heuristic about
     # geometry and the routers are the authority, so it is only ever allowed to pick BETTER
@@ -326,8 +351,10 @@ def _search(
     )
     seeds = -(-budget.attempts // len(sa_modes))  # ceiling division
     done = 0  # rounds run so far
+    if trace is not None:
+        trace(_start_trace(problem, seed, objective, budget))
     with ExitStack() as pools:
-        runner = _Rounds(problem, objective, jobs, budget, pools)
+        runner = _Rounds(problem, objective, jobs, budget, pools, traced=trace is not None)
         while True:
             # Round ``done``'s grid: round 0's, every seed moved on by ``done`` seeds per weighting,
             # so no two rounds anneal the same seed.
@@ -337,6 +364,8 @@ def _search(
             round_started = _now()
             # Read in grid order, whichever process ran what, so ties keep the earliest attempt.
             for attempt in runner.run(grid):
+                if trace is not None and attempt.trace is not None:
+                    trace(attempt.trace)
                 if attempt.infeasibility is not None:
                     # The machines do not fit the region at all - seed-independent, so no attempt
                     # can, and this is round 0's first attempt.
@@ -345,7 +374,7 @@ def _search(
                         seed=attempt.seed,
                         infeasibility=attempt.infeasibility,
                     )
-                    return infeasible, done + 1
+                    return finish("infeasible", infeasible, done + 1)
                 if attempt.layout is None:
                     gated = gated or attempt.gated
                     continue
@@ -363,7 +392,7 @@ def _search(
                 break
 
     if best_valid is not None:
-        return best_valid, done
+        return finish("valid", best_valid, done)
     # No attempt came out VALID. The fast path's layout is the constructive placement every attempt
     # anneals away from, assembled as it stands, and it can be VALID where none of them is: stacking
     # wins the floor term and buries the one face a cable could dock on. So it is laid here exactly
@@ -376,7 +405,7 @@ def _search(
     if constructive.ok and not crowded_machines(problem, constructive.placements):
         fast, _ = _assemble(problem, constructive.placements, seed, objective, repair=False)
         if fast.status is LayoutStatus.VALID:
-            return fast, done
+            return finish("fast", fast, done)
     if best_partial is None:
         # Every attempt was turned away, so nothing was ever routed. Do NOT report the crowding as
         # the verdict: the gate is a model of the routers' docking rules, and it has been wrong
@@ -386,8 +415,9 @@ def _search(
         # changed nothing else.
         assert gated is not None  # the only path that skips every attempt sets it
         layout, _ = _assemble(problem, gated, seed, objective, max_rounds=budget.negotiation_rounds)
-        return _with_shortfall_reason(problem, layout), done
-    return _with_shortfall_reason(problem, best_partial), done
+        return finish("gated", _with_shortfall_reason(problem, layout), done)
+    partial = _with_shortfall_reason(problem, best_partial)
+    return finish("partial", partial, done, best_failures)
 
 
 def _another_round(
@@ -457,27 +487,49 @@ class _Attempt:
     gated: tuple[Placement, ...] | None = None
     layout: LayoutResult | None = None
     failed_nets: tuple[str, ...] = ()
+    trace: AttemptTrace | None = None  # set when the solve is traced (solver.trace)
 
 
 def _attempt(
-    problem: InputIR, sa_mode: Objective, attempt_seed: int, objective: Objective, budget: _Budget
+    problem: InputIR,
+    sa_mode: Objective,
+    attempt_seed: int,
+    objective: Objective,
+    budget: _Budget,
+    traced: bool = False,
 ) -> _Attempt:
     """One attempt of the grid: anneal, gate, and if the gate lets it through, route and validate.
 
     A function of its arguments alone, so it returns the same thing in a pool process as here. The
     budget is one of them rather than read from :data:`DEFAULT_EFFORT`, which a pool process
-    imports afresh.
+    imports afresh. ``traced`` also builds the attempt's record (``solver.trace``), here, so it
+    comes back from a pool process with the rest of the attempt.
     """
     placement = optimize_placement(
-        problem, seed=attempt_seed, objective=sa_mode, max_iterations=budget.anneal_iterations
+        problem,
+        seed=attempt_seed,
+        objective=sa_mode,
+        max_iterations=budget.anneal_iterations,
+        trace=traced,
     )
     if not placement.ok:
-        return _Attempt(attempt_seed, infeasibility=placement.infeasibility)
+        return _Attempt(
+            attempt_seed,
+            infeasibility=placement.infeasibility,
+            trace=_attempt_trace(traced, attempt_seed, sa_mode, placement, "infeasible"),
+        )
     # Can every machine dock every connection it carries? Checked before routing, naming a machine
     # only on proof: a crowded placement cannot route, and routing it only to watch an arbitrary
     # net lose the race for the last free face costs an attempt and reports the wrong machine (#76).
-    if crowded_machines(problem, placement.placements):
-        return _Attempt(attempt_seed, gated=placement.placements)
+    crowded = crowded_machines(problem, placement.placements)
+    if crowded:
+        return _Attempt(
+            attempt_seed,
+            gated=placement.placements,
+            trace=_attempt_trace(
+                traced, attempt_seed, sa_mode, placement, "gated", gated=len(crowded)
+            ),
+        )
     layout, failed_nets = _assemble(
         problem,
         placement.placements,
@@ -485,7 +537,62 @@ def _attempt(
         objective,
         max_rounds=budget.negotiation_rounds,
     )
-    return _Attempt(attempt_seed, layout=layout, failed_nets=failed_nets)
+    trace = _attempt_trace(
+        traced,
+        attempt_seed,
+        sa_mode,
+        placement,
+        "routed",
+        status=layout.status.value,
+        failed_nets=len(failed_nets),
+        key=_traced_key(problem, layout, objective),
+    )
+    return _Attempt(attempt_seed, layout=layout, failed_nets=failed_nets, trace=trace)
+
+
+def _attempt_trace(
+    traced: bool,
+    attempt_seed: int,
+    sa_mode: Objective,
+    placement: PlacementResult,
+    outcome: AttemptOutcome,
+    *,
+    gated: int = 0,
+    status: str | None = None,
+    failed_nets: int | None = None,
+    key: QualityKey | None = None,
+) -> AttemptTrace | None:
+    """An attempt's record (``solver.trace``), or None when the solve is not traced."""
+    if not traced:
+        return None
+    return AttemptTrace(
+        attempt_seed, sa_mode, outcome, placement.trace, gated, status, failed_nets, key
+    )
+
+
+def _start_trace(problem: InputIR, seed: int, objective: Objective, budget: _Budget) -> StartTrace:
+    """The annealer's start, gated and routed as an attempt would be (``solver.trace``).
+
+    Routed on ``seed`` like the solve's first attempt, with the effort's router budget. Only a
+    traced solve pays for it: one extra routing outside the ranking, so the layout the solve
+    returns cannot depend on it.
+    """
+    start = place(problem, lattice=True)
+    if not start.ok:
+        return StartTrace(ok=False)
+    crowded = crowded_machines(problem, start.placements)
+    if crowded:
+        return StartTrace(ok=True, gated=len(crowded))
+    layout, failed = _assemble(
+        problem, start.placements, seed, objective, max_rounds=budget.negotiation_rounds
+    )
+    key = _traced_key(problem, layout, objective)
+    return StartTrace(True, 0, layout.status.value, len(failed), key)
+
+
+def _traced_key(problem: InputIR, layout: LayoutResult, objective: Objective) -> QualityKey | None:
+    """A layout's quality key for a trace record, or None when nothing is placed."""
+    return _quality(problem, layout, objective) if layout.placements else None
 
 
 class _Rounds:
@@ -506,12 +613,15 @@ class _Rounds:
         jobs: int,
         budget: _Budget,
         pools: ExitStack,
+        *,
+        traced: bool = False,
     ) -> None:
         self._problem = problem
         self._objective = objective
         self._jobs = jobs
         self._budget = budget
         self._pools = pools
+        self._traced = traced
         self._pool: ProcessPoolExecutor | None = None
         self._first = True
 
@@ -538,13 +648,17 @@ class _Rounds:
         return [first, *(self._here(mode, s) for mode, s in rest)]
 
     def _here(self, mode: Objective, attempt_seed: int) -> _Attempt:
-        return _attempt(self._problem, mode, attempt_seed, self._objective, self._budget)
+        return _attempt(
+            self._problem, mode, attempt_seed, self._objective, self._budget, self._traced
+        )
 
     def _pooled(
         self, pool: ProcessPoolExecutor, grid: list[tuple[Objective, int]]
     ) -> list[_Attempt]:
         futures = [
-            pool.submit(_attempt, self._problem, mode, s, self._objective, self._budget)
+            pool.submit(
+                _attempt, self._problem, mode, s, self._objective, self._budget, self._traced
+            )
             for mode, s in grid
         ]
         return [future.result() for future in futures]

@@ -21,9 +21,11 @@ from .banks import bank_columns
 from .constructive import PlacementResult, place
 from .feasibility import crowded_machines, single_block_shortfalls
 from .search import Objective, optimize_placement
+from .trace import AnnealTrace
 
 __all__ = [
     "SINGLE_BLOCK_IO_FACES",
+    "AnnealTrace",
     "Objective",
     "PlacementResult",
     "bank_columns",

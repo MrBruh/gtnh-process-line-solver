@@ -18,8 +18,9 @@ one-block-deep wall with its pipes spilling out in front. Seeded packed solid, t
 block the router cannot thread. The lattice is the middle: a near-square floor with routing room
 inside it. Each edge of it is held by a whole row or column of blocks, so the floor term barely
 moves it and the seed's spacing is what sets the build's size; rows one cell apart instead of two
-lost two of eight iron seeds to congestion. The fast path keeps the plain row, whose neighbours
-touch and so auto-feed.
+lost two of eight iron seeds to congestion. Re-measured against tighter and wider lattices, and a
+shelf for lines with a multiblock (docs/experiments/initial-placement.md, 2026-10-05): none beat
+this one on fresh seeds. The fast path keeps the plain row, whose neighbours touch and so auto-feed.
 
 **A group of parallel single blocks** (``placement.groups``) is seeded as its column, back to front,
 because the annealer moves each group as one rigid unit and has to start from one. Only the
@@ -82,14 +83,20 @@ from gtnh_solver.ir.geometry import (
 from gtnh_solver.ir.nets import net_sources_sinks, port_direction_map
 
 from .groups import column_offsets, column_size, parallel_groups
+from .trace import AnnealTrace
 
 
 @dataclass(frozen=True)
 class PlacementResult:
-    """Crude placer output: all placements, or a partial set plus why it stalled."""
+    """Crude placer output: all placements, or a partial set plus why it stalled.
+
+    ``trace`` is what the annealer did to reach them, set only when
+    :func:`~gtnh_solver.placement.optimize_placement` is asked to trace (``placement.trace``).
+    """
 
     placements: tuple[Placement, ...] = ()
     infeasibility: Infeasibility | None = None
+    trace: AnnealTrace | None = None
 
     @property
     def ok(self) -> bool:

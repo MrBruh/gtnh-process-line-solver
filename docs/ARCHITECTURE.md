@@ -146,7 +146,11 @@ doc as intent and reconcile.
   The aim only shortlists; routing decides, so this is the same decision as the missing
   placement-cost term, not a reversal of it - cable is judged where it is knowable, on a routed
   layout. The grid is deterministic and bounded, keyed off the seed; a caller with time to spare
-  buys more rounds of it with a time budget (decision 6).
+  buys more rounds of it with a time budget (decision 6). A **traced** solve (`solve(trace=...)`,
+  `gtnh-solve --trace FILE`) also hands out what each attempt did, built where the attempt ran so
+  it comes back from a pool with it: the start, each anneal and its routed result, and the path the
+  layout came from (`solver/trace.py`, `placement/trace.py`). It is for experiments on the search
+  and never changes the layout; docs/experiments/ holds what it has measured.
   Within one attempt the order is fixed: lay the pipes (each power net negotiated with them as a
   reserved tree, #164), lay the ME networks around the pipes (#335), lay power around both
   (through the repair pass), place hatches, validate. ME goes before power because an AE2 tree

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import warnings
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -43,6 +44,7 @@ from gtnh_solver.schematic import read_schematic
 from gtnh_solver.schematic.ae import MELowering, warn_about_me
 from gtnh_solver.schematic.core import POWER_SOURCE_STAND_IN, SchematicWarning
 from gtnh_solver.solver import Effort, solve
+from gtnh_solver.solver.trace import TraceRecord
 from gtnh_solver.validator import validate
 from tests._helpers import on_me, world_save
 from tests._me_fixtures import SUB, acceptor_comb, comb, gt_hatch_line
@@ -100,6 +102,7 @@ def real_solves(monkeypatch: pytest.MonkeyPatch) -> list[tuple[InputIR, LayoutRe
         effort: Effort | None,
         time_budget: float | None,
         rounds: int | None,
+        trace: Callable[[TraceRecord], None] | None,
     ) -> LayoutResult:
         layout = solve(
             problem,
@@ -110,6 +113,7 @@ def real_solves(monkeypatch: pytest.MonkeyPatch) -> list[tuple[InputIR, LayoutRe
             effort=effort,
             time_budget=time_budget,
             rounds=rounds,
+            trace=trace,
         )
         solved.append((problem, layout))
         return layout
