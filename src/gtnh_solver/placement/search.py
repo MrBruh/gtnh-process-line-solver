@@ -80,6 +80,9 @@ at full effort iron solved VALID on 15 either way, at a median of 346 floor plus
 against 366, and 37 of its 128 attempts routed VALID against 29. The floor term hardly moves a
 lattice (each edge is a whole row of blocks), so it was left alone: priced as a smooth
 ((x + z) / 2) ** 2, or with a one-cell routing margin on each side, iron solved no better.
+Traced (``placement.trace``), a walk keeps little of its start but its size: about 95% of machines
+move and their order along x is all but reshuffled, yet a lattice anneals to roughly its own floor
+times a fixed ratio, and no other spacing tried beats this one (docs/experiments/initial-placement.md).
 
 **The nudge** shifts one machine by one cell. Relocate draws a cell anywhere in the region, which
 almost never lands anywhere useful (under 2% of relocates are accepted), so without a nudge the
@@ -95,8 +98,9 @@ recreate falls back to a machine's freed origin), so the validator still indepen
 the output. A **power source** keeps its front face - the reserved external-feed face - flush on
 the region boundary through every move (relocate/swap re-orient it back onto a wall when they
 can, reorient only offers wall-facing options), the same hard constraint the constructive seed
-satisfies and the validator enforces. Deterministic for a given ``seed``. The multi-start that
-routes and ranks these placements lives in ``solver.core`` (docs/ROADMAP.md lane C + solver).
+satisfies and the validator enforces. Deterministic for a given ``seed``, traced or not: ``trace``
+records what the walk did to its start (``placement.trace``) and never steers it. The multi-start
+that routes and ranks these placements lives in ``solver.core`` (docs/ROADMAP.md lane C + solver).
 """
 
 from __future__ import annotations
@@ -139,6 +143,7 @@ from gtnh_solver.router.auto import auto_candidates, auto_output_possible
 from .constructive import PlacementResult, _fit, place
 from .feasibility import crowded_machines
 from .groups import column_offsets, column_size, parallel_groups
+from .trace import Checkpoint, anneal_trace, checkpoint_iterations
 
 #: The six face-adjacent offsets, for growing LNS insertion candidates around placed neighbours.
 _FACE_DELTAS = FACE_OFFSETS
@@ -594,12 +599,16 @@ def optimize_placement(
     face_penalties: dict[str, float] | None = None,
     objective: Objective = "footprint",
     max_iterations: int | None = None,
+    trace: bool = False,
 ) -> PlacementResult:
     """Anneal the constructive placement toward a lower routing-aware cost (seeded, validated).
 
     ``max_iterations`` caps the annealing schedule (which scales with the machine count); None runs
     the whole schedule. The solver's ``minimal`` effort passes a small cap: a shorter anneal cools
     less far and so places worse, but every move still only ever builds a valid candidate.
+
+    ``trace`` also records what the walk did to its start (``placement.trace``) on the result's
+    ``trace``. It reads the walk and never steers it, so the placement is the same either way.
 
         ``net_penalties`` (net id -> extra weight) boosts a net's wirelength term so its machines pull
         tighter, so a caller that re-places after a failed routing can cluster the nets the router
@@ -682,7 +691,10 @@ def optimize_placement(
     if max_iterations is not None:
         iters = min(iters, max_iterations)
     temp = _T0
-    for _ in range(iters):
+    start, start_cost = current, current_cost
+    reads = checkpoint_iterations(iters) if trace else frozenset()
+    checkpoints: list[Checkpoint] = []
+    for done in range(1, iters + 1):
         if rng.random() < _P_LNS:
             cand = _ruin_and_recreate(current, ctx, rng)
         else:
@@ -707,8 +719,28 @@ def optimize_placement(
                     best, best_cost = current, current_cost
                 accepted.append((current_cost, len(accepted), current))
         temp *= _ALPHA
+        if done in reads:
+            checkpoints.append(Checkpoint(done, current_cost, best_cost))
     chosen = _cheapest_uncrowded(problem, accepted, best)
-    return PlacementResult(placements=tuple(_placement(p) for p in chosen))
+    placements = tuple(_placement(p) for p in chosen)
+    if not trace:
+        return PlacementResult(placements=placements)
+    chosen_cost = best_cost if chosen is best else next(c for c, _, st in accepted if st is chosen)
+    return PlacementResult(
+        placements=placements,
+        trace=anneal_trace(
+            seed=seed,
+            objective=objective,
+            iterations=iters,
+            accepted=len(accepted) - 1,
+            start=start,
+            chosen=chosen,
+            size_of=lambda pose: bodies[pose.machine_id].sizes[pose.orientation],
+            costs=(start_cost, best_cost, chosen_cost),
+            chosen_is_best=chosen is best,
+            checkpoints=checkpoints,
+        ),
+    )
 
 
 def _cheapest_uncrowded(

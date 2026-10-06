@@ -600,13 +600,14 @@ def test_solve_returns_an_explicit_partial_when_every_attempt_fails(
         face_penalties: dict[str, float] | None = None,
         objective: Objective = "footprint",
         max_iterations: int | None = None,
+        trace: bool = False,
     ) -> PlacementResult:
         nonlocal attempts
         attempts += 1
         assert not net_penalties  # every attempt anneals on its own...
         assert not face_penalties  # ...with nothing carried over from another
         return optimize_placement(
-            problem, seed=seed, objective=objective, max_iterations=max_iterations
+            problem, seed=seed, objective=objective, max_iterations=max_iterations, trace=trace
         )
 
     monkeypatch.setattr(solver_core, "optimize_placement", counting_optimize)
@@ -851,10 +852,11 @@ def _record_budgets(
         face_penalties: dict[str, float] | None = None,
         objective: Objective = "footprint",
         max_iterations: int | None = None,
+        trace: bool = False,
     ) -> PlacementResult:
         anneals.append((objective, seed, max_iterations))
         return optimize_placement(
-            problem, seed=seed, objective=objective, max_iterations=max_iterations
+            problem, seed=seed, objective=objective, max_iterations=max_iterations, trace=trace
         )
 
     def recording_route(

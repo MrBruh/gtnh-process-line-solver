@@ -19,6 +19,7 @@ ShadowTheAge calculator plan, ``.gtnh``, with the 'shadow' extra), the solved la
     gtnh-solve plan.json --rounds 3               # exactly 3 rounds (replays a timed run)
     gtnh-solve plan.json --objective volume       # what "compact" means: footprint|volume|balanced
     gtnh-solve plan.json --jobs 1                 # keep every attempt in one process
+    gtnh-solve plan.json --trace attempts.jsonl   # what each attempt did, as JSON lines
     gtnh-solve plan.json --list-nets              # the nets a user may move to ME (NetList JSON)
     gtnh-solve plan.json --me-plan me.json        # move the nets an MEPlan names to ME
     gtnh-solve plan.json --me items --me fluids   # ...or every item and fluid net, to one network
@@ -63,9 +64,9 @@ import os
 import sys
 import traceback
 import zipfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Final, get_args
+from typing import Final, TextIO, get_args
 
 from pydantic import ValidationError
 
@@ -108,6 +109,7 @@ from gtnh_solver.schematic import SchematicError, item_ids, read_schematic, writ
 from gtnh_solver.schematic.ae import describe_tile, part_item_id, table_part_item_id
 from gtnh_solver.schematic.read import Schematic
 from gtnh_solver.solver import Effort, fast_falls_back, solve
+from gtnh_solver.solver.trace import TraceRecord, trace_json
 from gtnh_solver.system_io import RATE_STEM, MENetworkIO, resource_label, system_io
 from gtnh_solver.validator import validate
 
@@ -240,6 +242,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--trace",
+        metavar="FILE",
+        help=(
+            "write what each optimizing attempt did to FILE, one JSON record per line: the "
+            "annealer's start, each attempt's anneal (how far it moved the start, its cost along "
+            "the way) and routed result, then where the layout came from. For experiments on the "
+            "search; it never changes the layout. '-' writes to stderr; --fast writes nothing"
+        ),
+    )
+    parser.add_argument(
         "--me",
         action="append",
         choices=tuple(_ME_COMMODITIES),
@@ -353,6 +365,26 @@ def _me_commodities(words: list[str] | None) -> tuple[frozenset[Commodity], bool
     """
     named = {_ME_COMMODITIES[word] for word in words or ()}
     return frozenset(named - {Commodity.POWER}), Commodity.POWER in named
+
+
+def _open_trace(path: str | None) -> TextIO | None:
+    """Where ``--trace`` writes: stderr for ``-``, else ``path`` opened for writing, or ``None``
+    without the flag. Raises ``OSError`` when the file cannot be opened."""
+    if path is None:
+        return None
+    return sys.stderr if path == "-" else open(path, "w", encoding="utf-8")
+
+
+def _trace_writer(out: TextIO | None) -> Callable[[TraceRecord], None] | None:
+    """The solver's ``trace`` callback for ``out``: each record as one JSON line, flushed so a long
+    solve's records can be read while it runs."""
+    if out is None:
+        return None
+
+    def write(record: TraceRecord) -> None:
+        print(trace_json(record), file=out, flush=True)
+
+    return write
 
 
 def _read_me_plan(path: str | None) -> MEPlan | None:
@@ -1159,6 +1191,11 @@ def main(argv: list[str] | None = None) -> int:
     _note_fast(args, problem)
 
     try:
+        trace_out = _open_trace(args.trace)
+    except OSError as exc:
+        print(f"error: could not write {args.trace}: {exc}", file=sys.stderr)
+        return 2
+    try:
         layout = solve(
             problem,
             seed=args.seed,
@@ -1169,6 +1206,7 @@ def main(argv: list[str] | None = None) -> int:
             effort=args.effort,
             time_budget=args.time_budget,
             rounds=args.rounds,
+            trace=_trace_writer(trace_out),
         )
         _note_rounds(args, layout)
         _note_me_networks(problem, layout)
@@ -1178,6 +1216,9 @@ def main(argv: list[str] | None = None) -> int:
         payload = _layout_json(layout) if publish else None
     except Exception as exc:  # the last-resort guard; see _internal_error
         return _internal_error(exc)
+    finally:
+        if trace_out is not None and trace_out is not sys.stderr:
+            trace_out.close()
 
     if payload is not None:
         # Printed on an infeasible run too, ahead of the report below: the JSON carries `status`

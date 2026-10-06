@@ -15,6 +15,7 @@ diverge, the doc records the intent, so reconcile one to the other and say which
 | [ROADMAP.md](ROADMAP.md) | The phased v1 plan (Phase 1 thin slice, Phase 2 optimizer core), the parallel lanes, and the deferred v1.1+ work. |
 | [TESTING.md](TESTING.md) | The testing strategy given there is no headless GT simulator: independent validator, hypothesis property tests, golden corpus. |
 | **[dataset-extraction/](dataset-extraction/)** | How the physical dataset, multiblock structures and textures, is extracted from GT5-Unofficial. Its files are below. |
+| **[experiments/](experiments/)** | Measured experiments on the solver: the question, the gate set before the results were read, the numbers and the verdict, one file per experiment. A no-go is recorded too, so the same runs are not repeated. Its files are below. |
 | **[spikes/](spikes/)** | Design spikes: a reviewed design for a change that has not been built yet, one file per issue, named `<issue>-<slug>.md`. A spike is a *proposal plus its evidence*, not a record of what the code does, so read it as intent for an issue rather than as a description of `src/`. Its files are below. |
 
 ### dataset-extraction/
@@ -25,6 +26,12 @@ diverge, the doc records the intent, so reconcile one to the other and say which
 | [implementation.md](dataset-extraction/implementation.md) | How the code achieves it: the Java extractor and the Python consumer, mechanism by mechanism (the *how*). |
 | [texture-resolution.md](dataset-extraction/texture-resolution.md) | Deep dive on the texture pass: the routes `TextureDumper` tries to turn a `(block, meta)` into a sprite name, why a headless dedicated server needs more than one, and what is still unreachable. |
 | [icons.md](dataset-extraction/icons.md) | The item and fluid icons the previewer shows beside each resource: the per-pack icon index it reads, its format, and what a preview draws without one (#297). |
+
+### experiments/
+
+| Doc | One line |
+|-----|----------|
+| [initial-placement.md](experiments/initial-placement.md) | How the annealer's start shapes the layout: a diagnostic of what each anneal keeps of its start, a sweep of nine start spacings and a multiblock shelf, and a fresh-seed confirmation. No-go; bio-diesel's crowding is the open problem it found. |
 
 ### spikes/
 

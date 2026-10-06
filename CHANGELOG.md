@@ -7,6 +7,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`gtnh-solve --trace FILE` records what each optimizing attempt did**, one JSON line per
+  record: the annealer's start (gated and routed as it stands), each attempt's anneal (its cost
+  at every tenth of the walk, how far the machines moved, whether their order survived, the size it
+  returned) and routed result with its quality key, then which path the layout came from. `-` writes
+  to stderr. It is for experiments on the search and never changes the layout; `solve(trace=...)`
+  takes the same records as a callback. The initial-placement experiment that needed it is written
+  up in `docs/experiments/initial-placement.md`: no start shape tried beat the current one.
 - **The `.schematic` export writes ME networks (#339).** Each controller and Energy Acceptor is
   written as its AE2 block, facing as placed and a controller in its network's colour, and each GT
   ME hatch by its own mID, painted its subnet's colour (the old warning that called it a plain bus
