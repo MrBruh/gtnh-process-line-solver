@@ -25,7 +25,7 @@
 # `ruff format .` produces a diff no one asked for. Dependabot's pip and pre-commit ecosystems
 # propose both halves; the test is what stops one landing without the other.
 
-hypothesis==6.168.3
+hypothesis==6.168.5
 mypy==2.3.1
 pre-commit==4.6.2
 pydantic==2.13.5
