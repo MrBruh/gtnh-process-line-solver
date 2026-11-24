@@ -429,6 +429,24 @@ def test_power_rejects_a_root_carrying_more_than_16x() -> None:
     assert "the source's own cable block must carry 18 amps" in sized.detail
 
 
+def test_power_a_tier_at_the_cap_is_refused_before_the_partition_gains_a_source() -> None:
+    # #360's repro. Sixteen EV sinks of 2048 EU/t are exactly 16 A at the source, so a lossless
+    # partition fills one group to the cap; two legs of eight then put every sink a block out, so
+    # 17 A through the root, which no cable carries on any placement. This is the refusal the
+    # partition's loss headroom exists to prevent - the adapter now prices that loss and gives the
+    # tier a second source instead (see tests/test_adapter.py).
+    sized = _size_trunk(
+        "p",
+        [[_R, _A], [_R, _B]],
+        {_R: 0, _A: 1, _B: 1},
+        [_A] * 8 + [_B] * 8,
+        [(2048.0, "EV")] * 16,
+    )
+    assert isinstance(sized, Infeasibility), "a lossless group at the cap cannot route"
+    assert sized.constraint == "amperage"
+    assert "the source's own cable block must carry 17 amps" in sized.detail
+
+
 def test_power_route_refuses_a_root_over_16x_on_legal_legs() -> None:
     # The branched trunk above, loaded heavier: m0 one block out (31 V) draws 279/31 = 9 A and m1
     # five out (27 V) 243/27 = 9 A, so each leg needs a 12x cable, legal on its own, but the source's

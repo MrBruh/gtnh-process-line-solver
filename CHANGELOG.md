@@ -509,6 +509,22 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Hovering a plain machine is unchanged.
 
 ### Fixed
+- **A tier's power groups leave room for cable loss, so a group at the cap gets a source of its
+  own (#360).** `_partition_by_amperage` packed each tier's energy hatches on their *nominal* load
+  (at-source voltage, no loss). Since #347 the source's own cable block carries its group's whole
+  output, so a group filled to the 16x cap at the lossless voltage is over it the moment any sink
+  sits a block out - the router refuses the net (`amperage`), the attempt ranks it as a failed net,
+  and nothing re-partitions, so no placement can clear it. Platline on 2.9 data: `power:EV#1` is
+  16.000 A nominal and 16.02 A at depth 3, so 17 A through the root on every placement.
+
+  The partition now packs on each hatch's load at a reference cable distance
+  (`adapter.power.PARTITION_LOSS_BLOCKS`, 4 blocks), so a group that loss would push over the cap
+  is split before it is ever routed and the tier gains a source. The reference distance is an
+  allowance, not a guarantee - distances do not exist until placement - so the router still sizes
+  and re-checks every segment at the distance actually routed and an over-cap run is still
+  refused. Only a tier whose group sits near the cap changes, and it gains a source; the five
+  shipped examples (none of them near the cap) lay out byte-identically, with the same sources.
+
 - **The cable block a power source feeds is built for everything it puts out (#347).** Every amp
   the source puts out passes through that block, whichever leg it then takes, but it was built at
   its thickest touching segment, and a segment carries only the load beyond it. Where two or more
