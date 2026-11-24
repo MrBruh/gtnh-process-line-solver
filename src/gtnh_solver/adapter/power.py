@@ -38,6 +38,13 @@ the single-source ids (``power-source:MV`` / ``power:MV``) and one that has to s
 (``power-source:MV#1``, ``power:MV#2``, ...), so the common case reads unchanged in the layout and
 the previewer.
 
+**A group is packed with room for cable loss** (:data:`PARTITION_LOSS_BLOCKS`). A cable loses
+voltage over distance, so a group filled to the cap at the lossless voltage is over it the moment
+any sink sits a block out - and since #347 the source's own block carries the group's whole
+output, which no cable then carries. The partition therefore packs on each feed's load at a
+reference distance, so a group that loss would push over 16x gets a source of its own; the router
+still sizes and re-checks every segment at the distance actually routed.
+
 **How each source is itself powered is left to the builder**; the layout marks where an external
 source must feed in. Source *position* optimization (packing groups by
 proximity rather than by load alone) is still Phase 2.
@@ -96,6 +103,17 @@ def _port_id(index: int = 0, total: int = 1) -> str:
 #: the hatch count is a symptom of a wrong tier rather than a real design.
 MAX_HATCHES_BEFORE_UPGRADE = 3
 
+#: Cable distance the partition reserves loss headroom for: a group is packed on each feed's load
+#: at this many blocks from its source, so a group filled to the 16x cap at the lossless voltage
+#: is not over it once its sinks sit a block or two out (#360).
+#:
+#: **An allowance, never a guarantee** - distances do not exist until placement, and the router
+#: sizes and re-checks every segment at the distance actually routed, so a group loss pushes over
+#: the cap is still reported rather than silently accepted. A larger number buys margin at the
+#: cost of more sources; at the 16-block :data:`~gtnh_solver.dataset.DESIGN_RUN_BLOCKS` a low
+#: tier would split almost every group, which is a worse build than the one it prevents.
+PARTITION_LOSS_BLOCKS = 4
+
 
 def _supply_tier(machine: Machine) -> str:
     """The tier to power ``machine`` at: its own, raised until it needs few enough hatches.
@@ -142,13 +160,15 @@ class _Feed:
 
     The unit the partitioner works in. Before v3 that unit was the machine, which quietly assumed
     a machine draws through exactly one connection - true only while its whole load fits one
-    hatch.
+    hatch. ``load`` is what the partition packs on: the hatch's share at the reference distance
+    (:data:`PARTITION_LOSS_BLOCKS`), not the at-source figure, so a group carries the loss its
+    cable run will actually cost it.
     """
 
     machine_id: str
     port_id: str
     eut: float  # EU/t through this one hatch
-    load: float  # nominal amps at the at-source voltage
+    load: float  # amps at the reference distance (see PARTITION_LOSS_BLOCKS)
 
 
 def _power_ports(machine: Machine, *, single_block: bool = False) -> list[Port]:
@@ -256,16 +276,20 @@ def _own_input_amps(machine: Machine) -> float | None:
 def _feeds_for(tier: str, machines_at_tier: list[tuple[Machine, list[Port]]]) -> list[_Feed]:
     """Every energy hatch at ``tier`` as a :class:`_Feed`, in machine-then-port order.
 
-    A feed's ``load`` is its nominal amps at the at-source voltage. An off-ladder tier has no
-    verifiable load; it comes back as 0 so the partitioner leaves the tier on one net and the
-    router (which reports the unknown tier) is the one to say so.
+    A feed's ``load`` is its amps at :data:`PARTITION_LOSS_BLOCKS` from the source, so the
+    partition leaves room for the loss the group's cable run will cost it. Every ladder tier
+    survives that distance (the lowest, ULV, is 8 V against 1 EU a block), so no feed is
+    unpowerable here: ``UnpowerableError`` stays the router's to report, at the distance actually
+    routed. An off-ladder tier has no verifiable load; it comes back as 0 so the partitioner
+    leaves the tier on one net and the router (which reports the unknown tier) is the one to say
+    so.
     """
     feeds: list[_Feed] = []
     for machine, ports in machines_at_tier:
         for port in ports:
             eut = machine.eut if port.rate is None else port.rate
             try:
-                load = amp_load(eut, tier)
+                load = amp_load(eut, tier, distance=PARTITION_LOSS_BLOCKS)
             except UnknownTierError:
                 load = 0.0
             feeds.append(_Feed(machine_id=machine.id, port_id=port.id, eut=eut, load=load))
@@ -275,9 +299,12 @@ def _feeds_for(tier: str, machines_at_tier: list[tuple[Machine, list[Port]]]) ->
 def _partition_by_amperage(feeds: list[_Feed]) -> list[list[_Feed]]:
     """Split one tier's feeds into groups a single cable run can carry.
 
-    First-fit-decreasing on each feed's *nominal* amp load (at-source voltage, no loss). Distances
-    are unknown until placement, so this reserves no loss headroom: a group that cable loss later
-    pushes over the cap is reported by the router, not silently accepted.
+    First-fit-decreasing on each feed's amp load at :data:`PARTITION_LOSS_BLOCKS`, so a group
+    filled to the cap still carries its own cable loss: since #347 the source's own block carries
+    the group's whole output, so a group packed at the lossless voltage is over the cap the moment
+    any sink sits a block out, and no placement can clear it. Distances are unknown until
+    placement, so this is an allowance rather than a guarantee - the router sizes every segment at
+    the distance actually routed and still refuses an over-cap one.
 
     Because the unit is a hatch and not a machine, a heavy machine no longer forces an over-cap
     net: its hatches spread across as many runs as the cap needs, and several hatches of the same

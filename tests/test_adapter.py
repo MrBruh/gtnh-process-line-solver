@@ -513,6 +513,58 @@ def test_machine_over_the_cap_alone_gets_its_own_source() -> None:
     assert [e.machine_id for e in heavy.endpoints if e.port_id == "power:in"] == ["n0"]
 
 
+def test_a_tier_at_the_cap_splits_once_cable_loss_is_counted() -> None:
+    # #360: a group is packed on what its cable run costs, not on the lossless figure. Sixteen
+    # 2048 EU/t EV hatches are exactly 16 A at the source - and 17 A the moment any sink sits a
+    # block out, which no cable carries and no placement can clear, because since #347 the
+    # source's own block carries the group's whole output. The tier now gains a source.
+    ir = to_input_ir(_powered_plan(*([2048.0] * 16), tier="EV"))
+    nets = _power_nets(ir)
+    assert len(nets) == 2, "a tier at the cap must not be packed as though its cable were lossless"
+    assert _source_ids(ir) == {"power-source:EV#1", "power-source:EV#2"}
+
+
+def test_a_tier_well_under_the_cap_keeps_one_source() -> None:
+    # The headroom costs a source only where loss could actually push a group over: eight EV
+    # hatches are 8 A at the reference distance, so the tier stays on the one run it was on.
+    ir = to_input_ir(_powered_plan(*([2048.0] * 8), tier="EV"))
+    assert {n.id for n in _power_nets(ir)} == {"power:EV"}
+    assert _source_ids(ir) == {"power-source:EV"}
+
+
+def test_the_partition_leaves_room_for_cable_loss() -> None:
+    # The unit test behind the two above: the partition packs on the load at the reference
+    # distance, so the group it fills to the cap still carries its own loss.
+    from gtnh_solver.adapter.power import (
+        PARTITION_LOSS_BLOCKS,
+        _Feed,
+        _partition_by_amperage,
+    )
+    from gtnh_solver.dataset import amp_load, whole_amps
+
+    tier = "EV"
+    at_source = [_Feed(machine_id=f"n{i}", port_id="p", eut=2048.0, load=1.0) for i in range(16)]
+    assert whole_amps(sum(f.load for f in at_source)) == 16, (
+        "the case must start exactly at the cap"
+    )
+    assert len(_partition_by_amperage(at_source)) == 1, "the lossless pack is the bug being fixed"
+
+    # The same sixteen feeds, priced at the reference distance the partition now packs on.
+    with_loss = [
+        _Feed(
+            machine_id=f"n{i}",
+            port_id="p",
+            eut=2048.0,
+            load=amp_load(2048.0, tier, distance=PARTITION_LOSS_BLOCKS),
+        )
+        for i in range(16)
+    ]
+    groups = _partition_by_amperage(with_loss)
+    assert sorted(len(g) for g in groups) == [1, 15], "the group at the cap gives up its last feed"
+    for group in groups:
+        assert whole_amps(sum(f.load for f in group)) <= 16
+
+
 # --------------------------------------------------- energy hatches (multi-connection power)
 
 
